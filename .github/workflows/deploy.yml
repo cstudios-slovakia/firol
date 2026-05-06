@@ -34,5 +34,5 @@ jobs:
             cp -r $ROOT/frontend/dist/. $ROOT/
             cp $ROOT/backend/public/index.php $ROOT/index.php
             cp $ROOT/backend/public/.htaccess $ROOT/.htaccess
-            cp -r $ROOT/backend/vendor $ROOT/vendor
-            cp -r $ROOT/backend/src $ROOT/src
+            rsync -a --delete $ROOT/backend/vendor/ $ROOT/vendor/
+            rsync -a --delete $ROOT/backend/src/ $ROOT/src/
