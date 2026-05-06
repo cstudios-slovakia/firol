@@ -19,7 +19,20 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           port: ${{ secrets.SSH_PORT }}
           script: |
-            cd ~/cstudios.ninja/sub/firol
+            set -e
+            ROOT=~/cstudios.ninja/sub/firol
+            cd $ROOT
             git pull origin main
-            cd frontend && npm ci && npm run build
-            cd ~/cstudios.ninja/sub/firol/backend && composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --no-progress
+
+            # Build frontend
+            cd $ROOT/frontend && npm ci && npm run build
+
+            # Install PHP dependencies
+            cd $ROOT/backend && composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --no-progress
+
+            # Deploy artifacts to webroot
+            cp -r $ROOT/frontend/dist/. $ROOT/
+            cp $ROOT/backend/public/index.php $ROOT/index.php
+            cp $ROOT/backend/public/.htaccess $ROOT/.htaccess
+            cp -r $ROOT/backend/vendor $ROOT/vendor
+            cp -r $ROOT/backend/src $ROOT/src
