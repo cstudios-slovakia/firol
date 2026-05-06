@@ -21,5 +21,5 @@ jobs:
           script: |
             cd ~/cstudios.ninja/sub/firol
             git pull origin main
-            cd frontend && npm ci && npm run build && cd ..
-            cd backend && composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --no-progress
+            cd frontend && npm ci && npm run build
+            cd ~/cstudios.ninja/sub/firol/backend && composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --no-progress
