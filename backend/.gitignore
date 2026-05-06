@@ -1,0 +1,7 @@
+/vendor/
+/.env
+/.env.local
+.phpunit.cache
+.php-cs-fixer.cache
+.phpstan.cache
+*.log

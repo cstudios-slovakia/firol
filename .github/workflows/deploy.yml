@@ -1,0 +1,25 @@
+name: Deploy to Websupport
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            cd ~/cstudios.ninja/sub/firol
+            git pull origin main
+            cd frontend && npm ci && npm run build && cd ..
+            cd backend && composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --no-progress

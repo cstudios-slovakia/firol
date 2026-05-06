@@ -1,0 +1,47 @@
+services:
+  php:
+    build:
+      context: ./docker/php
+    container_name: firol-php
+    restart: unless-stopped
+    working_dir: /var/www/backend
+    volumes:
+      - ./backend:/var/www/backend
+    environment:
+      PHP_DISPLAY_ERRORS: "1"
+    networks: [firol]
+    depends_on: [db]
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: firol-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./backend:/var/www/backend:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [php]
+    networks: [firol]
+
+  db:
+    image: mariadb:11
+    container_name: firol-db
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: firol
+      MARIADB_USER: firol
+      MARIADB_PASSWORD: firol
+    volumes:
+      - dbdata:/var/lib/mysql
+    networks: [firol]
+
+volumes:
+  dbdata:
+
+networks:
+  firol:
+    driver: bridge

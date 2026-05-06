@@ -1,0 +1,32 @@
+{
+    "name": "cstudios/firol",
+    "description": "Firol — SaaS pre revízie požiarnej ochrany (backend)",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": "^8.5",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
+        "ext-json": "*",
+        "vlucas/phpdotenv": "^5.6"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.0",
+        "friendsofphp/php-cs-fixer": "^3.65"
+    },
+    "autoload": {
+        "psr-4": {
+            "Firol\\": "src/"
+        }
+    },
+    "scripts": {
+        "stan": "phpstan analyse --memory-limit=512M",
+        "fix": "php-cs-fixer fix"
+    },
+    "config": {
+        "sort-packages": true,
+        "optimize-autoloader": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
