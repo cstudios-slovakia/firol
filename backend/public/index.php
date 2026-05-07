@@ -36,11 +36,16 @@ foreach ($envCandidates as $dir) {
 
 header('Content-Type: application/json; charset=utf-8');
 
-$rawPath = $_SERVER['PATH_INFO']
-    ?? parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH)
-    ?? '/';
-// Strip /index.php prefix when called directly (prod, no mod_rewrite).
-$path = preg_replace('#^/index\.php#', '', $rawPath) ?: '/';
+if (isset($_SERVER['PATH_INFO'])) {
+    $path = $_SERVER['PATH_INFO'];
+} else {
+    $uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
+    $script = $_SERVER['SCRIPT_NAME'] ?? '';
+    // Strip script path prefix (e.g. /sub/firol/index.php → remove that prefix).
+    $path = $script && str_starts_with($uri, $script)
+        ? (substr($uri, strlen($script)) ?: '/')
+        : $uri;
+}
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 // Triviálny "router" — nahradí sa neskôr proper routerom.
