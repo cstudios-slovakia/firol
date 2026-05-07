@@ -15,23 +15,35 @@ if (is_file(__DIR__ . '/../.env')) {
     \Dotenv\Dotenv::createImmutable(__DIR__ . '/..')->safeLoad();
 }
 
-header('Content-Type: application/json; charset=utf-8');
+use Firol\Controllers\AuthController;
+use Firol\Controllers\MeController;
+use Firol\Http\Request;
+use Firol\Http\Response;
+use Firol\Http\Router;
 
-// Prod transports the route via ?path=… because the docroot has no rewriter.
-// Dev hits this script directly through nginx with the route in REQUEST_URI.
-$path = $_GET['path']
-    ?? parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH)
-    ?? '/';
-$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$request = new Request();
+$router  = new Router();
 
-if ($path === '/api/health' && $method === 'GET') {
-    echo json_encode([
+$router->get('/api/health', static function (): void {
+    Response::json([
         'status' => 'ok',
-        'php' => PHP_VERSION,
-        'time' => date('c'),
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
-}
+        'php'    => PHP_VERSION,
+        'time'   => date('c'),
+    ]);
+});
 
-http_response_code(404);
-echo json_encode(['error' => 'Not Found', 'path' => $path], JSON_UNESCAPED_UNICODE);
+$router->post('/api/auth/register',                [AuthController::class, 'register']);
+$router->post('/api/auth/login',                   [AuthController::class, 'login']);
+$router->post('/api/auth/logout',                  [AuthController::class, 'logout']);
+$router->post('/api/auth/password-reset/request', [AuthController::class, 'passwordResetRequest']);
+$router->post('/api/auth/password-reset/confirm', [AuthController::class, 'passwordResetConfirm']);
+
+$router->get('/api/me',                  [MeController::class, 'show']);
+$router->post('/api/me/switch-account',  [MeController::class, 'switchAccount']);
+
+try {
+    $router->dispatch($request);
+} catch (\Throwable $e) {
+    error_log('[unhandled] ' . $e::class . ': ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+    Response::error('Internal Server Error', 500);
+}

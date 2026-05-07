@@ -34,16 +34,22 @@ The whole app depends on this. Everything has `account_id`.
   Prod (Websupport) still runs 8.5. DB healthcheck added to compose so
   migrations run after MariaDB initialises.
 
-### 1b — Auth backbone (PHP)
-- ⬜ Replace the trivial if-chain router in `index.php` with a small router
-- ⬜ Session helper (HttpOnly cookie, SameSite=Lax) + CSRF token
-- ⬜ `current_user()` / `current_account_id()` request-scoped helpers
-- ⬜ Endpoints: `POST /api/auth/{register,login,logout}`,
+### 1b — Auth backbone (PHP) ✅
+- ✅ Tiny regex router (`Firol\Http\Router`) replacing the if-chain
+- ✅ `Request` / `Response` helpers (JSON in/out)
+- ✅ `Session` helper (HttpOnly cookie, SameSite=Lax)
+- ✅ `Csrf` token + `Csrf::require()` for state-changing requests
+- ✅ `Tenant::currentUserId()` / `currentAccountId()` guards
+- ✅ Endpoints: `POST /api/auth/{register,login,logout}`,
   `POST /api/auth/password-reset/{request,confirm}`,
   `GET /api/me`, `POST /api/me/switch-account`
-- ⬜ Invited-technician flow: invite email contains a tokenized link to set
-  the password (per supervisor decision)
-- ⬜ Multi-tenancy guard helper (every data query MUST filter by `account_id`)
+- ✅ Verified locally with curl: register 201, /me 200/401, login 200/401,
+  logout 403/204 (CSRF on/off), reset 204, duplicate register 409
+- ⏸ Invited-technician flow → deferred to Phase 5 (Settings → Technicians)
+  where it actually appears in the UI; the password-reset machinery here
+  reuses the same `password_resets` table when added.
+- ⏸ Real email transport — Phase 7. Reset links currently logged via
+  `error_log()` (visible in `docker compose logs php`).
 
 ### 1c — Frontend auth flows
 - ⬜ Design tokens (colors, spacing, typography, radii, shadows)
