@@ -28,7 +28,9 @@ vendor/
 # Veľké materiály k handoffu (referenčné, nie v repe)
 firol.pdf
 handoff.zip
-docs/handoff/
+docs/*
+# …ale roadmap je tracked (referencuje sa z CLAUDE.md)
+!docs/development-roadmap.md
 
 # Deploy artefakty (zostavujú sa v CI)
 deploy/
