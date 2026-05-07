@@ -36,3 +36,13 @@ jobs:
             cp $ROOT/backend/public/.htaccess $ROOT/.htaccess
             rsync -a --delete $ROOT/backend/vendor/ $ROOT/vendor/
             rsync -a --delete $ROOT/backend/src/ $ROOT/src/
+
+            # Diagnostics: confirm what is actually in the deploy target.
+            echo "=== ROOT path: $ROOT ==="
+            echo "=== Resolved (readlink): $(readlink -f $ROOT) ==="
+            echo "=== ls -la $ROOT/ (top level) ==="
+            ls -la $ROOT/
+            echo "=== index.php exists? ==="
+            ls -la $ROOT/index.php || echo "MISSING"
+            echo "=== which php ==="
+            which php && php -v
