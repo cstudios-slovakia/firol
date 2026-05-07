@@ -46,3 +46,18 @@ jobs:
             ls -la $ROOT/index.php || echo "MISSING"
             echo "=== which php ==="
             which php && php -v
+
+            # Drop a known-good PHP test file so we can isolate whether PHP runs at all.
+            echo "<?php echo 'PHP_OK ' . PHP_VERSION; ?>" > $ROOT/test.php
+            echo "=== test.php created at $ROOT/test.php ==="
+            ls -la $ROOT/test.php
+
+            echo "=== Parent dir listing (cstudios.ninja root) ==="
+            ls -la $ROOT/../../ || true
+            echo "=== Look for .htaccess up the tree ==="
+            for d in $ROOT $ROOT/.. $ROOT/../.. $ROOT/../../..; do
+              if [ -f "$d/.htaccess" ]; then
+                echo "--- $d/.htaccess ---"
+                cat "$d/.htaccess"
+              fi
+            done
