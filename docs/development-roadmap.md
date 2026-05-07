@@ -75,16 +75,23 @@ The whole app depends on this. Everything has `account_id`.
 - **Invited technician**: receives an email with a tokenized link to set
   their own password. Application never auto-generates and emails passwords.
 
-## Phase 2 — Companies & facilities ⬜
+## Phase 2 — Companies & facilities ✅
 The technician's data, no inspections yet.
 
-- ⬜ DB: `companies`, `facilities` (with `account_id`)
-- ⬜ CRUD endpoints (search, pagination, soft-delete / archive)
-- ⬜ Dashboard / Moje firmy: list, search, status badges, "+ Nová kontrola"
-- ⬜ Company detail (info, facilities list, recent inspections placeholder)
-- ⬜ Facility detail (info, inspections-history placeholder)
-- ⬜ Bottom tab bar: Firmy / Kontroly / Školenia / Nastavenia (mobile)
-- ⬜ Mobile + desktop responsive layout
+- ✅ DB: `companies`, `facilities` (with `account_id`, soft-delete via
+  `archived_at`); migration 002
+- ✅ CRUD endpoints (search by name/IČO, soft-delete / archive); all routes
+  go through `Csrf::require()` for state-changing methods and through
+  `Tenant::currentAccountId()` for scoping
+- ✅ Dashboard "Moje firmy": debounced search, company cards with neutral
+  "Žiadne kontroly" badge until Phase 3 wires real status
+- ✅ Company detail (info, facilities list, "+ Pridať prevádzku")
+- ✅ Facility detail (info, inspections-history placeholder)
+- ✅ Bottom tab bar: Firmy / Kontroly / Školenia / Nastavenia (mobile only;
+  Kontroly / Školenia / Nastavenia are placeholder pages until later phases)
+- ✅ AppShell layout with sticky header (brand, account switcher, logout)
+- ✅ Multi-tenancy isolation verified — Petra cannot list, read or mutate
+  Jan's companies (returns empty / 404 in all paths)
 
 ## Phase 3 — Inspection types ⬜
 Implement one type fully end-to-end (RPHP), then replicate the pattern.
