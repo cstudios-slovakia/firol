@@ -36,16 +36,11 @@ foreach ($envCandidates as $dir) {
 
 header('Content-Type: application/json; charset=utf-8');
 
-if (isset($_SERVER['PATH_INFO'])) {
-    $path = $_SERVER['PATH_INFO'];
-} else {
-    $uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
-    $script = $_SERVER['SCRIPT_NAME'] ?? '';
-    // Strip script path prefix (e.g. /sub/firol/index.php → remove that prefix).
-    $path = $script && str_starts_with($uri, $script)
-        ? (substr($uri, strlen($script)) ?: '/')
-        : $uri;
-}
+// On prod (no mod_rewrite, no PATH_INFO) the route comes via ?path=...
+// In dev (Vite proxy) Apache hits index.php directly with the route in REQUEST_URI.
+$path = $_GET['path']
+    ?? parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH)
+    ?? '/';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 // Triviálny "router" — nahradí sa neskôr proper routerom.
