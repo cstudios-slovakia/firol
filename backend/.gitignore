@@ -1,6 +1,7 @@
 /vendor/
 /.env
 /.env.local
+/storage/
 .phpunit.cache
 .php-cs-fixer.cache
 .phpstan.cache

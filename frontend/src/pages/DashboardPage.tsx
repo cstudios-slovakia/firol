@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Building2, ChevronRight, Plus, Search } from 'lucide-react';
+import { Building2, ChevronRight, ClipboardList, Plus, Search } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type CompanyListItem } from '@/api/companies';
 import { ApiError } from '@/lib/api';
@@ -65,11 +65,11 @@ export function DashboardPage() {
           </p>
         </div>
         <Link
-          to="/companies/new"
+          to="/inspections/new"
           className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] transition-colors hover:bg-firol-600"
         >
-          <Plus className="size-4" />
-          Nová firma
+          <ClipboardList className="size-4" />
+          Nová kontrola
         </Link>
       </header>
 
@@ -82,6 +82,14 @@ export function DashboardPage() {
           className="w-full bg-transparent text-sm text-ink-800 placeholder:text-ink-400 focus:outline-none"
           aria-label="Vyhľadávanie"
         />
+        <Link
+          to="/companies/new"
+          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs font-medium text-ink-500 hover:bg-ink-100 hover:text-ink-700"
+          title="Pridať novú firmu"
+        >
+          <Plus className="size-3" />
+          Firma
+        </Link>
       </Card>
 
       {status === 'loading' && items.length === 0 && (
@@ -135,6 +143,11 @@ export function DashboardPage() {
 }
 
 function CompanyCard({ company }: { company: CompanyListItem }) {
+  const lastDate = company.last_inspection_at;
+  const formattedLast = lastDate
+    ? new Date(lastDate).toLocaleDateString('sk-SK', { day: 'numeric', month: 'numeric', year: 'numeric' })
+    : null;
+
   return (
     <Link to={`/companies/${company.id}`} className="block group">
       <Card className="px-4 py-3.5 transition-shadow group-hover:shadow-[var(--shadow-lift)]">
@@ -153,7 +166,14 @@ function CompanyCard({ company }: { company: CompanyListItem }) {
               <span>{company.facilities_count} {plural(company.facilities_count, 'prevádzka', 'prevádzky', 'prevádzok')}</span>
             </div>
             <div className="mt-2">
-              <Badge tone="neutral">Žiadne kontroly</Badge>
+              {company.inspections_count === 0 ? (
+                <Badge tone="neutral">Žiadne kontroly</Badge>
+              ) : (
+                <Badge tone="brand">
+                  {company.inspections_count} {plural(company.inspections_count, 'kontrola', 'kontroly', 'kontrol')}
+                  {formattedLast && ` · posledná ${formattedLast}`}
+                </Badge>
+              )}
             </div>
           </div>
         </div>

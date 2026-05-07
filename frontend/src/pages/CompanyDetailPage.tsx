@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, ChevronRight, Edit2, Hash, MapPin, Phone, Plus, Warehouse } from 'lucide-react';
+import { ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, Hash, MapPin, Phone, Plus, Warehouse } from 'lucide-react';
 import { Companies, type CompanyDetail } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
@@ -95,6 +95,18 @@ export function CompanyDetailPage() {
             <div className="py-2 text-ink-400">Žiadne ďalšie údaje. Doplň ich úpravou firmy.</div>
           )}
         </dl>
+
+        {facilities.length > 0 && (
+          <div className="border-t border-ink-100 px-5 py-3">
+            <Link
+              to={`/inspections/new?company_id=${company.id}`}
+              className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+            >
+              <ClipboardList className="size-4" />
+              Nová kontrola
+            </Link>
+          </div>
+        )}
       </Card>
 
       <section>

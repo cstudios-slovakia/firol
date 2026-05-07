@@ -7,6 +7,8 @@ export type CompanyListItem = {
   address: string | null;
   contact: string | null;
   facilities_count: number;
+  inspections_count: number;
+  last_inspection_at: string | null;
 };
 
 export type Company = {

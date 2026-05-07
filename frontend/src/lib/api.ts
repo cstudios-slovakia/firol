@@ -34,8 +34,14 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
 
   let body: BodyInit | undefined;
   if (opts.body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-    body = JSON.stringify(opts.body);
+    if (opts.body instanceof FormData) {
+      // Let the browser set Content-Type with the multipart boundary —
+      // setting it manually here would clobber the boundary.
+      body = opts.body;
+    } else {
+      headers['Content-Type'] = 'application/json';
+      body = JSON.stringify(opts.body);
+    }
   }
   if (method !== 'GET' && opts.csrfToken) {
     headers['X-CSRF-Token'] = opts.csrfToken;

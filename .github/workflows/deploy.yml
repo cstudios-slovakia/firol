@@ -34,6 +34,19 @@ jobs:
             # Install PHP dependencies into backend/vendor (outside docroot).
             cd $ROOT/backend && composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --no-progress
 
+            # Apply any pending DB migrations. The runner is idempotent —
+            # already-applied migrations are skipped via the `migrations`
+            # table. Requires backend/.env to be in place on the server.
+            php $ROOT/backend/db/migrate.php
+
+            # Make sure the storage tree exists for signatures, generated
+            # PDFs and the mPDF scratch dir. Created at deploy time so the
+            # web user owns them and we never hit a "tempDir not writable"
+            # error on first PDF generation.
+            mkdir -p $ROOT/backend/storage/signatures \
+                     $ROOT/backend/storage/documents \
+                     $ROOT/backend/storage/mpdf-tmp
+
             # One-time cleanup of artifacts a previous (broken) deploy
             # placed at the project root instead of frontend/dist/. Safe
             # to remove because the real docroot is frontend/dist/.

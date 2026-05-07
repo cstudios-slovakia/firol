@@ -4,14 +4,21 @@ FROM php:8.4-fpm
 # Docker image had a broken docker-php-ext-install pipeline at the time
 # of this writing — switch back when fixed.
 
-# Minimal extensions for the current phase: pdo_mysql + opcache.
-# (gd / intl / zip / mbstring will be added in Phase 3 when PDF generation
-# starts needing them.) Installing extensions one at a time avoids a known
-# alpine-image quirk where parallel install-modules can't find the .so output.
+# Extensions needed across phases:
+#   pdo_mysql + opcache — core
+#   gd + mbstring        — required by mPDF (Phase 3a-3 PDF generation)
+# Installing one at a time avoids a known alpine-image quirk where
+# parallel install-modules can't find the .so output.
+# gd needs jpeg/png/freetype headers + zlib at build time.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git unzip \
+    && apt-get install -y --no-install-recommends \
+        git unzip \
+        libjpeg-dev libpng-dev libfreetype6-dev zlib1g-dev libonig-dev \
+    && docker-php-ext-configure gd --with-jpeg --with-freetype \
     && docker-php-ext-install pdo_mysql \
     && docker-php-ext-install opcache \
+    && docker-php-ext-install mbstring \
+    && docker-php-ext-install gd \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
