@@ -18,9 +18,19 @@ final class CompanyController
         $accountId = Tenant::currentAccountId();
         $search    = $req->query('search');
 
+        // Pull facilities count + a quick "last finalized inspection"
+        // summary so the dashboard can render status without an extra
+        // round-trip per company. Subqueries are scoped to the same
+        // tenant via the account_id condition on the parent query.
         $sql = 'SELECT c.id, c.name, c.ico, c.address, c.contact,
                        (SELECT COUNT(*) FROM facilities f
-                         WHERE f.company_id = c.id AND f.archived_at IS NULL) AS facilities_count
+                         WHERE f.company_id = c.id AND f.archived_at IS NULL) AS facilities_count,
+                       (SELECT MAX(i.executed_on) FROM inspections i
+                         WHERE i.company_id = c.id
+                           AND i.status = "finalized" AND i.archived_at IS NULL) AS last_inspection_at,
+                       (SELECT COUNT(*) FROM inspections i
+                         WHERE i.company_id = c.id
+                           AND i.status = "finalized" AND i.archived_at IS NULL) AS inspections_count
                 FROM   companies c
                 WHERE  c.account_id = :account_id AND c.archived_at IS NULL';
         $params = ['account_id' => $accountId];
@@ -158,6 +168,9 @@ final class CompanyController
     {
         if (isset($row['facilities_count'])) {
             $row['facilities_count'] = (int) $row['facilities_count'];
+        }
+        if (isset($row['inspections_count'])) {
+            $row['inspections_count'] = (int) $row['inspections_count'];
         }
         $row['id'] = (int) $row['id'];
         return $row;

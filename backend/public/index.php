@@ -18,6 +18,10 @@ if (is_file(__DIR__ . '/../.env')) {
 use Firol\Controllers\AuthController;
 use Firol\Controllers\CompanyController;
 use Firol\Controllers\FacilityController;
+use Firol\Controllers\DocumentController;
+use Firol\Controllers\InspectionController;
+use Firol\Controllers\InspectionItemController;
+use Firol\Controllers\InspectorProfileController;
 use Firol\Controllers\MeController;
 use Firol\Http\Request;
 use Firol\Http\Response;
@@ -53,6 +57,24 @@ $router->post('/api/companies/{id}/facilities',     [FacilityController::class, 
 $router->get('/api/facilities/{id}',                [FacilityController::class, 'show']);
 $router->patch('/api/facilities/{id}',              [FacilityController::class, 'update']);
 $router->delete('/api/facilities/{id}',             [FacilityController::class, 'archive']);
+
+$router->get('/api/inspections',                    [InspectionController::class, 'index']);
+$router->post('/api/inspections',                   [InspectionController::class, 'store']);
+$router->get('/api/inspections/{id}',               [InspectionController::class, 'show']);
+$router->patch('/api/inspections/{id}',             [InspectionController::class, 'updateBasic']);
+$router->delete('/api/inspections/{id}',            [InspectionController::class, 'archive']);
+$router->post('/api/inspections/{id}/repeat',       [InspectionController::class, 'repeat']);
+$router->post('/api/inspections/{id}/items',        [InspectionItemController::class, 'store']);
+$router->patch('/api/inspections/{id}/items/{item_id}',  [InspectionItemController::class, 'update']);
+$router->delete('/api/inspections/{id}/items/{item_id}', [InspectionItemController::class, 'destroy']);
+$router->post('/api/inspections/{id}/generate-pdf',  [DocumentController::class, 'generateForInspection']);
+$router->get('/api/inspections/{id}/documents',      [DocumentController::class, 'indexForInspection']);
+$router->get('/api/documents/{id}/download',         [DocumentController::class, 'download']);
+
+$router->get('/api/me/inspector-profile',            [InspectorProfileController::class, 'show']);
+$router->patch('/api/me/inspector-profile',          [InspectorProfileController::class, 'update']);
+$router->post('/api/me/inspector-profile/signature', [InspectorProfileController::class, 'uploadSignature']);
+$router->get('/api/me/inspector-profile/signature',  [InspectorProfileController::class, 'downloadSignature']);
 
 try {
     $router->dispatch($request);

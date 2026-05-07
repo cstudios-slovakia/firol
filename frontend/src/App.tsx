@@ -10,6 +10,12 @@ import { CompanyDetailPage } from '@/pages/CompanyDetailPage';
 import { CompanyEditPage } from '@/pages/CompanyEditPage';
 import { FacilityDetailPage } from '@/pages/FacilityDetailPage';
 import { FacilityEditPage } from '@/pages/FacilityEditPage';
+import { NewInspectionTypePicker } from '@/pages/NewInspectionTypePicker';
+import { InspectionStep1Page } from '@/pages/InspectionStep1Page';
+import { InspectionStep2Page } from '@/pages/InspectionStep2Page';
+import { InspectionDetailPage } from '@/pages/InspectionDetailPage';
+import { InspectionsListPage } from '@/pages/InspectionsListPage';
+import { SettingsPage } from '@/pages/SettingsPage';
 import { PlaceholderPage } from '@/pages/PlaceholderPage';
 
 export default function App() {
@@ -51,15 +57,13 @@ export default function App() {
         <Route path="/facilities/:id" element={<FacilityDetailPage />} />
         <Route path="/facilities/:id/edit" element={<FacilityEditPage />} />
 
-        <Route
-          path="/inspections"
-          element={
-            <PlaceholderPage
-              title="Kontroly"
-              subtitle="Tu uvidíš všetky vykonané kontroly s možnosťou stiahnutia PDF protokolov."
-            />
-          }
-        />
+        <Route path="/inspections" element={<InspectionsListPage />} />
+        <Route path="/inspections/new" element={<NewInspectionTypePicker />} />
+        <Route path="/inspections/new/:type/step-1" element={<InspectionStep1Page />} />
+        <Route path="/inspections/:id" element={<InspectionDetailPage />} />
+        <Route path="/inspections/:id/items/new" element={<InspectionStep2Page />} />
+        <Route path="/inspections/:id/items/:itemId" element={<InspectionStep2Page />} />
+
         <Route
           path="/trainings"
           element={
@@ -69,15 +73,7 @@ export default function App() {
             />
           }
         />
-        <Route
-          path="/settings"
-          element={
-            <PlaceholderPage
-              title="Nastavenia"
-              subtitle="Profil, technici, fakturácia a značka — pripravujeme."
-            />
-          }
-        />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

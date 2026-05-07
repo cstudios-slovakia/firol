@@ -93,24 +93,114 @@ The technician's data, no inspections yet.
 - ✅ Multi-tenancy isolation verified — Petra cannot list, read or mutate
   Jan's companies (returns empty / 404 in all paths)
 
-## Phase 3 — Inspection types ⬜
+## Phase 3 — Inspection types 🟡
 Implement one type fully end-to-end (RPHP), then replicate the pattern.
+Phase 3 is split into **3a-1 → 3a-2 → 3a-3 → 3a-4** for RPHP, then
+3b/3c/… for the other types.
 
-- ⬜ DB: `inspections`, `inspection_items` (per-type fields in JSON column),
-  `documents` (PDF protocols)
-- ⬜ Common flow scaffolding: type picker → step 1 → step 2 → step 3
-- ⬜ Inspector profile (signature, certification number, validity)
-- ⬜ Document numbering per account+type+year (RPHP-2025-001 etc.)
-- ⬜ PDF generation pipeline (mPDF) — branded header (logo + theme color),
-  data sections, signature stamp, footer
-- ⬜ Type 1: **RPHP** (12/24 mo, 4 statuses A/TS/O/V, full PDF)
+### 3a-1 — Foundation: schema + Inspector profile + Step 1 ✅
+- ✅ DB migration 003: `inspections`, `inspection_items` (JSON `fields`),
+  `documents`, `document_sequences`, `inspector_profiles`
+- ✅ Type slugs locked (used both as `inspections.type` and as
+  `documents.type`): `rphp`, `hydranty`, `oprava_ts_rphp`,
+  `poziarna_kniha`, `pu_akcieschopnost`, `pu_udrzba`,
+  `nudzove_osvetlenie`, `ts_hadic`
+- ✅ Backend `InspectionController` — list / show / create draft /
+  patch (date, periodicity, notes) / archive; per-type periodicity
+  validation, multi-tenancy on every query
+- ✅ Backend `InspectorProfileController` — show / update / signature
+  upload (PNG, max 512 KB, real MIME sniff) / signature stream;
+  one row per (user_id, account_id), auto-created on first read
+- ✅ Storage helper (`Firol\Storage\Storage`) keeps signatures and
+  future PDFs outside the docroot under `backend/storage/` (gitignored)
+- ✅ Frontend: API clients, type picker (8 cards, only RPHP active —
+  others show "Čoskoro"), Step 1 form (date strictly manual, hint
+  "Zadaj manuálne, nemusí byť dnešný dátum"), draft detail placeholder
+- ✅ Settings → Inspector profile page (cert number, validity dates,
+  signature upload + preview)
+- ✅ "+ Nová kontrola" entry points on Dashboard, Company detail,
+  Facility detail (preserving company/facility context via query string)
+- ✅ Routes wired: `/inspections`, `/inspections/new`,
+  `/inspections/new/:type/step-1`, `/inspections/:id`, `/settings`
+
+### 3a-2 — Step 2 + Step 3 (without PDF) ✅
+- ✅ Item CRUD: `POST /api/inspections/{id}/items`,
+  `PATCH/DELETE /api/inspections/{id}/items/{item_id}`; per-type validator
+  dispatch (RPHP enforced, others rejected with 422 until they ship)
+- ✅ Item position auto-assigned (max + 1) on insert; deletes leave
+  positions sparse — PDF render will renumber on the fly
+- ✅ Finalized inspections reject item mutations (409)
+- ✅ Step 2 — RPHP per-extinguisher form (Výrobca, Typ, Sériové č., Rok
+  výroby, Umiestnenie, Stav A/TS/O/V, Poznámky); two CTAs
+  „Uložiť a ďalší" / „Prejsť na súhrn"; progress dots clickable
+  per saved item; edit & add modes share the route
+- ✅ Step 3 — orange-highlighted editable date (critical for Opakovať),
+  statistics box (A/TS/O/V counts), per-item rows with status badge,
+  Opraviť & Trash icons, „+ Pridať prístroj" header CTA, disabled
+  „Generovať PDF" placeholder
+- ✅ Step 1 redirect → `/inspections/:id/items/new` so the flow is
+  continuous (Step 1 → Step 2 → Step 3)
+- ✅ Routes: `/inspections/:id/items/new`, `/inspections/:id/items/:itemId`
+
+### 3a-3 — PDF generation + Document numbering + History ✅
+- ✅ mPDF 8.3 added (composer); Docker dev image gained `gd` and
+  `mbstring` extensions (Dockerfile rebuilt)
+- ✅ `Firol\Pdf\PdfRenderer::renderRphp()` + standalone PHP template at
+  `backend/src/Pdf/templates/rphp.php` — branded header (Firol red
+  default, account theme later), client / facility / kontrola sections,
+  items table with status pills, statistics row, signature block with
+  inline PNG signature data URI, footer with document number
+- ✅ `Firol\Documents\NumberAllocator` — atomic per-account+type+year
+  via `document_sequences` + transaction + FOR UPDATE; format
+  `<PREFIX>-<YEAR>-<SEQ:03d>` (RPHP-2026-001 etc.)
+- ✅ `DocumentController` — `POST /api/inspections/{id}/generate-pdf`
+  (transactional: number reservation, file write, documents row,
+  inspection → finalized), `GET /api/inspections/{id}/documents`,
+  `GET /api/documents/{id}/download` (auth + tenant check, streams PDF)
+- ✅ Storage layout: `backend/storage/documents/{accountId}/{year}/{number}.pdf`,
+  mPDF temp dir `backend/storage/mpdf-tmp/`
+- ✅ Frontend: `Generovať PDF protokol` button (red, mapped to
+  `status-bad` per spec), opens PDF in new tab on success; lists all
+  generated protocols with download icons; date + items lock when
+  finalized
+- ✅ Inspection history list on Facility detail page (chronological,
+  status badge, PDF icon for finalized)
+- ✅ Re-generation rejected with 409 — fresh protocol requires Opakovať
+  flow (Phase 3a-4)
+
+### 3a-4 — Opakovať flow + polish ✅
+- ✅ `POST /api/inspections/{id}/repeat` — clones a finalized inspection
+  into a fresh draft (items copied via `INSERT … SELECT`, `executed_on`
+  reset to NULL, status = draft); rejects drafts (422), rejects
+  `poziarna_kniha` (each entry is unique per spec)
+- ✅ Verified locally: re-issued protocol got fresh sequence
+  (`RPHP-2027-001`) because the new date was in a different year bucket
+- ✅ "Opakovať" CTA on `InspectionDetailPage` (replaces the "Pridať
+  prístroj" button when finalized) and as an icon button on
+  `FacilityDetailPage` history rows; hidden for `poziarna_kniha`
+- ✅ Global `<ErrorBoundary>` mounted at the app root — uncaught render
+  errors show a friendly „Skús načítať znova" panel instead of a blank
+  page; per-page async errors continue to flow through local state
+- ✅ Dashboard company cards now show `N kontrol · posledná D. M. RRRR`
+  badge instead of the static „Žiadne kontroly"; backend
+  `GET /api/companies` returns `inspections_count` + `last_inspection_at`
+  via subqueries (single round-trip)
+
+### Phase 3a — RPHP end-to-end ✅
+RPHP is now feature-complete: schema → Step 1 (basic data) → Step 2
+(per-prístroj entry, edit, delete) → Step 3 (summary, statistics,
+editable date) → PDF generation with branded header, signature stamp,
+sequential numbering → Opakovať flow for repeat protocols. The same
+pattern replicates to the remaining 7 inspection types — Phase 3b
+onward is mostly per-type form + per-type PDF template.
+
+### Other types (after RPHP ships)
 - ⬜ Type 2: **Hydranty** (12 mo, DN25/DN33/DN52/C52/other, HS/HD/Q values)
 - ⬜ Type 3: **Oprava + plnenie + TS RPHP** (60 mo)
 - ⬜ Type 4: **Požiarna kniha** (3/6 mo, no Repeat flow)
 - ⬜ Type 5/6: **Požiarne uzávery** AK (3 mo) + UD (12 mo)
 - ⬜ Type 7: **Núdzové osvetlenie** (12 mo)
 - ⬜ Type 8: **TS hadíc** (60 mo)
-- ⬜ "Opakovať" flow (clone, jump to step 3, fresh date + number)
 
 ## Phase 4 — Trainings ⬜
 - ⬜ DB: `trainings`, `trainees` (with touchscreen signatures)
