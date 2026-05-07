@@ -21,7 +21,7 @@ Status legend: ⬜ todo · 🟡 in progress · ✅ done · ⏸ blocked / waiting
   (`/api.php?path=/api/health` — webroot is `frontend/dist/`,
   PHP entry copied there from `frontend/public/api.php`)
 
-## Phase 1 — Database, auth, multi-tenancy 🟡
+## Phase 1 — Database, auth, multi-tenancy ✅
 The whole app depends on this. Everything has `account_id`.
 
 ### 1a — DB & migrations ✅
@@ -51,12 +51,18 @@ The whole app depends on this. Everything has `account_id`.
 - ⏸ Real email transport — Phase 7. Reset links currently logged via
   `error_log()` (visible in `docker compose logs php`).
 
-### 1c — Frontend auth flows
-- ⬜ Design tokens (colors, spacing, typography, radii, shadows)
-- ⬜ Base components (Button, Input, Card, Badge, Field)
-- ⬜ Login, Registration, Password-reset (request + confirm) screens
-- ⬜ Auth context + protected-route wrapper
-- ⬜ Account switcher in header (only shown when user has >1 account)
+### 1c — Frontend auth flows ✅
+- ✅ Design tokens (HSL palettes, brand `firol-*`, neutral `ink-*`, status
+  triplet, shadows, radii) in `index.css` via Tailwind v4 `@theme`
+- ✅ Base components (Button, Input, Field, Card, Badge, Spinner)
+- ✅ `lib/api.ts` — fetch wrapper with `credentials: 'include'` + CSRF
+- ✅ `auth/AuthContext` + `RequireAuth` / `RedirectIfAuthed` route guards
+- ✅ Login, Registration, Password-reset (request + confirm) screens with
+  shared `AuthLayout`
+- ✅ Account switcher (renders only when user has 2+ accounts)
+- ✅ Dashboard placeholder (real list of companies lands in Phase 2)
+- ✅ React Router wired in `App.tsx`, providers in `main.tsx`
+- ✅ Build passes (`tsc -b && vite build`)
 
 ## Decisions (locked, do not invent more)
 - **Company entity**: `name`, `ico`, `address` (free text), `contact` (free text).

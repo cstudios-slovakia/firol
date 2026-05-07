@@ -1,17 +1,70 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens — Firol UI primary stays Firol red. Account theme color
+ * (per-tenant) is applied only on PDF protocol headers and the account
+ * avatar; web UI shell stays brand red.
+ *
+ * HSL values are curated rather than Tailwind defaults. Status colors are
+ * surfaced for the dashboard "Platná / Blíži sa termín / Po termíne" badges.
+ */
+@theme {
+  --color-firol-50:  hsl(4 100% 97%);
+  --color-firol-100: hsl(4 100% 92%);
+  --color-firol-200: hsl(4  95% 84%);
+  --color-firol-300: hsl(4  90% 74%);
+  --color-firol-400: hsl(4  85% 64%);
+  --color-firol-500: hsl(4  80% 56%);   /* #E8433A — brand */
+  --color-firol-600: hsl(4  75% 48%);
+  --color-firol-700: hsl(4  72% 40%);
+  --color-firol-800: hsl(4  70% 32%);
+  --color-firol-900: hsl(4  60% 22%);
+
+  --color-ink-50:  hsl(220 14% 96%);
+  --color-ink-100: hsl(220 13% 91%);
+  --color-ink-200: hsl(220 13% 83%);
+  --color-ink-300: hsl(220 11% 70%);
+  --color-ink-400: hsl(220 10% 53%);
+  --color-ink-500: hsl(220 11% 39%);
+  --color-ink-600: hsl(220 14% 28%);
+  --color-ink-700: hsl(220 16% 22%);
+  --color-ink-800: hsl(220 20% 16%);
+  --color-ink-900: hsl(220 25% 10%);
+
+  --color-status-ok:      hsl(142 65% 42%);
+  --color-status-ok-bg:   hsl(142 65% 95%);
+  --color-status-warn:    hsl( 35 90% 48%);
+  --color-status-warn-bg: hsl( 35 95% 95%);
+  --color-status-bad:     hsl(  0 75% 52%);
+  --color-status-bad-bg:  hsl(  0 80% 96%);
+
+  --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-sans:    'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --radius-card: 1.25rem;  /* rounded-2xl-ish */
+  --radius-pill: 9999px;
+
+  --shadow-soft:  0 1px 2px hsl(220 25% 10% / 0.04), 0 4px 12px hsl(220 25% 10% / 0.04);
+  --shadow-lift:  0 1px 2px hsl(220 25% 10% / 0.05), 0 8px 24px hsl(220 25% 10% / 0.08);
+  --shadow-glow:  0 8px 32px hsl(4 80% 56% / 0.18);
+}
+
 @layer base {
-  html,
-  body,
-  #root {
-    height: 100%;
-  }
+  html, body, #root { height: 100%; }
   html {
-    font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    color: var(--color-ink-800);
   }
-  body {
-    margin: 0;
+  body { margin: 0; }
+
+  /* Subtle warm gradient backdrop used by auth and shell layouts. Matches
+     the "modern, fresh" tone — not generic gray. */
+  .bg-app {
+    background:
+      radial-gradient(60rem 40rem at 90% -10%, hsl(4 100% 96%) 0%, transparent 60%),
+      radial-gradient(50rem 35rem at -10% 110%, hsl(220 80% 97%) 0%, transparent 60%),
+      hsl(220 14% 98%);
   }
 }
