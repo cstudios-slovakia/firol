@@ -61,8 +61,27 @@ Common flow: select company/facility → enter data item by item
 → summary with editable date → generate PDF. "Repeat" function for existing inspections.
 
 ## Principles
-- Multi-tenancy: every record has `owner_id` and all queries filter by the logged-in technician. Address **from the start**, not as a retrofit.
+- Multi-tenancy: every record has `account_id` and all queries filter by the active account of the logged-in user. Address **from the start**, not as a retrofit.
 - No credentials in repo — `.env` (local) + GitHub Secrets (CI).
 - Inspection dates are always entered manually, NEVER today's date automatically.
 - Slovak for UI strings and domain terms.
 - All documentation and code comments in English.
+
+## Source of truth — NO HALLUCINATION
+- App functionality, fields, screens, copy, intervals, PDF layouts and any
+  domain decision come **only** from `docs/Firol base document-*.md` and
+  `docs/handoff/`. Nothing else is authoritative.
+- If a piece of context is missing or ambiguous, **stop and ask**. Do not
+  invent fields, flows, validations, statuses, screens or features. Do not
+  add nice-to-haves that the spec doesn't mention.
+- React/PHP implementation choices (folder structure, libraries, patterns)
+  are at Claude's discretion — but the *what* (features, data model, UX)
+  is fixed by the spec.
+- Mockups in `docs/handoff/` are visual inspiration only. Don't copy them
+  1:1 — produce a fresh, modern, clean design that mirrors the structure
+  and information hierarchy.
+
+## Roadmap
+Active development plan and phase tracking lives in
+`docs/development-roadmap.md`. Update it when a phase changes status,
+when scope is clarified by the user, or when a new phase is added.
