@@ -24,17 +24,15 @@ Status legend: ⬜ todo · 🟡 in progress · ✅ done · ⏸ blocked / waiting
 ## Phase 1 — Database, auth, multi-tenancy 🟡
 The whole app depends on this. Everything has `account_id`.
 
-### 1a — DB & migrations
-- ⬜ PDO connection helper (`Firol\Db`)
-- ⬜ Migration runner script (numbered `*.sql` files, tracked in `migrations` table)
-- ⬜ Schema migrations:
-  - `users` (id, fullname, email, phone, password_hash, created_at, updated_at)
-  - `accounts` (id, invoice_company_name, invoice_street, invoice_postal_code,
-    invoice_city, invoice_country, invoice_ico, invoice_dic, invoice_ic_dph,
-    logo_path, theme_color, subscription_end_date, main_user_id, created_at)
-  - `account_users` (account_id, user_id, role)
-  - `password_resets` (token, user_id, expires_at, used_at)
-  - `system_settings` (key, value)
+### 1a — DB & migrations ✅
+- ✅ PDO connection helper (`Firol\Db`)
+- ✅ Migration runner script (numbered `*.sql` files, tracked in `migrations` table)
+- ✅ Schema applied locally:
+  - `users`, `accounts`, `account_users`, `password_resets`, `system_settings`
+- Notes: dev image temporarily on PHP 8.4 (8.5 docker had a broken
+  `docker-php-ext-install` pipeline). Composer constraint relaxed to ^8.4.
+  Prod (Websupport) still runs 8.5. DB healthcheck added to compose so
+  migrations run after MariaDB initialises.
 
 ### 1b — Auth backbone (PHP)
 - ⬜ Replace the trivial if-chain router in `index.php` with a small router

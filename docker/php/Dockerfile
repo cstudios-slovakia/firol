@@ -1,41 +1,24 @@
-FROM php:8.5-fpm-alpine
+FROM php:8.4-fpm
+# Note: dev image uses PHP 8.4, prod (Websupport) is 8.5. We don't depend
+# on any 8.5-only language features yet, so this is compatible. The 8.5
+# Docker image had a broken docker-php-ext-install pipeline at the time
+# of this writing — switch back when fixed.
 
-# System dependencies + PHP extensions potrebné pre MariaDB, intl, zip, gd.
-RUN apk add --no-cache --virtual .build-deps \
-        $PHPIZE_DEPS \
-        icu-dev \
-        libzip-dev \
-        oniguruma-dev \
-        libpng-dev \
-        libjpeg-turbo-dev \
-        freetype-dev \
-    && apk add --no-cache \
-        icu-libs \
-        libzip \
-        libpng \
-        libjpeg-turbo \
-        freetype \
-        git \
-        unzip \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j"$(nproc)" \
-        pdo \
-        pdo_mysql \
-        intl \
-        zip \
-        gd \
-        mbstring \
-        opcache \
-    && apk del .build-deps
+# Minimal extensions for the current phase: pdo_mysql + opcache.
+# (gd / intl / zip / mbstring will be added in Phase 3 when PDF generation
+# starts needing them.) Installing extensions one at a time avoids a known
+# alpine-image quirk where parallel install-modules can't find the .so output.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git unzip \
+    && docker-php-ext-install pdo_mysql \
+    && docker-php-ext-install opcache \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Rozumné defaulty pre dev.
 RUN { \
         echo 'memory_limit=512M'; \
-        echo 'upload_max_filesize=32M'; \
-        echo 'post_max_size=32M'; \
         echo 'date.timezone=Europe/Bratislava'; \
     } > /usr/local/etc/php/conf.d/firol.ini
 
