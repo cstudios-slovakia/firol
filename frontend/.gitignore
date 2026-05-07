@@ -7,3 +7,8 @@ dist-ssr
 *.log
 .vite
 .DS_Store
+
+# tsc -b incremental + emit from tsconfig.node.json
+*.tsbuildinfo
+vite.config.d.ts
+vite.config.js
