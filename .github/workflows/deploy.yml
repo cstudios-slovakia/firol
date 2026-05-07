@@ -22,6 +22,7 @@ jobs:
             set -e
             ROOT=~/cstudios.ninja/sub/firol
             cd $ROOT
+            git clean -f backend/composer.lock
             git pull origin main
 
             # Build frontend — output lands in frontend/dist/, which is
