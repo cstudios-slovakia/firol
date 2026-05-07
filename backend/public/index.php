@@ -16,6 +16,8 @@ if (is_file(__DIR__ . '/../.env')) {
 }
 
 use Firol\Controllers\AuthController;
+use Firol\Controllers\CompanyController;
+use Firol\Controllers\FacilityController;
 use Firol\Controllers\MeController;
 use Firol\Http\Request;
 use Firol\Http\Response;
@@ -40,6 +42,17 @@ $router->post('/api/auth/password-reset/confirm', [AuthController::class, 'passw
 
 $router->get('/api/me',                  [MeController::class, 'show']);
 $router->post('/api/me/switch-account',  [MeController::class, 'switchAccount']);
+
+$router->get('/api/companies',                      [CompanyController::class, 'index']);
+$router->post('/api/companies',                     [CompanyController::class, 'store']);
+$router->get('/api/companies/{id}',                 [CompanyController::class, 'show']);
+$router->patch('/api/companies/{id}',               [CompanyController::class, 'update']);
+$router->delete('/api/companies/{id}',              [CompanyController::class, 'archive']);
+$router->post('/api/companies/{id}/facilities',     [FacilityController::class, 'storeUnderCompany']);
+
+$router->get('/api/facilities/{id}',                [FacilityController::class, 'show']);
+$router->patch('/api/facilities/{id}',              [FacilityController::class, 'update']);
+$router->delete('/api/facilities/{id}',             [FacilityController::class, 'archive']);
 
 try {
     $router->dispatch($request);

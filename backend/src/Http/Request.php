@@ -68,4 +68,16 @@ final class Request
         $value = $_SERVER[$key] ?? null;
         return is_string($value) ? $value : null;
     }
+
+    public function query(string $key): ?string
+    {
+        // Skip the magic `path` key used for prod routing.
+        if ($key === 'path') return null;
+        $value = $_GET[$key] ?? null;
+        if (is_string($value)) {
+            $trimmed = trim($value);
+            return $trimmed === '' ? null : $trimmed;
+        }
+        return null;
+    }
 }
