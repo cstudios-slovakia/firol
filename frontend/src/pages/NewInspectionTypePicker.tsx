@@ -40,7 +40,7 @@ const TYPES: TypeMeta[] = [
     description: 'Kontrola DN25 / DN33 / DN52 / C52 a ďalších.',
     intervalLabel: '12 mes.',
     icon: <Droplets className="size-5" />,
-    enabled: false,
+    enabled: true,
   },
   {
     type: 'oprava_ts_rphp',
@@ -48,7 +48,7 @@ const TYPES: TypeMeta[] = [
     description: 'Oprava, plnenie a tlaková skúška hasiacich prístrojov.',
     intervalLabel: '60 mes.',
     icon: <Wrench className="size-5" />,
-    enabled: false,
+    enabled: true,
   },
   {
     type: 'poziarna_kniha',
@@ -56,7 +56,7 @@ const TYPES: TypeMeta[] = [
     description: 'Periodický záznam o stave protipožiarnej ochrany.',
     intervalLabel: '3 / 6 mes.',
     icon: <BookOpen className="size-5" />,
-    enabled: false,
+    enabled: true,
   },
   {
     type: 'pu_akcieschopnost',
@@ -64,7 +64,7 @@ const TYPES: TypeMeta[] = [
     description: 'Požiarne uzávery, prevádzková kontrola.',
     intervalLabel: '3 mes.',
     icon: <ShieldCheck className="size-5" />,
-    enabled: false,
+    enabled: true,
   },
   {
     type: 'pu_udrzba',
@@ -72,7 +72,7 @@ const TYPES: TypeMeta[] = [
     description: 'Požiarne uzávery, ročná prevádzková údržba.',
     intervalLabel: '12 mes.',
     icon: <DoorClosed className="size-5" />,
-    enabled: false,
+    enabled: true,
   },
   {
     type: 'nudzove_osvetlenie',
@@ -80,7 +80,7 @@ const TYPES: TypeMeta[] = [
     description: 'Test svietidiel a doby svietenia v núdzovom režime.',
     intervalLabel: '12 mes.',
     icon: <Lightbulb className="size-5" />,
-    enabled: false,
+    enabled: true,
   },
   {
     type: 'ts_hadic',
@@ -88,7 +88,7 @@ const TYPES: TypeMeta[] = [
     description: 'Tlaková skúška požiarnych hadíc.',
     intervalLabel: '60 mes.',
     icon: <Gauge className="size-5" />,
-    enabled: false,
+    enabled: true,
   },
 ];
 

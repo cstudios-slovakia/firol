@@ -194,13 +194,74 @@ sequential numbering → Opakovať flow for repeat protocols. The same
 pattern replicates to the remaining 7 inspection types — Phase 3b
 onward is mostly per-type form + per-type PDF template.
 
-### Other types (after RPHP ships)
-- ⬜ Type 2: **Hydranty** (12 mo, DN25/DN33/DN52/C52/other, HS/HD/Q values)
-- ⬜ Type 3: **Oprava + plnenie + TS RPHP** (60 mo)
-- ⬜ Type 4: **Požiarna kniha** (3/6 mo, no Repeat flow)
-- ⬜ Type 5/6: **Požiarne uzávery** AK (3 mo) + UD (12 mo)
-- ⬜ Type 7: **Núdzové osvetlenie** (12 mo)
-- ⬜ Type 8: **TS hadíc** (60 mo)
+### 3b — Hydranty ✅
+- ✅ Backend validator branch in `InspectionItemController` for hydranty:
+  type enum DN25/DN33/DN52/C52/other (with `type_other` free text when
+  `other`), location, hose_count, HS/HD (MPa), Q (l/s), defects, result
+  (vyhovuje/nevyhovuje); shared `nonNegativeInt` + `float` helpers
+- ✅ `PdfRenderer::renderForType()` dispatcher + standalone
+  `templates/hydranty.php` — measurements column shows MPa / l/s,
+  Vyhovuje/Nevyhovuje pills, type "other" rendered as the user-supplied
+  free-text label
+- ✅ `DocumentController::computeStats()` per-type branch
+  (RPHP=A/TS/O/V, hydranty=vyhovuje/nevyhovuje, total)
+- ✅ Frontend: `inspection-types/` registry — each type exports
+  `Step2Form` / `ItemRow` / `StatsBar`; `InspectionStep2Page` and
+  `InspectionDetailPage` are now type-agnostic wrappers driven by
+  `getTypeModule(type)`
+- ✅ Hydranty card enabled in `NewInspectionTypePicker`; full flow
+  verified locally — created hydranty inspection, added DN52 + custom
+  "DN40" hydrants with HS/HD/Q values, generated `HYD-2026-001`
+
+### 3c — Oprava + plnenie + TS RPHP ✅
+- ✅ Backend: `oprava_ts_rphp` validator (RPHP-style identification +
+  `actions` multi-select from {tlakova_skuska, oprava, plnenie}); reject
+  empty actions
+- ✅ Stats branch counts how many items had each action (an item can
+  contribute to multiple buckets)
+- ✅ PDF template with action-pill column; verified `OPR-RPHP-2026-001`
+- ✅ Frontend module + enabled in TypePicker
+
+### 3d — Požiarna kniha ✅
+- ✅ Backend: `poziarna_kniha` validator (workspaces, activities[] from
+  14 predefined slugs, `activities_other` free text, result enum,
+  notes); single-record protocol — second `POST /items` rejected with
+  409 by the controller
+- ✅ Stats reduces to a single overall result
+- ✅ PDF template with checkbox-style activity list, full-width result
+  banner; verified `PK-2026-001`
+- ✅ Frontend module — single-shot form (no „save and next" CTA),
+  „+ Pridať záznam" hidden in Step 3 once one entry exists
+- ✅ Already-coded: Opakovať flow rejects this type (per spec)
+
+### 3e + 3f — Požiarne uzávery (AK + UD) ✅
+- ✅ Backend: shared `PU_KINDS = ['dvere','okno','klapka']`; AK fields
+  (kind, identifier, manufacturer, location, result, notes) and UD
+  fields (same minus manufacturer, plus mandatory `maintenance_work`)
+- ✅ Two PDF templates with shared layout but different columns
+  (manufacturer for AK vs maintenance_work for UD); verified
+  `PU-AK-2026-001` and `PU-UD-2026-001`
+- ✅ Two frontend modules + both enabled in TypePicker
+
+### 3g — Núdzové osvetlenie ✅
+- ✅ Backend: `nudzove_osvetlenie` validator (luminaire_type,
+  manufacturer, location, `duration_min` 0–600, result, notes)
+- ✅ PDF template with duration column (whole minutes); verified
+  `NO-2026-001`
+- ✅ Frontend module + enabled in TypePicker
+
+### 3h — TS hadíc ✅
+- ✅ Backend: `ts_hadic` validator (hose_type, serial, location,
+  `test_pressure` 0–50 MPa, result, notes)
+- ✅ PDF template; verified `TS-HAD-2026-001`
+- ✅ Frontend module + enabled in TypePicker
+
+### Phase 3 — all 8 inspection types ✅
+RPHP, Hydranty, Oprava+TS RPHP, Požiarna kniha, PU akcieschopnosť,
+PU údržba, Núdzové osvetlenie, TS hadíc — all live, all generate PDFs
+with their own number prefix and per-type stats. Pattern stabilised in
+the `inspection-types/` registry: a new type ships in one backend
+validator branch + one PHP template + one frontend module file.
 
 ## Phase 4 — Trainings ⬜
 - ⬜ DB: `trainings`, `trainees` (with touchscreen signatures)
