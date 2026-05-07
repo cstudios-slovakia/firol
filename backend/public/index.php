@@ -36,7 +36,9 @@ foreach ($envCandidates as $dir) {
 
 header('Content-Type: application/json; charset=utf-8');
 
-$path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
+$path = $_SERVER['PATH_INFO']
+    ?? parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH)
+    ?? '/';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 // Triviálny "router" — nahradí sa neskôr proper routerom.
