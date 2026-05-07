@@ -56,13 +56,15 @@ foreach ($files as $file) {
         exit(1);
     }
 
-    // Split on `;` newline so we can run multi-statement migrations under a
-    // PDO connection that disables MULTI_STATEMENTS. Naïve split is fine for
-    // our DDL — there are no string literals containing `;`. Lift this if
-    // we ever need to seed text with semicolons.
+    // Strip line comments first (otherwise a leading `-- header` block makes
+    // its statement look like a comment and gets filtered out). Then split on
+    // `;\n` so we can run multi-statement migrations under a PDO connection
+    // that disables MULTI_STATEMENTS. Naïve split is fine for our DDL — there
+    // are no `;` chars inside string literals.
+    $sqlWithoutComments = preg_replace('/^\s*--.*$/m', '', $sql) ?? $sql;
     $statements = array_filter(
-        array_map('trim', preg_split('/;\s*\n/', $sql) ?: []),
-        static fn (string $s): bool => $s !== '' && !str_starts_with($s, '--')
+        array_map('trim', preg_split('/;\s*\n/', $sqlWithoutComments) ?: []),
+        static fn (string $s): bool => $s !== ''
     );
 
     try {
