@@ -24,40 +24,17 @@ jobs:
             cd $ROOT
             git pull origin main
 
-            # Build frontend
+            # Build frontend — output lands in frontend/dist/, which is
+            # the actual document root for firol.cstudios.ninja. The PHP
+            # entry (frontend/public/api.php) is auto-copied to dist/ by
+            # Vite. No further file shuffling is needed.
             cd $ROOT/frontend && npm ci && npm run build
 
-            # Install PHP dependencies
+            # Install PHP dependencies into backend/vendor (outside docroot).
             cd $ROOT/backend && composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --no-progress
 
-            # Deploy artifacts to webroot
-            cp -r $ROOT/frontend/dist/. $ROOT/
-            cp $ROOT/backend/public/index.php $ROOT/index.php
-            cp $ROOT/backend/public/.htaccess $ROOT/.htaccess
-            rsync -a --delete $ROOT/backend/vendor/ $ROOT/vendor/
-            rsync -a --delete $ROOT/backend/src/ $ROOT/src/
-
-            # Diagnostics: confirm what is actually in the deploy target.
-            echo "=== ROOT path: $ROOT ==="
-            echo "=== Resolved (readlink): $(readlink -f $ROOT) ==="
-            echo "=== ls -la $ROOT/ (top level) ==="
-            ls -la $ROOT/
-            echo "=== index.php exists? ==="
-            ls -la $ROOT/index.php || echo "MISSING"
-            echo "=== which php ==="
-            which php && php -v
-
-            # Drop a known-good PHP test file so we can isolate whether PHP runs at all.
-            echo "<?php echo 'PHP_OK ' . PHP_VERSION; ?>" > $ROOT/test.php
-            echo "=== test.php created at $ROOT/test.php ==="
-            ls -la $ROOT/test.php
-
-            echo "=== Parent dir listing (cstudios.ninja root) ==="
-            ls -la $ROOT/../../ || true
-            echo "=== Look for .htaccess up the tree ==="
-            for d in $ROOT $ROOT/.. $ROOT/../.. $ROOT/../../..; do
-              if [ -f "$d/.htaccess" ]; then
-                echo "--- $d/.htaccess ---"
-                cat "$d/.htaccess"
-              fi
-            done
+            # One-time cleanup of artifacts a previous (broken) deploy
+            # placed at the project root instead of frontend/dist/. Safe
+            # to remove because the real docroot is frontend/dist/.
+            rm -f  $ROOT/index.php $ROOT/index.html $ROOT/test.php
+            rm -rf $ROOT/assets $ROOT/vendor $ROOT/src

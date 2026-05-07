@@ -3,47 +3,27 @@
 declare(strict_types=1);
 
 /*
- * Front controller — vstupný bod pre všetky HTTP požiadavky.
- * Lokálny dev: webroot je backend/public/, autoload je v ../vendor/.
- * Produkcia (Websupport shared hosting): index.php aj vendor/ skončia v jednom
- * adresári (cstudios.ninja/sub/firol/), preto skúšame oba relatívne paths.
+ * Front controller — entry point for HTTP requests to the PHP backend.
+ * Local dev: served directly by nginx, web root = backend/public/.
+ * Production: included from frontend/public/api.php (which ends up at
+ * <docroot>/api.php after Vite build).
  */
 
-$autoloadCandidates = [
-    __DIR__ . '/../vendor/autoload.php',
-    __DIR__ . '/vendor/autoload.php',
-];
+require __DIR__ . '/../vendor/autoload.php';
 
-foreach ($autoloadCandidates as $autoload) {
-    if (is_file($autoload)) {
-        require_once $autoload;
-        break;
-    }
-}
-
-// .env (rovnaká logika — koreň projektu vs. webroot na prod)
-$envCandidates = [
-    dirname(__DIR__),
-    __DIR__,
-];
-
-foreach ($envCandidates as $dir) {
-    if (is_file($dir . '/.env')) {
-        \Dotenv\Dotenv::createImmutable($dir)->safeLoad();
-        break;
-    }
+if (is_file(__DIR__ . '/../.env')) {
+    \Dotenv\Dotenv::createImmutable(__DIR__ . '/..')->safeLoad();
 }
 
 header('Content-Type: application/json; charset=utf-8');
 
-// On prod (no mod_rewrite, no PATH_INFO) the route comes via ?path=...
-// In dev (Vite proxy) Apache hits index.php directly with the route in REQUEST_URI.
+// Prod transports the route via ?path=… because the docroot has no rewriter.
+// Dev hits this script directly through nginx with the route in REQUEST_URI.
 $path = $_GET['path']
     ?? parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH)
     ?? '/';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
-// Triviálny "router" — nahradí sa neskôr proper routerom.
 if ($path === '/api/health' && $method === 'GET') {
     echo json_encode([
         'status' => 'ok',
@@ -54,15 +34,4 @@ if ($path === '/api/health' && $method === 'GET') {
 }
 
 http_response_code(404);
-echo json_encode([
-    'error' => 'Not Found',
-    'path' => $path,
-    'method' => $method,
-    'debug' => [
-        'REQUEST_URI' => $_SERVER['REQUEST_URI'] ?? null,
-        'SCRIPT_NAME' => $_SERVER['SCRIPT_NAME'] ?? null,
-        'PATH_INFO' => $_SERVER['PATH_INFO'] ?? null,
-        'PHP_SELF' => $_SERVER['PHP_SELF'] ?? null,
-        'HTTP_HOST' => $_SERVER['HTTP_HOST'] ?? null,
-    ],
-], JSON_UNESCAPED_UNICODE);
+echo json_encode(['error' => 'Not Found', 'path' => $path], JSON_UNESCAPED_UNICODE);
