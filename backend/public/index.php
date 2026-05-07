@@ -59,4 +59,15 @@ if ($path === '/api/health' && $method === 'GET') {
 }
 
 http_response_code(404);
-echo json_encode(['error' => 'Not Found', 'path' => $path], JSON_UNESCAPED_UNICODE);
+echo json_encode([
+    'error' => 'Not Found',
+    'path' => $path,
+    'method' => $method,
+    'debug' => [
+        'REQUEST_URI' => $_SERVER['REQUEST_URI'] ?? null,
+        'SCRIPT_NAME' => $_SERVER['SCRIPT_NAME'] ?? null,
+        'PATH_INFO' => $_SERVER['PATH_INFO'] ?? null,
+        'PHP_SELF' => $_SERVER['PHP_SELF'] ?? null,
+        'HTTP_HOST' => $_SERVER['HTTP_HOST'] ?? null,
+    ],
+], JSON_UNESCAPED_UNICODE);
