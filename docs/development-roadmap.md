@@ -21,28 +21,49 @@ Status legend: ⬜ todo · 🟡 in progress · ✅ done · ⏸ blocked / waiting
   (`/api.php?path=/api/health` — webroot is `frontend/dist/`,
   PHP entry copied there from `frontend/public/api.php`)
 
-## Phase 1 — Database, auth, multi-tenancy ⬜
+## Phase 1 — Database, auth, multi-tenancy 🟡
 The whole app depends on this. Everything has `account_id`.
 
-- ⬜ Migration system (lightweight: `backend/migrations/*.sql` + a runner script)
-- ⬜ DB schema:
-  - `users` (id, fullname, email, phone, password_hash, created_at)
-  - `accounts` (id, invoice_*, logo_path, theme_color, subscription_end_date,
-    main_user_id, created_at)
-  - `account_users` (account_id, user_id, role) — pivot, many-to-many
-  - `password_resets` (token, user_id, expires_at)
-  - `system_settings` (key/value: trial_days, monthly_price, yearly_price)
-- ⬜ Backend routing layer (replace the trivial if-chain in `index.php`)
-- ⬜ Auth endpoints: `/api/auth/register`, `/login`, `/logout`,
-  `/password-reset/{request,confirm}`, `/api/me`, `/api/me/switch-account`
-- ⬜ Session token (likely cookie-based — same-origin, HttpOnly, SameSite=Lax)
-  + CSRF token for state-changing requests
-- ⬜ Multi-tenancy guard at the data layer (every query reads
-  `current_account_id()` from request context; no controller can bypass)
-- ⬜ Frontend: login, registration (without Stripe yet — trial only),
-  password reset, account switcher in header
-- ⬜ Design system tokens (colors, spacing, typography, components: Button,
-  Input, Card, Badge) — first pass during this phase
+### 1a — DB & migrations
+- ⬜ PDO connection helper (`Firol\Db`)
+- ⬜ Migration runner script (numbered `*.sql` files, tracked in `migrations` table)
+- ⬜ Schema migrations:
+  - `users` (id, fullname, email, phone, password_hash, created_at, updated_at)
+  - `accounts` (id, invoice_company_name, invoice_street, invoice_postal_code,
+    invoice_city, invoice_country, invoice_ico, invoice_dic, invoice_ic_dph,
+    logo_path, theme_color, subscription_end_date, main_user_id, created_at)
+  - `account_users` (account_id, user_id, role)
+  - `password_resets` (token, user_id, expires_at, used_at)
+  - `system_settings` (key, value)
+
+### 1b — Auth backbone (PHP)
+- ⬜ Replace the trivial if-chain router in `index.php` with a small router
+- ⬜ Session helper (HttpOnly cookie, SameSite=Lax) + CSRF token
+- ⬜ `current_user()` / `current_account_id()` request-scoped helpers
+- ⬜ Endpoints: `POST /api/auth/{register,login,logout}`,
+  `POST /api/auth/password-reset/{request,confirm}`,
+  `GET /api/me`, `POST /api/me/switch-account`
+- ⬜ Invited-technician flow: invite email contains a tokenized link to set
+  the password (per supervisor decision)
+- ⬜ Multi-tenancy guard helper (every data query MUST filter by `account_id`)
+
+### 1c — Frontend auth flows
+- ⬜ Design tokens (colors, spacing, typography, radii, shadows)
+- ⬜ Base components (Button, Input, Card, Badge, Field)
+- ⬜ Login, Registration, Password-reset (request + confirm) screens
+- ⬜ Auth context + protected-route wrapper
+- ⬜ Account switcher in header (only shown when user has >1 account)
+
+## Decisions (locked, do not invent more)
+- **Company entity**: `name`, `ico`, `address` (free text), `contact` (free text).
+  Nothing else. No DIČ, no street/city breakdown.
+- **Facility entity**: `name`, `address` (free text), `notes`, `contact_person`
+  (fullname only — no email/phone field).
+- **Periodicity defaults**: per facility, **per inspection type**, even for
+  types whose interval is fixed (the picker still respects the stored default).
+  Configurable in Settings → Default periodicities.
+- **Invited technician**: receives an email with a tokenized link to set
+  their own password. Application never auto-generates and emails passwords.
 
 ## Phase 2 — Companies & facilities ⬜
 The technician's data, no inspections yet.
