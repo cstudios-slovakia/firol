@@ -9,7 +9,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/health')
+    fetch(`${import.meta.env.VITE_API_BASE_URL ?? ''}/api/health`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then(setHealth)
       .catch((e) => setError(e.message));
