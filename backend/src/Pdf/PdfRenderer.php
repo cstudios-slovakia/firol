@@ -38,6 +38,67 @@ final class PdfRenderer
         return self::buildPdf($html, $payload['number'] ?? 'firol');
     }
 
+    public static function renderHydranty(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/hydranty.php', $payload);
+        return self::buildPdf($html, $payload['number'] ?? 'firol');
+    }
+
+    public static function renderOpravaTsRphp(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/oprava_ts_rphp.php', $payload);
+        return self::buildPdf($html, $payload['number'] ?? 'firol');
+    }
+
+    public static function renderPoziarnaKniha(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/poziarna_kniha.php', $payload);
+        return self::buildPdf($html, $payload['number'] ?? 'firol');
+    }
+
+    public static function renderPuAkcieschopnost(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/pu_akcieschopnost.php', $payload);
+        return self::buildPdf($html, $payload['number'] ?? 'firol');
+    }
+
+    public static function renderPuUdrzba(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/pu_udrzba.php', $payload);
+        return self::buildPdf($html, $payload['number'] ?? 'firol');
+    }
+
+    public static function renderNudzoveOsvetlenie(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/nudzove_osvetlenie.php', $payload);
+        return self::buildPdf($html, $payload['number'] ?? 'firol');
+    }
+
+    public static function renderTsHadic(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/ts_hadic.php', $payload);
+        return self::buildPdf($html, $payload['number'] ?? 'firol');
+    }
+
+    /**
+     * Type-aware dispatcher. Adding a new inspection type means adding a
+     * branch here + the corresponding template under templates/.
+     */
+    public static function renderForType(string $type, array $payload): string
+    {
+        return match ($type) {
+            'rphp'               => self::renderRphp($payload),
+            'hydranty'           => self::renderHydranty($payload),
+            'oprava_ts_rphp'     => self::renderOpravaTsRphp($payload),
+            'poziarna_kniha'     => self::renderPoziarnaKniha($payload),
+            'pu_akcieschopnost'  => self::renderPuAkcieschopnost($payload),
+            'pu_udrzba'          => self::renderPuUdrzba($payload),
+            'nudzove_osvetlenie' => self::renderNudzoveOsvetlenie($payload),
+            'ts_hadic'           => self::renderTsHadic($payload),
+            default => throw new \InvalidArgumentException("No renderer for type: $type"),
+        };
+    }
+
     /** @param array<string, mixed> $payload */
     private static function renderTemplate(string $templatePath, array $payload): string
     {

@@ -61,16 +61,17 @@ final class DocumentController
 
         $payload = self::buildPayload($accountId, $userId, $inspection, $items);
         $stats   = $payload['stats'];
+        $insType = (string) $inspection['type'];
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
 
         try {
-            $allocated = NumberAllocator::allocate($accountId, $inspection['type'], $year);
+            $allocated = NumberAllocator::allocate($accountId, $insType, $year);
             $payload['number'] = $allocated['number'];
             $payload['generated_at'] = date('c');
 
-            $pdfBytes = PdfRenderer::renderRphp($payload);
+            $pdfBytes = PdfRenderer::renderForType($insType, $payload);
 
             $relPath = Storage::documentRelative($accountId, $year, $allocated['number']);
             $absPath = Storage::documentAbsolute($relPath);
@@ -259,13 +260,7 @@ final class DocumentController
         $accStmt->execute([$accountId]);
         $accRow = $accStmt->fetch() ?: [];
 
-        $stats = ['A' => 0, 'TS' => 0, 'O' => 0, 'V' => 0, 'total' => count($items)];
-        foreach ($items as $it) {
-            $st = (string) ($it['fields']['status'] ?? '');
-            if (isset($stats[$st])) {
-                $stats[$st]++;
-            }
-        }
+        $stats = self::computeStats((string) $inspection['type'], $items);
 
         return [
             'brand' => [
@@ -298,6 +293,80 @@ final class DocumentController
             'items' => $items,
             'stats' => $stats,
         ];
+    }
+
+    /**
+     * Per-type aggregate counts shown in the PDF stats row. RPHP cares
+     * about A/TS/O/V; pass-fail types (hydranty, PU, NO, TS-HAD) reduce
+     * to vyhovuje/nevyhovuje. Always exposes `total` so templates can
+     * print the headline number without knowing the type.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return array<string, int>
+     */
+    private static function computeStats(string $type, array $items): array
+    {
+        $stats = ['total' => count($items)];
+        switch ($type) {
+            case 'rphp':
+                $stats += ['A' => 0, 'TS' => 0, 'O' => 0, 'V' => 0];
+                foreach ($items as $it) {
+                    $st = (string) ($it['fields']['status'] ?? '');
+                    if (isset($stats[$st])) {
+                        $stats[$st]++;
+                    }
+                }
+                return $stats;
+            case 'hydranty':
+                $stats += ['vyhovuje' => 0, 'nevyhovuje' => 0];
+                foreach ($items as $it) {
+                    $r = (string) ($it['fields']['result'] ?? '');
+                    if (isset($stats[$r])) {
+                        $stats[$r]++;
+                    }
+                }
+                return $stats;
+            case 'oprava_ts_rphp':
+                // Counts how many items had each action performed. An item
+                // can contribute to multiple buckets (tlakova_skuska +
+                // plnenie are typically combined on the same prístroj).
+                $stats += ['tlakova_skuska' => 0, 'oprava' => 0, 'plnenie' => 0];
+                foreach ($items as $it) {
+                    $actions = $it['fields']['actions'] ?? [];
+                    if (is_array($actions)) {
+                        foreach ($actions as $a) {
+                            if (isset($stats[$a])) {
+                                $stats[$a]++;
+                            }
+                        }
+                    }
+                }
+                return $stats;
+            case 'poziarna_kniha':
+                // Single-record protocol — total is always 0 or 1; the
+                // overall result is what matters.
+                $stats += ['result' => 'bez_nedostatkov'];
+                $first = $items[0]['fields'] ?? [];
+                $r = (string) ($first['result'] ?? 'bez_nedostatkov');
+                if (in_array($r, ['bez_nedostatkov', 'zistene_nedostatky'], true)) {
+                    $stats['result'] = $r;
+                }
+                return $stats;
+            case 'pu_akcieschopnost':
+            case 'pu_udrzba':
+            case 'nudzove_osvetlenie':
+            case 'ts_hadic':
+                // All four types reduce to the shared pass/fail enum.
+                $stats += ['vyhovuje' => 0, 'nevyhovuje' => 0];
+                foreach ($items as $it) {
+                    $r = (string) ($it['fields']['result'] ?? '');
+                    if (isset($stats[$r])) {
+                        $stats[$r]++;
+                    }
+                }
+                return $stats;
+        }
+        return $stats;
     }
 
     private static function signatureToDataUri(?string $relativePath): ?string

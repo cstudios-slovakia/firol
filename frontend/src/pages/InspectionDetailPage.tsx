@@ -1,45 +1,38 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowLeft, Building2, CalendarDays, ClipboardList,
-  Download, Edit2, FileText, Hash, MapPin, Plus, Repeat, Tag, Trash2, Warehouse,
+  ArrowLeft, Building2, CalendarDays, ClipboardList, Download, FileText,
+  Plus, Repeat, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
   INSPECTION_TYPE_LABELS,
   Inspections,
-  RPHP_STATUS_LABELS,
-  RPHP_STATUS_TONES,
   documentDownloadUrl,
   type InspectionDetail,
   type InspectionDocument,
-  type InspectionItem,
-  type RphpItemFields,
-  type RphpStatus,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
-import { cn } from '@/lib/cn';
+import { getTypeModule } from '@/inspection-types';
 
 /**
  * Step 3 — summary screen. Final review before PDF generation.
  *
  * The date sits in a highlighted orange box and is editable directly here:
- * critical for the Opakovať flow (Phase 3a-4) where the technician
- * clones a previous inspection and only changes the date.
- *
- * Statistics summarise the per-status counts (A / TS / O / V) so the
- * inspector sees at a glance which prístroje need follow-up.
+ * critical for the Opakovať flow (3a-4) where the technician clones a
+ * previous inspection and only changes the date. Items + stats render
+ * via the per-type registry so this page stays type-agnostic.
  */
 export function InspectionDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
   const id = Number(idStr);
   const { csrfToken } = useAuth();
-
   const navigate = useNavigate();
+
   const [data, setData] = useState<InspectionDetail | null>(null);
   const [documents, setDocuments] = useState<InspectionDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -85,16 +78,12 @@ export function InspectionDetailPage() {
     setGenerating(true);
     try {
       const res = await Inspections.generatePdf(id, csrfToken);
-      // Reload everything: status flipped to finalized + a new document
-      // exists. Cheaper than patching local state and easier to keep in
-      // sync with future server-side changes.
       const [detail, docs] = await Promise.all([
         Inspections.show(id),
         Inspections.documents(id),
       ]);
       setData(detail);
       setDocuments(docs.items);
-      // Open the freshly generated PDF in a new tab.
       window.open(documentDownloadUrl(res.document.id), '_blank', 'noopener');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'PDF sa nepodarilo vygenerovať.');
@@ -117,7 +106,7 @@ export function InspectionDetailPage() {
   }
 
   async function handleDeleteItem(itemId: number) {
-    if (!window.confirm('Naozaj zmazať tento prístroj?')) return;
+    if (!window.confirm('Naozaj zmazať túto položku?')) return;
     setDeletingItemId(itemId);
     try {
       await Inspections.deleteItem(id, itemId, csrfToken);
@@ -129,8 +118,6 @@ export function InspectionDetailPage() {
       setDeletingItemId(null);
     }
   }
-
-  const stats = useMemo(() => computeRphpStats(data?.items ?? []), [data?.items]);
 
   if (error && !data) {
     return (
@@ -154,7 +141,7 @@ export function InspectionDetailPage() {
 
   const { inspection: i, items } = data;
   const isDraft = i.status === 'draft';
-  const isRphp = i.type === 'rphp';
+  const module = getTypeModule(i.type);
 
   return (
     <div className="flex flex-col gap-5">
@@ -190,21 +177,21 @@ export function InspectionDetailPage() {
             </Badge>
           </p>
         </div>
-        {isDraft ? (
+        {isDraft && !(i.type === 'poziarna_kniha' && items.length >= 1) ? (
           <Link
             to={`/inspections/${id}/items/new`}
             className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
           >
             <Plus className="size-4" />
-            Pridať prístroj
+            {i.type === 'poziarna_kniha' ? 'Pridať záznam' : 'Pridať položku'}
           </Link>
-        ) : i.type !== 'poziarna_kniha' ? (
+        ) : !isDraft && i.type !== 'poziarna_kniha' ? (
           <Button
             type="button"
             onClick={handleRepeat}
             loading={repeating}
             leftIcon={<Repeat className="size-4" />}
-            title="Vytvorí novú kontrolu s tými istými prístrojmi a prázdnym dátumom"
+            title="Vytvorí novú kontrolu s tými istými položkami a prázdnym dátumom"
             className="shrink-0"
           >
             Opakovať
@@ -236,9 +223,7 @@ export function InspectionDetailPage() {
         />
       </Card>
 
-      {isRphp && items.length > 0 && (
-        <StatsBar stats={stats} total={items.length} />
-      )}
+      {module && items.length > 0 && <module.StatsBar items={items} />}
 
       {error && data && (
         <Card className="px-3 py-2 text-sm text-status-bad">{error}</Card>
@@ -246,24 +231,25 @@ export function InspectionDetailPage() {
 
       {items.length === 0 ? (
         <EmptyItems inspectionId={id} disabled={!isDraft} />
-      ) : (
+      ) : module ? (
         <ul className="flex flex-col gap-2">
           {items.map((it, idx) => (
             <li key={it.id}>
-              {isRphp
-                ? <RphpItemRow
-                    inspectionId={id}
-                    index={idx + 1}
-                    item={it}
-                    deleting={deletingItemId === it.id}
-                    onDelete={() => handleDeleteItem(it.id)}
-                    canEdit={isDraft}
-                  />
-                : <UnknownItemRow item={it} />
-              }
+              <module.ItemRow
+                inspectionId={id}
+                index={idx + 1}
+                item={it}
+                canEdit={isDraft}
+                deleting={deletingItemId === it.id}
+                onDelete={() => handleDeleteItem(it.id)}
+              />
             </li>
           ))}
         </ul>
+      ) : (
+        <Card className="px-3 py-3 text-xs text-ink-500">
+          Pre tento typ kontroly ešte nemáme zobrazenie položiek.
+        </Card>
       )}
 
       <DocumentsBlock
@@ -300,7 +286,7 @@ function DocumentsBlock({
         <p className="max-w-sm text-xs text-ink-500">
           {canGenerate
             ? 'Po vygenerovaní sa kontrola uzamkne a dostane svoje číslo (napr. RPHP-2026-001).'
-            : 'Pre vygenerovanie pridaj aspoň jeden prístroj a skontroluj dátum kontroly.'}
+            : 'Pre vygenerovanie pridaj aspoň jednu položku a skontroluj dátum kontroly.'}
         </p>
         <Button
           type="button"
@@ -359,144 +345,15 @@ function DocumentsBlock({
   );
 }
 
-function StatsBar({
-  stats,
-  total,
-}: {
-  stats: Record<RphpStatus, number>;
-  total: number;
-}) {
-  const entries: { key: RphpStatus; label: string; tone: 'ok' | 'warn' | 'bad' | 'neutral' }[] = [
-    { key: 'A',  label: 'Akcieschopné',     tone: 'ok' },
-    { key: 'TS', label: 'Tlaková skúška',  tone: 'warn' },
-    { key: 'O',  label: 'Vyžaduje opravu', tone: 'bad' },
-    { key: 'V',  label: 'Vyradené',         tone: 'neutral' },
-  ];
-  const toneClasses: Record<typeof entries[number]['tone'], string> = {
-    ok:      'bg-[var(--color-status-ok-bg)] text-[var(--color-status-ok)]',
-    warn:    'bg-[var(--color-status-warn-bg)] text-[var(--color-status-warn)]',
-    bad:     'bg-[var(--color-status-bad-bg)] text-[var(--color-status-bad)]',
-    neutral: 'bg-ink-100 text-ink-700',
-  };
-  return (
-    <Card className="px-4 py-3">
-      <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="font-semibold uppercase tracking-wider text-ink-500">
-          Štatistika
-        </span>
-        <span className="text-ink-500">spolu {total}</span>
-      </div>
-      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {entries.map((e) => (
-          <div
-            key={e.key}
-            className={cn(
-              'flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm',
-              toneClasses[e.tone],
-            )}
-          >
-            <span className="text-xs">{e.label}</span>
-            <span className="text-base font-semibold tabular-nums">{stats[e.key]}</span>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-function RphpItemRow({
-  inspectionId,
-  index,
-  item,
-  canEdit,
-  deleting,
-  onDelete,
-}: {
-  inspectionId: number;
-  index: number;
-  item: InspectionItem;
-  canEdit: boolean;
-  deleting: boolean;
-  onDelete: () => void;
-}) {
-  const f = item.fields as Partial<RphpItemFields>;
-  const status = isRphpStatus(f.status) ? f.status : null;
-  return (
-    <Card className="px-4 py-3">
-      <div className="flex items-start gap-3">
-        <span className="grid size-9 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-700 text-sm font-semibold">
-          {index}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 className="truncate text-sm font-semibold text-ink-900">
-              <Tag className="-mt-0.5 mr-1 inline size-3 text-ink-400" />
-              {f.manufacturer} · {f.type}
-            </h3>
-            {status && (
-              <Badge tone={RPHP_STATUS_TONES[status]}>
-                {status} · {RPHP_STATUS_LABELS[status]}
-              </Badge>
-            )}
-          </div>
-          <p className="mt-0.5 truncate text-xs text-ink-500">
-            <Hash className="-mt-0.5 mr-1 inline size-3" />
-            {f.serial}
-            <span className="mx-1.5 text-ink-300">·</span>
-            r. {f.year}
-            <span className="mx-1.5 text-ink-300">·</span>
-            <MapPin className="-mt-0.5 mr-1 inline size-3" />
-            {f.location}
-          </p>
-          {f.notes && (
-            <p className="mt-1 line-clamp-2 text-xs text-ink-600">
-              <AlertTriangle className="-mt-0.5 mr-1 inline size-3 text-status-warn" />
-              {f.notes}
-            </p>
-          )}
-        </div>
-        {canEdit && (
-          <div className="flex shrink-0 items-center gap-1">
-            <Link
-              to={`/inspections/${inspectionId}/items/${item.id}`}
-              aria-label="Opraviť"
-              className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700"
-            >
-              <Edit2 className="size-4" />
-            </Link>
-            <button
-              type="button"
-              onClick={onDelete}
-              disabled={deleting}
-              aria-label="Zmazať"
-              className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad disabled:opacity-50"
-            >
-              {deleting ? <Spinner size="sm" /> : <Trash2 className="size-4" />}
-            </button>
-          </div>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function UnknownItemRow({ item }: { item: InspectionItem }) {
-  return (
-    <Card className="px-4 py-3 text-xs text-ink-500">
-      <pre className="whitespace-pre-wrap break-words">{JSON.stringify(item.fields, null, 2)}</pre>
-    </Card>
-  );
-}
-
 function EmptyItems({ inspectionId, disabled }: { inspectionId: number; disabled: boolean }) {
   return (
     <Card className="flex flex-col items-center gap-3 px-6 py-10 text-center">
       <div className="grid size-12 place-items-center rounded-2xl bg-firol-50 text-firol-500">
         <ClipboardList className="size-5" />
       </div>
-      <h2 className="text-sm font-semibold text-ink-900">Zatiaľ žiadne prístroje</h2>
+      <h2 className="text-sm font-semibold text-ink-900">Zatiaľ žiadne položky</h2>
       <p className="max-w-xs text-xs text-ink-500">
-        Pridaj prvý prístroj. Po uložení sa zobrazí v zozname so štatistikou A / TS / O / V.
+        Pridaj prvú položku — po uložení sa zobrazí v zozname so štatistikou.
       </p>
       {!disabled && (
         <Link
@@ -504,22 +361,9 @@ function EmptyItems({ inspectionId, disabled }: { inspectionId: number; disabled
           className="inline-flex h-11 items-center gap-1.5 rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
         >
           <Plus className="size-4" />
-          Pridať prvý prístroj
+          Pridať prvú položku
         </Link>
       )}
     </Card>
   );
-}
-
-function computeRphpStats(items: InspectionItem[]): Record<RphpStatus, number> {
-  const stats: Record<RphpStatus, number> = { A: 0, TS: 0, O: 0, V: 0 };
-  for (const it of items) {
-    const status = (it.fields as Partial<RphpItemFields>).status;
-    if (isRphpStatus(status)) stats[status] += 1;
-  }
-  return stats;
-}
-
-function isRphpStatus(s: unknown): s is RphpStatus {
-  return s === 'A' || s === 'TS' || s === 'O' || s === 'V';
 }

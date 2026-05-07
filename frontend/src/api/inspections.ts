@@ -85,6 +85,144 @@ export type RphpItemFields = {
   notes: string | null;
 };
 
+export type HydrantTypeKind = 'DN25' | 'DN33' | 'DN52' | 'C52' | 'other';
+export const HYDRANT_TYPES: HydrantTypeKind[] = ['DN25', 'DN33', 'DN52', 'C52', 'other'];
+
+export type PassFailResult = 'vyhovuje' | 'nevyhovuje';
+export const PASS_FAIL_LABELS: Record<PassFailResult, string> = {
+  vyhovuje: 'Vyhovuje',
+  nevyhovuje: 'Nevyhovuje',
+};
+
+export type HydrantItemFields = {
+  type: HydrantTypeKind;
+  type_other: string | null;
+  location: string;
+  hose_count: number;
+  hs: number;
+  hd: number;
+  q: number;
+  defects: string | null;
+  result: PassFailResult;
+};
+
+export type OpravaAction = 'tlakova_skuska' | 'oprava' | 'plnenie';
+export const OPRAVA_ACTIONS: OpravaAction[] = ['tlakova_skuska', 'oprava', 'plnenie'];
+export const OPRAVA_ACTION_LABELS: Record<OpravaAction, string> = {
+  tlakova_skuska: 'Tlaková skúška',
+  oprava: 'Oprava',
+  plnenie: 'Plnenie',
+};
+
+export type OpravaTsRphpItemFields = {
+  manufacturer: string;
+  type: string;
+  serial: string;
+  year: number;
+  location: string;
+  actions: OpravaAction[];
+  notes: string | null;
+};
+
+export type PkActivity =
+  | 'visual_check'
+  | 'rphp_check'
+  | 'hydranty_check'
+  | 'escape_routes_check'
+  | 'pu_check'
+  | 'training_initial'
+  | 'training_repeated'
+  | 'electrical_equipment_check'
+  | 'technical_equipment_check'
+  | 'electrical_appliances_check'
+  | 'documentation_check'
+  | 'employee_list_check'
+  | 'fire_drill'
+  | 'fire_cabinet_check';
+
+export const PK_ACTIVITIES: PkActivity[] = [
+  'visual_check', 'rphp_check', 'hydranty_check', 'escape_routes_check',
+  'pu_check', 'training_initial', 'training_repeated',
+  'electrical_equipment_check', 'technical_equipment_check',
+  'electrical_appliances_check', 'documentation_check',
+  'employee_list_check', 'fire_drill', 'fire_cabinet_check',
+];
+
+export const PK_ACTIVITY_LABELS: Record<PkActivity, string> = {
+  visual_check: 'Vizuálna kontrola priestorov spoločnosti',
+  rphp_check: 'Kontrola stavu, označenia a dostupnosti RPHP',
+  hydranty_check: 'Kontrola stavu, označenia a dostupnosti požiarnych hydrantov',
+  escape_routes_check: 'Kontrola stavu, označenia a voľnosti únikových ciest',
+  pu_check: 'Kontrola akcieschopnosti požiarnych uzáverov',
+  training_initial: 'Vykonané vstupné školenie z predpisov OPP',
+  training_repeated: 'Vykonané opakované školenie vedúcich a ostatných zamestnancov',
+  electrical_equipment_check: 'Kontrola stavu používaných elektrických zariadení',
+  technical_equipment_check: 'Kontrola stavu používaných technických zariadení',
+  electrical_appliances_check: 'Kontrola stavu používaných elektrických spotrebičov',
+  documentation_check: 'Kontrola aktuálnosti dokumentácie požiarnej ochrany',
+  employee_list_check: 'Kontrola aktuálneho zoznamu zamestnancov a ich školení',
+  fire_drill: 'Vykonaný cvičný požiarny poplach',
+  fire_cabinet_check: 'Kontrola hasičskej skrine na 2. poschodí',
+};
+
+export type PkResult = 'bez_nedostatkov' | 'zistene_nedostatky';
+export const PK_RESULT_LABELS: Record<PkResult, string> = {
+  bez_nedostatkov: 'Bez zistených nedostatkov',
+  zistene_nedostatky: 'Zistené nedostatky',
+};
+
+export type PoziarnaKnihaItemFields = {
+  workspaces: string;
+  activities: PkActivity[];
+  activities_other: string | null;
+  result: PkResult;
+  notes: string | null;
+};
+
+export type PuKind = 'dvere' | 'okno' | 'klapka';
+export const PU_KINDS: PuKind[] = ['dvere', 'okno', 'klapka'];
+export const PU_KIND_LABELS: Record<PuKind, string> = {
+  dvere: 'Požiarne dvere',
+  okno: 'Požiarne okno',
+  klapka: 'Požiarna klapka',
+};
+
+export type PuAkcieschopnostItemFields = {
+  kind: PuKind;
+  identifier: string;
+  manufacturer: string;
+  location: string;
+  result: PassFailResult;
+  notes: string | null;
+};
+
+export type PuUdrzbaItemFields = {
+  kind: PuKind;
+  identifier: string;
+  location: string;
+  maintenance_work: string;
+  result: PassFailResult;
+  notes: string | null;
+};
+
+export type NudzoveOsvetlenieItemFields = {
+  luminaire_type: string;
+  manufacturer: string;
+  location: string;
+  duration_min: number;
+  result: PassFailResult;
+  notes: string | null;
+};
+
+export type TsHadicItemFields = {
+  hose_type: string;
+  serial: string;
+  location: string;
+  test_pressure: number;
+  result: PassFailResult;
+  notes: string | null;
+};
+
 export type InspectionItem = {
   id: number;
   position: number;
@@ -162,7 +300,19 @@ export const Inspections = {
   archive: (id: number, csrfToken: string | null) =>
     api<void>(`/api/inspections/${id}`, { method: 'DELETE', csrfToken }),
 
-  addItem: (inspectionId: number, fields: RphpItemFields, csrfToken: string | null) =>
+  addItem: (
+    inspectionId: number,
+    fields:
+      | RphpItemFields
+      | HydrantItemFields
+      | OpravaTsRphpItemFields
+      | PoziarnaKnihaItemFields
+      | PuAkcieschopnostItemFields
+      | PuUdrzbaItemFields
+      | NudzoveOsvetlenieItemFields
+      | TsHadicItemFields,
+    csrfToken: string | null,
+  ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items`, {
       method: 'POST',
       body: fields,
@@ -171,7 +321,15 @@ export const Inspections = {
   updateItem: (
     inspectionId: number,
     itemId: number,
-    fields: RphpItemFields,
+    fields:
+      | RphpItemFields
+      | HydrantItemFields
+      | OpravaTsRphpItemFields
+      | PoziarnaKnihaItemFields
+      | PuAkcieschopnostItemFields
+      | PuUdrzbaItemFields
+      | NudzoveOsvetlenieItemFields
+      | TsHadicItemFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items/${itemId}`, {
