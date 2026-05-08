@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, NotebookPen,
-  Repeat, Warehouse,
+  Plus, Repeat, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type CompanyListItem, type FacilityListItem } from '@/api/companies';
@@ -16,8 +16,10 @@ import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
+import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
+import { NewCompanyDialog } from '@/components/NewCompanyDialog';
 import { cn } from '@/lib/cn';
 
 const KNOWN_TYPES: InspectionType[] = [
@@ -62,6 +64,7 @@ export function InspectionStep1Page() {
   const [loadingFacilities, setLoadingFacilities] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newCompanyOpen, setNewCompanyOpen] = useState(false);
 
   // Initial company list. Pulls a generous page (200) — enough for the
   // typical technician's client base; pagination/search lands in Phase 5.
@@ -219,20 +222,34 @@ export function InspectionStep1Page() {
         <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
           <Field label="Spoločnosť" required>
             {(p) => (
-              <select
+              <Select
                 id={p.id}
                 aria-invalid={p['aria-invalid']}
-                value={companyId ?? ''}
-                onChange={(e) => setCompanyId(e.target.value ? Number(e.target.value) : null)}
-                className={selectClasses}
-              >
-                <option value="" disabled>— vyber firmu —</option>
-                {companies?.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}{c.ico ? ` · IČO ${c.ico}` : ''}
-                  </option>
-                ))}
-              </select>
+                value={companyId !== null ? String(companyId) : ''}
+                onChange={(v) => setCompanyId(v ? Number(v) : null)}
+                placeholder="— vyber firmu —"
+                leftIcon={<Building2 className="size-4" />}
+                options={(companies ?? []).map((c) => ({
+                  value: String(c.id),
+                  label: c.name,
+                  description: c.ico ? `IČO ${c.ico}` : undefined,
+                }))}
+                headerSlot={({ closeDropdown }) => (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeDropdown();
+                      setNewCompanyOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
+                  >
+                    <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
+                      <Plus className="size-3.5" />
+                    </span>
+                    Pridať novú firmu
+                  </button>
+                )}
+              />
             )}
           </Field>
 
@@ -244,25 +261,25 @@ export function InspectionStep1Page() {
               : undefined}
           >
             {(p) => (
-              <select
+              <Select
                 id={p.id}
                 aria-invalid={p['aria-invalid']}
-                value={facilityId ?? ''}
-                onChange={(e) => setFacilityId(e.target.value ? Number(e.target.value) : null)}
+                value={facilityId !== null ? String(facilityId) : ''}
+                onChange={(v) => setFacilityId(v ? Number(v) : null)}
                 disabled={companyId === null || loadingFacilities || facilities.length === 0}
-                className={selectClasses}
-              >
-                <option value="" disabled>
-                  {companyId === null
+                placeholder={
+                  companyId === null
                     ? '— najprv vyber firmu —'
                     : loadingFacilities
                       ? 'Načítavam…'
-                      : '— vyber prevádzku —'}
-                </option>
-                {facilities.map((f) => (
-                  <option key={f.id} value={f.id}>{f.name}</option>
-                ))}
-              </select>
+                      : '— vyber prevádzku —'
+                }
+                leftIcon={<Warehouse className="size-4" />}
+                options={facilities.map((f) => ({
+                  value: String(f.id),
+                  label: f.name,
+                }))}
+              />
             )}
           </Field>
 
@@ -363,6 +380,32 @@ export function InspectionStep1Page() {
           </div>
         </form>
       </Card>
+
+      <NewCompanyDialog
+        open={newCompanyOpen}
+        onClose={() => setNewCompanyOpen(false)}
+        onCreated={(c) => {
+          // Splice the new row into the list, fill in the
+          // dashboard-only fields the create endpoint doesn't return,
+          // and auto-select it.
+          setCompanies((prev) => {
+            const enriched: CompanyListItem = {
+              id: c.id,
+              name: c.name,
+              ico: c.ico,
+              address: c.address,
+              contact: c.contact,
+              facilities_count: 0,
+              inspections_count: 0,
+              last_inspection_at: null,
+            };
+            const next = prev ? [...prev, enriched] : [enriched];
+            next.sort((a, b) => a.name.localeCompare(b.name));
+            return next;
+          });
+          setCompanyId(c.id);
+        }}
+      />
     </div>
   );
 }
@@ -411,8 +454,3 @@ function stepTwoCta(type: InspectionType): string {
   }
 }
 
-const selectClasses =
-  'h-11 w-full rounded-xl border border-ink-200 bg-white px-3 text-sm text-ink-800 ' +
-  'transition-colors duration-150 hover:border-ink-300 ' +
-  'focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200 ' +
-  'disabled:bg-ink-50 disabled:text-ink-400';

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, Clock, GraduationCap,
-  NotebookPen,
+  NotebookPen, Plus,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type CompanyListItem, type FacilityListItem } from '@/api/companies';
@@ -18,8 +18,10 @@ import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
+import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
+import { NewCompanyDialog } from '@/components/NewCompanyDialog';
 import { cn } from '@/lib/cn';
 
 export function NewTrainingPage() {
@@ -43,6 +45,7 @@ export function NewTrainingPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newCompanyOpen, setNewCompanyOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -205,30 +208,49 @@ export function NewTrainingPage() {
 
           <Field label="Spoločnosť" required>
             {(p) => (
-              <select id={p.id} value={companyId ?? ''}
-                onChange={(e) => setCompanyId(e.target.value ? Number(e.target.value) : null)}
-                className={selectClasses}>
-                <option value="" disabled>— vyber firmu —</option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}{c.ico ? ` · IČO ${c.ico}` : ''}
-                  </option>
-                ))}
-              </select>
+              <Select
+                id={p.id}
+                value={companyId !== null ? String(companyId) : ''}
+                onChange={(v) => setCompanyId(v ? Number(v) : null)}
+                placeholder="— vyber firmu —"
+                leftIcon={<Building2 className="size-4" />}
+                options={companies.map((c) => ({
+                  value: String(c.id),
+                  label: c.name,
+                  description: c.ico ? `IČO ${c.ico}` : undefined,
+                }))}
+                headerSlot={({ closeDropdown }) => (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeDropdown();
+                      setNewCompanyOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
+                  >
+                    <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
+                      <Plus className="size-3.5" />
+                    </span>
+                    Pridať novú firmu
+                  </button>
+                )}
+              />
             )}
           </Field>
 
           <Field label="Prevádzka" hint="Voliteľné — niektoré školenia sú pre celú firmu.">
             {(p) => (
-              <select id={p.id} value={facilityId ?? ''}
-                onChange={(e) => setFacilityId(e.target.value ? Number(e.target.value) : null)}
+              <Select
+                id={p.id}
+                value={facilityId !== null ? String(facilityId) : ''}
+                onChange={(v) => setFacilityId(v ? Number(v) : null)}
                 disabled={companyId === null || facilities.length === 0}
-                className={selectClasses}>
-                <option value="">— bez konkrétnej prevádzky —</option>
-                {facilities.map((f) => (
-                  <option key={f.id} value={f.id}>{f.name}</option>
-                ))}
-              </select>
+                placeholder="— bez konkrétnej prevádzky —"
+                options={[
+                  { value: '', label: '— bez konkrétnej prevádzky —' },
+                  ...facilities.map((f) => ({ value: String(f.id), label: f.name })),
+                ]}
+              />
             )}
           </Field>
 
@@ -250,17 +272,21 @@ export function NewTrainingPage() {
             error={trainerWithoutSignatureWarning ? trainerWithoutSignatureWarning : undefined}
           >
             {(p) => (
-              <select id={p.id} value={trainerId ?? ''}
-                onChange={(e) => setTrainerId(e.target.value ? Number(e.target.value) : null)}
+              <Select
+                id={p.id}
+                value={trainerId !== null ? String(trainerId) : ''}
+                onChange={(v) => setTrainerId(v ? Number(v) : null)}
                 disabled={trainers === null || noTrainers}
-                className={selectClasses}>
-                <option value="">— bez školiteľa —</option>
-                {(trainers ?? []).map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.fullname}{t.certification_number ? ` · ${t.certification_number}` : ''}
-                  </option>
-                ))}
-              </select>
+                placeholder="— bez školiteľa —"
+                options={[
+                  { value: '', label: '— bez školiteľa —' },
+                  ...(trainers ?? []).map((t) => ({
+                    value: String(t.id),
+                    label: t.fullname,
+                    description: t.certification_number ?? undefined,
+                  })),
+                ]}
+              />
             )}
           </Field>
 
@@ -310,6 +336,29 @@ export function NewTrainingPage() {
           Po vytvorení doplníš účastníkov s ich podpismi. PDF protokol so zoznamom účastníkov vznikne v ďalšom kroku.
         </span>
       </Card>
+
+      <NewCompanyDialog
+        open={newCompanyOpen}
+        onClose={() => setNewCompanyOpen(false)}
+        onCreated={(c) => {
+          setCompanies((prev) => {
+            const enriched: CompanyListItem = {
+              id: c.id,
+              name: c.name,
+              ico: c.ico,
+              address: c.address,
+              contact: c.contact,
+              facilities_count: 0,
+              inspections_count: 0,
+              last_inspection_at: null,
+            };
+            const next = prev ? [...prev, enriched] : [enriched];
+            next.sort((a, b) => a.name.localeCompare(b.name));
+            return next;
+          });
+          setCompanyId(c.id);
+        }}
+      />
     </div>
   );
 }
@@ -347,10 +396,4 @@ function numericParam(raw: string | null): number | null {
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
-
-const selectClasses =
-  'h-11 w-full rounded-xl border border-ink-200 bg-white px-3 text-sm text-ink-800 ' +
-  'transition-colors duration-150 hover:border-ink-300 ' +
-  'focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200 ' +
-  'disabled:bg-ink-50 disabled:text-ink-400';
 
