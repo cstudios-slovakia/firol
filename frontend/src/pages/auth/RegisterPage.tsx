@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Building2, Lock, Mail, Phone, User } from 'lucide-react';
+import { Building2, Eye, EyeOff, Lock, Mail, Phone, User } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -20,14 +20,27 @@ export function RegisterPage() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [billingPeriod, setBillingPeriod] = useState<Period>('yearly');
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Surface the mismatch only after the user has typed enough that they're
+  // clearly past the "still typing the same thing" stage — saves one
+  // distracting red flash while they re-type the same characters.
+  const passwordMismatch =
+    passwordConfirm.length > 0 && passwordConfirm !== password.slice(0, passwordConfirm.length);
+  const passwordsMatch = password.length > 0 && password === passwordConfirm;
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (password !== passwordConfirm) {
+      setError('Heslá sa nezhodujú. Skontroluj druhé pole.');
+      return;
+    }
     setError(null);
     setLoading(true);
     try {
@@ -109,14 +122,48 @@ export function RegisterPage() {
             {(p) => (
               <Input
                 {...p}
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 autoComplete="new-password"
                 required
                 leftIcon={<Lock className="size-4" />}
+                rightSlot={
+                  <PasswordToggle
+                    visible={showPassword}
+                    onClick={() => setShowPassword((v) => !v)}
+                  />
+                }
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 minLength={8}
+              />
+            )}
+          </Field>
+
+          <Field
+            label="Potvrdenie hesla"
+            required
+            hint={passwordsMatch ? 'Heslá sa zhodujú.' : undefined}
+            error={passwordMismatch ? 'Heslá sa nezhodujú.' : undefined}
+          >
+            {(p) => (
+              <Input
+                {...p}
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                required
+                leftIcon={<Lock className="size-4" />}
+                rightSlot={
+                  <PasswordToggle
+                    visible={showPassword}
+                    onClick={() => setShowPassword((v) => !v)}
+                  />
+                }
+                value={passwordConfirm}
+                onChange={(e) => setPasswordConfirm(e.target.value)}
+                placeholder="••••••••"
+                minLength={8}
+                invalid={passwordMismatch}
               />
             )}
           </Field>
@@ -134,10 +181,13 @@ export function RegisterPage() {
             )}
           </Field>
 
-          <fieldset className="flex flex-col gap-1.5">
-            <legend className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+          <div className="flex flex-col gap-1.5" role="group" aria-labelledby="billing-period-label">
+            <span
+              id="billing-period-label"
+              className="text-xs font-semibold uppercase tracking-wide text-ink-500"
+            >
               Predplatné
-            </legend>
+            </span>
             <div className="grid grid-cols-2 gap-2">
               <PeriodOption
                 active={billingPeriod === 'yearly'}
@@ -156,7 +206,7 @@ export function RegisterPage() {
             <p className="text-xs text-ink-400">
               Najprv 14 dní zadarmo. Až po skončení skúšobnej doby ti bude účtovaná zvolená suma.
             </p>
-          </fieldset>
+          </div>
 
           {error && (
             <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
@@ -164,12 +214,40 @@ export function RegisterPage() {
             </div>
           )}
 
-          <Button type="submit" loading={loading} className="mt-2 w-full">
+          <Button
+            type="submit"
+            loading={loading}
+            disabled={password.length === 0 || password !== passwordConfirm}
+            className="mt-2 w-full"
+          >
             Vytvoriť konto
           </Button>
         </form>
       </Card>
     </AuthLayout>
+  );
+}
+
+function PasswordToggle({
+  visible,
+  onClick,
+}: {
+  visible: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={visible ? 'Skryť heslo' : 'Zobraziť heslo'}
+      title={visible ? 'Skryť heslo' : 'Zobraziť heslo'}
+      // tabIndex=-1 keeps the field focus order natural (label → input →
+      // next field) instead of stopping on the toggle in between.
+      tabIndex={-1}
+      className="grid size-9 place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-700"
+    >
+      {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+    </button>
   );
 }
 
