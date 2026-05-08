@@ -143,6 +143,131 @@ final class DocumentController
     }
 
     /** Lists documents for a single inspection (used by the UI to show download links). */
+    /**
+     * Generate the PDF protocol for a training. All trainings share the
+     * SKO number prefix and a single per-account+year sequence regardless
+     * of the training type (per spec — the type is recorded in the body).
+     * Training must be a draft with at least one trainee and a chosen
+     * trainer (otherwise the protocol can't be signed).
+     */
+    public static function generateForTraining(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId  = Tenant::currentAccountId();
+        $trainingId = (int) $params['id'];
+
+        $training = self::loadTrainingForGenerate($accountId, $trainingId);
+
+        if ($training['status'] === 'finalized') {
+            Response::error(
+                'Školenie už je uzamknuté a má vystavený PDF protokol.',
+                409,
+            );
+        }
+        if ($training['date'] === null) {
+            Response::error('Doplň dátum školenia pred generovaním PDF.', 422);
+        }
+        if ($training['trainer_id'] === null) {
+            Response::error('Vyber školiteľa pred generovaním PDF.', 422);
+        }
+
+        $trainees = self::loadTrainees($trainingId);
+        if (count($trainees) === 0) {
+            Response::error(
+                'Pridaj aspoň jedného účastníka pred generovaním PDF.',
+                422,
+            );
+        }
+
+        $year = (int) substr((string) $training['date'], 0, 4);
+        $payload = self::buildTrainingPayload($accountId, $training, $trainees);
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            // All training types share the SKO bucket; pass the literal
+            // 'skolenie' slug as the sequence type.
+            $allocated = NumberAllocator::allocate($accountId, 'skolenie', $year);
+            $payload['number'] = $allocated['number'];
+            $payload['generated_at'] = date('c');
+
+            $pdfBytes = PdfRenderer::renderTraining($payload);
+
+            $relPath = Storage::documentRelative($accountId, $year, $allocated['number']);
+            $absPath = Storage::documentAbsolute($relPath);
+            Storage::ensureDir(dirname($absPath));
+            if (file_put_contents($absPath, $pdfBytes) === false) {
+                throw new \RuntimeException('Failed to write PDF to storage.');
+            }
+
+            $insert = $pdo->prepare(
+                'INSERT INTO documents
+                    (account_id, parent_type, parent_id, type, number,
+                     file_path, signed, signed_at)
+                 VALUES (?, "training", ?, "skolenie", ?, ?, 1, NOW())'
+            );
+            $insert->execute([
+                $accountId,
+                $trainingId,
+                $allocated['number'],
+                $relPath,
+            ]);
+            $documentId = (int) $pdo->lastInsertId();
+
+            $pdo->prepare(
+                'UPDATE trainings SET status = "finalized" WHERE id = ? AND account_id = ?'
+            )->execute([$trainingId, $accountId]);
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            if (isset($absPath) && is_file($absPath)) {
+                @unlink($absPath);
+            }
+            error_log('[generate-pdf-training] ' . $e::class . ': ' . $e->getMessage());
+            Response::error('PDF sa nepodarilo vygenerovať.', 500);
+        }
+
+        Response::json([
+            'document' => self::loadDocument($accountId, $documentId),
+        ], 201);
+    }
+
+    public static function indexForTraining(Request $req, array $params): void
+    {
+        $accountId  = Tenant::currentAccountId();
+        $trainingId = (int) $params['id'];
+
+        $check = Db::pdo()->prepare(
+            'SELECT 1 FROM trainings WHERE id = ? AND account_id = ? AND archived_at IS NULL'
+        );
+        $check->execute([$trainingId, $accountId]);
+        if ($check->fetchColumn() === false) {
+            Response::error('Training not found', 404);
+        }
+
+        $stmt = Db::pdo()->prepare(
+            'SELECT id, type, number, file_path, generated_at, signed
+             FROM   documents
+             WHERE  account_id = ? AND parent_type = "training" AND parent_id = ?
+             ORDER  BY generated_at DESC'
+        );
+        $stmt->execute([$accountId, $trainingId]);
+        $rows = $stmt->fetchAll();
+        $items = array_map(static function (array $r): array {
+            return [
+                'id'           => (int) $r['id'],
+                'type'         => $r['type'],
+                'number'       => $r['number'],
+                'generated_at' => $r['generated_at'],
+                'signed'       => (int) $r['signed'] === 1,
+                'download_url' => '/api/documents/' . (int) $r['id'] . '/download',
+            ];
+        }, $rows);
+
+        Response::json(['items' => $items]);
+    }
+
     public static function indexForInspection(Request $req, array $params): void
     {
         $accountId    = Tenant::currentAccountId();
@@ -414,6 +539,124 @@ final class DocumentController
             'signed'       => (int) $row['signed'] === 1,
             'signed_at'    => $row['signed_at'],
             'download_url' => '/api/documents/' . (int) $row['id'] . '/download',
+        ];
+    }
+
+    /** Spec-locked Slovak labels for the 6 training types. */
+    private const TRAINING_TYPE_LABELS = [
+        'vstupne'      => 'Vstupné školenie vedúcich a ostatných zamestnancov',
+        'opakovane'    => 'Opakované školenie vedúcich a ostatných zamestnancov',
+        'opp_mimo'     => 'Školenie osôb zabezpečujúcich OPP v mimopracovnom čase',
+        'zdrzujuca_sa' => 'Školenie osôb zdržujúcich sa na pracovisku',
+        'hliadka_oph'  => 'Odborná príprava protipožiarnych hliadok',
+        'hliadka_opah' => 'Odborná príprava protipožiarnej asistenčnej hliadky',
+    ];
+
+    /** @return array<string, mixed> */
+    private static function loadTrainingForGenerate(int $accountId, int $trainingId): array
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT t.id, t.type, t.date, t.duration_min, t.topics, t.status,
+                    t.company_id, c.name AS company_name, c.ico AS company_ico,
+                    c.address AS company_address,
+                    t.facility_id, f.name AS facility_name, f.address AS facility_address,
+                    t.trainer_id, tr.fullname AS trainer_name,
+                    tr.certification_number AS trainer_certification_number,
+                    tr.signature_path     AS trainer_signature_path
+             FROM   trainings t
+             JOIN   companies  c  ON c.id = t.company_id
+             LEFT JOIN facilities f  ON f.id = t.facility_id
+             LEFT JOIN trainers   tr ON tr.id = t.trainer_id
+             WHERE  t.id = ? AND t.account_id = ? AND t.archived_at IS NULL'
+        );
+        $stmt->execute([$trainingId, $accountId]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            Response::error('Training not found', 404);
+        }
+        return $row;
+    }
+
+    /** @return list<array<string, mixed>> */
+    private static function loadTrainees(int $trainingId): array
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT id, fullname, position, signature_path, signed_at
+             FROM   trainees WHERE training_id = ? ORDER BY id ASC'
+        );
+        $stmt->execute([$trainingId]);
+        $rows = $stmt->fetchAll();
+        return array_map(static function (array $r): array {
+            return [
+                'id'             => (int) $r['id'],
+                'fullname'       => $r['fullname'],
+                'position'       => $r['position'],
+                'signature_path' => $r['signature_path'],
+                'signed_at'      => $r['signed_at'],
+            ];
+        }, $rows);
+    }
+
+    /**
+     * @param array<string, mixed>            $training
+     * @param list<array<string, mixed>>       $trainees
+     * @return array<string, mixed>
+     */
+    private static function buildTrainingPayload(
+        int $accountId,
+        array $training,
+        array $trainees,
+    ): array {
+        $accStmt = Db::pdo()->prepare(
+            'SELECT invoice_company_name FROM accounts WHERE id = ?'
+        );
+        $accStmt->execute([$accountId]);
+        $accRow = $accStmt->fetch() ?: [];
+
+        $trainerSignatureUri = self::signatureToDataUri(
+            $training['trainer_signature_path'] ?? null,
+        );
+
+        $traineesPayload = array_map(static function (array $r): array {
+            return [
+                'id'                 => (int) $r['id'],
+                'fullname'           => $r['fullname'],
+                'position'           => $r['position'],
+                'signature_data_uri' => self::signatureToDataUri($r['signature_path'] ?? null),
+                'signed_at'          => $r['signed_at'],
+            ];
+        }, $trainees);
+
+        $type = (string) $training['type'];
+
+        return [
+            'brand' => [
+                'name'  => $accRow['invoice_company_name'] ?? 'Firol',
+                'color' => '#E8433A',
+            ],
+            'training' => [
+                'type'                => $type,
+                'training_type_label' => self::TRAINING_TYPE_LABELS[$type] ?? $type,
+                'date'                => $training['date'],
+                'duration_min'        => $training['duration_min'],
+                'topics'              => $training['topics'],
+                'status'              => $training['status'],
+            ],
+            'company' => [
+                'name'    => $training['company_name'],
+                'ico'     => $training['company_ico'],
+                'address' => $training['company_address'],
+            ],
+            'facility' => [
+                'name'    => $training['facility_name'],
+                'address' => $training['facility_address'],
+            ],
+            'trainer' => [
+                'fullname'             => $training['trainer_name'],
+                'certification_number' => $training['trainer_certification_number'],
+                'signature_data_uri'   => $trainerSignatureUri,
+            ],
+            'trainees' => $traineesPayload,
         ];
     }
 }

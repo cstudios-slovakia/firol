@@ -15,8 +15,10 @@ import { InspectionStep1Page } from '@/pages/InspectionStep1Page';
 import { InspectionStep2Page } from '@/pages/InspectionStep2Page';
 import { InspectionDetailPage } from '@/pages/InspectionDetailPage';
 import { InspectionsListPage } from '@/pages/InspectionsListPage';
+import { TrainingsListPage } from '@/pages/TrainingsListPage';
+import { NewTrainingPage } from '@/pages/NewTrainingPage';
+import { TrainingDetailPage } from '@/pages/TrainingDetailPage';
 import { SettingsPage } from '@/pages/SettingsPage';
-import { PlaceholderPage } from '@/pages/PlaceholderPage';
 
 export default function App() {
   return (
@@ -64,15 +66,9 @@ export default function App() {
         <Route path="/inspections/:id/items/new" element={<InspectionStep2Page />} />
         <Route path="/inspections/:id/items/:itemId" element={<InspectionStep2Page />} />
 
-        <Route
-          path="/trainings"
-          element={
-            <PlaceholderPage
-              title="Školenia"
-              subtitle="Sekcia pre školenia a podpisy účastníkov bude pripravená v ďalšej fáze."
-            />
-          }
-        />
+        <Route path="/trainings" element={<TrainingsListPage />} />
+        <Route path="/trainings/new" element={<NewTrainingPage />} />
+        <Route path="/trainings/:id" element={<TrainingDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
 

@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
-  CalendarDays, FileSignature, Hash, ImagePlus, ShieldCheck, Sparkles, UploadCloud,
+  CalendarDays, FileSignature, GraduationCap, Hash, ImagePlus, Plus, ShieldCheck,
+  Sparkles, Trash2, UploadCloud, User,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { InspectorProfileApi, type InspectorProfile } from '@/api/inspectorProfile';
+import { Trainers, type Trainer } from '@/api/trainers';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -213,6 +215,8 @@ export function SettingsPage() {
         </div>
       </Card>
 
+      <TrainersSection />
+
       <Card className="flex items-start gap-3 px-4 py-4 bg-firol-50/40">
         <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-white text-firol-500">
           <Sparkles className="size-4" />
@@ -222,11 +226,188 @@ export function SettingsPage() {
             Ostatné nastavenia pripravujeme
           </h3>
           <p className="mt-0.5 text-xs text-ink-500">
-            Branding, technici a fakturácia sa odomknú v ďalších fázach vývoja.
+            Branding (logo + farba), správa technikov a fakturácia odomykáme postupne.
           </p>
         </div>
       </Card>
     </div>
+  );
+}
+
+function TrainersSection() {
+  const { csrfToken } = useAuth();
+  const [trainers, setTrainers] = useState<Trainer[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const [newName, setNewName] = useState('');
+  const [newCert, setNewCert] = useState('');
+
+  const sigInputs = useRef<Record<number, HTMLInputElement | null>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    Trainers.list()
+      .then((res) => { if (!cancelled) setTrainers(res.items); })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať školiteľov.');
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function onAdd(e: FormEvent) {
+    e.preventDefault();
+    if (!newName.trim()) {
+      setError('Doplň meno školiteľa.');
+      return;
+    }
+    setError(null);
+    setAdding(true);
+    try {
+      const res = await Trainers.create(
+        { fullname: newName.trim(), certification_number: newCert.trim() || null },
+        csrfToken,
+      );
+      setTrainers((prev) => prev ? [...prev, res.trainer].sort((a, b) => a.fullname.localeCompare(b.fullname)) : [res.trainer]);
+      setNewName('');
+      setNewCert('');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Nepodarilo sa pridať školiteľa.');
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function onArchive(id: number) {
+    if (!window.confirm('Naozaj archivovať školiteľa? Existujúce školenia s ním zostanú nezmenené.')) return;
+    setBusyId(id);
+    try {
+      await Trainers.archive(id, csrfToken);
+      setTrainers((prev) => prev ? prev.filter((t) => t.id !== id) : prev);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Archiváciu sa nepodarilo dokončiť.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onSignatureChosen(id: number, file: File | undefined) {
+    if (!file) return;
+    setBusyId(id);
+    setError(null);
+    try {
+      const res = await Trainers.uploadSignature(id, file, csrfToken);
+      setTrainers((prev) => prev ? prev.map((t) => t.id === id ? res.trainer : t) : prev);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Nahranie podpisu sa nepodarilo.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/60 to-transparent px-5 py-4">
+        <div className="grid size-11 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
+          <GraduationCap className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold text-ink-900">Školitelia</h2>
+          <p className="text-xs text-ink-500">
+            Osoby, ktoré vykonávajú školenia. Ich meno a podpis sa objavia na PDF protokole.
+          </p>
+        </div>
+      </div>
+
+      <div className="px-5 py-4">
+        {error && (
+          <div className="mb-3 rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
+            {error}
+          </div>
+        )}
+
+        {trainers === null ? (
+          <div className="flex justify-center py-6 text-ink-400">
+            <Spinner />
+          </div>
+        ) : trainers.length === 0 ? (
+          <p className="mb-3 text-sm text-ink-500">
+            Zatiaľ nemáš žiadnych školiteľov. Pridaj prvého nižšie.
+          </p>
+        ) : (
+          <ul className="mb-4 flex flex-col gap-2">
+            {trainers.map((t) => (
+              <li key={t.id} className="flex items-center gap-3 rounded-2xl border border-ink-100 px-3 py-2.5">
+                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-firol-50 text-firol-600">
+                  <User className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-ink-900">{t.fullname}</p>
+                  <p className="mt-0.5 truncate text-xs text-ink-500">
+                    {t.certification_number ?? <span className="italic">— bez čísla oprávnenia —</span>}
+                    <span className="mx-1.5 text-ink-300">·</span>
+                    <Badge tone={t.has_signature ? 'ok' : 'warn'}>
+                      {t.has_signature ? 'Podpis nahraný' : 'Bez podpisu'}
+                    </Badge>
+                  </p>
+                </div>
+                <input
+                  ref={(el) => { sigInputs.current[t.id] = el; }}
+                  type="file"
+                  accept="image/png"
+                  className="hidden"
+                  onChange={(e) => onSignatureChosen(t.id, e.target.files?.[0])}
+                />
+                <button
+                  type="button"
+                  onClick={() => sigInputs.current[t.id]?.click()}
+                  disabled={busyId === t.id}
+                  title="Nahrať podpis (PNG)"
+                  className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700 disabled:opacity-50"
+                >
+                  {busyId === t.id ? <Spinner size="sm" /> : <UploadCloud className="size-4" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onArchive(t.id)}
+                  disabled={busyId === t.id}
+                  title="Archivovať"
+                  className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad disabled:opacity-50"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <form onSubmit={onAdd} className="flex flex-col gap-3 rounded-2xl border border-dashed border-ink-200 p-3 sm:flex-row sm:items-end">
+          <div className="flex-1">
+            <Field label="Meno a priezvisko" required>
+              {(p) => (
+                <Input {...p} required leftIcon={<User className="size-4" />}
+                  value={newName} onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Mgr. Jana Lektorová" />
+              )}
+            </Field>
+          </div>
+          <div className="flex-1">
+            <Field label="Číslo oprávnenia">
+              {(p) => (
+                <Input {...p} leftIcon={<Hash className="size-4" />}
+                  value={newCert} onChange={(e) => setNewCert(e.target.value)}
+                  placeholder="OPP-SK-2024-0123" />
+              )}
+            </Field>
+          </div>
+          <Button type="submit" loading={adding} leftIcon={<Plus className="size-4" />}>
+            Pridať
+          </Button>
+        </form>
+      </div>
+    </Card>
   );
 }
 

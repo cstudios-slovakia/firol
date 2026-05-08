@@ -80,6 +80,12 @@ final class PdfRenderer
         return self::buildPdf($html, $payload['number'] ?? 'firol');
     }
 
+    public static function renderTraining(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/training.php', $payload);
+        return self::buildPdf($html, $payload['number'] ?? 'firol');
+    }
+
     /**
      * Type-aware dispatcher. Adding a new inspection type means adding a
      * branch here + the corresponding template under templates/.
