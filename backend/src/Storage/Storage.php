@@ -42,6 +42,26 @@ final class Storage
         return "signatures/$accountId/$userId.png";
     }
 
+    public static function trainerSignaturePath(int $accountId, int $trainerId): string
+    {
+        return self::root() . "/trainers/$accountId/$trainerId.png";
+    }
+
+    public static function trainerSignatureRelative(int $accountId, int $trainerId): string
+    {
+        return "trainers/$accountId/$trainerId.png";
+    }
+
+    public static function traineeSignaturePath(int $trainingId, int $traineeId): string
+    {
+        return self::root() . "/trainings/$trainingId/$traineeId.png";
+    }
+
+    public static function traineeSignatureRelative(int $trainingId, int $traineeId): string
+    {
+        return "trainings/$trainingId/$traineeId.png";
+    }
+
     public static function documentDir(int $accountId, int $year): string
     {
         return self::root() . "/documents/$accountId/$year";

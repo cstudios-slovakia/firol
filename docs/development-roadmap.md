@@ -263,12 +263,69 @@ with their own number prefix and per-type stats. Pattern stabilised in
 the `inspection-types/` registry: a new type ships in one backend
 validator branch + one PHP template + one frontend module file.
 
-## Phase 4 — Trainings ⬜
-- ⬜ DB: `trainings`, `trainees` (with touchscreen signatures)
-- ⬜ Training types enum (6 types)
-- ⬜ Trainer entity (name, certification number, signature)
-- ⬜ Touchscreen signature capture (canvas → PNG)
-- ⬜ Training PDF protocol (with attendees list + signatures)
+## Phase 4 — Trainings ✅
+Split into 4a (foundation), 4b (trainees + canvas signatures),
+4c (PDF protocol). Mirrors the Phase 3a split that worked well for RPHP.
+
+### 4a — Foundation: trainers + training header CRUD ✅
+- ✅ Migration 004: `trainers`, `trainings`, `trainees`. Locked training
+  type slugs: `vstupne`, `opakovane`, `opp_mimo`, `zdrzujuca_sa`,
+  `hliadka_oph`, `hliadka_opah`. `documents.parent_type` already
+  supports `'training'` from migration 003.
+- ✅ Backend `TrainerController` — full CRUD per account + PNG
+  signature upload/stream (same pattern as inspector signature)
+- ✅ Backend `TrainingController` — list (filters: company/facility/type),
+  show (with embedded trainees array), create draft, patch (date /
+  trainer / topics / duration), archive. Multi-tenancy on every query;
+  facility (optional) must belong to the chosen company; trainer must
+  belong to the active account.
+- ✅ Storage helper for trainer signatures (`storage/trainers/`) and
+  trainee signatures (`storage/trainings/{id}/`)
+- ✅ Frontend: `api/trainers.ts`, `api/trainings.ts`;
+  `TrainingsListPage` (replaces placeholder), `NewTrainingPage` with
+  6-card type picker + company/facility/date/trainer/topics/duration
+  form, `TrainingDetailPage` skeleton (shows training header + warning
+  card that attendees + PDF land in 4b/4c)
+- ✅ Trainers section in Settings — list, add (name + cert), upload
+  signature (PNG), archive; surfaces "podpis nahraný / bez podpisu"
+  badges so the technician knows who's ready
+- ✅ Verified locally: created trainer (`Jan Skolitel`), then a
+  `vstupne` training tied to it; list/show return correctly
+
+### 4b — Trainees + on-screen signature capture ✅
+- ✅ Backend `TraineeController` — POST `/api/trainings/{id}/trainees`
+  (multipart with required PNG signature), DELETE
+  `/api/trainings/{id}/trainees/{trainee_id}`, GET
+  `/api/trainees/{id}/signature` (auth + tenant-scoped stream).
+  `signed_at = NOW()` on insert; rolls back the row if move_uploaded_file
+  fails so storage and DB stay in sync.
+- ✅ Mutations rejected on finalized training (409).
+- ✅ Frontend `<SignaturePad>` — single canvas with PointerEvent
+  handlers (mouse + touch via one code path), HiDPI-aware sizing via
+  ResizeObserver, quadratic stroke smoothing, eraser button,
+  imperative `toBlob()` for the parent form.
+- ✅ "Pridať účastníka" expanding form on `TrainingDetailPage` with
+  fullname + position + canvas; trainee rows show inline signature
+  thumbnails and a delete button (only while draft).
+
+### 4c — Training PDF protocol ✅
+- ✅ `NumberAllocator` extended with `'skolenie'` → `SKO` prefix; all
+  6 training types share the SKO bucket per spec
+- ✅ `PdfRenderer::renderTraining()` + `templates/training.php` — Firol
+  red header with the full training-type label, klient/prevádzka/
+  školenie sections, témy block, attendees table with embedded PNG
+  signature thumbnails, trainer signature in the protocol footer
+- ✅ `DocumentController::generateForTraining()` — transactional
+  (number allocation, file write, `documents` row with
+  `parent_type='training'`, training → finalized); validates date,
+  trainer and at least one trainee before doing anything
+- ✅ `DocumentController::indexForTraining()` for the list view
+- ✅ Verified locally: `SKO-2026-001` issued for a vstupne training
+  with one trainee; download stream reused from inspection flow
+- ✅ Frontend: red „Generovať PDF protokol" CTA on
+  `TrainingDetailPage` with per-precondition hint when disabled
+  (chýba dátum / školiteľ / účastník); finalized state locks edits
+  and shows the documents list with download links
 
 ## Phase 5 — Settings ⬜
 - ⬜ Profile, Inspector profile (signature upload / draw, validity dates)
