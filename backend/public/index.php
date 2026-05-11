@@ -17,6 +17,7 @@ if (is_file(__DIR__ . '/../.env')) {
 
 use Firol\Controllers\AccountController;
 use Firol\Controllers\AuthController;
+use Firol\Controllers\BillingController;
 use Firol\Controllers\CompanyController;
 use Firol\Controllers\FacilityController;
 use Firol\Controllers\DocumentController;
@@ -64,6 +65,10 @@ $router->get('/api/account/users',        [TeamController::class, 'index']);
 $router->post('/api/account/users',       [TeamController::class, 'invite']);
 $router->patch('/api/account/users/{id}', [TeamController::class, 'update']);
 $router->delete('/api/account/users/{id}',[TeamController::class, 'destroy']);
+
+$router->post('/api/billing/checkout', [BillingController::class, 'checkout']);
+$router->post('/api/billing/portal',   [BillingController::class, 'portal']);
+$router->post('/api/billing/webhook',  [BillingController::class, 'webhook']);
 
 $router->get('/api/companies',                      [CompanyController::class, 'index']);
 $router->post('/api/companies',                     [CompanyController::class, 'store']);

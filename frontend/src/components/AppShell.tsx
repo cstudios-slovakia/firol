@@ -2,7 +2,11 @@ import { Link, Outlet, NavLink } from 'react-router-dom';
 import {
   AlertTriangle, Building2, ClipboardList, CreditCard, Flame, GraduationCap, LogOut, Settings,
 } from 'lucide-react';
+import { useState } from 'react';
 import { useAuth } from '@/auth/AuthContext';
+import { Billing } from '@/api/billing';
+import { ApiError } from '@/lib/api';
+import { useToast } from '@/lib/toast';
 import { AccountSwitcher } from './AccountSwitcher';
 import { cn } from '@/lib/cn';
 
@@ -65,7 +69,10 @@ export function AppShell() {
  * until Phase 6b wires up Stripe Checkout.
  */
 function SubscriptionBanner() {
-  const { accounts, activeAccountId } = useAuth();
+  const { accounts, activeAccountId, csrfToken } = useAuth();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
   const account = accounts.find((a) => a.id === activeAccountId);
   if (!account) return null;
 
@@ -79,6 +86,18 @@ function SubscriptionBanner() {
   const human = end.toLocaleDateString('sk-SK', {
     day: 'numeric', month: 'long', year: 'numeric',
   });
+
+  async function onPay() {
+    setBusy(true);
+    try {
+      const res = await Billing.checkout(account?.billing_period ?? 'monthly', csrfToken);
+      window.location.assign(res.url);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Stripe Checkout sa nepodarilo otvoriť.';
+      toast.error(msg);
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="border-b border-[var(--color-status-bad)]/30 bg-[var(--color-status-bad-bg)]">
@@ -94,12 +113,12 @@ function SubscriptionBanner() {
         </div>
         <button
           type="button"
-          disabled
-          title="Platobnú bránu pripravujeme"
-          className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-status-bad)] px-3 py-2 text-xs font-semibold text-white opacity-70"
+          onClick={onPay}
+          disabled={busy}
+          className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-status-bad)] px-3 py-2 text-xs font-semibold text-white shadow transition-opacity hover:opacity-90 disabled:opacity-60"
         >
           <CreditCard className="size-4" />
-          Zaplatiť (čoskoro)
+          {busy ? 'Otváram Stripe…' : 'Zaplatiť'}
         </button>
       </div>
     </div>

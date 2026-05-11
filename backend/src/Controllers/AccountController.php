@@ -164,7 +164,8 @@ final class AccountController
     private static function shape(int $accountId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT id, invoice_company_name, logo_path, theme_color, subscription_end_date
+            'SELECT id, invoice_company_name, logo_path, theme_color, subscription_end_date,
+                    stripe_status, billing_period, stripe_customer_id
              FROM   accounts WHERE id = ?'
         );
         $stmt->execute([$accountId]);
@@ -177,6 +178,9 @@ final class AccountController
             'has_logo'             => !empty($row['logo_path'])
                                        && is_file(Storage::root() . '/' . $row['logo_path']),
             'subscription_end_date' => $row['subscription_end_date'] ?? null,
+            'stripe_status'         => $row['stripe_status'] ?? null,
+            'billing_period'        => $row['billing_period'] ?? null,
+            'has_stripe_customer'   => !empty($row['stripe_customer_id']),
         ];
     }
 }
