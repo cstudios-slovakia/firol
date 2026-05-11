@@ -69,6 +69,7 @@ $router->delete('/api/account/users/{id}',[TeamController::class, 'destroy']);
 $router->post('/api/billing/checkout', [BillingController::class, 'checkout']);
 $router->post('/api/billing/portal',   [BillingController::class, 'portal']);
 $router->post('/api/billing/webhook',  [BillingController::class, 'webhook']);
+$router->get('/api/billing/invoices',  [BillingController::class, 'invoices']);
 
 $router->get('/api/companies',                      [CompanyController::class, 'index']);
 $router->post('/api/companies',                     [CompanyController::class, 'store']);

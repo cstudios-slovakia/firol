@@ -361,7 +361,16 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
   period from settings); Checkout for renewing/upgrading
 - ⬜ Phase 6b — Stripe webhooks: `invoice.payment_succeeded`,
   `invoice.payment_failed`, `customer.subscription.deleted` (signature-verified)
-- ⬜ Phase 6c — iDoklad invoice generation per successful charge
+- ✅ **Phase 6c — iDoklad invoice on every Stripe payment**: thin
+  `IDokladClient` (OAuth2 client_credentials, in-process token cache,
+  envelope-aware response unwrap); `InvoiceIssuer` is invoked from the
+  `invoice.payment_succeeded` webhook, idempotent on stripe_invoice_id.
+  First payment per account auto-creates an iDoklad Contact from the
+  `accounts.invoice_*` fields and persists `idoklad_contact_id`.
+  `IDOKLAD_DRAFT_MODE` env (default true) keeps faktúry as Draft until
+  production. Frontend shows „História faktúr" in BillingSection.
+  Migration 006 adds `accounts.idoklad_contact_id` and the `invoices`
+  mirror table.
 - ⬜ Phase 6d — Billing screen (next charge, history, switch plan, cancel)
 - ⬜ Phase 6d — System admin settings UI (trial_days, prices)
 
