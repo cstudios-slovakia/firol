@@ -9,6 +9,7 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Idoklad\InvoiceIssuer;
 use Firol\Stripe\StripeClient;
 use Stripe\Exception\SignatureVerificationException;
 use Stripe\Webhook;
@@ -119,6 +120,39 @@ final class BillingController
     }
 
     /**
+     * GET /api/billing/invoices — list invoices we've recorded for the
+     * active account (Stripe payments; idoklad numbers when iDoklad
+     * issued them).
+     */
+    public static function invoices(Request $req): void
+    {
+        $accountId = Tenant::currentAccountId();
+        $stmt = Db::pdo()->prepare(
+            'SELECT id, stripe_invoice_id, idoklad_invoice_id, document_number,
+                    amount_cents, currency, status, issued_at
+             FROM   invoices
+             WHERE  account_id = ?
+             ORDER  BY issued_at DESC, id DESC
+             LIMIT  100'
+        );
+        $stmt->execute([$accountId]);
+        $rows = $stmt->fetchAll();
+
+        $items = array_map(static fn(array $r) => [
+            'id'                 => (int) $r['id'],
+            'stripe_invoice_id'  => (string) $r['stripe_invoice_id'],
+            'idoklad_invoice_id' => $r['idoklad_invoice_id'] !== null ? (int) $r['idoklad_invoice_id'] : null,
+            'document_number'    => $r['document_number'] ?: null,
+            'amount_cents'       => (int) $r['amount_cents'],
+            'currency'           => (string) $r['currency'],
+            'status'             => (string) $r['status'],
+            'issued_at'          => $r['issued_at'],
+        ], $rows);
+
+        Response::json(['items' => $items]);
+    }
+
+    /**
      * POST /api/billing/portal
      * Stripe-hosted Customer Portal — change card, see invoices, cancel.
      */
@@ -180,10 +214,15 @@ final class BillingController
                 break;
 
             case 'invoice.payment_succeeded':
+                error_log("[billing.webhook] payment ok customer={$obj->customer} amount={$obj->amount_paid}");
+                $accId = self::findAccountByCustomer((string) $obj->customer);
+                if ($accId !== null) {
+                    (new InvoiceIssuer())->issueForStripePayment($accId, $obj->toArray());
+                }
+                break;
+
             case 'invoice.payment_failed':
-                // Phase 6c will trigger iDoklad invoice generation here.
-                // For now we just log so we can verify wiring end-to-end.
-                error_log("[billing.webhook] $type customer={$obj->customer} amount={$obj->amount_paid}");
+                error_log("[billing.webhook] payment FAILED customer={$obj->customer} amount={$obj->amount_due}");
                 break;
 
             default:

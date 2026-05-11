@@ -9,7 +9,7 @@ import { AccountApi, type Account } from '@/api/account';
 import { InspectorProfileApi, type InspectorProfile } from '@/api/inspectorProfile';
 import { Trainers, type Trainer } from '@/api/trainers';
 import { Team, type TeamMember } from '@/api/team';
-import { Billing, type BillingPeriod } from '@/api/billing';
+import { Billing, type BillingPeriod, type Invoice } from '@/api/billing';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -715,6 +715,13 @@ function BillingSection() {
   const [period, setPeriod] = useState<BillingPeriod>('monthly');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+
+  useEffect(() => {
+    Billing.invoices()
+      .then((res) => setInvoices(res.items))
+      .catch(() => { /* invoices are optional — don't block UI */ });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -880,9 +887,57 @@ function BillingSection() {
             </div>
           </>
         )}
+
+        {invoices.length > 0 && (
+          <div className="mt-2 border-t border-ink-100 pt-4">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-500">
+              História faktúr
+            </h3>
+            <ul className="flex flex-col gap-1.5">
+              {invoices.map((inv) => (
+                <li
+                  key={inv.id}
+                  className="flex items-center gap-3 rounded-xl border border-ink-100 px-3 py-2 text-sm"
+                >
+                  <span className="font-mono text-xs text-ink-500">
+                    {new Date(inv.issued_at).toLocaleDateString('sk-SK')}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-medium text-ink-800">
+                    {inv.document_number ?? <span className="italic text-ink-400">(spracováva sa)</span>}
+                  </span>
+                  <span className="font-semibold text-ink-900">
+                    {(inv.amount_cents / 100).toFixed(2)} {inv.currency}
+                  </span>
+                  <Badge tone={
+                    inv.status === 'issued' || inv.status === 'paid' ? 'ok'
+                    : inv.status === 'error' ? 'warn'
+                    : 'neutral'
+                  }>
+                    {invoiceStatusLabel(inv.status)}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-ink-400">
+              Faktúry vystavuje iDoklad — kompletné PDF a história je k dispozícii v Stripe portáli.
+            </p>
+          </div>
+        )}
       </div>
     </Card>
   );
+}
+
+function invoiceStatusLabel(status: string): string {
+  switch (status) {
+    case 'issued': return 'Vystavená';
+    case 'draft':  return 'Koncept';
+    case 'paid':   return 'Zaplatená';
+    case 'pending': return 'Spracováva sa';
+    case 'skipped': return 'iDoklad off';
+    case 'error':  return 'Chyba';
+    default:       return status;
+  }
 }
 
 function PeriodCard({
