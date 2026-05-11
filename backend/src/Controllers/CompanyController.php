@@ -67,6 +67,39 @@ final class CompanyController
         $facStmt->execute([$id]);
         $facilities = $facStmt->fetchAll();
 
+        // Last-used periodicity per (facility, inspection type) — used by
+        // Step 1 to prefill the periodicity dropdown for types where it's
+        // selectable (RPHP, požiarna kniha). The window function picks the
+        // most recent finalized inspection per facility+type.
+        $defStmt = Db::pdo()->prepare(
+            'SELECT facility_id, type, periodicity_months
+             FROM (
+                 SELECT i.facility_id, i.type, i.periodicity_months,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY i.facility_id, i.type
+                            ORDER BY i.executed_on DESC, i.id DESC
+                        ) AS rn
+                 FROM   inspections i
+                 JOIN   facilities  f ON f.id = i.facility_id
+                 WHERE  f.company_id = ?
+                   AND  i.account_id = ?
+                   AND  i.archived_at IS NULL
+             ) t
+             WHERE t.rn = 1'
+        );
+        $defStmt->execute([$id, $accountId]);
+        $defaultsByFacility = [];
+        foreach ($defStmt->fetchAll() as $r) {
+            $fid = (int) $r['facility_id'];
+            $defaultsByFacility[$fid] ??= [];
+            $defaultsByFacility[$fid][(string) $r['type']] = (int) $r['periodicity_months'];
+        }
+        foreach ($facilities as &$fac) {
+            $fac['id'] = (int) $fac['id'];
+            $fac['last_periodicities'] = $defaultsByFacility[$fac['id']] ?? new \stdClass();
+        }
+        unset($fac);
+
         Response::json([
             'company'    => self::shape($row),
             'facilities' => $facilities,

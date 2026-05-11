@@ -380,7 +380,7 @@ final class DocumentController
         $signatureUri = self::signatureToDataUri($profile['signature_path'] ?? null);
 
         $accStmt = Db::pdo()->prepare(
-            'SELECT invoice_company_name FROM accounts WHERE id = ?'
+            'SELECT invoice_company_name, theme_color, logo_path FROM accounts WHERE id = ?'
         );
         $accStmt->execute([$accountId]);
         $accRow = $accStmt->fetch() ?: [];
@@ -388,10 +388,7 @@ final class DocumentController
         $stats = self::computeStats((string) $inspection['type'], $items);
 
         return [
-            'brand' => [
-                'name'  => $accRow['invoice_company_name'] ?? 'Firol',
-                'color' => '#E8433A',
-            ],
+            'brand' => self::buildBrand($accRow),
             'inspection' => [
                 'executed_on'        => $inspection['executed_on'],
                 'periodicity_months' => (int) $inspection['periodicity_months'],
@@ -513,6 +510,36 @@ final class DocumentController
     }
 
     /**
+     * Build the brand block (name + theme color + logo) from an account
+     * row. Falls back to Firol defaults so the PDFs stay branded even
+     * before the user uploads a logo or picks a custom color.
+     *
+     * @param array<string, mixed> $accRow Result of SELECT invoice_company_name, theme_color, logo_path
+     * @return array{name: string, color: string, logo_data_uri: string|null}
+     */
+    private static function buildBrand(array $accRow): array
+    {
+        $logoUri = null;
+        $logoRel = $accRow['logo_path'] ?? null;
+        if (is_string($logoRel) && $logoRel !== '') {
+            $abs = Storage::documentAbsolute($logoRel);
+            if (is_file($abs)) {
+                $bytes = @file_get_contents($abs);
+                if ($bytes !== false) {
+                    $mime = str_ends_with($logoRel, '.jpg') ? 'image/jpeg' : 'image/png';
+                    $logoUri = 'data:' . $mime . ';base64,' . base64_encode($bytes);
+                }
+            }
+        }
+
+        return [
+            'name'          => $accRow['invoice_company_name'] ?? 'Firol',
+            'color'         => $accRow['theme_color'] ?: '#E8433A',
+            'logo_data_uri' => $logoUri,
+        ];
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     private static function loadDocument(int $accountId, int $documentId): ?array
@@ -608,7 +635,7 @@ final class DocumentController
         array $trainees,
     ): array {
         $accStmt = Db::pdo()->prepare(
-            'SELECT invoice_company_name FROM accounts WHERE id = ?'
+            'SELECT invoice_company_name, theme_color, logo_path FROM accounts WHERE id = ?'
         );
         $accStmt->execute([$accountId]);
         $accRow = $accStmt->fetch() ?: [];
@@ -630,10 +657,7 @@ final class DocumentController
         $type = (string) $training['type'];
 
         return [
-            'brand' => [
-                'name'  => $accRow['invoice_company_name'] ?? 'Firol',
-                'color' => '#E8433A',
-            ],
+            'brand' => self::buildBrand($accRow),
             'training' => [
                 'type'                => $type,
                 'training_type_label' => self::TRAINING_TYPE_LABELS[$type] ?? $type,

@@ -62,6 +62,25 @@ final class Request
         return null;
     }
 
+    public function jsonBool(string $key): ?bool
+    {
+        $value = $this->json()[$key] ?? null;
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value)) {
+            return $value !== 0;
+        }
+        if (is_string($value)) {
+            return match (strtolower($value)) {
+                'true', '1', 'yes' => true,
+                'false', '0', 'no', '' => false,
+                default => null,
+            };
+        }
+        return null;
+    }
+
     public function header(string $name): ?string
     {
         $key = 'HTTP_' . strtoupper(str_replace('-', '_', $name));

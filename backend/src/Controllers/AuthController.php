@@ -222,7 +222,7 @@ final class AuthController
         $user = $userStmt->fetch();
 
         $accStmt = $pdo->prepare(
-            'SELECT a.id, a.invoice_company_name, a.subscription_end_date
+            'SELECT a.id, a.invoice_company_name, a.subscription_end_date, a.main_user_id
              FROM   accounts a
              JOIN   account_users au ON au.account_id = a.id
              WHERE  au.user_id = ? AND au.is_active = 1

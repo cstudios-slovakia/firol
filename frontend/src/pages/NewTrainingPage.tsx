@@ -15,6 +15,7 @@ import {
   type TrainingType,
 } from '@/api/trainings';
 import { ApiError } from '@/lib/api';
+import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -22,12 +23,14 @@ import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { NewCompanyDialog } from '@/components/NewCompanyDialog';
+import { NewFacilityDialog } from '@/components/NewFacilityDialog';
 import { cn } from '@/lib/cn';
 
 export function NewTrainingPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { csrfToken } = useAuth();
+  const toast = useToast();
 
   const presetCompanyId = numericParam(searchParams.get('company_id'));
   const presetFacilityId = numericParam(searchParams.get('facility_id'));
@@ -46,6 +49,7 @@ export function NewTrainingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newCompanyOpen, setNewCompanyOpen] = useState(false);
+  const [newFacilityOpen, setNewFacilityOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,9 +135,12 @@ export function NewTrainingPage() {
         },
         csrfToken,
       );
+      toast.success('Školenie vytvorené');
       navigate(`/trainings/${res.training.id}`, { replace: true });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
+      const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
@@ -244,12 +251,27 @@ export function NewTrainingPage() {
                 id={p.id}
                 value={facilityId !== null ? String(facilityId) : ''}
                 onChange={(v) => setFacilityId(v ? Number(v) : null)}
-                disabled={companyId === null || facilities.length === 0}
+                disabled={companyId === null}
                 placeholder="— bez konkrétnej prevádzky —"
                 options={[
                   { value: '', label: '— bez konkrétnej prevádzky —' },
                   ...facilities.map((f) => ({ value: String(f.id), label: f.name })),
                 ]}
+                headerSlot={companyId !== null ? ({ closeDropdown }) => (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeDropdown();
+                      setNewFacilityOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
+                  >
+                    <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
+                      <Plus className="size-3.5" />
+                    </span>
+                    Pridať prevádzku
+                  </button>
+                ) : undefined}
               />
             )}
           </Field>
@@ -359,6 +381,31 @@ export function NewTrainingPage() {
           setCompanyId(c.id);
         }}
       />
+
+      {companyId !== null && (
+        <NewFacilityDialog
+          open={newFacilityOpen}
+          onClose={() => setNewFacilityOpen(false)}
+          companyId={companyId}
+          companyName={companies?.find((c) => c.id === companyId)?.name ?? ''}
+          onCreated={(f) => {
+            setFacilities((prev) => {
+              const enriched: FacilityListItem = {
+                id: f.id,
+                name: f.name,
+                address: f.address,
+                contact_person: f.contact_person,
+                notes: f.notes,
+                last_periodicities: {},
+              };
+              const next = [...prev, enriched];
+              next.sort((a, b) => a.name.localeCompare(b.name));
+              return next;
+            });
+            setFacilityId(f.id);
+          }}
+        />
+      )}
     </div>
   );
 }

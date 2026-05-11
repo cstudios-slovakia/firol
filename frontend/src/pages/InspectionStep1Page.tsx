@@ -13,6 +13,7 @@ import {
   type InspectionType,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
+import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -20,6 +21,7 @@ import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { NewCompanyDialog } from '@/components/NewCompanyDialog';
+import { NewFacilityDialog } from '@/components/NewFacilityDialog';
 import { cn } from '@/lib/cn';
 
 const KNOWN_TYPES: InspectionType[] = [
@@ -37,6 +39,7 @@ function isInspectionType(s: string | undefined): s is InspectionType {
  */
 export function InspectionStep1Page() {
   const { user, csrfToken } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { type: typeParam } = useParams<{ type?: string }>();
@@ -59,12 +62,17 @@ export function InspectionStep1Page() {
   const [executedOn, setExecutedOn] = useState('');
   const [periodicity, setPeriodicity] = useState<number>(allowedPeriodicities[0]);
   const [notes, setNotes] = useState('');
+  // Tracks whether the user has manually picked a periodicity. We only
+  // auto-prefill from the facility's history when they haven't, so the
+  // sensible default doesn't keep overriding their choice.
+  const [periodicityTouched, setPeriodicityTouched] = useState(false);
 
   const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [loadingFacilities, setLoadingFacilities] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newCompanyOpen, setNewCompanyOpen] = useState(false);
+  const [newFacilityOpen, setNewFacilityOpen] = useState(false);
 
   // Initial company list. Pulls a generous page (200) — enough for the
   // typical technician's client base; pagination/search lands in Phase 5.
@@ -126,6 +134,21 @@ export function InspectionStep1Page() {
     };
   }, [companyId, presetFacilityId]);
 
+  // Prefill periodicity from this facility's history. Only kicks in for
+  // types where the user actually has a choice (allowedPeriodicities > 1)
+  // and only as long as they haven't manually picked a value yet — so
+  // returning to a different facility within the same flow can still
+  // refresh the suggestion, but typing then switching won't surprise
+  // them. Phase 5b: "default periodicities per facility per type".
+  useEffect(() => {
+    if (periodicityFixed || periodicityTouched || facilityId === null) return;
+    const facility = facilities.find((f) => f.id === facilityId);
+    const last = facility?.last_periodicities?.[type];
+    if (typeof last === 'number' && allowedPeriodicities.includes(last)) {
+      setPeriodicity(last);
+    }
+  }, [facilityId, facilities, type, allowedPeriodicities, periodicityFixed, periodicityTouched]);
+
   const ctaText = useMemo(() => stepTwoCta(type), [type]);
 
   async function onSubmit(e: FormEvent) {
@@ -154,9 +177,12 @@ export function InspectionStep1Page() {
       );
       // Move straight into Step 2 — adding the first prístroj. The
       // inspection itself is already persisted at this point.
+      toast.success('Kontrola vytvorená');
       navigate(`/inspections/${res.inspection.id}/items/new`, { replace: true });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
+      const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
@@ -253,20 +279,14 @@ export function InspectionStep1Page() {
             )}
           </Field>
 
-          <Field
-            label="Prevádzka"
-            required
-            hint={companyId !== null && facilities.length === 0 && !loadingFacilities
-              ? 'Táto firma zatiaľ nemá prevádzku. Pridaj ju z detailu firmy.'
-              : undefined}
-          >
+          <Field label="Prevádzka" required>
             {(p) => (
               <Select
                 id={p.id}
                 aria-invalid={p['aria-invalid']}
                 value={facilityId !== null ? String(facilityId) : ''}
                 onChange={(v) => setFacilityId(v ? Number(v) : null)}
-                disabled={companyId === null || loadingFacilities || facilities.length === 0}
+                disabled={companyId === null || loadingFacilities}
                 placeholder={
                   companyId === null
                     ? '— najprv vyber firmu —'
@@ -279,6 +299,21 @@ export function InspectionStep1Page() {
                   value: String(f.id),
                   label: f.name,
                 }))}
+                headerSlot={companyId !== null ? ({ closeDropdown }) => (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeDropdown();
+                      setNewFacilityOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
+                  >
+                    <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
+                      <Plus className="size-3.5" />
+                    </span>
+                    Pridať prevádzku
+                  </button>
+                ) : undefined}
               />
             )}
           </Field>
@@ -315,7 +350,7 @@ export function InspectionStep1Page() {
                       key={months}
                       type="button"
                       disabled={periodicityFixed && allowedPeriodicities.length === 1}
-                      onClick={() => setPeriodicity(months)}
+                      onClick={() => { setPeriodicity(months); setPeriodicityTouched(true); }}
                       className={cn(
                         'h-11 flex-1 rounded-xl border text-sm font-medium transition-colors',
                         active
@@ -406,6 +441,34 @@ export function InspectionStep1Page() {
           setCompanyId(c.id);
         }}
       />
+
+      {companyId !== null && (
+        <NewFacilityDialog
+          open={newFacilityOpen}
+          onClose={() => setNewFacilityOpen(false)}
+          companyId={companyId}
+          companyName={companies?.find((c) => c.id === companyId)?.name ?? ''}
+          onCreated={(f) => {
+            // Splice the new row into the list (last_periodicities empty —
+            // history kicks in only after the first inspection) and
+            // auto-select it.
+            setFacilities((prev) => {
+              const enriched: FacilityListItem = {
+                id: f.id,
+                name: f.name,
+                address: f.address,
+                contact_person: f.contact_person,
+                notes: f.notes,
+                last_periodicities: {},
+              };
+              const next = [...prev, enriched];
+              next.sort((a, b) => a.name.localeCompare(b.name));
+              return next;
+            });
+            setFacilityId(f.id);
+          }}
+        />
+      )}
     </div>
   );
 }

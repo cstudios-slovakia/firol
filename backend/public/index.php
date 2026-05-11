@@ -15,6 +15,7 @@ if (is_file(__DIR__ . '/../.env')) {
     \Dotenv\Dotenv::createImmutable(__DIR__ . '/..')->safeLoad();
 }
 
+use Firol\Controllers\AccountController;
 use Firol\Controllers\AuthController;
 use Firol\Controllers\CompanyController;
 use Firol\Controllers\FacilityController;
@@ -22,10 +23,13 @@ use Firol\Controllers\DocumentController;
 use Firol\Controllers\InspectionController;
 use Firol\Controllers\InspectionItemController;
 use Firol\Controllers\InspectorProfileController;
+use Firol\Controllers\TeamController;
 use Firol\Controllers\TraineeController;
 use Firol\Controllers\TrainerController;
 use Firol\Controllers\TrainingController;
 use Firol\Controllers\MeController;
+use Firol\Auth\Session;
+use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Http\Router;
@@ -49,6 +53,17 @@ $router->post('/api/auth/password-reset/confirm', [AuthController::class, 'passw
 
 $router->get('/api/me',                  [MeController::class, 'show']);
 $router->post('/api/me/switch-account',  [MeController::class, 'switchAccount']);
+
+$router->get('/api/account',             [AccountController::class, 'show']);
+$router->patch('/api/account',           [AccountController::class, 'update']);
+$router->post('/api/account/logo',       [AccountController::class, 'uploadLogo']);
+$router->delete('/api/account/logo',     [AccountController::class, 'deleteLogo']);
+$router->get('/api/account/logo',        [AccountController::class, 'downloadLogo']);
+
+$router->get('/api/account/users',        [TeamController::class, 'index']);
+$router->post('/api/account/users',       [TeamController::class, 'invite']);
+$router->patch('/api/account/users/{id}', [TeamController::class, 'update']);
+$router->delete('/api/account/users/{id}',[TeamController::class, 'destroy']);
 
 $router->get('/api/companies',                      [CompanyController::class, 'index']);
 $router->post('/api/companies',                     [CompanyController::class, 'store']);
@@ -97,6 +112,47 @@ $router->delete('/api/trainings/{id}/trainees/{trainee_id}', [TraineeController:
 $router->get('/api/trainees/{id}/signature',        [TraineeController::class, 'downloadSignature']);
 $router->post('/api/trainings/{id}/generate-pdf',   [DocumentController::class, 'generateForTraining']);
 $router->get('/api/trainings/{id}/documents',       [DocumentController::class, 'indexForTraining']);
+
+/*
+ * Phase 6a — read-only mode for expired subscriptions.
+ *
+ * Once accounts.subscription_end_date is in the past the whole tenant
+ * goes read-only: the user can browse and download existing PDFs but
+ * cannot create or mutate anything. Anchored at the dispatcher so
+ * controllers don't each need to remember to call a guard.
+ *
+ * Whitelist:
+ * - GET / HEAD             — reads are always allowed
+ * - /api/auth/*            — must be able to log in/out + reset password
+ * - /api/me/switch-account — must be able to escape to another tenant
+ * - /api/billing/*         — Phase 6b: paying must always work
+ * - DELETE on the session  — logout (covered by /api/auth/logout above)
+ */
+$method = $request->method();
+$path   = rtrim($request->path(), '/') ?: '/';
+$isMutation = !in_array($method, ['GET', 'HEAD'], true);
+$isWhitelisted = (bool) preg_match(
+    '#^/api/(auth/|me/switch-account|billing/)#',
+    $path,
+);
+if ($isMutation && !$isWhitelisted) {
+    $sessionUserId    = Session::userId();
+    $sessionAccountId = Session::activeAccountId();
+    if ($sessionUserId !== null && $sessionAccountId !== null) {
+        $stmt = Db::pdo()->prepare(
+            'SELECT subscription_end_date FROM accounts WHERE id = ?'
+        );
+        $stmt->execute([$sessionAccountId]);
+        $endDate = $stmt->fetchColumn();
+        if (is_string($endDate) && strtotime($endDate) < strtotime('today')) {
+            Response::error(
+                'Predplatné vypršalo. Účet je v režime len na čítanie.',
+                402,
+                ['subscription_end_date' => $endDate],
+            );
+        }
+    }
+}
 
 try {
     $router->dispatch($request);

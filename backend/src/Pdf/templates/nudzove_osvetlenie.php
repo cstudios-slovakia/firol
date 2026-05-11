@@ -26,6 +26,7 @@ $formatDate = static function (?string $iso): string {
   .brand-bar { background: <?= $h($brandColor) ?>; color: #fff; padding: 8pt 12pt; border-radius: 6pt; }
   .brand-bar .title { font-size: 14pt; font-weight: bold; letter-spacing: .3pt; }
   .brand-bar .subtitle { font-size: 9pt; opacity: .9; }
+  .brand-bar .brand-logo { float: left; max-height: 30pt; max-width: 90pt; margin-right: 10pt; background: #fff; padding: 3pt 5pt; border-radius: 4pt; }
   .doc-number { float: right; font-family: monospace; font-size: 11pt; background: rgba(255,255,255,.18); padding: 3pt 7pt; border-radius: 4pt; }
   h2 { color: <?= $h($brandColor) ?>; font-size: 11pt; margin: 14pt 0 4pt; border-bottom: 1pt solid #e5e5ea; padding-bottom: 2pt; }
   table { border-collapse: collapse; width: 100%; }
@@ -54,6 +55,7 @@ $formatDate = static function (?string $iso): string {
 
 <div class="brand-bar">
   <span class="doc-number"><?= $h($number) ?></span>
+  <?php if (!empty($brand['logo_data_uri'])): ?><img class="brand-logo" src="<?= $h($brand['logo_data_uri']) ?>" alt=""><?php endif; ?>
   <div class="title"><?= $h($brand['name'] ?? 'Firol') ?> · Záznam o kontrole núdzového osvetlenia</div>
   <div class="subtitle">Test funkčnosti a doby svietenia v núdzovom režime</div>
 </div>
