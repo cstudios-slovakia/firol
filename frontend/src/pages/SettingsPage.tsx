@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
-  AtSign, Building2, CalendarDays, Check, Copy, FileSignature, GraduationCap, Hash, ImagePlus,
-  MailPlus, Palette, Phone, Plus, RotateCcw, ShieldCheck, ShieldOff, Trash2, UploadCloud,
-  User, UserCheck, UsersRound,
+  AtSign, Building2, CalendarDays, Check, Copy, CreditCard, ExternalLink, FileSignature,
+  GraduationCap, Hash, ImagePlus, MailPlus, Palette, Phone, Plus, RotateCcw, ShieldCheck,
+  ShieldOff, Trash2, UploadCloud, User, UserCheck, UsersRound,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { AccountApi, type Account } from '@/api/account';
 import { InspectorProfileApi, type InspectorProfile } from '@/api/inspectorProfile';
 import { Trainers, type Trainer } from '@/api/trainers';
 import { Team, type TeamMember } from '@/api/team';
+import { Billing, type BillingPeriod } from '@/api/billing';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -16,6 +17,7 @@ import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
+import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/Badge';
 
 /**
@@ -225,6 +227,8 @@ export function SettingsPage() {
       </Card>
 
       <BrandingSection />
+
+      <BillingSection />
 
       <TrainersSection />
 
@@ -692,6 +696,229 @@ function TrainersSection() {
         </form>
       </div>
     </Card>
+  );
+}
+
+/**
+ * Phase 6b — Stripe-backed billing. Shows current subscription state,
+ * lets the user pick monthly/yearly, redirects to Stripe Checkout for
+ * payment, and opens the Stripe Customer Portal when a subscription
+ * already exists.
+ *
+ * Reads `?checkout=success` on mount → refreshes the auth snapshot so
+ * the read-only banner disappears as soon as Stripe acknowledges.
+ */
+function BillingSection() {
+  const { csrfToken, refresh } = useAuth();
+  const toast = useToast();
+  const [account, setAccount] = useState<Account | null>(null);
+  const [period, setPeriod] = useState<BillingPeriod>('monthly');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    AccountApi.show()
+      .then((res) => {
+        if (cancelled) return;
+        setAccount(res.account);
+        if (res.account.billing_period) setPeriod(res.account.billing_period);
+      })
+      .catch(() => { /* surfaced by BrandingSection too — silent here */ })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Handle the post-Checkout return: Stripe drops us back at
+  // /settings?checkout=success&session_id=... — refresh the auth
+  // snapshot so the new subscription_end_date lifts the read-only gate,
+  // then strip the query so a reload doesn't re-toast.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('checkout');
+    if (!status) return;
+    if (status === 'success') {
+      toast.success('Predplatné aktivované — ďakujeme!');
+      refresh();
+      AccountApi.show().then((res) => setAccount(res.account)).catch(() => {});
+    } else if (status === 'cancel') {
+      toast.error('Platba zrušená.');
+    }
+    params.delete('checkout');
+    params.delete('session_id');
+    const qs = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+  }, [refresh, toast]);
+
+  async function onCheckout() {
+    setBusy(true);
+    try {
+      const res = await Billing.checkout(period, csrfToken);
+      window.location.assign(res.url);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Stripe Checkout sa nepodarilo spustiť.';
+      toast.error(msg);
+      setBusy(false);
+    }
+  }
+
+  async function onPortal() {
+    setBusy(true);
+    try {
+      const res = await Billing.portal(csrfToken);
+      window.location.assign(res.url);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Customer Portal sa nepodarilo otvoriť.';
+      toast.error(msg);
+      setBusy(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <Card className="flex justify-center py-8 text-ink-400"><Spinner /></Card>
+    );
+  }
+  if (!account) return null;
+
+  const end = account.subscription_end_date
+    ? new Date(`${account.subscription_end_date}T00:00:00`)
+    : null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const expired = end !== null && end < today;
+  const isTrialing = account.stripe_status === 'trialing';
+  const isActive = account.stripe_status === 'active';
+  const hasSub = isActive || isTrialing;
+  const humanEnd = end ? end.toLocaleDateString('sk-SK', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
+
+  // Period label used in copy ("19 € / mesiac", "199 € / rok")
+  const periodPrice = account.billing_period === 'yearly'
+    ? '199 € / rok'
+    : '19 € / mesiac';
+
+  const statusBadge = expired
+    ? <Badge tone="warn">Vypršalo</Badge>
+    : isActive
+      ? <Badge tone="ok">Aktívne</Badge>
+      : isTrialing
+        ? <Badge tone="ok">Skúška + predplatené</Badge>
+        : account.stripe_status === 'canceled'
+          ? <Badge tone="warn">Zrušené</Badge>
+          : <Badge tone="neutral">Skúšobné obdobie</Badge>;
+
+  // Subtitle differentiates the three "things look OK" sub-states so
+  // the user knows what happens next (no surprise charges).
+  const subtitle = isTrialing
+    ? `Skúšobné obdobie do ${humanEnd}. Potom sa predplatné (${periodPrice}) automaticky aktivuje — kartu sme uložili na Stripe.`
+    : isActive
+      ? `Predplatné je aktívne. Ďalšia fakturácia ${humanEnd} (${periodPrice}).`
+      : account.stripe_status === 'canceled'
+        ? `Predplatné zrušené, prístup máš ešte do ${humanEnd}.`
+        : `Účet má prístup do ${humanEnd}. Potom sa prepne do režimu len na čítanie, kým si nezakúpiš predplatné.`;
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/60 to-transparent px-5 py-4">
+        <div className="grid size-11 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
+          <CreditCard className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold text-ink-900">Predplatné a fakturácia</h2>
+          <p className="text-xs text-ink-500">{subtitle}</p>
+        </div>
+        {statusBadge}
+      </div>
+
+      <div className="flex flex-col gap-4 px-5 py-5">
+        {hasSub ? (
+          <>
+            <p className="text-sm text-ink-700">
+              Platobnú kartu, faktúry a zmenu fakturačného obdobia spravuje
+              priamo Stripe v zabezpečenom portáli.
+            </p>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                onClick={onPortal}
+                loading={busy}
+                leftIcon={<ExternalLink className="size-4" />}
+              >
+                Spravovať predplatné
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-ink-800">Fakturačné obdobie</label>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <PeriodCard
+                  active={period === 'monthly'}
+                  title="Mesačne"
+                  price="19 € / mesiac"
+                  hint="Flexibilita, môžeš kedykoľvek zrušiť."
+                  onClick={() => setPeriod('monthly')}
+                />
+                <PeriodCard
+                  active={period === 'yearly'}
+                  title="Ročne"
+                  price="199 € / rok"
+                  hint="Ekvivalent ~16,60 € / mesiac — ušetríš 2 mesiace."
+                  onClick={() => setPeriod('yearly')}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                onClick={onCheckout}
+                loading={busy}
+                leftIcon={<CreditCard className="size-4" />}
+              >
+                {expired ? 'Obnoviť predplatné' : 'Aktivovať predplatné'}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function PeriodCard({
+  active, title, price, hint, onClick,
+}: {
+  active: boolean;
+  title: string;
+  price: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'group flex flex-col items-start gap-1 rounded-2xl border px-4 py-3 text-left transition-all',
+        active
+          ? 'border-firol-400 bg-firol-50/60 shadow-[inset_0_0_0_1px_var(--color-firol-200)]'
+          : 'border-ink-200 bg-white hover:border-ink-300',
+      )}
+    >
+      <span className="flex w-full items-center justify-between">
+        <span className="text-sm font-semibold text-ink-900">{title}</span>
+        <span
+          className={cn(
+            'grid size-5 place-items-center rounded-full border',
+            active ? 'border-firol-500 bg-firol-500 text-white' : 'border-ink-300 bg-white',
+          )}
+        >
+          {active && <Check className="size-3" />}
+        </span>
+      </span>
+      <span className="text-base font-semibold text-firol-700">{price}</span>
+      <span className="text-xs text-ink-500">{hint}</span>
+    </button>
   );
 }
 

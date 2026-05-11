@@ -13,6 +13,9 @@ export type Account = {
   invoice_company_name: string;
   subscription_end_date: string;
   main_user_id: number;
+  stripe_status: string | null;
+  billing_period: 'monthly' | 'yearly' | null;
+  stripe_customer_id: string | null;
 };
 
 type Snapshot = {

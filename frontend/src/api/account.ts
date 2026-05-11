@@ -6,6 +6,9 @@ export type Account = {
   theme_color: string | null;
   has_logo: boolean;
   subscription_end_date: string | null;
+  stripe_status: string | null;
+  billing_period: 'monthly' | 'yearly' | null;
+  has_stripe_customer: boolean;
 };
 
 export type AccountUpdate = {

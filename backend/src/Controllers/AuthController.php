@@ -10,6 +10,7 @@ use Firol\Auth\Session;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Stripe\StripeClient;
 use PDO;
 
 final class AuthController
@@ -56,10 +57,10 @@ final class AuthController
             $userId = (int) $pdo->lastInsertId();
 
             $insertAccount = $pdo->prepare(
-                'INSERT INTO accounts (invoice_company_name, subscription_end_date, main_user_id)
-                 VALUES (?, ?, ?)'
+                'INSERT INTO accounts (invoice_company_name, subscription_end_date, main_user_id, billing_period)
+                 VALUES (?, ?, ?, ?)'
             );
-            $insertAccount->execute([$invoiceCompanyName, $trialEnd, $userId]);
+            $insertAccount->execute([$invoiceCompanyName, $trialEnd, $userId, $billingPeriod]);
             $accountId = (int) $pdo->lastInsertId();
 
             $pdo->prepare(
@@ -75,9 +76,25 @@ final class AuthController
         Session::setUserId($userId);
         Session::setActiveAccountId($accountId);
 
-        // billing_period is intentionally not persisted yet — Stripe wiring
-        // (Phase 6) will pass it to the Customer create call. Logged for now
-        // so we can audit early signups.
+        // Best-effort: provision a Stripe Customer up front so the first
+        // Checkout call doesn't need to do it inline. If Stripe is down
+        // or misconfigured we still want the account to exist — the
+        // first /api/billing/checkout call will retry via ensureCustomer.
+        try {
+            $customer = StripeClient::get()->customers->create([
+                'email'    => $email,
+                'name'     => $invoiceCompanyName,
+                'metadata' => [
+                    'firol_account_id' => (string) $accountId,
+                    'firol_user_name'  => $fullname,
+                ],
+            ]);
+            $pdo->prepare('UPDATE accounts SET stripe_customer_id = ? WHERE id = ?')
+                ->execute([$customer->id, $accountId]);
+        } catch (\Throwable $e) {
+            error_log("[register] stripe customer create failed: " . $e->getMessage());
+        }
+
         error_log("[register] user_id={$userId} account_id={$accountId} billing_period={$billingPeriod}");
 
         Response::json(self::meSnapshot($pdo, $userId, $accountId), 201);
@@ -222,7 +239,8 @@ final class AuthController
         $user = $userStmt->fetch();
 
         $accStmt = $pdo->prepare(
-            'SELECT a.id, a.invoice_company_name, a.subscription_end_date, a.main_user_id
+            'SELECT a.id, a.invoice_company_name, a.subscription_end_date, a.main_user_id,
+                    a.stripe_status, a.billing_period, a.stripe_customer_id
              FROM   accounts a
              JOIN   account_users au ON au.account_id = a.id
              WHERE  au.user_id = ? AND au.is_active = 1
