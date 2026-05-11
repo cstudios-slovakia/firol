@@ -16,6 +16,7 @@ if (is_file(__DIR__ . '/../.env')) {
 }
 
 use Firol\Controllers\AccountController;
+use Firol\Controllers\AdminController;
 use Firol\Controllers\AuthController;
 use Firol\Controllers\BillingController;
 use Firol\Controllers\CompanyController;
@@ -65,6 +66,9 @@ $router->get('/api/account/users',        [TeamController::class, 'index']);
 $router->post('/api/account/users',       [TeamController::class, 'invite']);
 $router->patch('/api/account/users/{id}', [TeamController::class, 'update']);
 $router->delete('/api/account/users/{id}',[TeamController::class, 'destroy']);
+
+$router->get('/api/admin/settings', [AdminController::class, 'settings']);
+$router->patch('/api/admin/settings', [AdminController::class, 'updateSettings']);
 
 $router->post('/api/billing/checkout', [BillingController::class, 'checkout']);
 $router->post('/api/billing/portal',   [BillingController::class, 'portal']);
@@ -138,7 +142,7 @@ $method = $request->method();
 $path   = rtrim($request->path(), '/') ?: '/';
 $isMutation = !in_array($method, ['GET', 'HEAD'], true);
 $isWhitelisted = (bool) preg_match(
-    '#^/api/(auth/|me/switch-account|billing/)#',
+    '#^/api/(auth/|me/switch-account|billing/|admin/)#',
     $path,
 );
 if ($isMutation && !$isWhitelisted) {

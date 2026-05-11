@@ -254,6 +254,7 @@ final class AuthController
             'accounts'        => $accounts,
             'activeAccountId' => $accountId,
             'csrfToken'       => Csrf::token(),
+            'isAdmin'         => \Firol\Auth\Admin::isAdmin($userId),
         ];
     }
 }

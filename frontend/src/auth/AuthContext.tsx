@@ -23,6 +23,7 @@ type Snapshot = {
   accounts: Account[];
   activeAccountId: number;
   csrfToken: string;
+  isAdmin: boolean;
 };
 
 export type AuthStatus = 'loading' | 'authed' | 'unauthed';
@@ -42,6 +43,7 @@ type AuthContextValue = {
   accounts: Account[];
   activeAccountId: number | null;
   csrfToken: string | null;
+  isAdmin: boolean;
   login(email: string, password: string): Promise<void>;
   register(payload: RegisterPayload): Promise<void>;
   logout(): Promise<void>;
@@ -126,6 +128,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       accounts: snap?.accounts ?? [],
       activeAccountId: snap?.activeAccountId ?? null,
       csrfToken: snap?.csrfToken ?? null,
+      isAdmin: snap?.isAdmin ?? false,
       login,
       register,
       logout,
