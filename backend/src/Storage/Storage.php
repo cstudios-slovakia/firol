@@ -42,6 +42,16 @@ final class Storage
         return "signatures/$accountId/$userId.png";
     }
 
+    public static function accountLogoPath(int $accountId, string $ext): string
+    {
+        return self::root() . "/accounts/$accountId/logo.$ext";
+    }
+
+    public static function accountLogoRelative(int $accountId, string $ext): string
+    {
+        return "accounts/$accountId/logo.$ext";
+    }
+
     public static function trainerSignaturePath(int $accountId, int $trainerId): string
     {
         return self::root() . "/trainers/$accountId/$trainerId.png";

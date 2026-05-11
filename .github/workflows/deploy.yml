@@ -45,6 +45,9 @@ jobs:
             # error on first PDF generation.
             mkdir -p $ROOT/backend/storage/signatures \
                      $ROOT/backend/storage/documents \
+                     $ROOT/backend/storage/accounts \
+                     $ROOT/backend/storage/trainers \
+                     $ROOT/backend/storage/trainings \
                      $ROOT/backend/storage/mpdf-tmp
 
             # One-time cleanup of artifacts a previous (broken) deploy

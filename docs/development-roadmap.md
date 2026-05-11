@@ -327,20 +327,43 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
   (chýba dátum / školiteľ / účastník); finalized state locks edits
   and shows the documents list with download links
 
-## Phase 5 — Settings ⬜
-- ⬜ Profile, Inspector profile (signature upload / draw, validity dates)
-- ⬜ Account / Branding (logo upload, theme color picker)
-- ⬜ Technicians management (invite by email, deactivate)
-- ⬜ Default periodicities per facility
+## Phase 5 — Settings 🔄
+- ✅ Inspector profile (signature upload, certification, validity) — Phase 3a-1
+- ✅ Trainers section (CRUD + signature) — Phase 4
+- ✅ **Phase 5a — Account branding**: logo upload (PNG/JPG, 1 MB),
+  theme color picker, invoice company name. Backend `AccountController`
+  + `Storage::accountLogo*` helpers; PDFs read `accounts.theme_color`
+  and inline `accounts.logo_path` as data URI in the brand-bar.
+- ✅ **Phase 5b — Default periodicities per facility per inspection type**:
+  derived from history (no separate settings UI). `CompanyController::show`
+  computes `last_periodicities[type]` per facility via window function over
+  inspections; Step 1 prefills the periodicity dropdown for selectable types
+  (RPHP 12/24, požiarna kniha 3/6) when the user hasn't manually picked one.
+- ✅ **Phase 5c — Technicians management**: Settings → Technici section
+  visible to everyone, mutations gated to the account's main user.
+  `TeamController` over `account_users` with main-user/self guards
+  (`GET/POST/PATCH/DELETE /api/account/users[/:id]`); invite reuses
+  `password_resets` and returns the link in the response so the inviter
+  can copy it (real email is Phase 7). Re-attaches a previously
+  deactivated user instead of refusing. `meSnapshot` now exposes
+  `accounts.main_user_id` so the frontend can hide management UI for
+  technicians.
 
-## Phase 6 — Subscription & billing ⬜
-- ⬜ Stripe Customer + subscription on registration (trial period from settings)
-- ⬜ Stripe webhooks: `invoice.payment_succeeded`, `invoice.payment_failed`,
-  `customer.subscription.deleted` (signature-verified)
-- ⬜ iDoklad invoice generation per successful charge
-- ⬜ Read-only mode when `subscription_end_date` < now
-- ⬜ Billing screen (next charge, history, switch plan, cancel)
-- ⬜ System admin settings UI (trial_days, prices)
+## Phase 6 — Subscription & billing 🔄
+- ✅ **Phase 6a — Read-only mode**: dispatcher-level guard in
+  `backend/public/index.php` returns 402 for any state-changing request
+  (POST/PATCH/DELETE) once `accounts.subscription_end_date < today`.
+  Whitelist: `/api/auth/*`, `/api/me/switch-account`, `/api/billing/*`
+  (reserved for 6b). Frontend `<SubscriptionBanner>` in `AppShell`
+  shows a red bar with the expiry date and a stub „Zaplatiť (čoskoro)"
+  CTA — wired in 6b.
+- ⬜ Phase 6b — Stripe Customer + subscription on registration (trial
+  period from settings); Checkout for renewing/upgrading
+- ⬜ Phase 6b — Stripe webhooks: `invoice.payment_succeeded`,
+  `invoice.payment_failed`, `customer.subscription.deleted` (signature-verified)
+- ⬜ Phase 6c — iDoklad invoice generation per successful charge
+- ⬜ Phase 6d — Billing screen (next charge, history, switch plan, cancel)
+- ⬜ Phase 6d — System admin settings UI (trial_days, prices)
 
 ## Phase 7 — Polish & extras ⬜
 - ⬜ Empty states, error boundaries, loading skeletons

@@ -12,6 +12,7 @@ export type Account = {
   id: number;
   invoice_company_name: string;
   subscription_end_date: string;
+  main_user_id: number;
 };
 
 type Snapshot = {

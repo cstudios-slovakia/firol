@@ -4,6 +4,7 @@ import { ArrowLeft, MapPin, NotebookPen, Trash2, User, Warehouse } from 'lucide-
 import { useAuth } from '@/auth/AuthContext';
 import { Facilities } from '@/api/facilities';
 import { ApiError } from '@/lib/api';
+import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -26,6 +27,7 @@ export function FacilityEditPage() {
   const mode = modeFromParams(params);
   const navigate = useNavigate();
   const { csrfToken } = useAuth();
+  const toast = useToast();
 
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
@@ -77,13 +79,17 @@ export function FacilityEditPage() {
     try {
       if (mode.kind === 'create') {
         const res = await Facilities.createUnderCompany(mode.companyId, payload, csrfToken);
+        toast.success('Prevádzka vytvorená');
         navigate(`/facilities/${res.facility.id}`, { replace: true });
       } else {
         await Facilities.update(mode.facilityId, payload, csrfToken);
+        toast.success('Prevádzka uložená');
         navigate(`/facilities/${mode.facilityId}`, { replace: true });
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
+      const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
@@ -94,9 +100,12 @@ export function FacilityEditPage() {
     if (!window.confirm('Naozaj archivovať prevádzku?')) return;
     try {
       await Facilities.archive(mode.facilityId, csrfToken);
+      toast.success('Prevádzka archivovaná');
       navigate(companyId ? `/companies/${companyId}` : '/', { replace: true });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Archiváciu sa nepodarilo dokončiť.');
+      const msg = err instanceof ApiError ? err.message : 'Archiváciu sa nepodarilo dokončiť.';
+      setError(msg);
+      toast.error(msg);
     }
   }
 

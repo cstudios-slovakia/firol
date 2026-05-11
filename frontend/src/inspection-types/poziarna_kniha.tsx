@@ -14,6 +14,7 @@ import {
   type PoziarnaKnihaItemFields,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
+import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -47,6 +48,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     if (initialItem) {
@@ -102,6 +104,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
       // Požiarna kniha is a single-record protocol, so always go straight
       // to the summary instead of offering "save and next".
       onSaved('save-and-summary');
+      toast.success('Záznam uložený');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {

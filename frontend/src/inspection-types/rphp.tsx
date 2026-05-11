@@ -12,6 +12,7 @@ import {
   type RphpStatus,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
+import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -44,6 +45,7 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     if (initialItem) {
@@ -103,6 +105,7 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
         await Inspections.addItem(inspectionId, fields, csrfToken);
       }
       onSaved(action);
+      toast.success('Položka uložená');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {

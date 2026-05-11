@@ -1,5 +1,7 @@
 import { Link, Outlet, NavLink } from 'react-router-dom';
-import { Building2, ClipboardList, Flame, GraduationCap, LogOut, Settings } from 'lucide-react';
+import {
+  AlertTriangle, Building2, ClipboardList, CreditCard, Flame, GraduationCap, LogOut, Settings,
+} from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { AccountSwitcher } from './AccountSwitcher';
 import { cn } from '@/lib/cn';
@@ -16,6 +18,7 @@ export function AppShell() {
 
   return (
     <div className="bg-app min-h-screen pb-20 sm:pb-0">
+      <SubscriptionBanner />
       <header className="sticky top-0 z-20 border-b border-ink-100/80 bg-white/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
           <Link
@@ -52,6 +55,53 @@ export function AppShell() {
       </div>
 
       <BottomTabBar />
+    </div>
+  );
+}
+
+/**
+ * Phase 6a — read-only mode banner. Shown when the active account's
+ * subscription_end_date is in the past. The "Zaplatiť" CTA is a stub
+ * until Phase 6b wires up Stripe Checkout.
+ */
+function SubscriptionBanner() {
+  const { accounts, activeAccountId } = useAuth();
+  const account = accounts.find((a) => a.id === activeAccountId);
+  if (!account) return null;
+
+  const endStr = account.subscription_end_date;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const end = new Date(`${endStr}T00:00:00`);
+  const expired = !Number.isNaN(end.getTime()) && end < today;
+  if (!expired) return null;
+
+  const human = end.toLocaleDateString('sk-SK', {
+    day: 'numeric', month: 'long', year: 'numeric',
+  });
+
+  return (
+    <div className="border-b border-[var(--color-status-bad)]/30 bg-[var(--color-status-bad-bg)]">
+      <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-3 text-sm text-[var(--color-status-bad)] sm:flex-row sm:items-center sm:gap-3">
+        <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-white/70">
+          <AlertTriangle className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">Predplatné vypršalo {human}</p>
+          <p className="text-xs opacity-80">
+            Účet je v režime len na čítanie — nové kontroly, školenia ani úpravy nie sú možné, kým si neobnovíš predplatné.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled
+          title="Platobnú bránu pripravujeme"
+          className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-status-bad)] px-3 py-2 text-xs font-semibold text-white opacity-70"
+        >
+          <CreditCard className="size-4" />
+          Zaplatiť (čoskoro)
+        </button>
+      </div>
     </div>
   );
 }

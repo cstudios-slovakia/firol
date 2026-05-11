@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Building2, Hash, MapPin, Phone } from 'lucide-react';
 import { Companies, type Company, type CompanyPayload } from '@/api/companies';
 import { ApiError } from '@/lib/api';
+import { useToast } from '@/lib/toast';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
@@ -33,6 +34,7 @@ export function CompanyForm({
   mode = initial ? 'edit' : 'create',
 }: CompanyFormProps) {
   const { csrfToken } = useAuth();
+  const toast = useToast();
 
   const [name, setName] = useState(initial?.name ?? '');
   const [ico, setIco] = useState(initial?.ico ?? '');
@@ -57,8 +59,11 @@ export function CompanyForm({
         ? await Companies.update(initial.id, payload, csrfToken)
         : await Companies.create(payload, csrfToken);
       onSaved(res.company);
+      toast.success(mode === 'edit' ? 'Firma uložená' : 'Firma vytvorená');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
+      const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }

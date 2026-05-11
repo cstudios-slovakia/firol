@@ -16,6 +16,7 @@ import {
   type TrainingDocument,
 } from '@/api/trainings';
 import { ApiError } from '@/lib/api';
+import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -28,6 +29,7 @@ export function TrainingDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
   const id = Number(idStr);
   const { csrfToken } = useAuth();
+  const toast = useToast();
 
   const [data, setData] = useState<TrainingDetail | null>(null);
   const [documents, setDocuments] = useState<TrainingDocument[]>([]);
@@ -70,9 +72,12 @@ export function TrainingDetailPage() {
     try {
       const res = await Trainings.generatePdf(id, csrfToken);
       await refreshDetail();
+      toast.success('PDF protokol vygenerovaný');
       window.open(trainingDocumentDownloadUrl(res.document.id), '_blank', 'noopener');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'PDF sa nepodarilo vygenerovať.');
+      const msg = err instanceof ApiError ? err.message : 'PDF sa nepodarilo vygenerovať.';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setGenerating(false);
     }
@@ -93,12 +98,15 @@ export function TrainingDetailPage() {
       );
       await refreshDetail();
       setShowAddForm(false);
+      toast.success('Účastník uložený');
     } catch (err) {
-      // Surface the error inside the add form so the user keeps their
-      // typed fullname/position; throw to let the form know not to clear.
-      throw err instanceof ApiError
+      const apiErr = err instanceof ApiError
         ? err
         : new ApiError(0, 'Účastníka sa nepodarilo pridať.', null);
+      toast.error(apiErr.message);
+      // Surface the error inside the add form so the user keeps their
+      // typed fullname/position; throw to let the form know not to clear.
+      throw apiErr;
     } finally {
       setAdding(false);
     }
@@ -110,8 +118,11 @@ export function TrainingDetailPage() {
     try {
       await Trainings.deleteTrainee(id, traineeId, csrfToken);
       await refreshDetail();
+      toast.success('Účastník zmazaný');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Mazanie sa nepodarilo.');
+      const msg = err instanceof ApiError ? err.message : 'Mazanie sa nepodarilo.';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setDeletingId(null);
     }
