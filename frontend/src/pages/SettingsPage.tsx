@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   AtSign, Building2, CalendarDays, Check, Copy, CreditCard, ExternalLink, FileSignature,
-  GraduationCap, Hash, ImagePlus, MailPlus, Palette, Phone, Plus, RotateCcw, ShieldCheck,
-  ShieldOff, Trash2, UploadCloud, User, UserCheck, UsersRound,
+  GraduationCap, Hash, ImagePlus, MailPlus, MapPin, Palette, Phone, Plus, Receipt, RotateCcw,
+  Settings as SettingsIcon, ShieldCheck, ShieldOff, Trash2, UploadCloud, User, UserCheck,
+  UsersRound,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { AccountApi, type Account } from '@/api/account';
@@ -10,6 +11,7 @@ import { InspectorProfileApi, type InspectorProfile } from '@/api/inspectorProfi
 import { Trainers, type Trainer } from '@/api/trainers';
 import { Team, type TeamMember } from '@/api/team';
 import { Billing, type BillingPeriod, type Invoice } from '@/api/billing';
+import { Admin, type SystemSettings } from '@/api/admin';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -230,9 +232,13 @@ export function SettingsPage() {
 
       <BillingSection />
 
+      <InvoiceDetailsSection />
+
       <TrainersSection />
 
       <TeamSection />
+
+      <AdminSection />
     </div>
   );
 }
@@ -977,6 +983,126 @@ function PeriodCard({
   );
 }
 
+function InvoiceDetailsSection() {
+  const { csrfToken } = useAuth();
+  const toast = useToast();
+  const [account, setAccount] = useState<Account | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const [street, setStreet]     = useState('');
+  const [postal, setPostal]     = useState('');
+  const [city, setCity]         = useState('');
+  const [country, setCountry]   = useState('Slovensko');
+  const [ico, setIco]           = useState('');
+  const [dic, setDic]           = useState('');
+  const [icDph, setIcDph]       = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    AccountApi.show()
+      .then((res) => {
+        if (cancelled) return;
+        setAccount(res.account);
+        setStreet(res.account.invoice_street ?? '');
+        setPostal(res.account.invoice_postal_code ?? '');
+        setCity(res.account.invoice_city ?? '');
+        setCountry(res.account.invoice_country ?? 'Slovensko');
+        setIco(res.account.invoice_ico ?? '');
+        setDic(res.account.invoice_dic ?? '');
+        setIcDph(res.account.invoice_ic_dph ?? '');
+      })
+      .catch(() => { /* surfaced elsewhere */ })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const res = await AccountApi.update({
+        invoice_street:      street,
+        invoice_postal_code: postal,
+        invoice_city:        city,
+        invoice_country:     country.trim() || 'Slovensko',
+        invoice_ico:         ico,
+        invoice_dic:         dic,
+        invoice_ic_dph:      icDph,
+      }, csrfToken);
+      setAccount(res.account);
+      toast.success('Fakturačné údaje uložené.');
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Uloženie zlyhalo.';
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return <Card className="flex justify-center py-8 text-ink-400"><Spinner /></Card>;
+  }
+  if (!account) return null;
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/60 to-transparent px-5 py-4">
+        <div className="grid size-11 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
+          <Receipt className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold text-ink-900">Fakturačné údaje</h2>
+          <p className="text-xs text-ink-500">
+            Použijú sa pri vystavovaní faktúr za predplatné. Doplň ich pred prvou platbou.
+          </p>
+        </div>
+      </div>
+
+      <form onSubmit={onSubmit} className="flex flex-col gap-3 px-5 py-5">
+        <Field label="Ulica a číslo">
+          {(p) => (
+            <Input {...p} value={street} onChange={(e) => setStreet(e.target.value)}
+                   leftIcon={<MapPin className="size-4" />} />
+          )}
+        </Field>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Field label="PSČ">
+            {(p) => <Input {...p} value={postal} onChange={(e) => setPostal(e.target.value)} />}
+          </Field>
+          <Field label="Mesto" className="sm:col-span-2">
+            {(p) => <Input {...p} value={city} onChange={(e) => setCity(e.target.value)} />}
+          </Field>
+        </div>
+        <Field label="Krajina">
+          {(p) => <Input {...p} value={country} onChange={(e) => setCountry(e.target.value)} />}
+        </Field>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Field label="IČO">
+            {(p) => (
+              <Input {...p} value={ico} onChange={(e) => setIco(e.target.value)}
+                     leftIcon={<Hash className="size-4" />} />
+            )}
+          </Field>
+          <Field label="DIČ">
+            {(p) => <Input {...p} value={dic} onChange={(e) => setDic(e.target.value)} />}
+          </Field>
+          <Field label="IČ DPH">
+            {(p) => <Input {...p} value={icDph} onChange={(e) => setIcDph(e.target.value)} />}
+          </Field>
+        </div>
+
+        <div className="flex justify-end pt-1">
+          <Button type="submit" loading={saving} leftIcon={<Receipt className="size-4" />}>
+            Uložiť fakturačné údaje
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
 function TeamSection() {
   const { csrfToken, user, accounts, activeAccountId } = useAuth();
   const toast = useToast();
@@ -1276,5 +1402,108 @@ function SignaturePreview({
         className="max-h-full max-w-full object-contain"
       />
     </div>
+  );
+}
+
+function AdminSection() {
+  const { csrfToken, isAdmin } = useAuth();
+  const toast = useToast();
+  const [settings, setSettings] = useState<SystemSettings | null>(null);
+  const [loading, setLoading]   = useState(true);
+  const [saving, setSaving]     = useState(false);
+
+  const [trialDays, setTrialDays]    = useState('');
+  const [priceMonthly, setMonthly]   = useState('');
+  const [priceYearly, setYearly]     = useState('');
+
+  useEffect(() => {
+    if (!isAdmin) { setLoading(false); return; }
+    let cancelled = false;
+    Admin.settings()
+      .then((res) => {
+        if (cancelled) return;
+        setSettings(res.settings);
+        setTrialDays(res.settings.trial_days);
+        setMonthly(res.settings.price_monthly_eur);
+        setYearly(res.settings.price_yearly_eur);
+      })
+      .catch(() => { /* hidden when not admin */ })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [isAdmin]);
+
+  if (!isAdmin) return null;
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const res = await Admin.updateSettings({
+        trial_days:        Number(trialDays),
+        price_monthly_eur: Number(priceMonthly),
+        price_yearly_eur:  Number(priceYearly),
+      }, csrfToken);
+      setSettings(res.settings);
+      toast.success('Systémové nastavenia uložené.');
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Uloženie zlyhalo.';
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return <Card className="flex justify-center py-8 text-ink-400"><Spinner /></Card>;
+  }
+  if (!settings) return null;
+
+  return (
+    <Card className="overflow-hidden border-firol-200">
+      <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-100/60 to-transparent px-5 py-4">
+        <div className="grid size-11 place-items-center rounded-2xl bg-ink-900 text-white shadow-[var(--shadow-glow)]">
+          <SettingsIcon className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold text-ink-900">Systémové nastavenia</h2>
+          <p className="text-xs text-ink-500">
+            Globálne hodnoty, ktoré sa dotýkajú všetkých účtov. Viditeľné iba pre admina.
+          </p>
+        </div>
+        <Badge tone="warn">Admin</Badge>
+      </div>
+
+      <form onSubmit={onSubmit} className="flex flex-col gap-3 px-5 py-5">
+        <Field label="Skúšobné obdobie (dni)" hint="Uplatní sa len pri nových registráciách.">
+          {(p) => (
+            <Input {...p} type="number" inputMode="numeric" min={0} max={365}
+                   value={trialDays} onChange={(e) => setTrialDays(e.target.value)} />
+          )}
+        </Field>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Cena mesačne (EUR)">
+            {(p) => (
+              <Input {...p} type="number" inputMode="numeric" min={0}
+                     value={priceMonthly} onChange={(e) => setMonthly(e.target.value)} />
+            )}
+          </Field>
+          <Field label="Cena ročne (EUR)">
+            {(p) => (
+              <Input {...p} type="number" inputMode="numeric" min={0}
+                     value={priceYearly} onChange={(e) => setYearly(e.target.value)} />
+            )}
+          </Field>
+        </div>
+        <p className="text-xs text-ink-400">
+          Pozn.: ceny tu sú len informatívne pre UI/copy. Skutočné sumy účtuje
+          Stripe podľa <code>STRIPE_PRICE_MONTHLY</code> / <code>STRIPE_PRICE_YEARLY</code>.
+        </p>
+        <div className="flex justify-end pt-1">
+          <Button type="submit" loading={saving} leftIcon={<SettingsIcon className="size-4" />}>
+            Uložiť nastavenia
+          </Button>
+        </div>
+      </form>
+    </Card>
   );
 }

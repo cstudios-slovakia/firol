@@ -3,6 +3,13 @@ import { api } from '@/lib/api';
 export type Account = {
   id: number;
   invoice_company_name: string | null;
+  invoice_street: string | null;
+  invoice_postal_code: string | null;
+  invoice_city: string | null;
+  invoice_country: string | null;
+  invoice_ico: string | null;
+  invoice_dic: string | null;
+  invoice_ic_dph: string | null;
   theme_color: string | null;
   has_logo: boolean;
   subscription_end_date: string | null;
@@ -13,6 +20,13 @@ export type Account = {
 
 export type AccountUpdate = {
   invoice_company_name?: string | null;
+  invoice_street?: string | null;
+  invoice_postal_code?: string | null;
+  invoice_city?: string | null;
+  invoice_country?: string | null;
+  invoice_ico?: string | null;
+  invoice_dic?: string | null;
+  invoice_ic_dph?: string | null;
   theme_color?: string | null;
 };
 

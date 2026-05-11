@@ -48,16 +48,42 @@ final class AccountController
         // Empty string clears the override and falls back to Firol red.
         $themeColorValue = ($themeColor === '' || $themeColor === null) ? null : strtolower($themeColor);
 
-        Db::pdo()->prepare(
-            'UPDATE accounts
-             SET    invoice_company_name = COALESCE(?, invoice_company_name),
-                    theme_color          = ?
-             WHERE  id = ?'
-        )->execute([
+        // Optional invoicing details — used by the iDoklad Contact creation
+        // on the first paid invoice. Each field is independent: NULL means
+        // "don't touch", empty string means "clear".
+        $invoiceFields = [
+            'invoice_street'      => $req->jsonString('invoice_street'),
+            'invoice_postal_code' => $req->jsonString('invoice_postal_code'),
+            'invoice_city'        => $req->jsonString('invoice_city'),
+            'invoice_country'     => $req->jsonString('invoice_country'),
+            'invoice_ico'         => $req->jsonString('invoice_ico'),
+            'invoice_dic'         => $req->jsonString('invoice_dic'),
+            'invoice_ic_dph'      => $req->jsonString('invoice_ic_dph'),
+        ];
+
+        $sets   = [
+            'invoice_company_name = COALESCE(?, invoice_company_name)',
+            'theme_color = ?',
+        ];
+        $params = [
             $invoiceName !== null ? trim($invoiceName) : null,
             $themeColorValue,
-            $accountId,
-        ]);
+        ];
+        foreach ($invoiceFields as $col => $val) {
+            if ($val === null) continue;
+            $trimmed = trim($val);
+            // invoice_country is NOT NULL in schema — refuse to clear it.
+            if ($col === 'invoice_country' && $trimmed === '') {
+                Response::error('invoice_country cannot be empty', 422);
+            }
+            $sets[]   = "$col = ?";
+            $params[] = $trimmed === '' ? null : $trimmed;
+        }
+        $params[] = $accountId;
+
+        Db::pdo()->prepare(
+            'UPDATE accounts SET ' . implode(', ', $sets) . ' WHERE id = ?'
+        )->execute($params);
 
         Response::json(['account' => self::shape($accountId)]);
     }
@@ -164,7 +190,9 @@ final class AccountController
     private static function shape(int $accountId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT id, invoice_company_name, logo_path, theme_color, subscription_end_date,
+            'SELECT id, invoice_company_name, invoice_street, invoice_postal_code,
+                    invoice_city, invoice_country, invoice_ico, invoice_dic, invoice_ic_dph,
+                    logo_path, theme_color, subscription_end_date,
                     stripe_status, billing_period, stripe_customer_id
              FROM   accounts WHERE id = ?'
         );
@@ -174,6 +202,13 @@ final class AccountController
         return [
             'id'                   => (int) ($row['id'] ?? $accountId),
             'invoice_company_name' => $row['invoice_company_name'] ?? null,
+            'invoice_street'       => $row['invoice_street']       ?? null,
+            'invoice_postal_code'  => $row['invoice_postal_code']  ?? null,
+            'invoice_city'         => $row['invoice_city']         ?? null,
+            'invoice_country'      => $row['invoice_country']      ?? null,
+            'invoice_ico'          => $row['invoice_ico']          ?? null,
+            'invoice_dic'          => $row['invoice_dic']          ?? null,
+            'invoice_ic_dph'       => $row['invoice_ic_dph']       ?? null,
             'theme_color'          => $row['theme_color'] ?? null,
             'has_logo'             => !empty($row['logo_path'])
                                        && is_file(Storage::root() . '/' . $row['logo_path']),

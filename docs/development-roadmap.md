@@ -357,10 +357,16 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
   (reserved for 6b). Frontend `<SubscriptionBanner>` in `AppShell`
   shows a red bar with the expiry date and a stub „Zaplatiť (čoskoro)"
   CTA — wired in 6b.
-- ⬜ Phase 6b — Stripe Customer + subscription on registration (trial
-  period from settings); Checkout for renewing/upgrading
-- ⬜ Phase 6b — Stripe webhooks: `invoice.payment_succeeded`,
-  `invoice.payment_failed`, `customer.subscription.deleted` (signature-verified)
+- ✅ **Phase 6b — Stripe Customer + subscription**: Customer created on
+  register (best-effort — register doesn't fail if Stripe is down),
+  Checkout Session in subscription mode with `subscription_data.trial_end`
+  honouring our local trial when the user pays early; Customer Portal for
+  switching plan / cancelling. Signature-verified webhooks via
+  `Webhook::constructEvent` handle `customer.subscription.created/updated/
+  deleted` and `invoice.payment_succeeded`. Reads `current_period_end`
+  from BOTH subscription root and `items[0]` (Stripe API ≥2025-04
+  moved it). Migration 005 adds `stripe_customer_id`,
+  `stripe_subscription_id`, `stripe_status`, `billing_period`.
 - ✅ **Phase 6c — iDoklad invoice on every Stripe payment**: thin
   `IDokladClient` (OAuth2 client_credentials, in-process token cache,
   envelope-aware response unwrap); `InvoiceIssuer` is invoked from the
@@ -371,8 +377,17 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
   production. Frontend shows „História faktúr" in BillingSection.
   Migration 006 adds `accounts.idoklad_contact_id` and the `invoices`
   mirror table.
-- ⬜ Phase 6d — Billing screen (next charge, history, switch plan, cancel)
-- ⬜ Phase 6d — System admin settings UI (trial_days, prices)
+- ✅ **Phase 6d — Billing screen + invoice details + admin knobs**:
+  Settings → „Fakturačné údaje" form persists `accounts.invoice_*` (street,
+  PSČ, mesto, krajina, IČO, DIČ, IČ DPH) so the iDoklad Contact created
+  on the first paid invoice has real data. Settings → „Systémové
+  nastavenia" (admin-only, gated by `ADMIN_EMAIL` env via `Auth\Admin`)
+  edits `trial_days`, `price_monthly_eur`, `price_yearly_eur` from the
+  `system_settings` table. New `AdminController` + `Auth\Admin` helper +
+  `/api/admin/settings` GET/PATCH (whitelisted past the 402 read-only
+  gate). `meSnapshot` exposes `isAdmin` so the section is hidden for
+  non-admins. Switch-plan / cancel continues to live in Stripe Customer
+  Portal — already wired in 6b.
 
 ## Phase 7 — Polish & extras ⬜
 - ⬜ Empty states, error boundaries, loading skeletons
