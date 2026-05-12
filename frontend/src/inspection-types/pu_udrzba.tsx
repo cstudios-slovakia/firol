@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle, ArrowRight, CheckCircle2, DoorClosed, Edit2, Hash,
-  ListChecks, MapPin, NotebookPen, Save, Trash2, Wrench,
+  ListChecks, MapPin, NotebookPen, Save, Tag, Trash2, Wrench,
 } from 'lucide-react';
 import {
   Inspections,
@@ -42,6 +42,7 @@ function PuUdStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
 
   const [kind, setKind] = useState<PuKind>('dvere');
   const [identifier, setIdentifier] = useState('');
+  const [manufacturer, setManufacturer] = useState('');
   const [location, setLocation] = useState('');
   const [maintenanceWork, setMaintenanceWork] = useState('');
   const [result, setResult] = useState<PassFailResult>('vyhovuje');
@@ -56,6 +57,7 @@ function PuUdStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
       const f = initialItem.fields as Partial<PuUdrzbaItemFields>;
       setKind(isPuKind(f.kind) ? f.kind : 'dvere');
       setIdentifier(typeof f.identifier === 'string' ? f.identifier : '');
+      setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
       setLocation(typeof f.location === 'string' ? f.location : '');
       setMaintenanceWork(typeof f.maintenance_work === 'string' ? f.maintenance_work : '');
       setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
@@ -63,6 +65,7 @@ function PuUdStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
     } else {
       setKind('dvere');
       setIdentifier('');
+      setManufacturer('');
       setLocation('');
       setMaintenanceWork('');
       setResult('vyhovuje');
@@ -90,6 +93,7 @@ function PuUdStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
       const fields: PuUdrzbaItemFields = {
         kind,
         identifier: identifier.trim(),
+        manufacturer: manufacturer.trim(),
         location: location.trim(),
         maintenance_work: maintenanceWork.trim(),
         result,
@@ -130,14 +134,22 @@ function PuUdStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
                 placeholder="PD-A1, kl. 03/EW30" />
             )}
           </Field>
-          <Field label="Umiestnenie" required>
+          <Field label="Výrobca">
             {(p) => (
-              <Input {...p} required leftIcon={<MapPin className="size-4" />}
-                value={location} onChange={(e) => setLocation(e.target.value)}
-                placeholder="Hala A → kancelárie" />
+              <Input {...p} leftIcon={<Tag className="size-4" />}
+                value={manufacturer} onChange={(e) => setManufacturer(e.target.value)}
+                placeholder="ROLF a.s., SYSTEMAIR" />
             )}
           </Field>
         </div>
+
+        <Field label="Umiestnenie" required>
+          {(p) => (
+            <Input {...p} required leftIcon={<MapPin className="size-4" />}
+              value={location} onChange={(e) => setLocation(e.target.value)}
+              placeholder="Hala A → kancelárie" />
+          )}
+        </Field>
 
         <Field label="Vykonané práce" required hint="Mazanie, výmena tesnení, kontrola samozatváračov, atď.">
           {(p) => (

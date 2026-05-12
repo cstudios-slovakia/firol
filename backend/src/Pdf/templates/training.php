@@ -1,22 +1,15 @@
 <?php
 /**
- * Training (Školenie) protocol template. The attendee list is the heart
- * of the document — each row carries the trainee's name, position and
- * inlined signature so the protocol stays self-contained even after the
- * stored PNG is deleted.
+ * Training (Školenie) protocol template.
  *
- * @var string $number          e.g. SKO-2026-001
+ * @var string $number
  * @var string $generated_at
- * @var array  $brand           name, color
- * @var array  $training        type, training_type_label, date,
- *                              duration_min, topics, status
+ * @var array  $brand           name, color, logo_data_uri
+ * @var array  $training        type, training_type_label, date, duration_min, topics, status
  * @var array  $company         name, ico, address
- * @var array  $facility        name, address (may be empty arrays if
- *                              the training has no facility scope)
- * @var array  $trainer         fullname, certification_number,
- *                              signature_data_uri
- * @var list<array>             $trainees   id, fullname, position,
- *                                          signature_data_uri, signed_at
+ * @var array  $facility        name, address
+ * @var array  $trainer         fullname, certification_number, signature_data_uri
+ * @var list<array> $trainees   id, fullname, position, signature_data_uri, signed_at
  */
 $h = static fn (?string $v): string => htmlspecialchars((string) ($v ?? '—'), ENT_QUOTES, 'UTF-8');
 $brandColor = $brand['color'] ?? '#E8433A';
@@ -26,129 +19,269 @@ $formatDate = static function (?string $iso): string {
     $ts = strtotime($iso);
     return $ts ? date('j. n. Y', $ts) : $iso;
 };
+
+$type = (string) ($training['type'] ?? '');
+
+// Fixed topic lists keyed by training type. Each item: [text, duration_min] or just [text] for two-part types.
+$simpleTopics = [
+    'vstupne' => [
+        ['Oboznámenie sa so všeobecnými požiadavkami ochrany pred požiarmi v objektoch a priestoroch právnickej osoby.', 10],
+        ['Výklad o nebezpečenstve vzniku požiaru charakteristickom pre príslušné pracovisko a činnosť, najmä o protipožiarnych opatreniach na pracoviskách, požiarnom poriadku pracoviska, zabezpečení ochrany pred požiarmi pri technologických procesoch, skladovaní horľavých látok a o pracovnej disciplíne vo vzťahu k ochrane pred požiarmi.', 10],
+        ['Oboznámenie sa s rozmiestnením hasiacich zariadení, hasiacich prístrojov, spojovacích prostriedkov a ďalších vecných prostriedkov ochrany pred požiarmi na pracovisku a so spôsobom ich použitia, ako aj s rozmiestnením hlavných vypínačov elektrickej energie a uzáverov vody a plynu.', 20],
+        ['Spôsob vyhlásenia požiarneho poplachu a povinnosti zamestnancov pri vzniku požiaru vyplývajúce z požiarnych poplachových smerníc a z požiarneho evakuačného plánu.', 10],
+        ['Oboznámenie sa s požiarnou dokumentáciou spoločnosti a predpismi na zabezpečenie ochrany pred požiarmi.', 20],
+        ['Oboznámenie sa s nebezpečenstvom vzniku požiaru vyplývajúcim z činnosti právnickej osoby.', 10],
+        ['Oboznámenie sa so základmi procesov horenia a hasenia.', 10],
+        ['Oboznámenie sa so základnými požiadavkami protipožiarnej bezpečnosti stavieb.', 10],
+        ['Oboznámenie sa so zásadami protipožiarnej bezpečnosti pri skladovaní horľavých látok a pri manipulácii s nimi a pri činnosti spojenej so zvýšeným nebezpečenstvom vzniku požiaru a s činnosťou a parametrami zariadení, hasičskej techniky a iných vecných prostriedkov ochrany pred požiarmi.', 20],
+    ],
+    'opakovane' => [
+        ['Oboznámenie sa so všeobecnými požiadavkami ochrany pred požiarmi v objektoch a priestoroch právnickej osoby.', 10],
+        ['Výklad o nebezpečenstve vzniku požiaru charakteristickom pre príslušné pracovisko a činnosť, najmä o protipožiarnych opatreniach na pracoviskách, požiarnom poriadku pracoviska, zabezpečení ochrany pred požiarmi pri technologických procesoch, skladovaní horľavých látok a o pracovnej disciplíne vo vzťahu k ochrane pred požiarmi.', 10],
+        ['Oboznámenie sa s rozmiestnením hasiacich zariadení, hasiacich prístrojov, spojovacích prostriedkov a ďalších vecných prostriedkov ochrany pred požiarmi na pracovisku a so spôsobom ich použitia, ako aj s rozmiestnením hlavných vypínačov elektrickej energie a uzáverov vody a plynu.', 20],
+        ['Spôsob vyhlásenia požiarneho poplachu a povinnosti zamestnancov pri vzniku požiaru vyplývajúce z požiarnych poplachových smerníc a z požiarneho evakuačného plánu.', 10],
+        ['Oboznámenie sa s požiarnou dokumentáciou spoločnosti a predpismi na zabezpečenie ochrany pred požiarmi.', 20],
+        ['Oboznámenie sa s nebezpečenstvom vzniku požiaru vyplývajúcim z činnosti právnickej osoby.', 10],
+        ['Oboznámenie sa so základmi procesov horenia a hasenia.', 10],
+        ['Oboznámenie sa so základnými požiadavkami protipožiarnej bezpečnosti stavieb.', 10],
+        ['Oboznámenie sa so zásadami protipožiarnej bezpečnosti pri skladovaní horľavých látok a pri manipulácii s nimi a pri činnosti spojenej so zvýšeným nebezpečenstvom vzniku požiaru a s činnosťou a parametrami zariadení, hasičskej techniky a iných vecných prostriedkov ochrany pred požiarmi.', 20],
+    ],
+    'opp_mimo' => [
+        ['Oboznámenie sa s úlohami a povinnosťami osôb zabezpečujúcich ochranu pred požiarmi v mimopracovnom čase a po skončení prevádzky podľa § 9 ods. 5 vyhlášky MV SR č. 121/2002 Z. z.', 10],
+        ['Oboznámenie sa s objektom, prevádzkou, technologickými zariadeniami a s nebezpečenstvom vzniku požiaru charakteristickým pre objekt a priestory, v ktorých budú činnosť vykonávať.', 15],
+        ['Oboznámenie sa s rozmiestnením hasiacich zariadení, hasiacich prístrojov, spojovacích prostriedkov, hlavných vypínačov elektrickej energie a uzáverov vody a plynu a so spôsobom ich obsluhy a použitia.', 15],
+        ['Spôsob vyhlásenia požiarneho poplachu, privolania Hasičského a záchranného zboru, povinnosti pri vzniku požiaru a postup podľa požiarnych poplachových smerníc a požiarneho evakuačného plánu.', 20],
+    ],
+    'zdrzujuca_sa' => [
+        ['Oboznámenie sa so všeobecnými požiadavkami ochrany pred požiarmi v objektoch a priestoroch právnickej osoby.', 15],
+        ['Výklad o nebezpečenstve vzniku požiaru charakteristickom pre príslušné pracovisko a činnosť, najmä o protipožiarnych opatreniach, požiarnom poriadku pracoviska, zabezpečení ochrany pred požiarmi pri skladovaní horľavých látok a o pracovnej disciplíne vo vzťahu k ochrane pred požiarmi.', 15],
+        ['Oboznámenie sa s rozmiestnením hasiacich zariadení, hasiacich prístrojov, spojovacích prostriedkov a ďalších vecných prostriedkov ochrany pred požiarmi na pracovisku a so spôsobom ich použitia, ako aj s rozmiestnením hlavných vypínačov elektrickej energie a uzáverov vody a plynu.', 15],
+        ['Spôsob vyhlásenia požiarneho poplachu a povinnosti osôb pri vzniku požiaru vyplývajúce z požiarnych poplachových smerníc a z požiarneho evakuačného plánu.', 15],
+    ],
+];
+
+$twoPartTopics = [
+    'hliadka_oph' => [
+        'teoreticka' => ['rozsah' => 25, 'items' => [
+            'Úlohy protipožiarnej hliadky pracoviska.',
+            'Oboznámenie s nebezpečenstvom vzniku požiaru na pracoviskách právnickej osoby, fyzickej osoby – podnikateľa.',
+            'Oboznámenie s dokumentáciou ochrany pred požiarmi na pracovisku (požiarne poplachové smernice, požiarny evakuačný plán a pod.).',
+            'Oboznámenie sa so spôsobom vyhlásenia požiarneho poplachu a privolanie pomoci.',
+        ]],
+        'prakticka' => ['rozsah' => 35, 'items' => [
+            'Oboznámenie sa s rozmiestnením a použitím hasiacich prístrojov, požiarnych vodovodov, hasiacich zariadení, požiarnotechnických zariadení a spojovacích prostriedkov, zariadení na zabránenie šírenia požiaru.',
+            'Spôsoby a cesty evakuácie a súčinnosť s hasičskou jednotkou.',
+            'Oboznámenie sa so spojovacími prostriedkami.',
+            'Hlavné uzávery plynu, elektrickej energie, vody – spôsob uzatvárania.',
+        ]],
+    ],
+    'hliadka_opah' => [
+        'teoreticka' => ['rozsah' => 25, 'items' => [
+            'Oboznámenie sa s pokynom vydaným právnickou osobou, fyzickou osobou – podnikateľom k akcii.',
+            'Oboznámenie sa s úlohami protipožiarnej asistenčnej hliadky.',
+            'Oboznámenie sa s nebezpečenstvom vzniku požiaru počas akcie.',
+            'Oboznámenie sa so spôsobom vyhlásenia požiarneho poplachu a privolanie pomoci podľa požiarnych poplachových smerníc.',
+            'Oboznámenie sa s požiarnym evakuačným plánom.',
+        ]],
+        'prakticka' => ['rozsah' => 35, 'items' => [
+            'Oboznámenie sa s rozmiestnením a s použitím hasiacich prístrojov.',
+            'Oboznámenie sa s hasiacim zariadením.',
+            'Oboznámenie sa so spojovacími prostriedkami.',
+            'Oboznámenie sa s požiarnotechnickými zariadeniami na zabránenie šírenia požiaru.',
+            'Oboznámenie sa so spôsobom a cestami evakuácie a so súčinnosťou s hasičskou jednotkou.',
+            'Oboznámenie sa s hlavnými uzávermi vody, plynu a hlavným vypínačom elektrickej energie.',
+        ]],
+    ],
+];
+
+$trainerLine = $h($trainer['fullname']);
+if (!empty($trainer['certification_number'])) {
+    $trainerLine .= ' | č. oprávnenia: ' . $h($trainer['certification_number']);
+}
 ?>
 <style>
   body { font-family: dejavusans, sans-serif; color: #1a1a1f; font-size: 10pt; }
-  .brand-bar { background: <?= $h($brandColor) ?>; color: #fff; padding: 8pt 12pt; border-radius: 6pt; }
-  .brand-bar .title { font-size: 14pt; font-weight: bold; letter-spacing: .3pt; }
-  .brand-bar .subtitle { font-size: 9pt; opacity: .9; }
-  .brand-bar .brand-logo { float: left; max-height: 30pt; max-width: 90pt; margin-right: 10pt; background: #fff; padding: 3pt 5pt; border-radius: 4pt; }
-  .doc-number { float: right; font-family: monospace; font-size: 11pt; background: rgba(255,255,255,.18); padding: 3pt 7pt; border-radius: 4pt; }
-  h2 { color: <?= $h($brandColor) ?>; font-size: 11pt; margin: 14pt 0 4pt; border-bottom: 1pt solid #e5e5ea; padding-bottom: 2pt; }
-  table { border-collapse: collapse; width: 100%; }
-  table.kv { font-size: 9.5pt; }
-  table.kv td { padding: 2pt 0; vertical-align: top; }
-  table.kv td.label { width: 30%; color: #6b6b75; font-weight: bold; text-transform: uppercase; font-size: 8pt; letter-spacing: .4pt; }
-  table.attendees { font-size: 9pt; margin-top: 4pt; }
-  table.attendees th { background: #f3f3f6; color: #2a2a32; padding: 4pt 6pt; border: 1pt solid #d6d6dc; text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; }
+  .hdr { border-collapse: collapse; width: 100%; }
+  .hdr td { vertical-align: middle; padding: 3pt 0; }
+  .hdr-inner { border-collapse: collapse; }
+  .hdr-inner td { vertical-align: middle; padding: 0; }
+  .logo-img { max-height: 36pt; max-width: 80pt; }
+  .logo-box { border: 1pt solid #bbb; color: #999; font-size: 7pt; text-align: center; padding: 5pt 6pt; width: 36pt; }
+  .hdr-company { font-size: 12.5pt; font-weight: bold; }
+  .hdr-sub { font-size: 8.5pt; color: #555; }
+  .hdr-right { text-align: right; }
+  .hdr-title { font-size: 12.5pt; font-weight: bold; color: <?= $h($brandColor) ?>; }
+  .hdr-meta { font-size: 9pt; color: #555; }
+  h2 { color: <?= $h($brandColor) ?>; font-size: 10pt; font-weight: bold; margin: 10pt 0 3pt; text-transform: uppercase; letter-spacing: .3pt; }
+  .bi { border-collapse: collapse; width: 100%; font-size: 9pt; }
+  .bi td { padding: 3pt 6pt; border: 1pt solid #dde0e6; vertical-align: top; }
+  .bl { background: #f7f7f9; font-weight: bold; color: #6b6b75; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; white-space: nowrap; width: 14%; }
+  .bv { width: 36%; }
+  table.topics { border-collapse: collapse; width: 100%; font-size: 9pt; margin-top: 4pt; }
+  table.topics th { background: #f3f3f6; color: #2a2a32; padding: 4pt 5pt; border: 1pt solid #d6d6dc; text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; }
+  table.topics td { padding: 4pt 5pt; border: 1pt solid #e5e5ea; vertical-align: top; }
+  table.topics td.tnum { width: 6%; text-align: center; white-space: nowrap; }
+  table.topics td.ttime { width: 12%; text-align: center; white-space: nowrap; }
+  .section-hdr { font-size: 9pt; font-weight: bold; margin: 5pt 0 2pt; color: #2a2a32; }
+  table.topics-part { border-collapse: collapse; width: 100%; font-size: 9pt; margin-top: 2pt; margin-bottom: 4pt; }
+  table.topics-part th { background: <?= $h($brandColor) ?>; color: #fff; padding: 4pt 5pt; border: 1pt solid <?= $h($brandColor) ?>; text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; }
+  table.topics-part td { padding: 4pt 5pt; border: 1pt solid #e5e5ea; vertical-align: top; }
+  table.topics-part td.tnum { width: 6%; text-align: center; white-space: nowrap; }
+  table.attendees { border-collapse: collapse; width: 100%; font-size: 9pt; margin-top: 4pt; }
+  table.attendees th { background: <?= $h($brandColor) ?>; color: #fff; padding: 4pt 6pt; border: 1pt solid <?= $h($brandColor) ?>; text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; }
   table.attendees td { padding: 6pt; border: 1pt solid #e5e5ea; vertical-align: middle; }
-  table.attendees .sig-cell { text-align: center; }
+  table.attendees td.sig-cell { text-align: center; }
   table.attendees .sig-img { max-height: 36pt; max-width: 140pt; }
-  .topics { white-space: pre-wrap; font-size: 9.5pt; line-height: 1.4; padding: 4pt 0; }
-  .signature-block { margin-top: 22pt; }
-  .signature-block .row { display: table; width: 100%; }
-  .signature-block .col { display: table-cell; width: 50%; vertical-align: bottom; padding-right: 18pt; }
-  .signature-line { border-top: 1pt solid #2a2a32; margin-top: 50pt; padding-top: 3pt; font-size: 8.5pt; }
-  .signature-img { max-height: 48pt; max-width: 180pt; margin-bottom: -8pt; }
-  .small { color: #6b6b75; font-size: 8pt; }
-  .footer { color: #8a8a92; font-size: 7.5pt; text-align: center; margin-top: 20pt; }
+  .footer { border-top: 1pt solid #e5e5ea; margin-top: 12pt; padding-top: 4pt; font-size: 8pt; color: #1a1a1f; }
 </style>
 
-<div class="brand-bar">
-  <span class="doc-number"><?= $h($number) ?></span>
-  <?php if (!empty($brand['logo_data_uri'])): ?><img class="brand-logo" src="<?= $h($brand['logo_data_uri']) ?>" alt=""><?php endif; ?>
-  <div class="title"><?= $h($brand['name'] ?? 'Firol') ?> · Záznam o vykonanom školení</div>
-  <div class="subtitle"><?= $h($training['training_type_label'] ?? '') ?></div>
-</div>
+<table class="hdr">
+  <tr>
+    <td width="57%">
+      <table class="hdr-inner">
+        <tr>
+          <td width="50pt" style="padding-right:7pt;">
+            <?php if (!empty($brand['logo_data_uri'])): ?>
+              <img class="logo-img" src="<?= $h($brand['logo_data_uri']) ?>" alt="">
+            <?php else: ?>
+              <div class="logo-box">LOGO<br>FIRMY</div>
+            <?php endif ?>
+          </td>
+          <td>
+            <div class="hdr-company"><?= $h($company['name']) ?></div>
+            <div class="hdr-sub">Prevádzka: <?= $h($facility['name']) ?> | IČO: <?= $h($company['ico']) ?></div>
+            <div class="hdr-sub"><?= $h($company['address']) ?></div>
+          </td>
+        </tr>
+      </table>
+    </td>
+    <td width="43%" class="hdr-right">
+      <div class="hdr-title">Školenie PO</div>
+      <div class="hdr-meta">Č. dokumentu: <?= $h($number) ?></div>
+      <div class="hdr-meta">Dátum: <?= $formatDate($training['date'] ?? null) ?></div>
+    </td>
+  </tr>
+</table>
+<hr style="border:none; border-top:2pt solid <?= $h($brandColor) ?>; margin:4pt 0 8pt;">
 
-<h2>Klient</h2>
-<table class="kv">
-  <tr><td class="label">Spoločnosť</td><td><?= $h($company['name']) ?></td></tr>
-  <tr><td class="label">IČO</td><td><?= $h($company['ico']) ?></td></tr>
-  <tr><td class="label">Adresa</td><td><?= $h($company['address']) ?></td></tr>
+<h2>Základné informácie</h2>
+<table class="bi">
+  <tr>
+    <td class="bl">Spoločnosť</td>
+    <td class="bv"><?= $h($company['name']) ?></td>
+    <td class="bl">Druh školenia</td>
+    <td class="bv"><?= $h($training['training_type_label'] ?? '') ?></td>
+  </tr>
+  <tr>
+    <td class="bl">IČO</td>
+    <td class="bv"><?= $h($company['ico']) ?></td>
+    <td class="bl">Dátum školenia</td>
+    <td class="bv"><strong><?= $formatDate($training['date'] ?? null) ?></strong></td>
+  </tr>
+  <tr>
+    <td class="bl">Prevádzka</td>
+    <td class="bv"><?= $h($facility['name']) ?></td>
+    <td class="bl">Časový rozsah</td>
+    <td class="bv"><?= (int) ($training['duration_min'] ?? 0) ?> minút</td>
+  </tr>
+  <?php if ($type === 'hliadka_opah'): ?>
+  <tr>
+    <td class="bl">Názov akcie</td>
+    <td colspan="3"><?= $h($training['topics'] ?? null) ?></td>
+  </tr>
+  <?php endif ?>
+  <tr>
+    <td class="bl">Školenie vykonal</td>
+    <td colspan="3"><?= $trainerLine ?></td>
+  </tr>
 </table>
 
-<?php if (!empty($facility['name'])): ?>
-<h2>Prevádzka</h2>
-<table class="kv">
-  <tr><td class="label">Názov</td><td><?= $h($facility['name']) ?></td></tr>
-  <?php if (!empty($facility['address'])): ?>
-  <tr><td class="label">Adresa</td><td><?= $h($facility['address']) ?></td></tr>
-  <?php endif ?>
+<h2>Tematický plán školenia</h2>
+<?php if (isset($simpleTopics[$type])): ?>
+<table class="topics">
+  <thead>
+    <tr>
+      <th style="width:6%">Č.</th>
+      <th>Obsah školenia</th>
+      <th style="width:12%">Čas</th>
+    </tr>
+  </thead>
+  <tbody>
+    <?php foreach ($simpleTopics[$type] as $i => [$text, $min]): ?>
+    <tr>
+      <td class="tnum"><?= $i + 1 ?></td>
+      <td><?= $h($text) ?></td>
+      <td class="ttime"><?= $min ?> min</td>
+    </tr>
+    <?php endforeach ?>
+  </tbody>
+</table>
+<?php elseif (isset($twoPartTopics[$type])): $parts = $twoPartTopics[$type]; ?>
+<div class="section-hdr">Teoretická časť (rozsah: <?= $parts['teoreticka']['rozsah'] ?> min)</div>
+<table class="topics-part">
+  <thead>
+    <tr>
+      <th style="width:6%">Č.</th>
+      <th>Obsah</th>
+    </tr>
+  </thead>
+  <tbody>
+    <?php foreach ($parts['teoreticka']['items'] as $i => $text): ?>
+    <tr>
+      <td class="tnum"><?= $i + 1 ?></td>
+      <td><?= $h($text) ?></td>
+    </tr>
+    <?php endforeach ?>
+  </tbody>
+</table>
+<div class="section-hdr">Praktická časť (rozsah: <?= $parts['prakticka']['rozsah'] ?> min)</div>
+<table class="topics-part">
+  <thead>
+    <tr>
+      <th style="width:6%">Č.</th>
+      <th>Obsah</th>
+    </tr>
+  </thead>
+  <tbody>
+    <?php foreach ($parts['prakticka']['items'] as $i => $text): ?>
+    <tr>
+      <td class="tnum"><?= $i + 1 ?></td>
+      <td><?= $h($text) ?></td>
+    </tr>
+    <?php endforeach ?>
+  </tbody>
 </table>
 <?php endif ?>
 
-<h2>Školenie</h2>
-<table class="kv">
-  <tr><td class="label">Dátum</td><td><strong><?= $formatDate($training['date'] ?? null) ?></strong></td></tr>
-  <?php if (!empty($training['duration_min'])): ?>
-  <tr><td class="label">Dĺžka</td><td><?= (int) $training['duration_min'] ?> minút</td></tr>
-  <?php endif ?>
-  <tr><td class="label">Školiteľ</td><td>
-    <?= $h($trainer['fullname']) ?>
-    <?php if (!empty($trainer['certification_number'])): ?>
-      <span class="small"> · oprávnenie č. <?= $h($trainer['certification_number']) ?></span>
-    <?php endif ?>
-  </td></tr>
-</table>
-
-<?php if (!empty($training['topics'])): ?>
-<h2>Obsah školenia</h2>
-<div class="topics"><?= nl2br($h($training['topics'])) ?></div>
-<?php endif ?>
-
-<h2>Účastníci školenia (<?= count($trainees) ?>)</h2>
+<h2>Prezenčná listina účastníkov</h2>
 <table class="attendees">
   <thead>
     <tr>
-      <th style="width: 4%">#</th>
-      <th style="width: 30%">Meno a priezvisko</th>
-      <th style="width: 26%">Pracovné zaradenie</th>
-      <th style="width: 30%">Podpis</th>
-      <th style="width: 10%">Dátum</th>
+      <th style="width:6%">Por. č.</th>
+      <th style="width:28%">Meno, priezvisko, titul</th>
+      <th style="width:22%">Pracovné zaradenie</th>
+      <th style="width:15%">Dátum školenia</th>
+      <th style="width:29%">Podpis</th>
     </tr>
   </thead>
   <tbody>
     <?php foreach ($trainees as $idx => $tr): ?>
-    <tr>
+    <tr style="height:30pt;">
       <td><?= $idx + 1 ?></td>
-      <td><strong><?= $h($tr['fullname']) ?></strong></td>
+      <td><?= $h($tr['fullname']) ?></td>
       <td><?= $h($tr['position'] ?? null) ?></td>
+      <td><?= $formatDate(substr((string) ($tr['signed_at'] ?? ''), 0, 10)) ?></td>
       <td class="sig-cell">
         <?php if (!empty($tr['signature_data_uri'])): ?>
-          <img class="sig-img" src="<?= $h($tr['signature_data_uri']) ?>" alt="Podpis">
-        <?php else: ?>
-          <span class="small">— bez podpisu —</span>
+          <img class="sig-img" src="<?= $h($tr['signature_data_uri']) ?>" alt="">
         <?php endif ?>
       </td>
-      <td><?= $formatDate(substr((string) ($tr['signed_at'] ?? ''), 0, 10)) ?></td>
     </tr>
     <?php endforeach ?>
   </tbody>
 </table>
 
-<div class="signature-block">
-  <div class="row">
-    <div class="col">
-      <?php if (!empty($trainer['signature_data_uri'])): ?>
-        <img class="signature-img" src="<?= $h($trainer['signature_data_uri']) ?>" alt="Podpis školiteľa">
-      <?php endif ?>
-      <div class="signature-line">
-        <strong><?= $h($trainer['fullname']) ?></strong>
-        <?php if (!empty($trainer['certification_number'])): ?>
-          <div class="small">Oprávnenie č. <?= $h($trainer['certification_number']) ?></div>
-        <?php endif ?>
-      </div>
-    </div>
-    <div class="col">
-      <div class="signature-line">
-        <strong>Za klienta</strong>
-        <div class="small">Podpis a pečiatka zástupcu spoločnosti</div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <div class="footer">
-  Vystavené v aplikácii Firol · <?= $h($number) ?> · vygenerované <?= $formatDate(substr((string) $generated_at, 0, 10)) ?>
+  <strong>Školenie vykonal:</strong> <?= $trainerLine ?>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Podpis školiteľa: ______________________
 </div>
