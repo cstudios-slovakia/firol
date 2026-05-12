@@ -61,7 +61,7 @@ $statusLabels = ['A' => 'Akcieschopný', 'TS' => 'Tlaková skúška', 'O' => 'Vy
   .hdr-right { text-align: right; }
   .hdr-title { font-size: 12.5pt; font-weight: bold; color: <?= $h($brandColor) ?>; }
   .hdr-meta { font-size: 9pt; color: #555; }
-  h2 { color: <?= $h($brandColor) ?>; font-size: 10pt; font-weight: bold; margin: 10pt 0 3pt; text-transform: uppercase; letter-spacing: .3pt; }
+  h2 { background: <?= $h($brandColor) ?>; color: #fff; font-size: 9pt; font-weight: bold; margin: 8pt 0 0; text-transform: uppercase; letter-spacing: .3pt; padding: 3pt 6pt; }
   .bi { border-collapse: collapse; width: 100%; font-size: 9pt; }
   .bi td { padding: 3pt 6pt; border: 1pt solid #dde0e6; vertical-align: top; }
   .bl { background: #f7f7f9; font-weight: bold; color: #6b6b75; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; white-space: nowrap; width: 14%; }
@@ -71,7 +71,7 @@ $statusLabels = ['A' => 'Akcieschopný', 'TS' => 'Tlaková skúška', 'O' => 'Vy
   table.items td { padding: 4pt 5pt; border: 1pt solid #e5e5ea; vertical-align: top; }
   .stats { border-collapse: collapse; width: 100%; margin-top: 6pt; }
   .stats td { padding: 5pt 8pt; border: 1pt solid #e5e5ea; text-align: center; font-size: 9pt; }
-  .stats .num { font-size: 15pt; font-weight: bold; display: block; margin-top: 1pt; }
+  .stats .num { font-size: 15pt; font-weight: bold; }
   .legenda { font-size: 8pt; color: #6b6b75; margin-top: 4pt; font-style: italic; }
   .notes-box { margin-top: 5pt; padding: 5pt 8pt; background: #f7f7f9; border: 1pt solid #e5e5ea; font-size: 9pt; }
   .notes-box p { margin: 2pt 0; }
@@ -166,11 +166,11 @@ $statusLabels = ['A' => 'Akcieschopný', 'TS' => 'Tlaková skúška', 'O' => 'Vy
 <h2>Súhrn výsledkov</h2>
 <table class="stats">
   <tr>
-    <td>Celkom<span class="num"><?= (int) $stats['total'] ?></span></td>
-    <td>Akcieschopných (A)<span class="num" style="color:#2e7d32"><?= (int) $stats['A'] ?></span></td>
-    <td>Na TS<span class="num" style="color:#b95400"><?= (int) $stats['TS'] ?></span></td>
-    <td>Oprava (O)<span class="num" style="color:#c4231b"><?= (int) $stats['O'] ?></span></td>
-    <td>Vyradených (V)<span class="num" style="color:#4a4a52"><?= (int) $stats['V'] ?></span></td>
+    <td>Celkom<br><span class="num"><?= (int) $stats['total'] ?></span></td>
+    <td>Akcieschopných (A)<br><span class="num" style="color:#2e7d32"><?= (int) $stats['A'] ?></span></td>
+    <td>Na TS<br><span class="num" style="color:#b95400"><?= (int) $stats['TS'] ?></span></td>
+    <td>Oprava (O)<br><span class="num" style="color:#c4231b"><?= (int) $stats['O'] ?></span></td>
+    <td>Vyradených (V)<br><span class="num" style="color:#4a4a52"><?= (int) $stats['V'] ?></span></td>
   </tr>
 </table>
 <div class="legenda">Legenda: A – akcieschopný | TS – určený na tlakovú skúšku | O – vyžaduje opravu | V – vyradený z prevádzky</div>

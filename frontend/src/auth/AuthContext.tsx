@@ -45,7 +45,7 @@ type AuthContextValue = {
   csrfToken: string | null;
   isAdmin: boolean;
   login(email: string, password: string): Promise<void>;
-  register(payload: RegisterPayload): Promise<void>;
+  register(payload: RegisterPayload): Promise<string>;
   logout(): Promise<void>;
   switchAccount(accountId: number): Promise<void>;
   refresh(): Promise<void>;
@@ -91,12 +91,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const register = useCallback(
-    async (payload: RegisterPayload) => {
+    async (payload: RegisterPayload): Promise<string> => {
       const data = await api<Snapshot>('/api/auth/register', {
         method: 'POST',
         body: payload,
       });
       apply(data);
+      return data.csrfToken;
     },
     [apply],
   );

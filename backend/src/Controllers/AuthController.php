@@ -45,7 +45,9 @@ final class AuthController
             Response::error('Email already registered', 409);
         }
 
-        $trialDays = self::settingInt($pdo, 'trial_days', 14);
+        // Trial temporarily disabled — new accounts must pay immediately.
+        // To re-enable, replace 0 with: self::settingInt($pdo, 'trial_days', 14)
+        $trialDays = 0;
         $trialEnd  = (new \DateTimeImmutable('today'))->modify("+{$trialDays} days")->format('Y-m-d');
 
         $pdo->beginTransaction();
