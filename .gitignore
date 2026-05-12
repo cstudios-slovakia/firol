@@ -24,6 +24,8 @@ vendor/
 # Cowork / Claude scratch
 .claude/cache/
 .claude/local/
+.claude/worktrees/
+.claude/settings.local.json
 
 # Veľké materiály k handoffu (referenčné, nie v repe)
 firol.pdf
