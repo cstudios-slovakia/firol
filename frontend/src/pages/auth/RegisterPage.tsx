@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Building2, Eye, EyeOff, Lock, Mail, Phone, User } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -8,12 +8,12 @@ import { Button } from '@/components/ui/Button';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useAuth } from '@/auth/AuthContext';
+import { Billing } from '@/api/billing';
 import { AuthLayout } from './AuthLayout';
 
 type Period = 'monthly' | 'yearly';
 
 export function RegisterPage() {
-  const navigate = useNavigate();
   const { register } = useAuth();
 
   const [fullname, setFullname] = useState('');
@@ -44,7 +44,7 @@ export function RegisterPage() {
     setError(null);
     setLoading(true);
     try {
-      await register({
+      const csrfToken = await register({
         fullname,
         email,
         phone: phone || undefined,
@@ -52,10 +52,11 @@ export function RegisterPage() {
         invoice_company_name: companyName,
         billing_period: billingPeriod,
       });
-      navigate('/', { replace: true });
+      const checkout = await Billing.checkout(billingPeriod, csrfToken);
+      window.location.assign(checkout.url);
+      // Page is redirecting — keep loading state, don't reset.
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo, skús to znova.');
-    } finally {
       setLoading(false);
     }
   }
@@ -63,7 +64,7 @@ export function RegisterPage() {
   return (
     <AuthLayout
       title="Registrácia"
-      subtitle="Vytvor si konto a začni s 14-dňovou skúšobnou dobou bez obmedzení."
+      subtitle="Vytvor si konto, vyber plán a zaplať bezpečne cez Stripe — prístup získaš okamžite."
       footer={
         <>
           Už máš konto?{' '}
@@ -204,7 +205,7 @@ export function RegisterPage() {
               />
             </div>
             <p className="text-xs text-ink-400">
-              Najprv 14 dní zadarmo. Až po skončení skúšobnej doby ti bude účtovaná zvolená suma.
+              Platba prebehne bezpečne cez Stripe. Po úhrade získaš okamžitý plný prístup.
             </p>
           </div>
 
@@ -220,7 +221,7 @@ export function RegisterPage() {
             disabled={password.length === 0 || password !== passwordConfirm}
             className="mt-2 w-full"
           >
-            Vytvoriť konto
+            Vytvoriť konto a zaplatiť
           </Button>
         </form>
       </Card>

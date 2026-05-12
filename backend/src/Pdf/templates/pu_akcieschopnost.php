@@ -71,7 +71,7 @@ foreach ($items as $idx => $it) {
   .hdr-right { text-align: right; }
   .hdr-title { font-size: 12.5pt; font-weight: bold; color: <?= $h($brandColor) ?>; }
   .hdr-meta { font-size: 9pt; color: #555; }
-  h2 { color: <?= $h($brandColor) ?>; font-size: 10pt; font-weight: bold; margin: 10pt 0 3pt; text-transform: uppercase; letter-spacing: .3pt; }
+  h2 { background: <?= $h($brandColor) ?>; color: #fff; font-size: 9pt; font-weight: bold; margin: 8pt 0 0; text-transform: uppercase; letter-spacing: .3pt; padding: 3pt 6pt; }
   .bi { border-collapse: collapse; width: 100%; font-size: 9pt; }
   .bi td { padding: 3pt 6pt; border: 1pt solid #dde0e6; vertical-align: top; }
   .bl { background: #f7f7f9; font-weight: bold; color: #6b6b75; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; white-space: nowrap; width: 14%; }
@@ -83,7 +83,7 @@ foreach ($items as $idx => $it) {
   .res-bad { color: #c4231b; font-weight: bold; }
   .stats { border-collapse: collapse; width: 100%; margin-top: 6pt; }
   .stats td { padding: 5pt 8pt; border: 1pt solid #e5e5ea; text-align: center; font-size: 9pt; }
-  .stats .num { font-size: 15pt; font-weight: bold; display: block; margin-top: 1pt; }
+  .stats .num { font-size: 15pt; font-weight: bold; }
   .notes-box { margin-top: 5pt; padding: 5pt 8pt; background: #f7f7f9; border: 1pt solid #e5e5ea; font-size: 9pt; }
   .notes-box p { margin: 2pt 0; }
   .sig-tbl { border-collapse: collapse; width: 100%; margin-top: 12pt; font-size: 9pt; }
@@ -177,9 +177,9 @@ foreach ($items as $idx => $it) {
 <h2>Súhrn výsledkov</h2>
 <table class="stats">
   <tr>
-    <td>Kontrolovaných uzáverov<span class="num"><?= (int) $stats['total'] ?></span></td>
-    <td>Vyhovuje<span class="num" style="color:#2e7d32"><?= (int) ($stats['vyhovuje'] ?? 0) ?></span></td>
-    <td>Nevyhovuje<span class="num" style="color:#c4231b"><?= (int) ($stats['nevyhovuje'] ?? 0) ?></span></td>
+    <td>Kontrolovaných uzáverov<br><span class="num"><?= (int) $stats['total'] ?></span></td>
+    <td>Vyhovuje<br><span class="num" style="color:#2e7d32"><?= (int) ($stats['vyhovuje'] ?? 0) ?></span></td>
+    <td>Nevyhovuje<br><span class="num" style="color:#c4231b"><?= (int) ($stats['nevyhovuje'] ?? 0) ?></span></td>
   </tr>
 </table>
 
