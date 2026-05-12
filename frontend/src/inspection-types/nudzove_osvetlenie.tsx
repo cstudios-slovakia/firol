@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, Clock, Edit2, Lightbulb,
-  ListChecks, MapPin, NotebookPen, Save, Tag, Trash2,
+  AlertTriangle, ArrowRight, CheckCircle2, Edit2, Hash, Lightbulb,
+  ListChecks, Layers, MapPin, NotebookPen, Save, Tag, Trash2,
 } from 'lucide-react';
 import {
   Inspections,
@@ -34,10 +34,11 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
+  const [evidNumber, setEvidNumber] = useState('');
+  const [floor, setFloor] = useState('');
   const [luminaireType, setLuminaireType] = useState('');
   const [manufacturer, setManufacturer] = useState('');
   const [location, setLocation] = useState('');
-  const [durationMin, setDurationMin] = useState<string>('');
   const [result, setResult] = useState<PassFailResult>('vyhovuje');
   const [notes, setNotes] = useState('');
 
@@ -48,30 +49,28 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   useEffect(() => {
     if (initialItem) {
       const f = initialItem.fields as Partial<NudzoveOsvetlenieItemFields>;
+      setEvidNumber(typeof f.evid_number === 'string' ? f.evid_number : '');
+      setFloor(typeof f.floor === 'string' ? f.floor : '');
       setLuminaireType(typeof f.luminaire_type === 'string' ? f.luminaire_type : '');
       setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
       setLocation(typeof f.location === 'string' ? f.location : '');
-      setDurationMin(typeof f.duration_min === 'number' ? String(f.duration_min) : '');
       setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
+      setEvidNumber('');
+      setFloor('');
       setLuminaireType('');
       setManufacturer('');
       setLocation('');
-      setDurationMin('');
       setResult('vyhovuje');
       setNotes('');
     }
   }, [initialItem]);
 
   function localValidationError(): string | null {
-    if (!luminaireType.trim()) return 'Doplň typ svietidla.';
-    if (!manufacturer.trim()) return 'Doplň výrobcu.';
+    if (!evidNumber.trim()) return 'Doplň evidenčné číslo svietidla.';
+    if (!luminaireType.trim()) return 'Doplň druh / typ svietidla.';
     if (!location.trim()) return 'Doplň umiestnenie.';
-    const n = Number(durationMin);
-    if (!Number.isInteger(n) || n < 0 || n > 600) {
-      return 'Doba svietenia musí byť celé číslo 0–600 minút.';
-    }
     return null;
   }
 
@@ -86,10 +85,11 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
     setSubmitting(true);
     try {
       const fields: NudzoveOsvetlenieItemFields = {
+        evid_number: evidNumber.trim(),
+        floor: floor.trim(),
         luminaire_type: luminaireType.trim(),
         manufacturer: manufacturer.trim(),
         location: location.trim(),
-        duration_min: Number(durationMin),
         result,
         notes: notes.trim() || null,
       };
@@ -111,41 +111,46 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
     <Card className="p-5">
       <form className="flex flex-col gap-4" noValidate onSubmit={(e) => handleSubmit(e, 'save-and-next')}>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Typ svietidla" required>
+          <Field label="Evid. č. svietidla" required hint="Napr. NL-001">
             {(p) => (
-              <Input {...p} required leftIcon={<Lightbulb className="size-4" />}
-                value={luminaireType} onChange={(e) => setLuminaireType(e.target.value)}
-                placeholder="LED 3W IP54" />
+              <Input {...p} required leftIcon={<Hash className="size-4" />}
+                value={evidNumber} onChange={(e) => setEvidNumber(e.target.value)}
+                placeholder="NL-001" />
             )}
           </Field>
-          <Field label="Výrobca" required>
+          <Field label="Podlažie" hint="Napr. 1.NP, 2.NP">
             {(p) => (
-              <Input {...p} required leftIcon={<Tag className="size-4" />}
-                value={manufacturer} onChange={(e) => setManufacturer(e.target.value)}
-                placeholder="Eaton" />
+              <Input {...p} leftIcon={<Layers className="size-4" />}
+                value={floor} onChange={(e) => setFloor(e.target.value)}
+                placeholder="1.NP" />
             )}
           </Field>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="sm:col-span-2">
-            <Field label="Umiestnenie" required>
-              {(p) => (
-                <Input {...p} required leftIcon={<MapPin className="size-4" />}
-                  value={location} onChange={(e) => setLocation(e.target.value)}
-                  placeholder="Chodba 2.NP, nad únikovým východom" />
-              )}
-            </Field>
-          </div>
-          <Field label="Doba svietenia (min)" required hint="Nameraná v núdzovom režime.">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Druh / typ" required>
             {(p) => (
-              <Input {...p} required type="number" inputMode="numeric" min={0} max={600}
-                leftIcon={<Clock className="size-4" />}
-                value={durationMin} onChange={(e) => setDurationMin(e.target.value)}
-                placeholder="180" />
+              <Input {...p} required leftIcon={<Lightbulb className="size-4" />}
+                value={luminaireType} onChange={(e) => setLuminaireType(e.target.value)}
+                placeholder="EXIT 3h, Núdzové 1h" />
+            )}
+          </Field>
+          <Field label="Výrobca">
+            {(p) => (
+              <Input {...p} leftIcon={<Tag className="size-4" />}
+                value={manufacturer} onChange={(e) => setManufacturer(e.target.value)}
+                placeholder="EATON, LEGRAND" />
             )}
           </Field>
         </div>
+
+        <Field label="Umiestnenie" required>
+          {(p) => (
+            <Input {...p} required leftIcon={<MapPin className="size-4" />}
+              value={location} onChange={(e) => setLocation(e.target.value)}
+              placeholder="Chodba 2.NP, nad únikovým východom" />
+          )}
+        </Field>
 
         <Field label="Výsledok testu" required>
           {() => (
@@ -237,7 +242,7 @@ function NoItemRow({
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h3 className="truncate text-sm font-semibold text-ink-900">
               <Lightbulb className="-mt-0.5 mr-1 inline size-3 text-ink-400" />
-              {f.luminaire_type} · {f.manufacturer}
+              {f.evid_number}{f.floor ? ` / ${f.floor}` : ''} · {f.luminaire_type}
             </h3>
             {result && (
               <Badge tone={result === 'vyhovuje' ? 'ok' : 'bad'}>
@@ -248,9 +253,6 @@ function NoItemRow({
           <p className="mt-0.5 truncate text-xs text-ink-500">
             <MapPin className="-mt-0.5 mr-1 inline size-3" />
             {f.location}
-            <span className="mx-1.5 text-ink-300">·</span>
-            <Clock className="-mt-0.5 mr-1 inline size-3" />
-            {f.duration_min ?? 0} min
           </p>
           {f.notes && (
             <p className="mt-1 line-clamp-2 text-xs text-ink-600">

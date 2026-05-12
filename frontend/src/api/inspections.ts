@@ -199,6 +199,7 @@ export type PuAkcieschopnostItemFields = {
 export type PuUdrzbaItemFields = {
   kind: PuKind;
   identifier: string;
+  manufacturer: string;
   location: string;
   maintenance_work: string;
   result: PassFailResult;
@@ -206,10 +207,12 @@ export type PuUdrzbaItemFields = {
 };
 
 export type NudzoveOsvetlenieItemFields = {
+  evid_number: string;
+  floor: string;
   luminaire_type: string;
   manufacturer: string;
   location: string;
-  duration_min: number;
+  duration_min?: number;
   result: PassFailResult;
   notes: string | null;
 };
