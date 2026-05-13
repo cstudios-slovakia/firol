@@ -58,6 +58,21 @@ final class BillingController
         }
 
         $account = self::loadAccountFull($accountId);
+
+        // Billing details (address + IČO) are required before any Stripe session
+        // can be created — iDoklad needs them to issue a proper Slovak invoice.
+        if (
+            empty(trim($account['invoice_street']      ?? '')) ||
+            empty(trim($account['invoice_postal_code'] ?? '')) ||
+            empty(trim($account['invoice_city']        ?? '')) ||
+            empty(trim($account['invoice_ico']         ?? ''))
+        ) {
+            Response::error(
+                'Pred aktiváciou predplatného vyplň fakturačné údaje (adresa a IČO) v nastaveniach.',
+                422
+            );
+        }
+
         $customerId = self::ensureCustomer($account);
 
         $base    = StripeClient::appBaseUrl();
@@ -323,7 +338,8 @@ final class BillingController
     private static function loadAccountFull(int $accountId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT id, invoice_company_name, stripe_customer_id, subscription_end_date
+            'SELECT id, invoice_company_name, stripe_customer_id, subscription_end_date,
+                    invoice_street, invoice_postal_code, invoice_city, invoice_ico
              FROM   accounts WHERE id = ?'
         );
         $stmt->execute([$accountId]);

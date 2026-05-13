@@ -16,7 +16,7 @@ export function AuthLayout({
   return (
     <main className="bg-app relative min-h-screen">
       <AuroraBackground />
-      <div className="mx-auto flex min-h-screen max-w-md flex-col px-5 py-8 sm:py-14">
+      <div className="mx-auto flex min-h-screen max-w-lg flex-col px-5 py-8 sm:py-14">
         <Link to="/" className="flex items-center gap-2.5 self-start">
           <span className="grid size-10 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
             <Flame className="size-5" />

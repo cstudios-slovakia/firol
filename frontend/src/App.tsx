@@ -1,8 +1,9 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { RequireAuth, RedirectIfAuthed } from '@/auth/RequireAuth';
+import { RequireAuth, RedirectIfAuthed, RequireBillingComplete } from '@/auth/RequireAuth';
 import { AppShell } from '@/components/AppShell';
 import { LoginPage } from '@/pages/auth/LoginPage';
 import { RegisterPage } from '@/pages/auth/RegisterPage';
+import { OnboardingBillingPage } from '@/pages/auth/OnboardingBillingPage';
 import { PasswordResetRequestPage } from '@/pages/auth/PasswordResetRequestPage';
 import { PasswordResetConfirmPage } from '@/pages/auth/PasswordResetConfirmPage';
 import { DashboardPage } from '@/pages/DashboardPage';
@@ -19,6 +20,7 @@ import { TrainingsListPage } from '@/pages/TrainingsListPage';
 import { NewTrainingPage } from '@/pages/NewTrainingPage';
 import { TrainingDetailPage } from '@/pages/TrainingDetailPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { BillingPage } from '@/pages/BillingPage';
 
 export default function App() {
   return (
@@ -43,9 +45,20 @@ export default function App() {
       <Route path="/password-reset/confirm" element={<PasswordResetConfirmPage />} />
 
       <Route
+        path="/onboarding/billing"
         element={
           <RequireAuth>
-            <AppShell />
+            <OnboardingBillingPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        element={
+          <RequireAuth>
+            <RequireBillingComplete>
+              <AppShell />
+            </RequireBillingComplete>
           </RequireAuth>
         }
       >
@@ -70,6 +83,7 @@ export default function App() {
         <Route path="/trainings/new" element={<NewTrainingPage />} />
         <Route path="/trainings/:id" element={<TrainingDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/billing" element={<BillingPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

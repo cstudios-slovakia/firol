@@ -31,3 +31,25 @@ export function RedirectIfAuthed({ children }: { children: React.ReactNode }) {
   if (status === 'authed') return <Navigate to="/" replace />;
   return <>{children}</>;
 }
+
+/**
+ * Forces paid-flow registrants (chose monthly/yearly, haven't completed
+ * Stripe checkout, missing billing details) onto /onboarding/billing
+ * before they can enter the app. Trial users skip this guard because they
+ * have no billing_period stored until they pick a plan in Settings.
+ */
+export function RequireBillingComplete({ children }: { children: React.ReactNode }) {
+  const { accounts, activeAccountId } = useAuth();
+  const account = accounts.find((a) => a.id === activeAccountId);
+  if (account) {
+    const needsBilling =
+      account.billing_period !== null &&
+      account.stripe_status !== 'active' &&
+      account.stripe_status !== 'trialing' &&
+      !account.has_billing_details;
+    if (needsBilling) {
+      return <Navigate to="/onboarding/billing" replace />;
+    }
+  }
+  return <>{children}</>;
+}
