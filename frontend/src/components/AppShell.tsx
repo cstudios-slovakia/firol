@@ -19,10 +19,38 @@ import { AuroraBackground } from "./AuroraBackground";
 import { cn } from "@/lib/cn";
 
 const TABS = [
-    { to: "/", label: "Firmy", icon: Building2 },
-    { to: "/inspections", label: "Kontroly", icon: ClipboardList },
-    { to: "/trainings", label: "Školenia", icon: GraduationCap },
-    { to: "/settings", label: "Nastavenia", icon: Settings },
+    {
+        to: "/",
+        label: "Firmy",
+        icon: Building2,
+        activeColor: "text-blue-600",
+        activeBg: "bg-blue-50 shadow-[inset_0_0_0_1px_theme(colors.blue.100)]",
+        iconBg: "bg-blue-100",
+    },
+    {
+        to: "/inspections",
+        label: "Kontroly",
+        icon: ClipboardList,
+        activeColor: "text-orange-600",
+        activeBg: "bg-orange-50 shadow-[inset_0_0_0_1px_theme(colors.orange.100)]",
+        iconBg: "bg-orange-100",
+    },
+    {
+        to: "/trainings",
+        label: "Školenia",
+        icon: GraduationCap,
+        activeColor: "text-emerald-600",
+        activeBg: "bg-emerald-50 shadow-[inset_0_0_0_1px_theme(colors.emerald.100)]",
+        iconBg: "bg-emerald-100",
+    },
+    {
+        to: "/settings",
+        label: "Nastavenia",
+        icon: Settings,
+        activeColor: "text-violet-600",
+        activeBg: "bg-violet-50 shadow-[inset_0_0_0_1px_theme(colors.violet.100)]",
+        iconBg: "bg-violet-100",
+    },
 ] as const;
 
 export function AppShell() {
@@ -161,19 +189,14 @@ function SideNav() {
                                     cn(
                                         "flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-sm font-medium transition-colors",
                                         isActive
-                                            ? "bg-firol-50 text-firol-700 shadow-[inset_0_0_0_1px_var(--color-firol-100)]"
-                                            : "text-ink-600 hover:bg-ink-100 hover:text-ink-900",
+                                            ? cn("text-ink-900", tab.activeBg)
+                                            : "text-ink-600 hover:bg-ink-50 hover:text-ink-900",
                                     )
                                 }
                             >
-                                {({ isActive }) => (
+                                {() => (
                                     <>
-                                        <tab.icon
-                                            className={cn(
-                                                "size-4 shrink-0",
-                                                isActive && "text-firol-600",
-                                            )}
-                                        />
+                                        <tab.icon className={cn("size-4 shrink-0", tab.activeColor)} />
                                         <span>{tab.label}</span>
                                     </>
                                 )}
@@ -202,8 +225,8 @@ function BottomTabBar() {
                                 cn(
                                     "flex flex-col items-center gap-0.5 rounded-2xl py-2 text-[11px] font-medium transition-colors",
                                     isActive
-                                        ? "text-firol-600"
-                                        : "text-ink-400 hover:text-ink-700",
+                                        ? cn(tab.activeColor, tab.activeBg)
+                                        : "text-ink-400 hover:text-ink-600",
                                 )
                             }
                         >
@@ -212,6 +235,7 @@ function BottomTabBar() {
                                     <tab.icon
                                         className={cn(
                                             "size-5",
+                                            tab.activeColor,
                                             isActive && "stroke-[2.25px]",
                                         )}
                                     />
