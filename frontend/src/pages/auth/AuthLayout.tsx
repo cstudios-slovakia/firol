@@ -1,5 +1,6 @@
 import { Flame } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { AuroraBackground } from '@/components/AuroraBackground';
 
 export function AuthLayout({
   title,
@@ -13,7 +14,8 @@ export function AuthLayout({
   footer?: React.ReactNode;
 }) {
   return (
-    <main className="bg-app min-h-screen">
+    <main className="bg-app relative min-h-screen">
+      <AuroraBackground />
       <div className="mx-auto flex min-h-screen max-w-md flex-col px-5 py-8 sm:py-14">
         <Link to="/" className="flex items-center gap-2.5 self-start">
           <span className="grid size-10 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
