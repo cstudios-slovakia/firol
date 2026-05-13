@@ -78,7 +78,7 @@
     animation: aurora-drift var(--aurora-dur, 22s) ease-in-out infinite var(--aurora-delay, 0s);
   }
 
-  /* Top-right: firol red/coral */
+  /* Top-right: firol red/coral — mierne tlmená */
   .aurora-blob-1 {
     width: 65vmax;
     height: 52vmax;
@@ -87,6 +87,7 @@
     background: radial-gradient(ellipse at center, hsl(4 90% 70%) 0%, transparent 68%);
     --aurora-dur: 24s;
     --aurora-delay: 0s;
+    opacity: 0.20;
   }
 
   /* Bottom-left: cool periwinkle blue */
@@ -99,6 +100,7 @@
     --aurora-dur: 30s;
     --aurora-delay: -9s;
     animation-direction: reverse;
+    opacity: 0.40;
   }
 
   /* Top-left: warm amber */
@@ -110,7 +112,7 @@
     background: radial-gradient(ellipse at center, hsl(32 95% 72%) 0%, transparent 70%);
     --aurora-dur: 26s;
     --aurora-delay: -5s;
-    opacity: 0.22;
+    opacity: 0.32;
   }
 
   /* Bottom-right: soft violet */
@@ -123,7 +125,7 @@
     --aurora-dur: 34s;
     --aurora-delay: -16s;
     animation-direction: reverse;
-    opacity: 0.20;
+    opacity: 0.30;
   }
 
   @keyframes aurora-drift {
