@@ -1,4 +1,4 @@
-import { Link, Outlet, NavLink } from "react-router-dom";
+import { Link, Outlet, NavLink, useNavigate } from "react-router-dom";
 import {
     AlertTriangle,
     Building2,
@@ -18,7 +18,7 @@ import { AccountSwitcher } from "./AccountSwitcher";
 import { AuroraBackground } from "./AuroraBackground";
 import { cn } from "@/lib/cn";
 
-const TABS = [
+const TOP_TABS = [
     {
         to: "/",
         label: "Firmy",
@@ -43,6 +43,17 @@ const TABS = [
         activeBg: "bg-emerald-50 shadow-[inset_0_0_0_1px_theme(colors.emerald.100)]",
         iconBg: "bg-emerald-100",
     },
+] as const;
+
+const BOTTOM_TABS = [
+    {
+        to: "/billing",
+        label: "Predplatné",
+        icon: CreditCard,
+        activeColor: "text-firol-600",
+        activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
+        iconBg: "bg-firol-100",
+    },
     {
         to: "/settings",
         label: "Nastavenia",
@@ -52,6 +63,8 @@ const TABS = [
         iconBg: "bg-violet-100",
     },
 ] as const;
+
+const TABS = [...TOP_TABS, ...BOTTOM_TABS] as const;
 
 export function AppShell() {
     const { logout } = useAuth();
@@ -108,6 +121,7 @@ export function AppShell() {
 function SubscriptionBanner() {
     const { accounts, activeAccountId, csrfToken } = useAuth();
     const toast = useToast();
+    const navigate = useNavigate();
     const [busy, setBusy] = useState(false);
 
     const account = accounts.find((a) => a.id === activeAccountId);
@@ -135,6 +149,11 @@ function SubscriptionBanner() {
             );
             window.location.assign(res.url);
         } catch (err) {
+            if (err instanceof ApiError && err.status === 422) {
+                // Billing details missing — redirect to settings to fill them.
+                navigate('/billing?onboarding=billing');
+                return;
+            }
             const msg =
                 err instanceof ApiError
                     ? err.message
@@ -173,37 +192,45 @@ function SubscriptionBanner() {
 }
 
 function SideNav() {
+    const renderItem = (tab: (typeof TABS)[number]) => (
+        <li key={tab.to}>
+            <NavLink
+                to={tab.to}
+                end={tab.to === "/"}
+                className={({ isActive }) =>
+                    cn(
+                        "flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-sm font-medium transition-colors",
+                        isActive
+                            ? cn("text-ink-900", tab.activeBg)
+                            : "text-ink-600 hover:bg-ink-50 hover:text-ink-900",
+                    )
+                }
+            >
+                {() => (
+                    <>
+                        <tab.icon className={cn("size-4 shrink-0", tab.activeColor)} />
+                        <span>{tab.label}</span>
+                    </>
+                )}
+            </NavLink>
+        </li>
+    );
+
     return (
         <aside
             aria-label="Hlavná navigácia"
             className="hidden sm:block w-56 shrink-0"
         >
-            <nav className="sticky top-[81px]">
+            <nav className="sticky top-[81px] flex min-h-[calc(100vh-113px)] flex-col">
                 <ul className="flex flex-col gap-1">
-                    {TABS.map((tab) => (
-                        <li key={tab.to}>
-                            <NavLink
-                                to={tab.to}
-                                end={tab.to === "/"}
-                                className={({ isActive }) =>
-                                    cn(
-                                        "flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-sm font-medium transition-colors",
-                                        isActive
-                                            ? cn("text-ink-900", tab.activeBg)
-                                            : "text-ink-600 hover:bg-ink-50 hover:text-ink-900",
-                                    )
-                                }
-                            >
-                                {() => (
-                                    <>
-                                        <tab.icon className={cn("size-4 shrink-0", tab.activeColor)} />
-                                        <span>{tab.label}</span>
-                                    </>
-                                )}
-                            </NavLink>
-                        </li>
-                    ))}
+                    {TOP_TABS.map(renderItem)}
                 </ul>
+                <div className="mt-auto pt-4">
+                    <div className="mb-2 border-t border-ink-100" />
+                    <ul className="flex flex-col gap-1">
+                        {BOTTOM_TABS.map(renderItem)}
+                    </ul>
+                </div>
             </nav>
         </aside>
     );

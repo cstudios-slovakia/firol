@@ -32,8 +32,8 @@ final class AuthController
         if ($invoiceCompanyName === null || $invoiceCompanyName === '') {
             Response::error('Field required: invoice_company_name', 422);
         }
-        if ($billingPeriod !== 'monthly' && $billingPeriod !== 'yearly') {
-            Response::error('billing_period must be "monthly" or "yearly"', 422);
+        if ($billingPeriod !== 'monthly' && $billingPeriod !== 'yearly' && $billingPeriod !== 'trial') {
+            Response::error('billing_period must be "trial", "monthly" or "yearly"', 422);
         }
 
         $pdo = Db::pdo();
@@ -45,10 +45,18 @@ final class AuthController
             Response::error('Email already registered', 409);
         }
 
-        // Trial temporarily disabled — new accounts must pay immediately.
-        // To re-enable, replace 0 with: self::settingInt($pdo, 'trial_days', 14)
-        $trialDays = 0;
+        // Trial path: grant trial_days of free access. Paid path: no trial —
+        // subscription_end_date lands on today, the account is in the
+        // forced-paywall state and the frontend routes the user through
+        // /onboarding/billing → Stripe before letting them into the app.
+        $trialDays = $billingPeriod === 'trial'
+            ? self::settingInt($pdo, 'trial_days', 14)
+            : 0;
         $trialEnd  = (new \DateTimeImmutable('today'))->modify("+{$trialDays} days")->format('Y-m-d');
+
+        // Persist the chosen plan only when the user committed to one.
+        // Trial users decide later in Settings.
+        $storedBillingPeriod = $billingPeriod === 'trial' ? null : $billingPeriod;
 
         $pdo->beginTransaction();
         try {
@@ -62,7 +70,7 @@ final class AuthController
                 'INSERT INTO accounts (invoice_company_name, subscription_end_date, main_user_id, billing_period)
                  VALUES (?, ?, ?, ?)'
             );
-            $insertAccount->execute([$invoiceCompanyName, $trialEnd, $userId, $billingPeriod]);
+            $insertAccount->execute([$invoiceCompanyName, $trialEnd, $userId, $storedBillingPeriod]);
             $accountId = (int) $pdo->lastInsertId();
 
             $pdo->prepare(
@@ -242,14 +250,28 @@ final class AuthController
 
         $accStmt = $pdo->prepare(
             'SELECT a.id, a.invoice_company_name, a.subscription_end_date, a.main_user_id,
-                    a.stripe_status, a.billing_period, a.stripe_customer_id
+                    a.stripe_status, a.billing_period, a.stripe_customer_id,
+                    a.invoice_street, a.invoice_postal_code, a.invoice_city, a.invoice_ico
              FROM   accounts a
              JOIN   account_users au ON au.account_id = a.id
              WHERE  au.user_id = ? AND au.is_active = 1
              ORDER  BY a.id ASC'
         );
         $accStmt->execute([$userId]);
-        $accounts = $accStmt->fetchAll();
+        $accountsRaw = $accStmt->fetchAll();
+
+        // Surface a derived `has_billing_details` flag so the frontend can
+        // gate UI (Settings billing card, /onboarding/billing guard) without
+        // shipping the full invoice address in the auth snapshot.
+        $accounts = array_map(static function (array $a): array {
+            $a['has_billing_details'] =
+                trim((string) ($a['invoice_street']      ?? '')) !== '' &&
+                trim((string) ($a['invoice_postal_code'] ?? '')) !== '' &&
+                trim((string) ($a['invoice_city']        ?? '')) !== '' &&
+                trim((string) ($a['invoice_ico']         ?? ''));
+            unset($a['invoice_street'], $a['invoice_postal_code'], $a['invoice_city'], $a['invoice_ico']);
+            return $a;
+        }, $accountsRaw);
 
         return [
             'user'            => $user ?: null,

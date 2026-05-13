@@ -1,20 +1,18 @@
 import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
-import { Building2, Eye, EyeOff, Lock, Mail, Phone, User } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Building2, Eye, EyeOff, Lock, Mail, Phone, Sparkles, User } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { useAuth } from '@/auth/AuthContext';
-import { Billing } from '@/api/billing';
+import { useAuth, type RegistrationPlan } from '@/auth/AuthContext';
 import { AuthLayout } from './AuthLayout';
-
-type Period = 'monthly' | 'yearly';
 
 export function RegisterPage() {
   const { register } = useAuth();
+  const navigate = useNavigate();
 
   const [fullname, setFullname] = useState('');
   const [email, setEmail] = useState('');
@@ -23,7 +21,7 @@ export function RegisterPage() {
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [companyName, setCompanyName] = useState('');
-  const [billingPeriod, setBillingPeriod] = useState<Period>('yearly');
+  const [plan, setPlan] = useState<RegistrationPlan>('trial');
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -44,17 +42,23 @@ export function RegisterPage() {
     setError(null);
     setLoading(true);
     try {
-      const csrfToken = await register({
+      await register({
         fullname,
         email,
         phone: phone || undefined,
         password,
         invoice_company_name: companyName,
-        billing_period: billingPeriod,
+        billing_period: plan,
       });
-      const checkout = await Billing.checkout(billingPeriod, csrfToken);
-      window.location.assign(checkout.url);
-      // Page is redirecting — keep loading state, don't reset.
+      // Trial users go straight into the app — they have 14 days before
+      // the read-only gate kicks in. Paid-plan users land on a dedicated
+      // billing-details page that gates access to the app until they
+      // complete checkout on Stripe.
+      if (plan === 'trial') {
+        navigate('/');
+      } else {
+        navigate('/onboarding/billing');
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo, skús to znova.');
       setLoading(false);
@@ -64,7 +68,7 @@ export function RegisterPage() {
   return (
     <AuthLayout
       title="Registrácia"
-      subtitle="Vytvor si konto, vyber plán a zaplať bezpečne cez Stripe — prístup získaš okamžite."
+      subtitle="Vytvor si konto, vyber plán a vyplň fakturačné údaje — potom zaplatíš cez Stripe a okamžite získaš prístup."
       footer={
         <>
           Už máš konto?{' '}
@@ -189,23 +193,33 @@ export function RegisterPage() {
             >
               Predplatné
             </span>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <PeriodOption
-                active={billingPeriod === 'yearly'}
-                onClick={() => setBillingPeriod('yearly')}
+                active={plan === 'trial'}
+                onClick={() => setPlan('trial')}
+                label="Skúšobná verzia"
+                price="14 dní zdarma"
+                badge="Štart"
+                icon={<Sparkles className="size-3.5" />}
+              />
+              <PeriodOption
+                active={plan === 'yearly'}
+                onClick={() => setPlan('yearly')}
                 label="Ročné"
                 price="199 €"
                 badge="−13 %"
               />
               <PeriodOption
-                active={billingPeriod === 'monthly'}
-                onClick={() => setBillingPeriod('monthly')}
+                active={plan === 'monthly'}
+                onClick={() => setPlan('monthly')}
                 label="Mesačné"
                 price="19 €"
               />
             </div>
             <p className="text-xs text-ink-400">
-              Platba prebehne bezpečne cez Stripe. Po úhrade získaš okamžitý plný prístup.
+              {plan === 'trial'
+                ? 'Skúšobné obdobie 14 dní bez platby. Predplatné si vyberieš neskôr v nastaveniach.'
+                : 'V ďalšom kroku doplníš fakturačné údaje a presmerujeme ťa na bezpečnú platbu cez Stripe.'}
             </p>
           </div>
 
@@ -221,7 +235,7 @@ export function RegisterPage() {
             disabled={password.length === 0 || password !== passwordConfirm}
             className="mt-2 w-full"
           >
-            Vytvoriť konto a zaplatiť
+            {plan === 'trial' ? 'Spustiť skúšobnú verziu' : 'Pokračovať na fakturáciu'}
           </Button>
         </form>
       </Card>
@@ -258,25 +272,34 @@ function PeriodOption({
   label,
   price,
   badge,
+  icon,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
   price: string;
   badge?: string;
+  icon?: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        'relative flex flex-col items-start gap-0.5 rounded-2xl border-2 px-4 py-3 text-left transition-all duration-200',
+        'flex flex-col items-start gap-0.5 rounded-2xl border-2 px-4 py-3 text-left transition-all duration-200',
         active
           ? 'border-firol-500 bg-firol-50/70 shadow-[var(--shadow-soft)]'
           : 'border-ink-200 bg-white hover:border-ink-300',
       )}
       aria-pressed={active}
     >
+      <span className={cn(
+        'mb-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+        badge ? 'bg-firol-100 text-firol-700' : 'invisible',
+      )}>
+        {icon}
+        {badge ?? ' '}
+      </span>
       <span
         className={cn(
           'text-sm font-medium',
@@ -286,11 +309,6 @@ function PeriodOption({
         {label}
       </span>
       <span className="text-base font-semibold text-ink-900">{price}</span>
-      {badge && (
-        <span className="absolute right-2 top-2 rounded-full bg-firol-100 px-1.5 py-0.5 text-[10px] font-semibold text-firol-700">
-          {badge}
-        </span>
-      )}
     </button>
   );
 }

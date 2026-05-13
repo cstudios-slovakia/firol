@@ -16,6 +16,7 @@ export type Account = {
   stripe_status: string | null;
   billing_period: 'monthly' | 'yearly' | null;
   stripe_customer_id: string | null;
+  has_billing_details: boolean;
 };
 
 type Snapshot = {
@@ -28,13 +29,15 @@ type Snapshot = {
 
 export type AuthStatus = 'loading' | 'authed' | 'unauthed';
 
+export type RegistrationPlan = 'trial' | 'monthly' | 'yearly';
+
 type RegisterPayload = {
   fullname: string;
   email: string;
   phone?: string;
   password: string;
   invoice_company_name: string;
-  billing_period: 'monthly' | 'yearly';
+  billing_period: RegistrationPlan;
 };
 
 type AuthContextValue = {
