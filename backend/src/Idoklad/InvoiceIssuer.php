@@ -38,13 +38,17 @@ final class InvoiceIssuer
 
         // Persist a row up front (without idoklad_invoice_id) so a
         // subsequent retry hits the idempotency check above even if
-        // iDoklad fails or this process crashes mid-call.
+        // iDoklad fails or this process crashes mid-call. Capture the
+        // Stripe invoice_pdf URL eagerly — it's always available on a
+        // paid invoice and serves as our fallback when iDoklad fails.
+        $stripePdfUrl = isset($stripeInvoice['invoice_pdf']) ? (string) $stripeInvoice['invoice_pdf'] : null;
         $pdo = Db::pdo();
         $pdo->prepare(
             'INSERT INTO invoices
-                 (account_id, stripe_invoice_id, amount_cents, currency, status, issued_at)
-             VALUES (?, ?, ?, ?, ?, NOW())'
-        )->execute([$accountId, $stripeInvoiceId, $amountCents, $currency, 'pending']);
+                 (account_id, stripe_invoice_id, stripe_invoice_pdf_url,
+                  amount_cents, currency, status, issued_at)
+             VALUES (?, ?, ?, ?, ?, ?, NOW())'
+        )->execute([$accountId, $stripeInvoiceId, $stripePdfUrl, $amountCents, $currency, 'pending']);
         $localInvoiceId = (int) $pdo->lastInsertId();
 
         if (!IDokladClient::isConfigured()) {
@@ -96,15 +100,24 @@ final class InvoiceIssuer
 
             $created = $client->post('IssuedInvoices', $payload);
 
+            // PublicHtmlUrl is iDoklad's unauthenticated download link.
+            // It's only populated for non-draft invoices — in draft mode
+            // we leave the column NULL and the UI falls back to Stripe.
+            $publicUrl = isset($created['PublicHtmlUrl']) && is_string($created['PublicHtmlUrl'])
+                ? $created['PublicHtmlUrl']
+                : null;
+
             $pdo->prepare(
                 'UPDATE invoices
                  SET    idoklad_invoice_id = ?,
                         document_number    = ?,
+                        idoklad_public_url = ?,
                         status             = ?
                  WHERE  id = ?'
             )->execute([
                 isset($created['Id']) ? (int) $created['Id'] : null,
                 (string) ($created['DocumentNumber'] ?? ''),
+                $publicUrl,
                 IDokladClient::isDraftMode() ? 'draft' : 'issued',
                 $localInvoiceId,
             ]);
@@ -113,7 +126,42 @@ final class InvoiceIssuer
             $pdo->prepare(
                 'UPDATE invoices SET status = ?, error_message = ? WHERE id = ?'
             )->execute(['error', $e->getMessage(), $localInvoiceId]);
+
+            self::sendFallbackEmail($accountId, $stripeInvoice, $amountCents, $currency);
         }
+    }
+
+    /**
+     * On iDoklad failure we still want the customer to receive a payment
+     * confirmation — Stripe already charged them. We attach the hosted
+     * Stripe invoice URL (if present) so they have a receipt to download
+     * until ops re-issues the SK faktúra manually.
+     */
+    private static function sendFallbackEmail(int $accountId, array $stripeInvoice, int $amountCents, string $currency): void
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT u.email, a.invoice_company_name
+             FROM   accounts a
+             JOIN   users    u ON u.id = a.main_user_id
+             WHERE  a.id = ?'
+        );
+        $stmt->execute([$accountId]);
+        $row = $stmt->fetch();
+        if (!$row || empty($row['email'])) {
+            return;
+        }
+
+        $hosted = isset($stripeInvoice['hosted_invoice_url']) ? (string) $stripeInvoice['hosted_invoice_url'] : null;
+
+        \Firol\Mail\Mailer::send(
+            \Firol\Mail\Templates\InvoiceFallbackEmail::build(
+                (string) $row['email'],
+                (string) ($row['invoice_company_name'] ?? 'tvoju firmu'),
+                $amountCents,
+                $currency,
+                $hosted,
+            )
+        );
     }
 
     private static function alreadyIssued(string $stripeInvoiceId): bool

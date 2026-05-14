@@ -389,9 +389,19 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
   non-admins. Switch-plan / cancel continues to live in Stripe Customer
   Portal — already wired in 6b.
 
-## Phase 7 — Polish & extras ⬜
+## Phase 7 — Polish & extras 🔄
 - ⬜ Empty states, error boundaries, loading skeletons
-- ⬜ Email transport (password reset, invoice fallback)
+- ✅ **Email transport (Resend HTTP API)**: `Firol\Mail\Mailer` posiela
+  cez Resend `/emails` (cURL, 10 s timeout), bez závislostí v composeri.
+  Templates v `src/Mail/Templates/` — shared `Layout::render()` s
+  gradient hlavičkou (Firol red → coral) zladený s app dizajnom, plus
+  per-flow šablóny: `PasswordResetEmail`, `InviteEmail`,
+  `InvoiceFallbackEmail`. Wired do `AuthController::passwordResetRequest`,
+  `TeamController::invite` a `InvoiceIssuer` catch-bloku (Stripe účtoval,
+  iDoklad zlyhal — používateľ dostane potvrdenie s hosted Stripe URL).
+  Bez `RESEND_API_KEY` Mailer loguje subject + plain-text obsah cez
+  `error_log()` aby dev flow ostal funkčný a invite/reset linky šli
+  vyfishovať z `docker compose logs php`.
 - ⬜ PWA / offline mode (optional, won't change data model)
 - ⬜ Final design pass
 

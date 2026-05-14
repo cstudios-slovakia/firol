@@ -136,7 +136,6 @@ final class TeamController
                 $pdo->prepare(
                     'INSERT INTO password_resets (token, user_id, expires_at) VALUES (?, ?, ?)'
                 )->execute([$token, $userId, $expires]);
-                error_log("[invite] account_id={$accountId} email={$email} token={$token} expires={$expires}");
             }
 
             $pdo->commit();
@@ -147,11 +146,29 @@ final class TeamController
             throw $e;
         }
 
+        if ($token !== null) {
+            $ctx = $pdo->prepare(
+                'SELECT u.fullname AS inviter_name, a.invoice_company_name AS account_name
+                 FROM   users u, accounts a
+                 WHERE  u.id = ? AND a.id = ?'
+            );
+            $ctx->execute([Tenant::currentUserId(), $accountId]);
+            $row = $ctx->fetch() ?: ['inviter_name' => 'Kolega', 'account_name' => 'Firol'];
+
+            \Firol\Mail\Mailer::send(
+                \Firol\Mail\Templates\InviteEmail::build(
+                    $email,
+                    (string) $row['inviter_name'],
+                    (string) $row['account_name'],
+                    $token,
+                )
+            );
+        }
+
         Response::json([
             'item' => self::loadMember($accountId, (int) $userId),
-            // Surface the token in the response so the inviter can copy
-            // the link from the UI (Phase 7 will replace this with a
-            // real email transport).
+            // Token still surfaced so the inviter can copy the link
+            // manually if the email bounces or the user can't find it.
             'invite_token' => $token,
         ], 201);
     }

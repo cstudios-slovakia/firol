@@ -175,9 +175,9 @@ final class AuthController
                 'INSERT INTO password_resets (token, user_id, expires_at) VALUES (?, ?, ?)'
             )->execute([$token, $userId, $expires]);
 
-            // Real email transport (Mailgun/SES/SMTP) is Phase 7. For now we
-            // log the link so devs can copy it from the container logs.
-            error_log("[password-reset] email={$email} token={$token} expires={$expires}");
+            \Firol\Mail\Mailer::send(
+                \Firol\Mail\Templates\PasswordResetEmail::build($email, $token)
+            );
         }
 
         // Always respond 204 — don't leak whether the email exists.
