@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
+import { setActiveAccountId, setCsrfToken } from '@/lib/session';
+import { drainQueue } from '@/lib/queue';
 
 export type User = {
   id: number;
@@ -63,6 +65,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const apply = useCallback((data: Snapshot | null) => {
     setSnap(data);
     setStatus(data?.user ? 'authed' : 'unauthed');
+    setActiveAccountId(data?.activeAccountId ?? null);
+    setCsrfToken(data?.csrfToken ?? null);
+    if (data?.user) {
+      // Re-auth or account switch — try to flush any queued mutations.
+      drainQueue().catch(() => undefined);
+    }
   }, []);
 
   const refresh = useCallback(async () => {

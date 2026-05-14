@@ -16,6 +16,7 @@ import {
   type TrainingDocument,
 } from '@/api/trainings';
 import { ApiError } from '@/lib/api';
+import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -101,6 +102,10 @@ export function TrainingDetailPage() {
       setShowAddForm(false);
       toast.success('Účastník uložený');
     } catch (err) {
+      if (handleOfflineSave(err, toast)) {
+        setShowAddForm(false);
+        return;
+      }
       const apiErr = err instanceof ApiError
         ? err
         : new ApiError(0, 'Účastníka sa nepodarilo pridať.', null);
@@ -121,6 +126,7 @@ export function TrainingDetailPage() {
       await refreshDetail();
       toast.success('Účastník zmazaný');
     } catch (err) {
+      if (handleOfflineSave(err, toast)) return;
       const msg = err instanceof ApiError ? err.message : 'Mazanie sa nepodarilo.';
       setError(msg);
       toast.error(msg);
