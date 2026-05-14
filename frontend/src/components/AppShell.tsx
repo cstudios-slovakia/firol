@@ -8,6 +8,7 @@ import {
     GraduationCap,
     LogOut,
     Settings,
+    Sparkles,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
@@ -73,6 +74,7 @@ export function AppShell() {
         <div className="bg-app relative min-h-screen pb-20 sm:pb-0">
             <AuroraBackground />
             <SubscriptionBanner />
+            <TrialBanner />
             <header className="sticky top-0 z-20 border-b border-ink-100/80 bg-white/80 backdrop-blur">
                 <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
                     <Link
@@ -185,6 +187,88 @@ function SubscriptionBanner() {
                 >
                     <CreditCard className="size-4" />
                     {busy ? "Otváram Stripe…" : "Zaplatiť"}
+                </button>
+            </div>
+        </div>
+    );
+}
+
+/**
+ * Compact trial banner — shown when the account is on a free trial
+ * (no active/trialing Stripe subscription yet) and not expired. Informs
+ * the user when the trial ends, warns that the app will switch to
+ * read-only afterwards, and offers a quick CTA to start a paid plan.
+ */
+function TrialBanner() {
+    const { accounts, activeAccountId, csrfToken } = useAuth();
+    const toast = useToast();
+    const navigate = useNavigate();
+    const [busy, setBusy] = useState(false);
+
+    const account = accounts.find((a) => a.id === activeAccountId);
+    if (!account) return null;
+
+    const status = account.stripe_status;
+    if (status === "active" || status === "trialing" || status === "canceled") {
+        return null;
+    }
+
+    const endStr = account.subscription_end_date;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const end = new Date(`${endStr}T00:00:00`);
+    if (Number.isNaN(end.getTime()) || end < today) return null;
+
+    const daysLeft = Math.max(
+        0,
+        Math.round((end.getTime() - today.getTime()) / 86_400_000),
+    );
+    const human = end.toLocaleDateString("sk-SK", {
+        day: "numeric",
+        month: "long",
+    });
+
+    async function onPay() {
+        setBusy(true);
+        try {
+            const res = await Billing.checkout(
+                account?.billing_period ?? "monthly",
+                csrfToken,
+            );
+            window.location.assign(res.url);
+        } catch (err) {
+            if (err instanceof ApiError && err.status === 422) {
+                navigate("/billing?onboarding=billing");
+                return;
+            }
+            const msg =
+                err instanceof ApiError
+                    ? err.message
+                    : "Stripe Checkout sa nepodarilo otvoriť.";
+            toast.error(msg);
+            setBusy(false);
+        }
+    }
+
+    return (
+        <div className="border-b border-firol-200/60 bg-firol-50/70">
+            <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-1.5 text-xs text-firol-900">
+                <Sparkles className="size-3.5 shrink-0 text-firol-600" />
+                <p className="min-w-0 flex-1 truncate">
+                    <span className="font-semibold">Skúšobné obdobie</span>
+                    <span className="opacity-80">
+                        {" "}· do {human} ({daysLeft}{" "}
+                        {daysLeft === 1 ? "deň" : daysLeft < 5 ? "dni" : "dní"})
+                        · potom režim len na čítanie
+                    </span>
+                </p>
+                <button
+                    type="button"
+                    onClick={onPay}
+                    disabled={busy}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-firol-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
+                >
+                    {busy ? "Otváram…" : "Predplatiť"}
                 </button>
             </div>
         </div>
