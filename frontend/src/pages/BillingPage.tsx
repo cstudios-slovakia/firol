@@ -12,7 +12,7 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
-import { Spinner } from '@/components/ui/Spinner';
+import { Skeleton, CardBlockSkeleton } from '@/components/ui/Skeleton';
 import { Badge } from '@/components/ui/Badge';
 import { Dialog } from '@/components/ui/Dialog';
 import { cn } from '@/lib/cn';
@@ -151,7 +151,17 @@ function BillingSection() {
 
   if (loading) {
     return (
-      <Card className="flex justify-center py-8 text-ink-400"><Spinner /></Card>
+      <Card className="space-y-4 px-5 py-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-5 w-1/3" />
+            <Skeleton className="h-3 w-2/3" />
+          </div>
+          <Skeleton className="h-6 w-20 rounded-full" />
+        </div>
+        <Skeleton className="h-10 w-full rounded-2xl" />
+        <Skeleton className="h-10 w-40 rounded-2xl self-end ml-auto" />
+      </Card>
     );
   }
   if (!account) return null;
@@ -510,7 +520,7 @@ function InvoiceDetailsSection() {
   }
 
   if (loading) {
-    return <Card className="flex justify-center py-8 text-ink-400"><Spinner /></Card>;
+    return <CardBlockSkeleton rows={6} />;
   }
   if (!account) return null;
 

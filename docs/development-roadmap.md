@@ -390,7 +390,17 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
   Portal — already wired in 6b.
 
 ## Phase 7 — Polish & extras 🔄
-- ⬜ Empty states, error boundaries, loading skeletons
+- ✅ **Empty states, error boundaries, loading skeletons**: empty-state
+  cards already shipped per page during Phases 2–4; global
+  `<ErrorBoundary>` shipped in 3a-4. This phase adds a reusable
+  `Skeleton` primitive + `CompanyCardSkeleton` / `ListItemSkeleton` /
+  `DetailHeaderSkeleton` / `CardBlockSkeleton` / `SkeletonList` blocks
+  in `components/ui/Skeleton.tsx`. List pages (Dashboard, Inspections,
+  Trainings) and detail pages (Company, Facility, Inspection,
+  Training, Billing, Settings) now render shape-matching skeletons
+  instead of bare centered spinners — perceived load time drops and
+  the layout no longer jumps when data lands. Spinners remain inline
+  for per-action busy states (delete, upload).
 - ✅ **Email transport (Resend HTTP API)**: `Firol\Mail\Mailer` posiela
   cez Resend `/emails` (cURL, 10 s timeout), bez závislostí v composeri.
   Templates v `src/Mail/Templates/` — shared `Layout::render()` s

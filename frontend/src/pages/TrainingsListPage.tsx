@@ -11,7 +11,7 @@ import {
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Spinner } from '@/components/ui/Spinner';
+import { SkeletonList } from '@/components/ui/Skeleton';
 
 export function TrainingsListPage() {
   const [items, setItems] = useState<TrainingListItem[] | null>(null);
@@ -52,11 +52,7 @@ export function TrainingsListPage() {
 
       {error && <Card className="px-4 py-3 text-sm text-status-bad">{error}</Card>}
 
-      {!items && !error && (
-        <div className="flex justify-center py-10 text-ink-400">
-          <Spinner />
-        </div>
-      )}
+      {!items && !error && <SkeletonList count={4} />}
 
       {items && items.length === 0 && (
         <Card className="flex flex-col items-center gap-3 px-6 py-12 text-center">

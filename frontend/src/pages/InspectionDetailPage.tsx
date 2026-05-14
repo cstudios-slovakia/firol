@@ -16,7 +16,7 @@ import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Spinner } from '@/components/ui/Spinner';
+import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 import { getTypeModule } from '@/inspection-types';
 
 /**
@@ -133,8 +133,14 @@ export function InspectionDetailPage() {
 
   if (!data) {
     return (
-      <div className="flex justify-center py-10 text-ink-400">
-        <Spinner />
+      <div className="flex flex-col gap-5">
+        <Link to="/inspections" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť
+        </Link>
+        <DetailHeaderSkeleton />
+        <CardBlockSkeleton rows={4} />
+        <CardBlockSkeleton rows={4} />
       </div>
     );
   }
