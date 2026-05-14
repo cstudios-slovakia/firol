@@ -144,6 +144,7 @@ final class BillingController
         $accountId = Tenant::currentAccountId();
         $stmt = Db::pdo()->prepare(
             'SELECT id, stripe_invoice_id, idoklad_invoice_id, document_number,
+                    idoklad_public_url, stripe_invoice_pdf_url,
                     amount_cents, currency, status, issued_at
              FROM   invoices
              WHERE  account_id = ?
@@ -153,18 +154,107 @@ final class BillingController
         $stmt->execute([$accountId]);
         $rows = $stmt->fetchAll();
 
-        $items = array_map(static fn(array $r) => [
-            'id'                 => (int) $r['id'],
-            'stripe_invoice_id'  => (string) $r['stripe_invoice_id'],
-            'idoklad_invoice_id' => $r['idoklad_invoice_id'] !== null ? (int) $r['idoklad_invoice_id'] : null,
-            'document_number'    => $r['document_number'] ?: null,
-            'amount_cents'       => (int) $r['amount_cents'],
-            'currency'           => (string) $r['currency'],
-            'status'             => (string) $r['status'],
-            'issued_at'          => $r['issued_at'],
-        ], $rows);
+        $items = array_map(static function (array $r): array {
+            // Prefer the iDoklad-issued Slovak invoice; fall back to the
+            // Stripe-hosted PDF receipt when iDoklad is off or errored.
+            $pdfUrl = $r['idoklad_public_url'] ?: ($r['stripe_invoice_pdf_url'] ?: null);
+            return [
+                'id'                 => (int) $r['id'],
+                'stripe_invoice_id'  => (string) $r['stripe_invoice_id'],
+                'idoklad_invoice_id' => $r['idoklad_invoice_id'] !== null ? (int) $r['idoklad_invoice_id'] : null,
+                'document_number'    => $r['document_number'] ?: null,
+                'amount_cents'       => (int) $r['amount_cents'],
+                'currency'           => (string) $r['currency'],
+                'status'             => (string) $r['status'],
+                'issued_at'          => $r['issued_at'],
+                'pdf_url'            => $pdfUrl,
+            ];
+        }, $rows);
 
         Response::json(['items' => $items]);
+    }
+
+    /**
+     * POST /api/billing/cancel
+     *
+     * Schedules the active subscription for cancellation at period end.
+     * The user keeps full access until `subscription_end_date`; Stripe
+     * fires `customer.subscription.updated` with cancel_at_period_end=1
+     * which we mirror into the account row.
+     */
+    public static function cancel(Request $req): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+
+        $stmt = Db::pdo()->prepare(
+            'SELECT stripe_subscription_id, stripe_status
+             FROM   accounts WHERE id = ?'
+        );
+        $stmt->execute([$accountId]);
+        $row = $stmt->fetch() ?: [];
+
+        $subId = (string) ($row['stripe_subscription_id'] ?? '');
+        if ($subId === '') {
+            Response::error('Nemáš aktívne predplatné na zrušenie.', 422);
+        }
+        $status = (string) ($row['stripe_status'] ?? '');
+        if (!in_array($status, ['active', 'trialing', 'past_due'], true)) {
+            Response::error('Predplatné nie je v stave, ktorý je možné zrušiť.', 422);
+        }
+
+        try {
+            StripeClient::get()->subscriptions->update($subId, [
+                'cancel_at_period_end' => true,
+            ]);
+        } catch (\Throwable $e) {
+            error_log('[billing.cancel] ' . $e->getMessage());
+            Response::error('Zrušenie predplatného zlyhalo.', 502);
+        }
+
+        // Persist eagerly — webhook will reconfirm asynchronously.
+        Db::pdo()->prepare(
+            'UPDATE accounts SET stripe_cancel_at_period_end = 1 WHERE id = ?'
+        )->execute([$accountId]);
+
+        Response::json(['ok' => true]);
+    }
+
+    /**
+     * POST /api/billing/resume
+     *
+     * Reverses a scheduled cancel-at-period-end (only meaningful while
+     * the period hasn't ended yet — afterwards the subscription is
+     * fully canceled and the user has to re-checkout).
+     */
+    public static function resume(Request $req): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+
+        $stmt = Db::pdo()->prepare(
+            'SELECT stripe_subscription_id FROM accounts WHERE id = ?'
+        );
+        $stmt->execute([$accountId]);
+        $subId = (string) ($stmt->fetchColumn() ?: '');
+        if ($subId === '') {
+            Response::error('Nemáš aktívne predplatné.', 422);
+        }
+
+        try {
+            StripeClient::get()->subscriptions->update($subId, [
+                'cancel_at_period_end' => false,
+            ]);
+        } catch (\Throwable $e) {
+            error_log('[billing.resume] ' . $e->getMessage());
+            Response::error('Obnovenie predplatného zlyhalo.', 502);
+        }
+
+        Db::pdo()->prepare(
+            'UPDATE accounts SET stripe_cancel_at_period_end = 0 WHERE id = ?'
+        )->execute([$accountId]);
+
+        Response::json(['ok' => true]);
     }
 
     /**
@@ -236,6 +326,21 @@ final class BillingController
                 }
                 break;
 
+            case 'invoice.finalized':
+                // Stripe finalises the invoice before charging — the
+                // invoice_pdf URL becomes stable here. We may not have a
+                // local row yet (payment_succeeded creates it), so try
+                // to update; if no row exists the next succeeded webhook
+                // will set both at once via InvoiceIssuer.
+                $pdfUrl = (string) ($obj->invoice_pdf ?? '');
+                $stripeInvId = (string) ($obj->id ?? '');
+                if ($pdfUrl !== '' && $stripeInvId !== '') {
+                    Db::pdo()->prepare(
+                        'UPDATE invoices SET stripe_invoice_pdf_url = ? WHERE stripe_invoice_id = ?'
+                    )->execute([$pdfUrl, $stripeInvId]);
+                }
+                break;
+
             case 'invoice.payment_failed':
                 error_log("[billing.webhook] payment FAILED customer={$obj->customer} amount={$obj->amount_due}");
                 break;
@@ -282,25 +387,28 @@ final class BillingController
 
         $status = (string) ($sub->status ?? '');
         $period = self::inferBillingPeriod($items);
+        $cancelFlag = !empty($sub->cancel_at_period_end) ? 1 : 0;
 
         $pdo = Db::pdo();
         if ($endDate !== null) {
             $pdo->prepare(
                 'UPDATE accounts
-                 SET    stripe_subscription_id = ?,
-                        stripe_status          = ?,
-                        billing_period         = COALESCE(?, billing_period),
-                        subscription_end_date  = ?
+                 SET    stripe_subscription_id      = ?,
+                        stripe_status               = ?,
+                        billing_period              = COALESCE(?, billing_period),
+                        stripe_cancel_at_period_end = ?,
+                        subscription_end_date       = ?
                  WHERE  id = ?'
-            )->execute([(string) $sub->id, $status, $period, $endDate, $accountId]);
+            )->execute([(string) $sub->id, $status, $period, $cancelFlag, $endDate, $accountId]);
         } else {
             $pdo->prepare(
                 'UPDATE accounts
-                 SET    stripe_subscription_id = ?,
-                        stripe_status          = ?,
-                        billing_period         = COALESCE(?, billing_period)
+                 SET    stripe_subscription_id      = ?,
+                        stripe_status               = ?,
+                        billing_period              = COALESCE(?, billing_period),
+                        stripe_cancel_at_period_end = ?
                  WHERE  id = ?'
-            )->execute([(string) $sub->id, $status, $period, $accountId]);
+            )->execute([(string) $sub->id, $status, $period, $cancelFlag, $accountId]);
         }
 
         error_log("[billing.webhook] account=$accountId subscription={$sub->id} status=$status end=$endDate");
@@ -317,7 +425,10 @@ final class BillingController
         // access until the period they already paid for ends. Stripe sets
         // status='canceled' on the final delete event.
         Db::pdo()->prepare(
-            'UPDATE accounts SET stripe_status = ? WHERE id = ?'
+            'UPDATE accounts
+             SET    stripe_status               = ?,
+                    stripe_cancel_at_period_end = 0
+             WHERE  id = ?'
         )->execute([(string) ($sub->status ?? 'canceled'), $accountId]);
     }
 

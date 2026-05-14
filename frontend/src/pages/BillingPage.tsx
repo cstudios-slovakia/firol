@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  AlertCircle, Check, CreditCard, ExternalLink, Hash, MapPin, Receipt,
+  AlertCircle, Check, CreditCard, Download, ExternalLink, Hash,
+  MapPin, Receipt, RotateCcw, XCircle,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { AccountApi, type Account } from '@/api/account';
@@ -13,6 +14,7 @@ import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
+import { Dialog } from '@/components/ui/Dialog';
 import { cn } from '@/lib/cn';
 
 export function BillingPage() {
@@ -47,6 +49,9 @@ function BillingSection() {
   const [period, setPeriod] = useState<BillingPeriod>('monthly');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
 
   useEffect(() => {
@@ -113,6 +118,37 @@ function BillingSection() {
     }
   }
 
+  async function onCancel() {
+    setCancelling(true);
+    try {
+      await Billing.cancel(csrfToken);
+      const fresh = await AccountApi.show();
+      setAccount(fresh.account);
+      setConfirmCancel(false);
+      toast.success('Predplatné bude zrušené ku koncu obdobia.');
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Zrušenie zlyhalo.';
+      toast.error(msg);
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function onResume() {
+    setResuming(true);
+    try {
+      await Billing.resume(csrfToken);
+      const fresh = await AccountApi.show();
+      setAccount(fresh.account);
+      toast.success('Predplatné obnovené — bude pokračovať aj po skončení obdobia.');
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Obnovenie zlyhalo.';
+      toast.error(msg);
+    } finally {
+      setResuming(false);
+    }
+  }
+
   if (loading) {
     return (
       <Card className="flex justify-center py-8 text-ink-400"><Spinner /></Card>
@@ -134,23 +170,29 @@ function BillingSection() {
     ? '199 € / rok'
     : '19 € / mesiac';
 
+  const cancelScheduled = account.stripe_cancel_at_period_end && (isActive || isTrialing);
+
   const statusBadge = expired
     ? <Badge tone="warn">Vypršalo</Badge>
-    : isActive
-      ? <Badge tone="ok">Aktívne</Badge>
-      : isTrialing
-        ? <Badge tone="ok">Skúška + predplatené</Badge>
-        : account.stripe_status === 'canceled'
-          ? <Badge tone="warn">Zrušené</Badge>
-          : <Badge tone="neutral">Skúšobné obdobie</Badge>;
+    : cancelScheduled
+      ? <Badge tone="warn">Zrušené ku {humanEnd}</Badge>
+      : isActive
+        ? <Badge tone="ok">Aktívne</Badge>
+        : isTrialing
+          ? <Badge tone="ok">Skúška + predplatené</Badge>
+          : account.stripe_status === 'canceled'
+            ? <Badge tone="warn">Zrušené</Badge>
+            : <Badge tone="neutral">Skúšobné obdobie</Badge>;
 
-  const subtitle = isTrialing
-    ? `Skúšobné obdobie do ${humanEnd}. Potom sa predplatné (${periodPrice}) automaticky aktivuje — kartu sme uložili na Stripe.`
-    : isActive
-      ? `Predplatné je aktívne. Ďalšia fakturácia ${humanEnd} (${periodPrice}).`
-      : account.stripe_status === 'canceled'
-        ? `Predplatné zrušené, prístup máš ešte do ${humanEnd}.`
-        : `Účet má prístup do ${humanEnd}. Potom sa prepne do režimu len na čítanie, kým si nezakúpiš predplatné.`;
+  const subtitle = cancelScheduled
+    ? `Predplatné bude zrušené ${humanEnd}. Dovtedy máš plný prístup — môžeš ho kedykoľvek obnoviť.`
+    : isTrialing
+      ? `Skúšobné obdobie do ${humanEnd}. Potom sa predplatné (${periodPrice}) automaticky aktivuje — kartu sme uložili na Stripe.`
+      : isActive
+        ? `Predplatné je aktívne. Ďalšia fakturácia ${humanEnd} (${periodPrice}).`
+        : account.stripe_status === 'canceled'
+          ? `Predplatné zrušené, prístup máš ešte do ${humanEnd}.`
+          : `Účet má prístup do ${humanEnd}. Potom sa prepne do režimu len na čítanie, kým si nezakúpiš predplatné.`;
 
   const billingReady = hasBillingDetails(account);
   const locked = !billingReady && !hasSub;
@@ -190,18 +232,39 @@ function BillingSection() {
         {hasSub ? (
           <>
             <p className="text-sm text-ink-700">
-              Platobnú kartu, faktúry a zmenu fakturačného obdobia spravuje
-              priamo Stripe v zabezpečenom portáli.
+              Platobnú kartu a zmenu fakturačného obdobia spravuje priamo
+              Stripe v zabezpečenom portáli. Predplatné môžeš zrušiť aj
+              priamo tu.
             </p>
-            <div className="flex justify-end">
-              <Button
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
                 type="button"
                 onClick={onPortal}
-                loading={busy}
-                leftIcon={<ExternalLink className="size-4" />}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium text-ink-600 transition-colors hover:bg-ink-50 hover:text-ink-900 disabled:opacity-50"
               >
-                Spravovať predplatné
-              </Button>
+                <ExternalLink className="size-4" />
+                Spravovať kartu (Stripe)
+              </button>
+              {cancelScheduled ? (
+                <Button
+                  type="button"
+                  onClick={onResume}
+                  loading={resuming}
+                  leftIcon={<RotateCcw className="size-4" />}
+                >
+                  Obnoviť predplatné
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setConfirmCancel(true)}
+                  leftIcon={<XCircle className="size-4" />}
+                >
+                  Zrušiť predplatné
+                </Button>
+              )}
             </div>
           </>
         ) : (
@@ -247,13 +310,13 @@ function BillingSection() {
         {invoices.length > 0 && (
           <div className="mt-2 border-t border-ink-100 pt-4">
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-500">
-              História faktúr
+              História platieb
             </h3>
             <ul className="flex flex-col gap-1.5">
               {invoices.map((inv) => (
                 <li
                   key={inv.id}
-                  className="flex items-center gap-3 rounded-xl border border-ink-100 px-3 py-2 text-sm"
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-ink-100 px-3 py-2 text-sm"
                 >
                   <span className="font-mono text-xs text-ink-500">
                     {new Date(inv.issued_at).toLocaleDateString('sk-SK')}
@@ -271,15 +334,65 @@ function BillingSection() {
                   }>
                     {invoiceStatusLabel(inv.status)}
                   </Badge>
+                  {inv.pdf_url ? (
+                    <a
+                      href={inv.pdf_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-firol-700 transition-colors hover:bg-firol-50"
+                      title="Stiahnuť PDF"
+                    >
+                      <Download className="size-3.5" />
+                      PDF
+                    </a>
+                  ) : (
+                    <span className="text-xs italic text-ink-400">PDF pripravujeme</span>
+                  )}
                 </li>
               ))}
             </ul>
             <p className="mt-2 text-xs text-ink-400">
-              Faktúry vystavuje iDoklad — kompletné PDF a história je k dispozícii v Stripe portáli.
+              Faktúry vystavuje iDoklad; pre platby spracované pred zavedením
+              tejto funkcie stiahneš potvrdenku zo Stripe.
             </p>
           </div>
         )}
       </div>
+
+      <Dialog
+        open={confirmCancel}
+        onClose={() => { if (!cancelling) setConfirmCancel(false); }}
+        title="Zrušiť predplatné?"
+        description={`Predplatné bude zrušené ${humanEnd}. Dovtedy zostávajú všetky funkcie dostupné.`}
+        dismissible={!cancelling}
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-ink-700">
+            Strhnutia z karty sa zastavia. Po skončení obdobia sa účet
+            prepne do režimu len na čítanie. Zrušenie môžeš pred koncom
+            obdobia kedykoľvek vrátiť tlačidlom „Obnoviť predplatné“.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setConfirmCancel(false)}
+              disabled={cancelling}
+            >
+              Späť
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={onCancel}
+              loading={cancelling}
+              leftIcon={<XCircle className="size-4" />}
+            >
+              Zrušiť predplatné
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </Card>
   );
 }

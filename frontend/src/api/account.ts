@@ -16,6 +16,7 @@ export type Account = {
   stripe_status: string | null;
   billing_period: 'monthly' | 'yearly' | null;
   has_stripe_customer: boolean;
+  stripe_cancel_at_period_end: boolean;
 };
 
 export type AccountUpdate = {

@@ -11,6 +11,8 @@ export type Invoice = {
   currency: string;
   status: 'paid' | 'pending' | 'issued' | 'draft' | 'skipped' | 'error' | string;
   issued_at: string;
+  /** Direct download link — iDoklad PublicHtmlUrl when available, Stripe invoice_pdf otherwise. */
+  pdf_url: string | null;
 };
 
 export const Billing = {
@@ -24,6 +26,12 @@ export const Billing = {
   /** Returns a Stripe Customer Portal URL (change card, see invoices, cancel). */
   portal: (csrfToken: string | null) =>
     api<{ url: string }>('/api/billing/portal', { method: 'POST', csrfToken }),
+  /** Schedule cancellation at the end of the current period. */
+  cancel: (csrfToken: string | null) =>
+    api<{ ok: true }>('/api/billing/cancel', { method: 'POST', csrfToken }),
+  /** Revoke a scheduled cancellation while the period is still active. */
+  resume: (csrfToken: string | null) =>
+    api<{ ok: true }>('/api/billing/resume', { method: 'POST', csrfToken }),
   /** Local invoice history — issued by iDoklad off Stripe payments. */
   invoices: () => api<{ items: Invoice[] }>('/api/billing/invoices'),
 };

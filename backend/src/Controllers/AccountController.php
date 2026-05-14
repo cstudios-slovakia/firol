@@ -193,7 +193,8 @@ final class AccountController
             'SELECT id, invoice_company_name, invoice_street, invoice_postal_code,
                     invoice_city, invoice_country, invoice_ico, invoice_dic, invoice_ic_dph,
                     logo_path, theme_color, subscription_end_date,
-                    stripe_status, billing_period, stripe_customer_id
+                    stripe_status, billing_period, stripe_customer_id,
+                    stripe_cancel_at_period_end
              FROM   accounts WHERE id = ?'
         );
         $stmt->execute([$accountId]);
@@ -216,6 +217,7 @@ final class AccountController
             'stripe_status'         => $row['stripe_status'] ?? null,
             'billing_period'        => $row['billing_period'] ?? null,
             'has_stripe_customer'   => !empty($row['stripe_customer_id']),
+            'stripe_cancel_at_period_end' => !empty($row['stripe_cancel_at_period_end']),
         ];
     }
 }

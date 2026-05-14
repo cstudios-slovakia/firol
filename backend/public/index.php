@@ -73,6 +73,8 @@ $router->patch('/api/admin/settings', [AdminController::class, 'updateSettings']
 $router->post('/api/billing/checkout', [BillingController::class, 'checkout']);
 $router->post('/api/billing/portal',   [BillingController::class, 'portal']);
 $router->post('/api/billing/webhook',  [BillingController::class, 'webhook']);
+$router->post('/api/billing/cancel',   [BillingController::class, 'cancel']);
+$router->post('/api/billing/resume',   [BillingController::class, 'resume']);
 $router->get('/api/billing/invoices',  [BillingController::class, 'invoices']);
 
 $router->get('/api/companies',                      [CompanyController::class, 'index']);
