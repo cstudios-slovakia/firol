@@ -6,7 +6,7 @@ import { Companies, type CompanyListItem } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Spinner } from '@/components/ui/Spinner';
+import { SkeletonList } from '@/components/ui/Skeleton';
 
 /**
  * "Moje firmy" — landing screen after login. Per spec: header + count of
@@ -93,9 +93,7 @@ export function DashboardPage() {
       </Card>
 
       {status === 'loading' && items.length === 0 && (
-        <div className="flex justify-center py-10 text-ink-400">
-          <Spinner />
-        </div>
+        <SkeletonList variant="company" count={3} />
       )}
 
       {status === 'error' && error && (

@@ -15,6 +15,7 @@ import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
+import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 
 export function FacilityDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
@@ -70,8 +71,13 @@ export function FacilityDetailPage() {
 
   if (!facility) {
     return (
-      <div className="flex justify-center py-10 text-ink-400">
-        <Spinner />
+      <div className="flex flex-col gap-5">
+        <Link to="/" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť
+        </Link>
+        <DetailHeaderSkeleton />
+        <SkeletonList count={3} />
       </div>
     );
   }
@@ -147,9 +153,7 @@ export function FacilityDetailPage() {
         </header>
 
         {inspections === null ? (
-          <div className="flex justify-center py-6 text-ink-400">
-            <Spinner />
-          </div>
+          <SkeletonList count={2} />
         ) : inspections.length === 0 ? (
           <Card className="flex flex-col items-center gap-2 px-4 py-8 text-center">
             <div className="grid size-12 place-items-center rounded-2xl bg-firol-50 text-firol-500">

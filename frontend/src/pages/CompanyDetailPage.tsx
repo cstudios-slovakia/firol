@@ -4,7 +4,7 @@ import { ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, Hash, MapPin,
 import { Companies, type CompanyDetail } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
-import { Spinner } from '@/components/ui/Spinner';
+import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 
 export function CompanyDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
@@ -42,8 +42,13 @@ export function CompanyDetailPage() {
 
   if (!data) {
     return (
-      <div className="flex justify-center py-10 text-ink-400">
-        <Spinner />
+      <div className="flex flex-col gap-5">
+        <Link to="/" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť na zoznam
+        </Link>
+        <DetailHeaderSkeleton />
+        <SkeletonList count={2} />
       </div>
     );
   }

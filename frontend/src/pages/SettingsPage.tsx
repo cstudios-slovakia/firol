@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
+import { CardBlockSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { Badge } from '@/components/ui/Badge';
 
 /**
@@ -109,8 +110,9 @@ export function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-10 text-ink-400">
-        <Spinner />
+      <div className="flex flex-col gap-4">
+        <CardBlockSkeleton rows={4} />
+        <CardBlockSkeleton rows={4} />
       </div>
     );
   }
@@ -341,11 +343,7 @@ function BrandingSection() {
   }
 
   if (loading) {
-    return (
-      <Card className="flex justify-center py-8 text-ink-400">
-        <Spinner />
-      </Card>
-    );
+    return <CardBlockSkeleton rows={5} />;
   }
 
   return (
@@ -616,9 +614,7 @@ function TrainersSection() {
         )}
 
         {trainers === null ? (
-          <div className="flex justify-center py-6 text-ink-400">
-            <Spinner />
-          </div>
+          <SkeletonList count={2} />
         ) : trainers.length === 0 ? (
           <p className="mb-3 text-sm text-ink-500">
             Zatiaľ nemáš žiadnych školiteľov. Pridaj prvého nižšie.
@@ -900,9 +896,7 @@ function TeamSection() {
         )}
 
         {members === null ? (
-          <div className="flex justify-center py-6 text-ink-400">
-            <Spinner />
-          </div>
+          <SkeletonList count={2} />
         ) : (
           <ul className="flex flex-col gap-2">
             {members.map((m) => {
@@ -1049,7 +1043,7 @@ function AdminSection() {
   }
 
   if (loading) {
-    return <Card className="flex justify-center py-8 text-ink-400"><Spinner /></Card>;
+    return <CardBlockSkeleton rows={4} />;
   }
   if (!settings) return null;
 
