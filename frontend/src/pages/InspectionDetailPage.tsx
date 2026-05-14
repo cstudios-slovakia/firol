@@ -13,6 +13,8 @@ import {
   type InspectionDocument,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
+import { handleOfflineSave } from '@/lib/offline';
+import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -32,6 +34,7 @@ export function InspectionDetailPage() {
   const id = Number(idStr);
   const { csrfToken } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
 
   const [data, setData] = useState<InspectionDetail | null>(null);
   const [documents, setDocuments] = useState<InspectionDocument[]>([]);
@@ -99,6 +102,7 @@ export function InspectionDetailPage() {
       const res = await Inspections.update(id, { executed_on: value }, csrfToken);
       setData((prev) => (prev ? { ...prev, inspection: { ...prev.inspection, ...res.inspection } } : prev));
     } catch (err) {
+      if (handleOfflineSave(err, toast)) return;
       setError(err instanceof ApiError ? err.message : 'Dátum sa nepodarilo uložiť.');
     } finally {
       setSavingDate(false);
@@ -113,6 +117,7 @@ export function InspectionDetailPage() {
       const fresh = await Inspections.show(id);
       setData(fresh);
     } catch (err) {
+      if (handleOfflineSave(err, toast)) return;
       setError(err instanceof ApiError ? err.message : 'Mazanie sa nepodarilo.');
     } finally {
       setDeletingItemId(null);

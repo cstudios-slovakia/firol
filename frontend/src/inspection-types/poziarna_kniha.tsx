@@ -14,6 +14,7 @@ import {
   type PoziarnaKnihaItemFields,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
+import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -106,6 +107,10 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
       onSaved('save-and-summary');
       toast.success('Záznam uložený');
     } catch (err) {
+      if (handleOfflineSave(err, toast)) {
+        onSaved('save-and-summary');
+        return;
+      }
       setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);

@@ -14,6 +14,7 @@ import {
   type PuKind,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
+import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -103,6 +104,10 @@ function PuAkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
       onSaved(action);
       toast.success('Položka uložená');
     } catch (err) {
+      if (handleOfflineSave(err, toast)) {
+        onSaved(action);
+        return;
+      }
       setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);

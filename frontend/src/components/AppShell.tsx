@@ -16,6 +16,7 @@ import { Billing } from "@/api/billing";
 import { ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { AccountSwitcher } from "./AccountSwitcher";
+import { OfflineIndicator } from "./OfflineIndicator";
 import { AuroraBackground } from "./AuroraBackground";
 import { cn } from "@/lib/cn";
 
@@ -90,6 +91,7 @@ export function AppShell() {
                         </span>
                     </Link>
                     <div className="flex items-center gap-2">
+                        <OfflineIndicator />
                         <AccountSwitcher />
                         <button
                             type="button"
@@ -203,7 +205,6 @@ function TrialBanner() {
     const { accounts, activeAccountId, csrfToken } = useAuth();
     const toast = useToast();
     const navigate = useNavigate();
-    const [busy, setBusy] = useState(false);
 
     const account = accounts.find((a) => a.id === activeAccountId);
     if (!account) return null;
@@ -229,7 +230,6 @@ function TrialBanner() {
     });
 
     async function onPay() {
-        setBusy(true);
         try {
             const res = await Billing.checkout(
                 account?.billing_period ?? "monthly",
@@ -246,7 +246,6 @@ function TrialBanner() {
                     ? err.message
                     : "Stripe Checkout sa nepodarilo otvoriť.";
             toast.error(msg);
-            setBusy(false);
         }
     }
 
@@ -265,10 +264,9 @@ function TrialBanner() {
                 <button
                     type="button"
                     onClick={onPay}
-                    disabled={busy}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-firol-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-firol-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
                 >
-                    {busy ? "Otváram…" : "Predplatiť"}
+                    Predplatiť
                 </button>
             </div>
         </div>

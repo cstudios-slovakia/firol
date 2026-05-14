@@ -412,7 +412,55 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
   Bez `RESEND_API_KEY` Mailer loguje subject + plain-text obsah cez
   `error_log()` aby dev flow ostal funkčný a invite/reset linky šli
   vyfishovať z `docker compose logs php`.
-- ⬜ PWA / offline mode (optional, won't change data model)
+- ✅ **PWA / offline mode** — 4 sub-phases:
+  - ✅ **7-PWA-a — Shell + manifest + Service Worker**: `vite-plugin-pwa`
+    (Workbox), `@vite-pwa/assets-generator` for icons. Manifest (Firol
+    name, SK lang, red theme, standalone). SW precaches Vite-emitted
+    assets + Google Fonts (SWR css, cache-first WOFF2).
+    `navigateFallbackDenylist` excludes `/api/*` and `/api.php` so PHP
+    requests always hit the network. Registered from `lib/pwa.ts`. Dev
+    SW disabled (`devOptions.enabled: false`).
+  - ✅ **7-PWA-b — IndexedDB read cache (Dexie)**: `lib/db.ts` with two
+    tables — `cache` (URL-keyed JSON snapshots scoped by accountId) and
+    `mutations` (outbox, see 7-PWA-c). `lib/api.ts` writes through every
+    successful GET, falls back to the cache when fetch rejects (offline).
+    `lib/session.ts` mirrors `activeAccountId` + `csrfToken` to a module
+    level so the api wrapper can scope cache reads without a React
+    subscription. localStorage backup of the account id means the cache
+    is queryable on the very first offline load.
+  - ✅ **7-PWA-c — Mutation queue (outbox) + sync worker**: `lib/queue.ts`
+    enqueues PATCH/DELETE on any `/api/<res>/<id>(...)?` and POST under
+    an existing parent id (`/api/inspections/{id}/items`,
+    `/api/trainings/{id}/trainees`). Creating new top-level resources
+    (POST `/api/inspections`, `/api/companies`, `/api/trainings`),
+    PDF generation, auth, billing all bypass the queue and rethrow the
+    network error so the UI says "vyžaduje pripojenie" — by design,
+    since the server still owns ID minting + the per-year document
+    sequence. Drain runs on `online` event, on app start (`navigator.onLine`)
+    and on every `apply()` in AuthContext. 401 pauses the drain;
+    network errors leave items pending; 4xx/5xx parks items in
+    `failed` state for manual retry/discard. `lib/offline.ts`
+    `handleOfflineSave()` smooths the `OfflineQueuedError` into a
+    success-toast path in all 8 inspection-type Step 2 modules,
+    `InspectionDetailPage` (date PATCH + delete item) and
+    `TrainingDetailPage` (add/delete trainee with PNG signature blob
+    persisted in IDB).
+  - ✅ **7-PWA-d — UX polish**: `OfflineIndicator` chip in the AppShell
+    header — red `CloudOff` when `navigator.onLine === false`, amber
+    `Cloud` with count when queue non-empty, hidden otherwise. Click
+    opens a panel listing each queued mutation with retry/discard
+    buttons (powered by Dexie `liveQuery` in `usePendingMutations`).
+    `useOnlineStatus` hook re-renders on `online`/`offline` events.
+    Auto-update (`registerType: 'autoUpdate'`) silently swaps the SW
+    when a new build is deployed.
+
+  Known v1 limitation: starting a new inspection/training/company
+  while offline still requires a connection because the server mints
+  the parent id. Adding more items, editing dates, capturing trainee
+  signatures, etc. all work offline against an already-created draft.
+  Lifting that restriction (clientId UUIDs + URL rewriting at sync
+  time) is tracked as a possible 7-PWA-e but isn't on the immediate
+  roadmap.
 - ⬜ Final design pass
 
 ---
