@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Briefcase, Building2, CalendarDays, CheckCircle2, Clock,
-  Download, FileText, GraduationCap, NotebookPen, Plus, Trash2, User, Users,
+  Download, Edit2, FileText, GraduationCap, NotebookPen, Plus, Trash2, User, Users,
   Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
@@ -194,6 +194,13 @@ export function TrainingDetailPage() {
                 </span>
               </div>
             </div>
+            <Link
+              to={`/trainings/${id}/edit`}
+              aria-label="Upraviť"
+              className="grid size-9 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-white hover:text-ink-700"
+            >
+              <Edit2 className="size-4" />
+            </Link>
           </div>
         </div>
 
