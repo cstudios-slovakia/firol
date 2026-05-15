@@ -12,10 +12,23 @@ type InputProps = React.InputHTMLAttributes<HTMLInputElement> & {
   rightSlot?: React.ReactNode;
 };
 
+const DATE_TYPES = new Set(['date', 'time', 'datetime-local', 'month', 'week']);
+
+function makePickerClick(userOnClick?: React.MouseEventHandler<HTMLInputElement>) {
+  return (e: React.MouseEvent<HTMLInputElement>) => {
+    userOnClick?.(e);
+    if (!e.defaultPrevented && DATE_TYPES.has((e.currentTarget as HTMLInputElement).type)) {
+      (e.currentTarget as HTMLInputElement).showPicker?.();
+    }
+  };
+}
+
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { className, invalid, leftIcon, rightSlot, ...rest },
+  { className, invalid, leftIcon, rightSlot, onClick, ...rest },
   ref,
 ) {
+  const handleClick = DATE_TYPES.has(rest.type ?? '') ? makePickerClick(onClick) : onClick;
+
   if (leftIcon || rightSlot) {
     return (
       <div className="relative">
@@ -33,6 +46,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
             invalid && invalidClasses,
             className,
           )}
+          onClick={handleClick}
           {...rest}
         />
         {rightSlot && (
@@ -47,6 +61,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
     <input
       ref={ref}
       className={cn(baseClasses, invalid && invalidClasses, className)}
+      onClick={handleClick}
       {...rest}
     />
   );

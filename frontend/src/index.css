@@ -135,8 +135,7 @@
     75%        { transform: translate(2.5%, -3.5%)scale(1.04) rotate(2deg);  }
   }
 
-  /* Hide the WebKit native calendar/clock indicator — only our Lucide icon shows.
-     The browser still opens the native picker when the input itself is clicked. */
+  /* Hide the native indicator — picker is opened programmatically via showPicker(). */
   input[type="date"]::-webkit-calendar-picker-indicator,
   input[type="time"]::-webkit-calendar-picker-indicator,
   input[type="datetime-local"]::-webkit-calendar-picker-indicator,
