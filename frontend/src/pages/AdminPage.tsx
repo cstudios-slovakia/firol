@@ -52,9 +52,12 @@ export function AdminPage() {
 }
 
 function AccountsSection() {
-  const { csrfToken } = useAuth();
+  const { csrfToken, activeAccountId } = useAuth();
   const toast = useToast();
   const [page, setPage] = useState<AdminAccountsPage | null>(null);
+  // Tracks how many items we've fetched from the server (independent of local deletions).
+  // Used to determine the correct offset for the next loadMore call and whether more exist.
+  const [serverLoadedCount, setServerLoadedCount] = useState(0);
   const [listLoading, setListLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +75,13 @@ function AccountsSection() {
     setListLoading(true);
     setError(null);
     AdminPanel.listAccounts(0, debouncedSearch || undefined)
-      .then((res) => { if (!cancelled) { setPage(res); setListLoading(false); } })
+      .then((res) => {
+        if (!cancelled) {
+          setPage(res);
+          setServerLoadedCount(res.items.length);
+          setListLoading(false);
+        }
+      })
       .catch((err: unknown) => {
         if (cancelled) return;
         setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať účty.');
@@ -83,16 +92,15 @@ function AccountsSection() {
 
   async function loadMore() {
     if (!page) return;
-    const nextOffset = page.offset + page.limit;
-    if (nextOffset >= page.total) return;
+    if (serverLoadedCount >= page.total) return;
     setLoadingMore(true);
     try {
-      const res = await AdminPanel.listAccounts(nextOffset, debouncedSearch || undefined);
-      setPage({
+      const res = await AdminPanel.listAccounts(serverLoadedCount, debouncedSearch || undefined);
+      setPage((prev) => prev ? {
         ...res,
-        items: [...page.items, ...res.items],
-        offset: page.offset,
-      });
+        items: [...prev.items, ...res.items],
+      } : res);
+      setServerLoadedCount((c) => c + res.items.length);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Načítanie zlyhalo.';
       toast.error(msg);
@@ -192,7 +200,7 @@ function AccountsSection() {
     return <CardBlockSkeleton rows={6} />;
   }
 
-  const hasMore = !listLoading && page.offset + page.items.length < page.total;
+  const hasMore = !listLoading && serverLoadedCount < page.total;
   const searching = debouncedSearch !== '';
 
   return (
@@ -237,6 +245,7 @@ function AccountsSection() {
               <AccountRow
                 key={a.id}
                 account={a}
+                isActive={a.id === activeAccountId}
                 expanded={expanded.has(a.id) || searching}
                 onToggle={() => toggle(a.id)}
                 onAccountSaved={(patch) => patchAccount(a.id, patch)}
@@ -257,7 +266,7 @@ function AccountsSection() {
                 loading={loadingMore}
                 leftIcon={<ChevronDown className="size-4" />}
               >
-                Zobraziť ďalších {Math.min(page.limit, page.total - page.items.length)}
+                Zobraziť ďalších {Math.min(page.limit, page.total - serverLoadedCount)}
               </Button>
             </div>
           )}
@@ -274,11 +283,12 @@ function pluralAccounts(n: number): string {
 }
 
 function AccountRow({
-  account, expanded, onToggle,
+  account, isActive, expanded, onToggle,
   onAccountSaved, onAccountDelete,
   onUserSaved, onUserDelete, onToggleAdmin,
 }: {
   account: AdminAccount;
+  isActive: boolean;
   expanded: boolean;
   onToggle: () => void;
   onAccountSaved: (patch: Partial<AdminAccount>) => void;
@@ -304,8 +314,9 @@ function AccountRow({
           <Building2 className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-ink-900">
-            {account.invoice_company_name}
+          <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-ink-900">
+            <span className="truncate">{account.invoice_company_name}</span>
+            {isActive && <Badge tone="ok">Aktuálne prihlásený</Badge>}
           </p>
           <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-ink-500">
             <span>#{account.id}</span>
@@ -317,7 +328,7 @@ function AccountRow({
                 <span>do {account.subscription_end_date}</span>
               </>
             )}
-            {account.stripe_status && (
+            {account.stripe_status && !account.users.some((u) => u.is_admin || u.is_env_seed) && (
               <>
                 <span className="text-ink-300">·</span>
                 <Badge tone={account.stripe_status === 'active' ? 'ok' : 'warn'}>
@@ -470,19 +481,18 @@ function UserRow({
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5 truncate text-xs text-ink-500">
             <span className="truncate">{user.email}</span>
             {isMain && <Badge tone="ok">Hlavný</Badge>}
-            {user.is_admin && <Badge tone="warn">Admin</Badge>}
-            {user.is_env_seed && <Badge tone="neutral">env</Badge>}
+            {(user.is_admin || user.is_env_seed) && <Badge tone="warn">Admin</Badge>}
             {!user.is_active && <Badge tone="neutral">Neaktívny</Badge>}
           </p>
         </div>
         <button
           type="button"
           onClick={onToggleAdmin}
-          disabled={user.is_env_seed && user.is_admin}
-          title={user.is_admin ? 'Odobrať admin práva' : 'Prideliť admin práva'}
+          disabled={user.is_env_seed}
+          title={user.is_env_seed ? 'Env seed admin — nedá sa zmeniť cez UI' : user.is_admin ? 'Odobrať admin práva' : 'Prideliť admin práva'}
           className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700 disabled:opacity-40"
         >
-          {user.is_admin ? <ShieldOff className="size-4" /> : <ShieldCheck className="size-4" />}
+          {(user.is_admin || user.is_env_seed) ? <ShieldOff className="size-4" /> : <ShieldCheck className="size-4" />}
         </button>
         <button
           type="button"
