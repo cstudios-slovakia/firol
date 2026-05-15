@@ -24,6 +24,7 @@ export function RegisterPage() {
   const [plan, setPlan] = useState<RegistrationPlan>('trial');
 
   const [trialDays, setTrialDays] = useState(14);
+  const [fieldErrors, setFieldErrors] = useState<{ fullname?: string; email?: string; password?: string; passwordConfirm?: string; companyName?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -43,10 +44,17 @@ export function RegisterPage() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (password !== passwordConfirm) {
-      setError('Heslá sa nezhodujú. Skontroluj druhé pole.');
+    const errs: typeof fieldErrors = {};
+    if (!fullname.trim()) errs.fullname = 'Zadaj meno a priezvisko.';
+    if (!email.trim()) errs.email = 'Zadaj e-mailovú adresu.';
+    if (!password) errs.password = 'Zadaj heslo.';
+    if (password !== passwordConfirm) errs.passwordConfirm = 'Heslá sa nezhodujú. Skontroluj druhé pole.';
+    if (!companyName.trim()) errs.companyName = 'Zadaj fakturačné meno spoločnosti.';
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs);
       return;
     }
+    setFieldErrors({});
     setError(null);
     setLoading(true);
     try {
@@ -89,7 +97,7 @@ export function RegisterPage() {
     >
       <Card className="p-6">
         <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-          <Field label="Meno a priezvisko" required>
+          <Field label="Meno a priezvisko" required error={fieldErrors.fullname}>
             {(p) => (
               <Input
                 {...p}
@@ -97,13 +105,13 @@ export function RegisterPage() {
                 required
                 leftIcon={<User className="size-4" />}
                 value={fullname}
-                onChange={(e) => setFullname(e.target.value)}
+                onChange={(e) => { setFullname(e.target.value); if (fieldErrors.fullname) setFieldErrors((prev) => ({ ...prev, fullname: undefined })); }}
                 placeholder="Ján Novák"
               />
             )}
           </Field>
 
-          <Field label="Email" required>
+          <Field label="Email" required error={fieldErrors.email}>
             {(p) => (
               <Input
                 {...p}
@@ -112,7 +120,7 @@ export function RegisterPage() {
                 required
                 leftIcon={<Mail className="size-4" />}
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => { setEmail(e.target.value); if (fieldErrors.email) setFieldErrors((prev) => ({ ...prev, email: undefined })); }}
                 placeholder="ty@firma.sk"
               />
             )}
@@ -132,7 +140,7 @@ export function RegisterPage() {
             )}
           </Field>
 
-          <Field label="Heslo" hint="Minimálne 8 znakov" required>
+          <Field label="Heslo" hint={fieldErrors.password ? undefined : 'Minimálne 8 znakov'} required error={fieldErrors.password}>
             {(p) => (
               <Input
                 {...p}
@@ -147,7 +155,7 @@ export function RegisterPage() {
                   />
                 }
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => { setPassword(e.target.value); if (fieldErrors.password) setFieldErrors((prev) => ({ ...prev, password: undefined })); }}
                 placeholder="••••••••"
                 minLength={8}
               />
@@ -158,7 +166,7 @@ export function RegisterPage() {
             label="Potvrdenie hesla"
             required
             hint={passwordsMatch ? 'Heslá sa zhodujú.' : undefined}
-            error={passwordMismatch ? 'Heslá sa nezhodujú.' : undefined}
+            error={fieldErrors.passwordConfirm ?? (passwordMismatch ? 'Heslá sa nezhodujú.' : undefined)}
           >
             {(p) => (
               <Input
@@ -174,7 +182,7 @@ export function RegisterPage() {
                   />
                 }
                 value={passwordConfirm}
-                onChange={(e) => setPasswordConfirm(e.target.value)}
+                onChange={(e) => { setPasswordConfirm(e.target.value); if (fieldErrors.passwordConfirm) setFieldErrors((prev) => ({ ...prev, passwordConfirm: undefined })); }}
                 placeholder="••••••••"
                 minLength={8}
                 invalid={passwordMismatch}
@@ -182,14 +190,14 @@ export function RegisterPage() {
             )}
           </Field>
 
-          <Field label="Fakturačné meno spoločnosti" required>
+          <Field label="Fakturačné meno spoločnosti" required error={fieldErrors.companyName}>
             {(p) => (
               <Input
                 {...p}
                 required
                 leftIcon={<Building2 className="size-4" />}
                 value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
+                onChange={(e) => { setCompanyName(e.target.value); if (fieldErrors.companyName) setFieldErrors((prev) => ({ ...prev, companyName: undefined })); }}
                 placeholder="Firol s. r. o."
               />
             )}

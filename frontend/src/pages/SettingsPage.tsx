@@ -516,6 +516,7 @@ function TrainersSection() {
 
   const [newName, setNewName] = useState('');
   const [newCert, setNewCert] = useState('');
+  const [newNameError, setNewNameError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -531,9 +532,10 @@ function TrainersSection() {
   async function onAdd(e: FormEvent) {
     e.preventDefault();
     if (!newName.trim()) {
-      setError('Doplň meno školiteľa.');
+      setNewNameError('Doplň meno školiteľa.');
       return;
     }
+    setNewNameError(null);
     setError(null);
     setAdding(true);
     try {
@@ -657,10 +659,10 @@ function TrainersSection() {
 
         <form onSubmit={onAdd} className="flex flex-col gap-3 rounded-2xl border border-dashed border-ink-200 p-3 sm:flex-row sm:items-end">
           <div className="flex-1">
-            <Field label="Meno a priezvisko" required>
+            <Field label="Meno a priezvisko" required error={newNameError}>
               {(p) => (
                 <Input {...p} required leftIcon={<User className="size-4" />}
-                  value={newName} onChange={(e) => setNewName(e.target.value)}
+                  value={newName} onChange={(e) => { setNewName(e.target.value); if (newNameError) setNewNameError(null); }}
                   placeholder="Mgr. Jana Lektorová" />
               )}
             </Field>
@@ -708,6 +710,7 @@ function TeamSection() {
   const [invitePhone, setInvitePhone] = useState('');
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [inviteFieldErrors, setInviteFieldErrors] = useState<{ name?: string; email?: string }>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -722,10 +725,11 @@ function TeamSection() {
 
   async function onInvite(e: FormEvent) {
     e.preventDefault();
-    if (!inviteName.trim() || !inviteEmail.trim()) {
-      setError('Doplň meno a e-mail.');
-      return;
-    }
+    const errs: typeof inviteFieldErrors = {};
+    if (!inviteName.trim()) errs.name = 'Doplň meno a priezvisko.';
+    if (!inviteEmail.trim()) errs.email = 'Doplň e-mail.';
+    if (Object.keys(errs).length > 0) { setInviteFieldErrors(errs); return; }
+    setInviteFieldErrors({});
     setError(null);
     setAdding(true);
     try {
@@ -818,7 +822,7 @@ function TeamSection() {
             type="button"
             variant="secondary"
             leftIcon={<MailPlus className="size-4" />}
-            onClick={() => { setShowInvite((v) => !v); setInviteLink(null); }}
+            onClick={() => { setShowInvite((v) => !v); setInviteLink(null); setInviteFieldErrors({}); }}
           >
             {showInvite ? 'Zrušiť' : 'Pozvať technika'}
           </Button>
@@ -838,17 +842,17 @@ function TeamSection() {
             className="mb-4 flex flex-col gap-3 rounded-2xl border border-dashed border-ink-200 p-3"
           >
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Meno a priezvisko" required>
+              <Field label="Meno a priezvisko" required error={inviteFieldErrors.name}>
                 {(p) => (
                   <Input {...p} required leftIcon={<User className="size-4" />}
-                    value={inviteName} onChange={(e) => setInviteName(e.target.value)}
+                    value={inviteName} onChange={(e) => { setInviteName(e.target.value); if (inviteFieldErrors.name) setInviteFieldErrors((prev) => ({ ...prev, name: undefined })); }}
                     placeholder="Ján Technik" />
                 )}
               </Field>
-              <Field label="E-mail" required>
+              <Field label="E-mail" required error={inviteFieldErrors.email}>
                 {(p) => (
                   <Input {...p} required type="email" leftIcon={<AtSign className="size-4" />}
-                    value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)}
+                    value={inviteEmail} onChange={(e) => { setInviteEmail(e.target.value); if (inviteFieldErrors.email) setInviteFieldErrors((prev) => ({ ...prev, email: undefined })); }}
                     placeholder="jan@firma.sk" />
                 )}
               </Field>

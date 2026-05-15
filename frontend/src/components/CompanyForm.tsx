@@ -42,10 +42,16 @@ export function CompanyForm({
   const [contact, setContact] = useState(initial?.contact ?? '');
 
   const [submitting, setSubmitting] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!name.trim()) {
+      setNameError('Doplň názov firmy.');
+      return;
+    }
+    setNameError(null);
     setError(null);
     setSubmitting(true);
     const payload: CompanyPayload = {
@@ -71,14 +77,14 @@ export function CompanyForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-      <Field label="Názov firmy" required>
+      <Field label="Názov firmy" required error={nameError}>
         {(p) => (
           <Input
             {...p}
             required
             leftIcon={<Building2 className="size-4" />}
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { setName(e.target.value); if (nameError) setNameError(null); }}
             placeholder="ALFA Trade s. r. o."
             autoFocus={mode === 'create'}
           />

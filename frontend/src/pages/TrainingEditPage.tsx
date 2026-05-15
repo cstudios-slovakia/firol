@@ -37,6 +37,7 @@ export function TrainingEditPage() {
   const [durationMin, setDurationMin] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [dateError, setDateError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,7 +70,8 @@ export function TrainingEditPage() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!date) { setError('Zadaj dátum školenia.'); return; }
+    if (!date) { setDateError('Zadaj dátum školenia.'); return; }
+    setDateError(null);
     setError(null);
     setSubmitting(true);
     try {
@@ -162,11 +164,16 @@ export function TrainingEditPage() {
 
       <Card className="p-5">
         <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-          <Field label="Dátum školenia" required hint="Zadaj manuálne, nemusí byť dnešný dátum.">
+          <Field
+            label="Dátum školenia"
+            required
+            hint={dateError ? undefined : 'Zadaj manuálne, nemusí byť dnešný dátum.'}
+            error={dateError}
+          >
             {(p) => (
               <Input {...p} required type="date"
                 leftIcon={<CalendarDays className="size-4" />}
-                value={date} onChange={(e) => setDate(e.target.value)} />
+                value={date} onChange={(e) => { setDate(e.target.value); if (dateError) setDateError(null); }} />
             )}
           </Field>
 
@@ -225,7 +232,7 @@ export function TrainingEditPage() {
             </Field>
           </div>
 
-          {error && (
+          {error && !dateError && (
             <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
               {error}
             </div>

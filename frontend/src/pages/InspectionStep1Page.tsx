@@ -71,6 +71,7 @@ export function InspectionStep1Page() {
   const [loadingFacilities, setLoadingFacilities] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ company?: string; facility?: string; date?: string }>({});
   const [newCompanyOpen, setNewCompanyOpen] = useState(false);
   const [newFacilityOpen, setNewFacilityOpen] = useState(false);
 
@@ -153,14 +154,15 @@ export function InspectionStep1Page() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!companyId || !facilityId) {
-      setError('Vyber firmu a prevádzku.');
+    const errs: typeof fieldErrors = {};
+    if (!companyId) errs.company = 'Vyber firmu.';
+    if (!facilityId) errs.facility = 'Vyber prevádzku.';
+    if (!executedOn) errs.date = 'Zadaj dátum vykonania kontroly.';
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs);
       return;
     }
-    if (!executedOn) {
-      setError('Zadaj dátum vykonania kontroly (manuálne).');
-      return;
-    }
+    setFieldErrors({});
     setError(null);
     setSubmitting(true);
     try {
@@ -169,8 +171,8 @@ export function InspectionStep1Page() {
           type,
           periodicity_months: periodicity,
           executed_on: executedOn,
-          company_id: companyId,
-          facility_id: facilityId,
+          company_id: companyId!,
+          facility_id: facilityId!,
           notes: notes.trim() || undefined,
         },
         csrfToken,
@@ -246,13 +248,13 @@ export function InspectionStep1Page() {
 
       <Card className="p-5">
         <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-          <Field label="Spoločnosť" required>
+          <Field label="Spoločnosť" required error={fieldErrors.company}>
             {(p) => (
               <Select
                 id={p.id}
                 aria-invalid={p['aria-invalid']}
                 value={companyId !== null ? String(companyId) : ''}
-                onChange={(v) => setCompanyId(v ? Number(v) : null)}
+                onChange={(v) => { setCompanyId(v ? Number(v) : null); if (fieldErrors.company) setFieldErrors((prev) => ({ ...prev, company: undefined })); }}
                 placeholder="— vyber firmu —"
                 leftIcon={<Building2 className="size-4" />}
                 options={(companies ?? []).map((c) => ({
@@ -279,13 +281,13 @@ export function InspectionStep1Page() {
             )}
           </Field>
 
-          <Field label="Prevádzka" required>
+          <Field label="Prevádzka" required error={fieldErrors.facility}>
             {(p) => (
               <Select
                 id={p.id}
                 aria-invalid={p['aria-invalid']}
                 value={facilityId !== null ? String(facilityId) : ''}
-                onChange={(v) => setFacilityId(v ? Number(v) : null)}
+                onChange={(v) => { setFacilityId(v ? Number(v) : null); if (fieldErrors.facility) setFieldErrors((prev) => ({ ...prev, facility: undefined })); }}
                 disabled={companyId === null || loadingFacilities}
                 placeholder={
                   companyId === null
@@ -321,7 +323,8 @@ export function InspectionStep1Page() {
           <Field
             label="Dátum vykonania kontroly"
             required
-            hint="Zadaj manuálne, nemusí byť dnešný dátum."
+            hint={fieldErrors.date ? undefined : 'Zadaj manuálne, nemusí byť dnešný dátum.'}
+            error={fieldErrors.date}
           >
             {(p) => (
               <Input
@@ -330,7 +333,7 @@ export function InspectionStep1Page() {
                 required
                 leftIcon={<CalendarDays className="size-4" />}
                 value={executedOn}
-                onChange={(e) => setExecutedOn(e.target.value)}
+                onChange={(e) => { setExecutedOn(e.target.value); if (fieldErrors.date) setFieldErrors((prev) => ({ ...prev, date: undefined })); }}
               />
             )}
           </Field>
@@ -403,6 +406,7 @@ export function InspectionStep1Page() {
               {error}
             </div>
           )}
+
 
           <div className="flex justify-end pt-1">
             <Button

@@ -43,7 +43,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
             baseClasses,
             leftIcon && 'pl-10',
             rightSlot && 'pr-11',
-            invalid && invalidClasses,
+            (invalid || rest['aria-invalid'] === true) && invalidClasses,
             className,
           )}
           onClick={handleClick}
@@ -60,7 +60,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   return (
     <input
       ref={ref}
-      className={cn(baseClasses, invalid && invalidClasses, className)}
+      className={cn(baseClasses, (invalid || rest['aria-invalid'] === true) && invalidClasses, className)}
       onClick={handleClick}
       {...rest}
     />

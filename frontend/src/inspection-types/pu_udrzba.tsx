@@ -50,7 +50,8 @@ function PuUdStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [apiError, setApiError] = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -73,13 +74,6 @@ function PuUdStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
       setNotes('');
     }
   }, [initialItem]);
-
-  function localValidationError(): string | null {
-    if (!identifier.trim()) return 'Doplň číslo / označenie uzáveru.';
-    if (!location.trim()) return 'Doplň umiestnenie.';
-    if (!maintenanceWork.trim()) return 'Popíš vykonané práce — aspoň krátko.';
-    return null;
-  }
 
   function isPristine() {
     return (
@@ -105,12 +99,13 @@ function PuUdStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
 
   async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
     e.preventDefault();
-    const localErr = localValidationError();
-    if (localErr) {
-      setError(localErr);
-      return;
-    }
-    setError(null);
+    const errs: Record<string, string> = {};
+    if (!identifier.trim()) errs.identifier = 'Doplň číslo / označenie uzáveru.';
+    if (!location.trim()) errs.location = 'Doplň umiestnenie.';
+    if (!maintenanceWork.trim()) errs.maintenanceWork = 'Popíš vykonané práce — aspoň krátko.';
+    if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
+    setFieldErrors({});
+    setApiError(null);
     setSubmitting(true);
     try {
       const fields: PuUdrzbaItemFields = {
@@ -134,7 +129,7 @@ function PuUdStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
         onSaved(action);
         return;
       }
-      setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
+      setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
     }
@@ -154,10 +149,10 @@ function PuUdStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
         </Field>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Číslo / označenie" required>
+          <Field label="Číslo / označenie" required error={fieldErrors.identifier}>
             {(p) => (
               <Input {...p} required leftIcon={<Hash className="size-4" />}
-                value={identifier} onChange={(e) => setIdentifier(e.target.value)}
+                value={identifier} onChange={(e) => { setIdentifier(e.target.value); if (fieldErrors.identifier) setFieldErrors((prev) => { const n = { ...prev }; delete n.identifier; return n; }); }}
                 placeholder="PD-A1, kl. 03/EW30" />
             )}
           </Field>
@@ -170,22 +165,22 @@ function PuUdStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
           </Field>
         </div>
 
-        <Field label="Umiestnenie" required>
+        <Field label="Umiestnenie" required error={fieldErrors.location}>
           {(p) => (
             <Input {...p} required leftIcon={<MapPin className="size-4" />}
-              value={location} onChange={(e) => setLocation(e.target.value)}
+              value={location} onChange={(e) => { setLocation(e.target.value); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
               placeholder="Hala A → kancelárie" />
           )}
         </Field>
 
-        <Field label="Vykonané práce" required hint="Mazanie, výmena tesnení, kontrola samozatváračov, atď.">
+        <Field label="Vykonané práce" required hint={fieldErrors.maintenanceWork ? undefined : 'Mazanie, výmena tesnení, kontrola samozatváračov, atď.'} error={fieldErrors.maintenanceWork}>
           {(p) => (
             <div className="relative">
               <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
                 <Wrench className="size-4" />
               </span>
               <textarea id={p.id} required rows={3} value={maintenanceWork}
-                onChange={(e) => setMaintenanceWork(e.target.value)}
+                onChange={(e) => { setMaintenanceWork(e.target.value); if (fieldErrors.maintenanceWork) setFieldErrors((prev) => { const n = { ...prev }; delete n.maintenanceWork; return n; }); }}
                 placeholder="Vyčistenie a namazanie pántov, výmena tesnenia po obvode, kontrola samozatváračov."
                 className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
             </div>
@@ -215,9 +210,9 @@ function PuUdStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
           )}
         </Field>
 
-        {error && (
+        {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-            {error}
+            {apiError}
           </div>
         )}
 

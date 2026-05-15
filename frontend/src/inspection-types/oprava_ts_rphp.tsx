@@ -45,7 +45,8 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [apiError, setApiError] = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -71,21 +72,7 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
 
   function toggleAction(a: OpravaAction) {
     setActions((prev) => prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]);
-  }
-
-  function localValidationError(): string | null {
-    if (!manufacturer.trim()) return 'Doplň výrobcu.';
-    if (!extType.trim()) return 'Doplň typ prístroja.';
-    if (!serial.trim()) return 'Doplň výrobné číslo.';
-    if (!location.trim()) return 'Doplň umiestnenie.';
-    const n = Number(year);
-    if (!Number.isInteger(n) || n < 1900 || n > 2200) {
-      return 'Rok výroby musí byť v rozsahu 1900–2200.';
-    }
-    if (actions.length === 0) {
-      return 'Vyber aspoň jeden vykonaný úkon.';
-    }
-    return null;
+    if (fieldErrors.actions) setFieldErrors((prev) => { const n = { ...prev }; delete n.actions; return n; });
   }
 
   function isPristine() {
@@ -112,12 +99,17 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
 
   async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
     e.preventDefault();
-    const localErr = localValidationError();
-    if (localErr) {
-      setError(localErr);
-      return;
-    }
-    setError(null);
+    const errs: Record<string, string> = {};
+    if (!manufacturer.trim()) errs.manufacturer = 'Doplň výrobcu.';
+    if (!extType.trim()) errs.extType = 'Doplň typ prístroja.';
+    if (!serial.trim()) errs.serial = 'Doplň výrobné číslo.';
+    if (!location.trim()) errs.location = 'Doplň umiestnenie.';
+    const yn = Number(year);
+    if (!Number.isInteger(yn) || yn < 1900 || yn > 2200) errs.year = 'Rok výroby musí byť v rozsahu 1900–2200.';
+    if (actions.length === 0) errs.actions = 'Vyber aspoň jeden vykonaný úkon.';
+    if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
+    setFieldErrors({});
+    setApiError(null);
     setSubmitting(true);
     try {
       const fields: OpravaTsRphpItemFields = {
@@ -141,7 +133,7 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
         onSaved(action);
         return;
       }
-      setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
+      setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
     }
@@ -151,49 +143,49 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
     <Card className="p-5">
       <form className="flex flex-col gap-4" noValidate onSubmit={(e) => handleSubmit(e, 'save-and-next')}>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Výrobca" required>
+          <Field label="Výrobca" required error={fieldErrors.manufacturer}>
             {(p) => (
               <Input {...p} required leftIcon={<Tag className="size-4" />}
-                value={manufacturer} onChange={(e) => setManufacturer(e.target.value)}
+                value={manufacturer} onChange={(e) => { setManufacturer(e.target.value); if (fieldErrors.manufacturer) setFieldErrors((prev) => { const n = { ...prev }; delete n.manufacturer; return n; }); }}
                 placeholder="Gloria" />
             )}
           </Field>
-          <Field label="Typ" required hint="Napr. P6, CO2-5, P9">
+          <Field label="Typ" required hint={fieldErrors.extType ? undefined : 'Napr. P6, CO2-5, P9'} error={fieldErrors.extType}>
             {(p) => (
               <Input {...p} required leftIcon={<FileSearch className="size-4" />}
-                value={extType} onChange={(e) => setExtType(e.target.value)}
+                value={extType} onChange={(e) => { setExtType(e.target.value); if (fieldErrors.extType) setFieldErrors((prev) => { const n = { ...prev }; delete n.extType; return n; }); }}
                 placeholder="P6" />
             )}
           </Field>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Výrobné číslo / séria" required>
+          <Field label="Výrobné číslo / séria" required error={fieldErrors.serial}>
             {(p) => (
               <Input {...p} required leftIcon={<Hash className="size-4" />}
-                value={serial} onChange={(e) => setSerial(e.target.value)}
+                value={serial} onChange={(e) => { setSerial(e.target.value); if (fieldErrors.serial) setFieldErrors((prev) => { const n = { ...prev }; delete n.serial; return n; }); }}
                 placeholder="GLR-2024-001" />
             )}
           </Field>
-          <Field label="Rok výroby" required>
+          <Field label="Rok výroby" required error={fieldErrors.year}>
             {(p) => (
               <Input {...p} required type="number" inputMode="numeric" min={1900} max={2200}
                 leftIcon={<Hash className="size-4" />}
-                value={year} onChange={(e) => setYear(e.target.value)}
+                value={year} onChange={(e) => { setYear(e.target.value); if (fieldErrors.year) setFieldErrors((prev) => { const n = { ...prev }; delete n.year; return n; }); }}
                 placeholder="2024" />
             )}
           </Field>
         </div>
 
-        <Field label="Umiestnenie" required>
+        <Field label="Umiestnenie" required error={fieldErrors.location}>
           {(p) => (
             <Input {...p} required leftIcon={<MapPin className="size-4" />}
-              value={location} onChange={(e) => setLocation(e.target.value)}
+              value={location} onChange={(e) => { setLocation(e.target.value); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
               placeholder="Hala A, vchod" />
           )}
         </Field>
 
-        <Field label="Vykonané úkony" required hint="Aspoň jeden — môže byť aj viac naraz.">
+        <Field label="Vykonané úkony" required hint={fieldErrors.actions ? undefined : 'Aspoň jeden — môže byť aj viac naraz.'} error={fieldErrors.actions}>
           {() => (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="group" aria-label="Vykonané úkony">
               {OPRAVA_ACTIONS.map((a) => (
@@ -216,9 +208,9 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
           )}
         </Field>
 
-        {error && (
+        {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-            {error}
+            {apiError}
           </div>
         )}
 

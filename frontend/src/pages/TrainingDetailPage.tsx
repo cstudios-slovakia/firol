@@ -425,7 +425,9 @@ function AddTraineeForm({
   const [fullname, setFullname] = useState('');
   const [position, setPosition] = useState('');
   const [empty, setEmpty] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [fullnameError, setFullnameError] = useState<string | null>(null);
+  const [signatureError, setSignatureError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   function handleCancel() {
     const hasData = !!fullname.trim() || !!position.trim() || !empty;
@@ -437,22 +439,19 @@ function AddTraineeForm({
 
   async function handle(e: FormEvent) {
     e.preventDefault();
-    if (!fullname.trim()) {
-      setError('Doplň meno a priezvisko účastníka.');
-      return;
-    }
     const blob = await padRef.current?.toBlob();
-    if (!blob) {
-      setError('Účastník sa musí podpísať na obrazovku.');
-      return;
-    }
-    setError(null);
+    let hasError = false;
+    if (!fullname.trim()) { setFullnameError('Doplň meno a priezvisko účastníka.'); hasError = true; }
+    if (!blob) { setSignatureError('Účastník sa musí podpísať na obrazovku.'); hasError = true; }
+    if (hasError) return;
+    setFullnameError(null);
+    setSignatureError(null);
+    setApiError(null);
     try {
-      await onSubmit({ fullname: fullname.trim(), position: position.trim(), signature: blob });
-      // Form is unmounted by the parent on success — no further state to reset.
+      await onSubmit({ fullname: fullname.trim(), position: position.trim(), signature: blob! });
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Účastníka sa nepodarilo pridať.';
-      setError(message);
+      setApiError(message);
     }
   }
 
@@ -460,10 +459,10 @@ function AddTraineeForm({
     <Card className="mb-3 p-5">
       <form onSubmit={handle} className="flex flex-col gap-4" noValidate>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Meno a priezvisko" required>
+          <Field label="Meno a priezvisko" required error={fullnameError}>
             {(p) => (
               <Input {...p} required leftIcon={<User className="size-4" />}
-                value={fullname} onChange={(e) => setFullname(e.target.value)}
+                value={fullname} onChange={(e) => { setFullname(e.target.value); if (fullnameError) setFullnameError(null); }}
                 placeholder="Mária Novotná" />
             )}
           </Field>
@@ -476,13 +475,13 @@ function AddTraineeForm({
           </Field>
         </div>
 
-        <Field label="Podpis" required hint="Podpíšte sa prstom alebo myšou. Rovnaký podpis pôjde na PDF.">
-          {() => <SignaturePad ref={padRef} heightPx={180} onEmptyChange={setEmpty} />}
+        <Field label="Podpis" required error={signatureError} hint={signatureError ? undefined : 'Podpíšte sa prstom alebo myšou. Rovnaký podpis pôjde na PDF.'}>
+          {() => <SignaturePad ref={padRef} heightPx={180} onEmptyChange={(isEmpty) => { setEmpty(isEmpty); if (!isEmpty && signatureError) setSignatureError(null); }} />}
         </Field>
 
-        {error && (
+        {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-            {error}
+            {apiError}
           </div>
         )}
 

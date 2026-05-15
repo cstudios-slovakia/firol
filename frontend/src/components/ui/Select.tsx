@@ -232,7 +232,7 @@ export function Select({
         onKeyDown={onTriggerKeyDown}
         className={cn(
           'flex h-11 w-full items-center gap-2 rounded-xl border bg-white pl-3 pr-3 text-left text-sm transition-colors duration-150',
-          invalid
+          (invalid || ariaInvalid === true)
             ? 'border-status-bad focus:border-status-bad focus:ring-[hsl(0_75%_90%)]'
             : 'border-ink-200 hover:border-ink-300 focus:border-firol-400 focus:ring-firol-200',
           'focus:outline-none focus:ring-2',

@@ -48,7 +48,9 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [workspacesError, setWorkspacesError] = useState<string | null>(null);
+  const [activitiesError, setActivitiesError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -72,22 +74,18 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
     setActivities((prev) => prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]);
   }
 
-  function localValidationError(): string | null {
-    if (!workspaces.trim()) return 'Doplň prehliadnuté pracoviská.';
-    if (activities.length === 0 && !activitiesOther.trim()) {
-      return 'Vyber aspoň jednu vykonanú činnosť alebo doplň vlastnú v poli „iné".';
-    }
-    return null;
-  }
-
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    const localErr = localValidationError();
-    if (localErr) {
-      setError(localErr);
-      return;
+    let hasError = false;
+    if (!workspaces.trim()) { setWorkspacesError('Doplň prehliadnuté pracoviská.'); hasError = true; }
+    if (activities.length === 0 && !activitiesOther.trim()) {
+      setActivitiesError('Vyber aspoň jednu vykonanú činnosť alebo doplň vlastnú v poli „iné".');
+      hasError = true;
     }
-    setError(null);
+    if (hasError) return;
+    setWorkspacesError(null);
+    setActivitiesError(null);
+    setApiError(null);
     setSubmitting(true);
     try {
       const fields: PoziarnaKnihaItemFields = {
@@ -111,7 +109,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
         onSaved('save-and-summary');
         return;
       }
-      setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
+      setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
     }
@@ -120,21 +118,26 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   return (
     <Card className="p-5">
       <form className="flex flex-col gap-4" noValidate onSubmit={handleSubmit}>
-        <Field label="Prehliadnuté pracoviská" required hint="Stručný zoznam priestorov / pracovísk, ktoré boli prehliadnuté.">
+        <Field
+          label="Prehliadnuté pracoviská"
+          required
+          hint={workspacesError ? undefined : 'Stručný zoznam priestorov / pracovísk, ktoré boli prehliadnuté.'}
+          error={workspacesError}
+        >
           {(p) => (
             <div className="relative">
               <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
                 <BookOpen className="size-4" />
               </span>
               <textarea id={p.id} required rows={2} value={workspaces}
-                onChange={(e) => setWorkspaces(e.target.value)}
+                onChange={(e) => { setWorkspaces(e.target.value); if (workspacesError) setWorkspacesError(null); }}
                 placeholder="Hala A, kancelárie 1.NP, sklad chemikálií, kotolňa."
                 className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
             </div>
           )}
         </Field>
 
-        <Field label="Vykonané činnosti" hint='Zaškrtni, čo bolo vykonané pri prehliadke. Možnosť „iné" je voľný text.'>
+        <Field label="Vykonané činnosti" hint={activitiesError ? undefined : 'Zaškrtni, čo bolo vykonané pri prehliadke. Možnosť „iné" je voľný text.'} error={activitiesError}>
           {() => (
             <div className="flex flex-col gap-1.5">
               {PK_ACTIVITIES.map((a) => (
@@ -149,7 +152,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
                 <span className="text-[11px] uppercase tracking-wide text-ink-400">Iné (voľný text)</span>
                 <Input
                   value={activitiesOther}
-                  onChange={(e) => setActivitiesOther(e.target.value)}
+                  onChange={(e) => { setActivitiesOther(e.target.value); if (activitiesError) setActivitiesError(null); }}
                   placeholder='Napr. „Kontrola stavu únikového východu na 3.NP".'
                 />
               </div>
@@ -179,9 +182,9 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           )}
         </Field>
 
-        {error && (
+        {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-            {error}
+            {apiError}
           </div>
         )}
 

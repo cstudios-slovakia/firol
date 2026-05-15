@@ -44,7 +44,8 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [apiError, setApiError] = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -67,13 +68,6 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
       setNotes('');
     }
   }, [initialItem]);
-
-  function localValidationError(): string | null {
-    if (!evidNumber.trim()) return 'Doplň evidenčné číslo svietidla.';
-    if (!luminaireType.trim()) return 'Doplň druh / typ svietidla.';
-    if (!location.trim()) return 'Doplň umiestnenie.';
-    return null;
-  }
 
   function isPristine() {
     return (
@@ -99,12 +93,13 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
 
   async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
     e.preventDefault();
-    const localErr = localValidationError();
-    if (localErr) {
-      setError(localErr);
-      return;
-    }
-    setError(null);
+    const errs: Record<string, string> = {};
+    if (!evidNumber.trim()) errs.evidNumber = 'Doplň evidenčné číslo svietidla.';
+    if (!luminaireType.trim()) errs.luminaireType = 'Doplň druh / typ svietidla.';
+    if (!location.trim()) errs.location = 'Doplň umiestnenie.';
+    if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
+    setFieldErrors({});
+    setApiError(null);
     setSubmitting(true);
     try {
       const fields: NudzoveOsvetlenieItemFields = {
@@ -128,7 +123,7 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
         onSaved(action);
         return;
       }
-      setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
+      setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
     }
@@ -138,10 +133,10 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
     <Card className="p-5">
       <form className="flex flex-col gap-4" noValidate onSubmit={(e) => handleSubmit(e, 'save-and-next')}>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Evid. č. svietidla" required hint="Napr. NL-001">
+          <Field label="Evid. č. svietidla" required hint={fieldErrors.evidNumber ? undefined : 'Napr. NL-001'} error={fieldErrors.evidNumber}>
             {(p) => (
               <Input {...p} required leftIcon={<Hash className="size-4" />}
-                value={evidNumber} onChange={(e) => setEvidNumber(e.target.value)}
+                value={evidNumber} onChange={(e) => { setEvidNumber(e.target.value); if (fieldErrors.evidNumber) setFieldErrors((prev) => { const n = { ...prev }; delete n.evidNumber; return n; }); }}
                 placeholder="NL-001" />
             )}
           </Field>
@@ -155,10 +150,10 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Druh / typ" required>
+          <Field label="Druh / typ" required error={fieldErrors.luminaireType}>
             {(p) => (
               <Input {...p} required leftIcon={<Lightbulb className="size-4" />}
-                value={luminaireType} onChange={(e) => setLuminaireType(e.target.value)}
+                value={luminaireType} onChange={(e) => { setLuminaireType(e.target.value); if (fieldErrors.luminaireType) setFieldErrors((prev) => { const n = { ...prev }; delete n.luminaireType; return n; }); }}
                 placeholder="EXIT 3h, Núdzové 1h" />
             )}
           </Field>
@@ -171,10 +166,10 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           </Field>
         </div>
 
-        <Field label="Umiestnenie" required>
+        <Field label="Umiestnenie" required error={fieldErrors.location}>
           {(p) => (
             <Input {...p} required leftIcon={<MapPin className="size-4" />}
-              value={location} onChange={(e) => setLocation(e.target.value)}
+              value={location} onChange={(e) => { setLocation(e.target.value); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
               placeholder="Chodba 2.NP, nad únikovým východom" />
           )}
         </Field>
@@ -202,9 +197,9 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           )}
         </Field>
 
-        {error && (
+        {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-            {error}
+            {apiError}
           </div>
         )}
 
