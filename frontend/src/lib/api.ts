@@ -24,6 +24,16 @@ import { enqueueMutation, OfflineQueuedError } from './queue';
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 
+// In production VITE_API_BASE_URL is "/api.php?path=" — the path and its
+// own query string must be split so PHP receives them as separate $_GET keys.
+// e.g. /api/admin/accounts?offset=0 → /api.php?path=/api/admin/accounts&offset=0
+function buildUrl(path: string): string {
+  if (!BASE) return path;
+  const q = path.indexOf('?');
+  if (q === -1) return `${BASE}${path}`;
+  return `${BASE}${path.slice(0, q)}&${path.slice(q + 1)}`;
+}
+
 export { OfflineQueuedError } from './queue';
 
 export class ApiError extends Error {
@@ -70,7 +80,7 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
 
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetch(buildUrl(path), {
       method,
       headers,
       body,
