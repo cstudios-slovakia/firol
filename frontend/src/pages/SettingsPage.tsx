@@ -162,11 +162,11 @@ export function SettingsPage() {
             <Button
               type="button"
               variant="secondary"
-              leftIcon={<UploadCloud className="size-4" />}
+              leftIcon={<FileSignature className="size-4" />}
               onClick={() => fileInputRef.current?.click()}
               loading={saving}
             >
-              {profile?.has_signature ? 'Nahrať nový podpis' : 'Nahrať podpis (PNG)'}
+              {profile?.has_signature ? 'Nahrať nový podpis' : 'Nahrať podpis'}
             </Button>
             <p className="text-xs text-ink-400">
               PNG s priehľadným pozadím, max 512 KB. Optimálne ~600×200 px.
@@ -645,9 +645,10 @@ function TrainersSection() {
                   onClick={() => sigInputs.current[t.id]?.click()}
                   disabled={busyId === t.id}
                   title="Nahrať podpis (PNG)"
-                  className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700 disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-medium text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700 disabled:opacity-50"
                 >
-                  {busyId === t.id ? <Spinner size="sm" /> : <UploadCloud className="size-4" />}
+                  {busyId === t.id ? <Spinner size="sm" /> : <FileSignature className="size-4 shrink-0" />}
+                  <span>Nahrať podpis</span>
                 </button>
                 <button
                   type="button"
