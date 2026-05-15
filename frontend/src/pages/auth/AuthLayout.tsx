@@ -1,5 +1,4 @@
 import { CheckCircle2, FileText, Flame, Shield } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { AuroraBackground } from '@/components/AuroraBackground';
 
 const HERO_FEATURES = [
