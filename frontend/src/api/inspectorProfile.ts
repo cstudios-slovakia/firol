@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, buildUrl } from '@/lib/api';
 
 export type InspectorProfile = {
   user_id: number;
@@ -25,19 +25,17 @@ export const InspectorProfileApi = {
       body,
       csrfToken,
     }),
-  uploadSignature: (file: File, csrfToken: string | null) => {
+  uploadSignature: (file: Blob | File, csrfToken: string | null) => {
     const fd = new FormData();
-    fd.append('signature', file);
+    fd.append('signature', file, 'signature.png');
     return api<{ profile: InspectorProfile }>('/api/me/inspector-profile/signature', {
       method: 'POST',
       body: fd,
       csrfToken,
     });
   },
-  // The signature endpoint streams a PNG — the UI consumes it via a
-  // standard <img src> with a cache-busting query param after upload.
   signatureUrl: (cacheBuster?: number | string): string => {
-    const base = '/api/me/inspector-profile/signature';
-    return cacheBuster !== undefined ? `${base}?t=${cacheBuster}` : base;
+    const qs = cacheBuster !== undefined ? `?t=${cacheBuster}` : '';
+    return buildUrl(`/api/me/inspector-profile/signature${qs}`);
   },
 };

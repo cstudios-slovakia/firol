@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, buildUrl } from '@/lib/api';
 
 export type TrainingType =
   | 'vstupne'
@@ -166,7 +166,6 @@ export function trainingDocumentDownloadUrl(documentId: number): string {
 }
 
 export function traineeSignatureUrl(traineeId: number, cacheBuster?: string | number): string {
-  const base = import.meta.env.VITE_API_BASE_URL ?? '';
   const qs = cacheBuster !== undefined ? `?t=${encodeURIComponent(String(cacheBuster))}` : '';
-  return `${base}/api/trainees/${traineeId}/signature${qs}`;
+  return buildUrl(`/api/trainees/${traineeId}/signature${qs}`);
 }
