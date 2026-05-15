@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, buildUrl } from '@/lib/api';
 import type { SubscriptionState } from '@/auth/AuthContext';
 
 export type Account = {
@@ -57,7 +57,7 @@ export const AccountApi = {
     }),
   // Logo endpoint streams the file — consume via <img src> with cache-bust.
   logoUrl: (cacheBuster?: number | string): string => {
-    const base = '/api/account/logo';
-    return cacheBuster !== undefined ? `${base}?t=${cacheBuster}` : base;
+    const qs = cacheBuster !== undefined ? `?t=${cacheBuster}` : '';
+    return buildUrl(`/api/account/logo${qs}`);
   },
 };
