@@ -17,6 +17,7 @@ if (is_file(__DIR__ . '/../.env')) {
 
 use Firol\Controllers\AccountController;
 use Firol\Controllers\AdminController;
+use Firol\Controllers\AdminPanelController;
 use Firol\Controllers\AuthController;
 use Firol\Controllers\BillingController;
 use Firol\Controllers\CompanyController;
@@ -70,12 +71,19 @@ $router->delete('/api/account/users/{id}',[TeamController::class, 'destroy']);
 $router->get('/api/admin/settings', [AdminController::class, 'settings']);
 $router->patch('/api/admin/settings', [AdminController::class, 'updateSettings']);
 
-$router->post('/api/billing/checkout', [BillingController::class, 'checkout']);
-$router->post('/api/billing/portal',   [BillingController::class, 'portal']);
-$router->post('/api/billing/webhook',  [BillingController::class, 'webhook']);
-$router->post('/api/billing/cancel',   [BillingController::class, 'cancel']);
-$router->post('/api/billing/resume',   [BillingController::class, 'resume']);
-$router->get('/api/billing/invoices',  [BillingController::class, 'invoices']);
+$router->get('/api/admin/accounts',         [AdminPanelController::class, 'listAccounts']);
+$router->patch('/api/admin/accounts/{id}',  [AdminPanelController::class, 'updateAccount']);
+$router->delete('/api/admin/accounts/{id}', [AdminPanelController::class, 'deleteAccount']);
+$router->patch('/api/admin/users/{id}',     [AdminPanelController::class, 'updateUser']);
+$router->delete('/api/admin/users/{id}',    [AdminPanelController::class, 'deleteUser']);
+
+$router->post('/api/billing/checkout',      [BillingController::class, 'checkout']);
+$router->post('/api/billing/checkout-sync', [BillingController::class, 'checkoutSync']);
+$router->post('/api/billing/portal',        [BillingController::class, 'portal']);
+$router->post('/api/billing/webhook',       [BillingController::class, 'webhook']);
+$router->post('/api/billing/cancel',        [BillingController::class, 'cancel']);
+$router->post('/api/billing/resume',        [BillingController::class, 'resume']);
+$router->get('/api/billing/invoices',       [BillingController::class, 'invoices']);
 
 $router->get('/api/companies',                      [CompanyController::class, 'index']);
 $router->post('/api/companies',                     [CompanyController::class, 'store']);
@@ -150,7 +158,10 @@ $isWhitelisted = (bool) preg_match(
 if ($isMutation && !$isWhitelisted) {
     $sessionUserId    = Session::userId();
     $sessionAccountId = Session::activeAccountId();
-    if ($sessionUserId !== null && $sessionAccountId !== null) {
+    // App admins (agency + client) have free, unrestricted access — they
+    // never go through Stripe and shouldn't be hit by the 402 guard.
+    $isAppAdmin = $sessionUserId !== null && \Firol\Auth\Admin::isAdmin($sessionUserId);
+    if ($sessionUserId !== null && $sessionAccountId !== null && !$isAppAdmin) {
         $stmt = Db::pdo()->prepare(
             'SELECT subscription_end_date FROM accounts WHERE id = ?'
         );

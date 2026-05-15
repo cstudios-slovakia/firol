@@ -32,6 +32,16 @@ export const Billing = {
   /** Revoke a scheduled cancellation while the period is still active. */
   resume: (csrfToken: string | null) =>
     api<{ ok: true }>('/api/billing/resume', { method: 'POST', csrfToken }),
+  /**
+   * Syncs the subscription state from Stripe immediately after checkout
+   * success, before the webhook has a chance to arrive.
+   */
+  syncCheckout: (sessionId: string, csrfToken: string | null) =>
+    api<void>('/api/billing/checkout-sync', {
+      method: 'POST',
+      body: { session_id: sessionId },
+      csrfToken,
+    }),
   /** Local invoice history — issued by iDoklad off Stripe payments. */
   invoices: () => api<{ items: Invoice[] }>('/api/billing/invoices'),
 };
