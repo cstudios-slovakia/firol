@@ -111,6 +111,7 @@ $router->delete('/api/inspections/{id}/items/{item_id}', [InspectionItemControll
 $router->post('/api/inspections/{id}/generate-pdf',  [DocumentController::class, 'generateForInspection']);
 $router->get('/api/inspections/{id}/documents',      [DocumentController::class, 'indexForInspection']);
 $router->get('/api/documents/{id}/download',         [DocumentController::class, 'download']);
+$router->post('/api/documents/{id}/email',           [DocumentController::class, 'emailDocument']);
 
 $router->get('/api/me/inspector-profile',            [InspectorProfileController::class, 'show']);
 $router->patch('/api/me/inspector-profile',          [InspectorProfileController::class, 'update']);

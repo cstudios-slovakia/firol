@@ -9,6 +9,7 @@
         "ext-pdo": "*",
         "ext-pdo_mysql": "*",
         "mpdf/mpdf": "^8.3",
+        "phpmailer/phpmailer": "^6.9",
         "stripe/stripe-php": "^15.0",
         "vlucas/phpdotenv": "^5.6"
     },
