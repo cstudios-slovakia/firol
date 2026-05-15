@@ -13,13 +13,16 @@ export function PasswordResetConfirmPage() {
   const token = params.get('token') ?? '';
 
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
+    if (password.length < 8) { setPasswordError('Heslo musí mať aspoň 8 znakov.'); return; }
+    setPasswordError(null);
+    setApiError(null);
     setLoading(true);
     try {
       await api('/api/auth/password-reset/confirm', {
@@ -28,7 +31,7 @@ export function PasswordResetConfirmPage() {
       });
       setDone(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo, skús to znova.');
+      setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo, skús to znova.');
     } finally {
       setLoading(false);
     }
@@ -62,7 +65,7 @@ export function PasswordResetConfirmPage() {
           </div>
         ) : (
           <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-            <Field label="Nové heslo" hint="Minimálne 8 znakov" required>
+            <Field label="Nové heslo" hint={passwordError ? undefined : 'Minimálne 8 znakov'} required error={passwordError}>
               {(p) => (
                 <Input
                   {...p}
@@ -72,15 +75,15 @@ export function PasswordResetConfirmPage() {
                   minLength={8}
                   leftIcon={<Lock className="size-4" />}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => { setPassword(e.target.value); if (passwordError) setPasswordError(null); }}
                   placeholder="••••••••"
                 />
               )}
             </Field>
 
-            {error && (
+            {apiError && (
               <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-                {error}
+                {apiError}
               </div>
             )}
 

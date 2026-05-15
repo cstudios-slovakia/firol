@@ -43,7 +43,8 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [apiError, setApiError] = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -64,17 +65,6 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
       setNotes('');
     }
   }, [initialItem]);
-
-  function localValidationError(): string | null {
-    if (!hoseType.trim()) return 'Doplň typ hadice (napr. C52, D25).';
-    if (!serial.trim()) return 'Doplň výrobné číslo.';
-    if (!location.trim()) return 'Doplň umiestnenie.';
-    const n = Number(testPressure);
-    if (!Number.isFinite(n) || n < 0 || n > 50) {
-      return 'Skúšobný tlak musí byť číslo v rozsahu 0–50 MPa.';
-    }
-    return null;
-  }
 
   function isPristine() {
     return (
@@ -100,12 +90,15 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
 
   async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
     e.preventDefault();
-    const localErr = localValidationError();
-    if (localErr) {
-      setError(localErr);
-      return;
-    }
-    setError(null);
+    const errs: Record<string, string> = {};
+    if (!hoseType.trim()) errs.hoseType = 'Doplň typ hadice (napr. C52, D25).';
+    if (!serial.trim()) errs.serial = 'Doplň výrobné číslo.';
+    if (!location.trim()) errs.location = 'Doplň umiestnenie.';
+    const tp = Number(testPressure);
+    if (!Number.isFinite(tp) || tp < 0 || tp > 50) errs.testPressure = 'Skúšobný tlak musí byť číslo v rozsahu 0–50 MPa.';
+    if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
+    setFieldErrors({});
+    setApiError(null);
     setSubmitting(true);
     try {
       const fields: TsHadicItemFields = {
@@ -128,7 +121,7 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
         onSaved(action);
         return;
       }
-      setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
+      setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
     }
@@ -138,17 +131,17 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
     <Card className="p-5">
       <form className="flex flex-col gap-4" noValidate onSubmit={(e) => handleSubmit(e, 'save-and-next')}>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Typ hadice" required hint="Napr. C52, D25, B65.">
+          <Field label="Typ hadice" required hint={fieldErrors.hoseType ? undefined : 'Napr. C52, D25, B65.'} error={fieldErrors.hoseType}>
             {(p) => (
               <Input {...p} required leftIcon={<Gauge className="size-4" />}
-                value={hoseType} onChange={(e) => setHoseType(e.target.value)}
+                value={hoseType} onChange={(e) => { setHoseType(e.target.value); if (fieldErrors.hoseType) setFieldErrors((prev) => { const n = { ...prev }; delete n.hoseType; return n; }); }}
                 placeholder="C52" />
             )}
           </Field>
-          <Field label="Výrobné číslo" required>
+          <Field label="Výrobné číslo" required error={fieldErrors.serial}>
             {(p) => (
               <Input {...p} required leftIcon={<Hash className="size-4" />}
-                value={serial} onChange={(e) => setSerial(e.target.value)}
+                value={serial} onChange={(e) => { setSerial(e.target.value); if (fieldErrors.serial) setFieldErrors((prev) => { const n = { ...prev }; delete n.serial; return n; }); }}
                 placeholder="ZP-2020-014" />
             )}
           </Field>
@@ -156,19 +149,19 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
 
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="sm:col-span-2">
-            <Field label="Umiestnenie" required>
+            <Field label="Umiestnenie" required error={fieldErrors.location}>
               {(p) => (
                 <Input {...p} required leftIcon={<MapPin className="size-4" />}
-                  value={location} onChange={(e) => setLocation(e.target.value)}
+                  value={location} onChange={(e) => { setLocation(e.target.value); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
                   placeholder="Hydrant H-2 chodba 1.NP" />
               )}
             </Field>
           </div>
-          <Field label="Skúšobný tlak (MPa)" required>
+          <Field label="Skúšobný tlak (MPa)" required error={fieldErrors.testPressure}>
             {(p) => (
               <Input {...p} required type="number" inputMode="decimal" step="0.1" min={0} max={50}
                 leftIcon={<Gauge className="size-4" />}
-                value={testPressure} onChange={(e) => setTestPressure(e.target.value)}
+                value={testPressure} onChange={(e) => { setTestPressure(e.target.value); if (fieldErrors.testPressure) setFieldErrors((prev) => { const n = { ...prev }; delete n.testPressure; return n; }); }}
                 placeholder="1,2" />
             )}
           </Field>
@@ -197,9 +190,9 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
           )}
         </Field>
 
-        {error && (
+        {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-            {error}
+            {apiError}
           </div>
         )}
 

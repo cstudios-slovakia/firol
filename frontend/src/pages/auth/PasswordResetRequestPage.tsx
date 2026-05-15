@@ -10,13 +10,16 @@ import { AuthLayout } from './AuthLayout';
 
 export function PasswordResetRequestPage() {
   const [email, setEmail] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
+    if (!email.trim()) { setEmailError('Doplň e-mailovú adresu.'); return; }
+    setEmailError(null);
+    setApiError(null);
     setLoading(true);
     try {
       await api('/api/auth/password-reset/request', {
@@ -25,7 +28,7 @@ export function PasswordResetRequestPage() {
       });
       setSent(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo, skús to znova.');
+      setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo, skús to znova.');
     } finally {
       setLoading(false);
     }
@@ -54,7 +57,7 @@ export function PasswordResetRequestPage() {
           </div>
         ) : (
           <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-            <Field label="Email" required>
+            <Field label="Email" required error={emailError}>
               {(p) => (
                 <Input
                   {...p}
@@ -63,15 +66,15 @@ export function PasswordResetRequestPage() {
                   required
                   leftIcon={<Mail className="size-4" />}
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => { setEmail(e.target.value); if (emailError) setEmailError(null); }}
                   placeholder="ty@firma.sk"
                 />
               )}
             </Field>
 
-            {error && (
+            {apiError && (
               <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-                {error}
+                {apiError}
               </div>
             )}
 

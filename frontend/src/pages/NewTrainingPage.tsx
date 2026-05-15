@@ -47,7 +47,8 @@ export function NewTrainingPage() {
   const [durationMin, setDurationMin] = useState<string>('');
 
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ company?: string; date?: string }>({});
+  const [apiError, setApiError] = useState<string | null>(null);
   const [newCompanyOpen, setNewCompanyOpen] = useState(false);
   const [newFacilityOpen, setNewFacilityOpen] = useState(false);
 
@@ -67,7 +68,7 @@ export function NewTrainingPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať dáta.');
+        setApiError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať dáta.');
       });
     return () => {
       cancelled = true;
@@ -112,21 +113,21 @@ export function NewTrainingPage() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!companyId) {
-      setError('Vyber firmu.');
+    const errs: typeof fieldErrors = {};
+    if (!companyId) errs.company = 'Vyber firmu.';
+    if (!date) errs.date = 'Zadaj dátum školenia.';
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs);
       return;
     }
-    if (!date) {
-      setError('Zadaj dátum školenia (manuálne).');
-      return;
-    }
-    setError(null);
+    setFieldErrors({});
+    setApiError(null);
     setSubmitting(true);
     try {
       const res = await Trainings.create(
         {
           type,
-          company_id: companyId,
+          company_id: companyId!,
           facility_id: facilityId ?? undefined,
           date,
           trainer_id: trainerId ?? undefined,
@@ -139,7 +140,7 @@ export function NewTrainingPage() {
       navigate(`/trainings/${res.training.id}`, { replace: true });
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
-      setError(msg);
+      setApiError(msg);
       toast.error(msg);
     } finally {
       setSubmitting(false);
@@ -213,12 +214,13 @@ export function NewTrainingPage() {
             )}
           </Field>
 
-          <Field label="Spoločnosť" required>
+          <Field label="Spoločnosť" required error={fieldErrors.company}>
             {(p) => (
               <Select
                 id={p.id}
+                aria-invalid={p['aria-invalid']}
                 value={companyId !== null ? String(companyId) : ''}
-                onChange={(v) => setCompanyId(v ? Number(v) : null)}
+                onChange={(v) => { setCompanyId(v ? Number(v) : null); if (fieldErrors.company) setFieldErrors((prev) => ({ ...prev, company: undefined })); }}
                 placeholder="— vyber firmu —"
                 leftIcon={<Building2 className="size-4" />}
                 options={companies.map((c) => ({
@@ -276,11 +278,16 @@ export function NewTrainingPage() {
             )}
           </Field>
 
-          <Field label="Dátum školenia" required hint="Zadaj manuálne, nemusí byť dnešný dátum.">
+          <Field
+            label="Dátum školenia"
+            required
+            hint={fieldErrors.date ? undefined : 'Zadaj manuálne, nemusí byť dnešný dátum.'}
+            error={fieldErrors.date}
+          >
             {(p) => (
               <Input {...p} required type="date"
                 leftIcon={<CalendarDays className="size-4" />}
-                value={date} onChange={(e) => setDate(e.target.value)} />
+                value={date} onChange={(e) => { setDate(e.target.value); if (fieldErrors.date) setFieldErrors((prev) => ({ ...prev, date: undefined })); }} />
             )}
           </Field>
 
@@ -338,9 +345,9 @@ export function NewTrainingPage() {
             </Field>
           </div>
 
-          {error && (
+          {apiError && (
             <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-              {error}
+              {apiError}
             </div>
           )}
 

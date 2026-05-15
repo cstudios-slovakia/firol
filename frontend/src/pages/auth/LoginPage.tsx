@@ -15,11 +15,20 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    const errs: typeof fieldErrors = {};
+    if (!email.trim()) errs.email = 'Zadaj e-mailovú adresu.';
+    if (!password) errs.password = 'Zadaj heslo.';
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs);
+      return;
+    }
+    setFieldErrors({});
     setError(null);
     setLoading(true);
     try {
@@ -47,7 +56,7 @@ export function LoginPage() {
     >
       <Card className="p-6">
         <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-          <Field label="Email" required>
+          <Field label="Email" required error={fieldErrors.email}>
             {(p) => (
               <Input
                 {...p}
@@ -56,13 +65,13 @@ export function LoginPage() {
                 required
                 leftIcon={<Mail className="size-4" />}
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => { setEmail(e.target.value); if (fieldErrors.email) setFieldErrors((prev) => ({ ...prev, email: undefined })); }}
                 placeholder="ty@firma.sk"
               />
             )}
           </Field>
 
-          <Field label="Heslo" required>
+          <Field label="Heslo" required error={fieldErrors.password}>
             {(p) => (
               <Input
                 {...p}
@@ -83,7 +92,7 @@ export function LoginPage() {
                   </button>
                 }
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => { setPassword(e.target.value); if (fieldErrors.password) setFieldErrors((prev) => ({ ...prev, password: undefined })); }}
                 placeholder="••••••••"
               />
             )}

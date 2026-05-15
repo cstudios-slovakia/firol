@@ -51,7 +51,8 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
   const [result, setResult] = useState<PassFailResult>('vyhovuje');
 
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [apiError, setApiError] = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -79,22 +80,6 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
     }
   }, [initialItem]);
 
-  function localValidationError(): string | null {
-    if (hydrantType === 'other' && !typeOther.trim()) return 'Doplň označenie typu (alebo vyber štandardný DN).';
-    if (!location.trim()) return 'Doplň umiestnenie.';
-    const hc = Number(hoseCount);
-    if (!Number.isInteger(hc) || hc < 0 || hc > 20) return 'Počet hadíc musí byť 0–20.';
-    for (const [label, raw, max] of [
-      ['HS', hs, 50] as const, ['HD', hd, 50] as const, ['Q', q, 100] as const,
-    ]) {
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n < 0 || n > max) {
-        return `Hodnota ${label} musí byť číslo v rozsahu 0–${max}.`;
-      }
-    }
-    return null;
-  }
-
   function isPristine() {
     return (
       hydrantType === 'DN52' && !typeOther && !location && hoseCount === '1' &&
@@ -119,12 +104,20 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
 
   async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
     e.preventDefault();
-    const localErr = localValidationError();
-    if (localErr) {
-      setError(localErr);
-      return;
-    }
-    setError(null);
+    const errs: Record<string, string> = {};
+    if (hydrantType === 'other' && !typeOther.trim()) errs.typeOther = 'Doplň označenie typu (alebo vyber štandardný DN).';
+    if (!location.trim()) errs.location = 'Doplň umiestnenie.';
+    const hc = Number(hoseCount);
+    if (!Number.isInteger(hc) || hc < 0 || hc > 20) errs.hoseCount = 'Počet hadíc musí byť 0–20.';
+    const hsN = Number(hs);
+    if (!Number.isFinite(hsN) || hsN < 0 || hsN > 50) errs.hs = 'Hodnota HS musí byť číslo v rozsahu 0–50.';
+    const hdN = Number(hd);
+    if (!Number.isFinite(hdN) || hdN < 0 || hdN > 50) errs.hd = 'Hodnota HD musí byť číslo v rozsahu 0–50.';
+    const qN = Number(q);
+    if (!Number.isFinite(qN) || qN < 0 || qN > 100) errs.q = 'Hodnota Q musí byť číslo v rozsahu 0–100.';
+    if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
+    setFieldErrors({});
+    setApiError(null);
     setSubmitting(true);
     try {
       const fields: HydrantItemFields = {
@@ -150,7 +143,7 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
         onSaved(action);
         return;
       }
-      setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
+      setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
     }
@@ -170,50 +163,50 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
         </Field>
 
         {hydrantType === 'other' && (
-          <Field label="Označenie typu" required hint="Napr. DN40 alebo presný výrobcovský kód.">
+          <Field label="Označenie typu" required hint={fieldErrors.typeOther ? undefined : 'Napr. DN40 alebo presný výrobcovský kód.'} error={fieldErrors.typeOther}>
             {(p) => (
               <Input {...p} required leftIcon={<Droplets className="size-4" />}
-                value={typeOther} onChange={(e) => setTypeOther(e.target.value)}
+                value={typeOther} onChange={(e) => { setTypeOther(e.target.value); if (fieldErrors.typeOther) setFieldErrors((prev) => { const n = { ...prev }; delete n.typeOther; return n; }); }}
                 placeholder="DN40 / DN65 / iné" />
             )}
           </Field>
         )}
 
-        <Field label="Umiestnenie" required>
+        <Field label="Umiestnenie" required error={fieldErrors.location}>
           {(p) => (
             <Input {...p} required leftIcon={<MapPin className="size-4" />}
-              value={location} onChange={(e) => setLocation(e.target.value)}
+              value={location} onChange={(e) => { setLocation(e.target.value); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
               placeholder="Vchod hala A, druhé poschodie" />
           )}
         </Field>
 
         <div className="grid gap-4 sm:grid-cols-4">
-          <Field label="Počet hadíc" required>
+          <Field label="Počet hadíc" required error={fieldErrors.hoseCount}>
             {(p) => (
               <Input {...p} required type="number" inputMode="numeric" min={0} max={20}
                 leftIcon={<Hash className="size-4" />}
-                value={hoseCount} onChange={(e) => setHoseCount(e.target.value)} />
+                value={hoseCount} onChange={(e) => { setHoseCount(e.target.value); if (fieldErrors.hoseCount) setFieldErrors((prev) => { const n = { ...prev }; delete n.hoseCount; return n; }); }} />
             )}
           </Field>
-          <Field label="HS (MPa)" required hint="Statický tlak">
+          <Field label="HS (MPa)" required hint={fieldErrors.hs ? undefined : 'Statický tlak'} error={fieldErrors.hs}>
             {(p) => (
               <Input {...p} required type="number" inputMode="decimal" step="0.01" min={0} max={50}
                 leftIcon={<Gauge className="size-4" />}
-                value={hs} onChange={(e) => setHs(e.target.value)} placeholder="0,55" />
+                value={hs} onChange={(e) => { setHs(e.target.value); if (fieldErrors.hs) setFieldErrors((prev) => { const n = { ...prev }; delete n.hs; return n; }); }} placeholder="0,55" />
             )}
           </Field>
-          <Field label="HD (MPa)" required hint="Dynamický tlak">
+          <Field label="HD (MPa)" required hint={fieldErrors.hd ? undefined : 'Dynamický tlak'} error={fieldErrors.hd}>
             {(p) => (
               <Input {...p} required type="number" inputMode="decimal" step="0.01" min={0} max={50}
                 leftIcon={<Gauge className="size-4" />}
-                value={hd} onChange={(e) => setHd(e.target.value)} placeholder="0,42" />
+                value={hd} onChange={(e) => { setHd(e.target.value); if (fieldErrors.hd) setFieldErrors((prev) => { const n = { ...prev }; delete n.hd; return n; }); }} placeholder="0,42" />
             )}
           </Field>
-          <Field label="Q (l/s)" required hint="Prietok">
+          <Field label="Q (l/s)" required hint={fieldErrors.q ? undefined : 'Prietok'} error={fieldErrors.q}>
             {(p) => (
               <Input {...p} required type="number" inputMode="decimal" step="0.01" min={0} max={100}
                 leftIcon={<Gauge className="size-4" />}
-                value={q} onChange={(e) => setQ(e.target.value)} placeholder="1,8" />
+                value={q} onChange={(e) => { setQ(e.target.value); if (fieldErrors.q) setFieldErrors((prev) => { const n = { ...prev }; delete n.q; return n; }); }} placeholder="1,8" />
             )}
           </Field>
         </div>
@@ -241,9 +234,9 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
           )}
         </Field>
 
-        {error && (
+        {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-            {error}
+            {apiError}
           </div>
         )}
 

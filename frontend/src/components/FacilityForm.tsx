@@ -48,21 +48,21 @@ export function FacilityForm({
   const [notes, setNotes] = useState(initial?.notes ?? '');
 
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) {
-      setError('Doplň názov prevádzky.');
+      setNameError('Doplň názov prevádzky.');
       return;
     }
     if (mode === 'create' && companyId === undefined) {
-      // Defensive: this dialog is meant to be opened only when a company
-      // is already selected. If it isn't, fail loudly instead of POSTing.
-      setError('Najprv vyber firmu.');
+      setApiError('Najprv vyber firmu.');
       return;
     }
-    setError(null);
+    setNameError(null);
+    setApiError(null);
     setSubmitting(true);
     const payload: FacilityPayload = {
       name: name.trim(),
@@ -78,7 +78,7 @@ export function FacilityForm({
       toast.success(mode === 'edit' ? 'Prevádzka uložená' : 'Prevádzka vytvorená');
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
-      setError(msg);
+      setApiError(msg);
       toast.error(msg);
     } finally {
       setSubmitting(false);
@@ -87,14 +87,14 @@ export function FacilityForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-      <Field label="Názov prevádzky" required>
+      <Field label="Názov prevádzky" required error={nameError}>
         {(p) => (
           <Input
             {...p}
             required
             leftIcon={<Warehouse className="size-4" />}
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { setName(e.target.value); if (nameError) setNameError(null); }}
             placeholder="Sklad A"
             autoFocus={mode === 'create'}
           />
@@ -144,9 +144,9 @@ export function FacilityForm({
         )}
       </Field>
 
-      {error && (
+      {apiError && (
         <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-          {error}
+          {apiError}
         </div>
       )}
 
