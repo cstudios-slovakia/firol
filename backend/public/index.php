@@ -31,6 +31,7 @@ use Firol\Controllers\TraineeController;
 use Firol\Controllers\TrainerController;
 use Firol\Controllers\TrainingController;
 use Firol\Controllers\MeController;
+use Firol\Controllers\PublicSettingsController;
 use Firol\Auth\Session;
 use Firol\Db;
 use Firol\Http\Request;
@@ -47,6 +48,8 @@ $router->get('/api/health', static function (): void {
         'time'   => date('c'),
     ]);
 });
+
+$router->get('/api/public/settings',               [PublicSettingsController::class, 'show']);
 
 $router->post('/api/auth/register',                [AuthController::class, 'register']);
 $router->post('/api/auth/login',                   [AuthController::class, 'login']);

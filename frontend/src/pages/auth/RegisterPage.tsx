@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Building2, Eye, EyeOff, Lock, Mail, Phone, Sparkles, User } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
@@ -23,8 +23,16 @@ export function RegisterPage() {
   const [companyName, setCompanyName] = useState('');
   const [plan, setPlan] = useState<RegistrationPlan>('trial');
 
+  const [trialDays, setTrialDays] = useState(14);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/public/settings')
+      .then((r) => r.json())
+      .then((data) => { if (typeof data.trial_days === 'number') setTrialDays(data.trial_days); })
+      .catch(() => {});
+  }, []);
 
   // Surface the mismatch only after the user has typed enough that they're
   // clearly past the "still typing the same thing" stage — saves one
@@ -67,12 +75,13 @@ export function RegisterPage() {
 
   return (
     <AuthLayout
+      wide
       title="Registrácia"
       subtitle="Vytvor si konto, vyber plán a vyplň fakturačné údaje — potom zaplatíš cez Stripe a okamžite získaš prístup."
       footer={
         <>
           Už máš konto?{' '}
-          <Link to="/login" className="font-medium text-firol-600 hover:text-firol-700">
+          <Link to="/login" className="font-semibold text-firol-600 underline-offset-2 hover:text-firol-700 hover:underline">
             Prihlás sa
           </Link>
         </>
@@ -198,7 +207,7 @@ export function RegisterPage() {
                 active={plan === 'trial'}
                 onClick={() => setPlan('trial')}
                 label="Skúšobná verzia"
-                price="14 dní zdarma"
+                price={`${trialDays} dní zdarma`}
                 badge="Štart"
                 icon={<Sparkles className="size-3.5" />}
               />
@@ -218,7 +227,7 @@ export function RegisterPage() {
             </div>
             <p className="text-xs text-ink-400">
               {plan === 'trial'
-                ? 'Skúšobné obdobie 14 dní bez platby. Predplatné si vyberieš neskôr v nastaveniach.'
+                ? `Skúšobné obdobie ${trialDays} dní bez platby. Predplatné si vyberieš neskôr v nastaveniach.`
                 : 'V ďalšom kroku doplníš fakturačné údaje a presmerujeme ťa na bezpečnú platbu cez Stripe.'}
             </p>
           </div>

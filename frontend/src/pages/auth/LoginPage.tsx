@@ -39,7 +39,7 @@ export function LoginPage() {
       footer={
         <>
           Ešte nemáš účet?{' '}
-          <Link to="/register" className="font-medium text-firol-600 hover:text-firol-700">
+          <Link to="/register" className="font-semibold text-firol-600 underline-offset-2 hover:text-firol-700 hover:underline">
             Zaregistruj sa
           </Link>
         </>
