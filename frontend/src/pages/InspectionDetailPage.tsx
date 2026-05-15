@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 import { getTypeModule } from '@/inspection-types';
+import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 
 /**
  * Step 3 — summary screen. Final review before PDF generation.
@@ -349,6 +350,7 @@ function DocumentsBlock({
               </div>
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
+            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} />
           </li>
         ))}
       </ul>

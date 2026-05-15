@@ -10,6 +10,8 @@ use Firol\Db;
 use Firol\Documents\NumberAllocator;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Mail\Mailer;
+use Firol\Mail\Templates\DocumentEmail;
 use Firol\Pdf\PdfRenderer;
 use Firol\Storage\Storage;
 
@@ -115,6 +117,66 @@ final class DocumentController
             'document' => self::loadDocument($accountId, $documentId),
             'stats'    => $stats,
         ], 201);
+    }
+
+    /**
+     * Send a generated PDF protocol to an arbitrary email address. The
+     * document file is read from disk and attached to a short cover email
+     * (subject: "Protokol <číslo> — <brand>"). Optional `note` lets the
+     * technician add a free-form message that's shown in the email body.
+     */
+    public static function emailDocument(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId  = Tenant::currentAccountId();
+        $documentId = (int) $params['id'];
+
+        $email = $req->jsonString('email');
+        if ($email === null || $email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            Response::error('Zadaj platnú e-mailovú adresu.', 422);
+        }
+
+        $note = $req->jsonString('note');
+
+        $doc = self::loadDocument($accountId, $documentId);
+        if (!$doc) {
+            Response::error('Document not found', 404);
+        }
+
+        $abs = Storage::documentAbsolute($doc['file_path']);
+        if (!is_file($abs)) {
+            error_log('[document-email] file missing: ' . $abs);
+            Response::error('Súbor protokolu nie je k dispozícii.', 410);
+        }
+
+        $pdfBytes = file_get_contents($abs);
+        if ($pdfBytes === false) {
+            Response::error('Súbor protokolu sa nepodarilo načítať.', 500);
+        }
+
+        $accStmt = Db::pdo()->prepare(
+            'SELECT invoice_company_name FROM accounts WHERE id = ?'
+        );
+        $accStmt->execute([$accountId]);
+        $brandName = (string) ($accStmt->fetchColumn() ?: 'Firol');
+
+        $filename = ($doc['number'] ?? 'protocol') . '.pdf';
+
+        $message = DocumentEmail::build(
+            to:             $email,
+            documentNumber: (string) ($doc['number'] ?? ''),
+            brandName:      $brandName,
+            pdfFilename:    $filename,
+            pdfBytes:       $pdfBytes,
+            note:           $note,
+        );
+
+        $sent = Mailer::send($message);
+        if (!$sent) {
+            Response::error('E-mail sa nepodarilo odoslať. Skús to neskôr.', 502);
+        }
+
+        Response::json(['sent' => true, 'to' => $email]);
     }
 
     public static function download(Request $req, array $params): void

@@ -11,11 +11,17 @@ namespace Firol\Mail;
  */
 final class Message
 {
+    /**
+     * @param list<array{filename: string, content: string}> $attachments
+     *        Attachments: filename + base64-encoded content (decoded by the
+     *        transport before send).
+     */
     public function __construct(
         public readonly string $to,
         public readonly string $subject,
         public readonly string $html,
         public readonly string $text,
         public readonly ?string $replyTo = null,
+        public readonly array $attachments = [],
     ) {}
 }

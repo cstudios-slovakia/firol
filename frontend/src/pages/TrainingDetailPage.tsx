@@ -26,6 +26,7 @@ import { Field } from '@/components/ui/Field';
 import { Spinner } from '@/components/ui/Spinner';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
+import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 
 export function TrainingDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
@@ -396,6 +397,7 @@ function DocumentsBlock({
               </div>
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
+            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} />
           </li>
         ))}
       </ul>
