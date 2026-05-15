@@ -21,6 +21,7 @@ import { NewTrainingPage } from '@/pages/NewTrainingPage';
 import { TrainingDetailPage } from '@/pages/TrainingDetailPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { BillingPage } from '@/pages/BillingPage';
+import { AdminPage, RequireAdmin } from '@/pages/AdminPage';
 
 export default function App() {
   return (
@@ -84,6 +85,14 @@ export default function App() {
         <Route path="/trainings/:id" element={<TrainingDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/billing" element={<BillingPage />} />
+        <Route
+          path="/admin"
+          element={
+            <RequireAdmin>
+              <AdminPage />
+            </RequireAdmin>
+          }
+        />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

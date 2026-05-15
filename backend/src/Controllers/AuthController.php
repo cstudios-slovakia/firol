@@ -250,7 +250,8 @@ final class AuthController
 
         $accStmt = $pdo->prepare(
             'SELECT a.id, a.invoice_company_name, a.subscription_end_date, a.main_user_id,
-                    a.stripe_status, a.billing_period, a.stripe_customer_id,
+                    a.stripe_status, a.stripe_subscription_id, a.stripe_cancel_at_period_end,
+                    a.billing_period, a.stripe_customer_id,
                     a.invoice_street, a.invoice_postal_code, a.invoice_city, a.invoice_ico
              FROM   accounts a
              JOIN   account_users au ON au.account_id = a.id
@@ -260,9 +261,11 @@ final class AuthController
         $accStmt->execute([$userId]);
         $accountsRaw = $accStmt->fetchAll();
 
-        // Surface a derived `has_billing_details` flag so the frontend can
-        // gate UI (Settings billing card, /onboarding/billing guard) without
-        // shipping the full invoice address in the auth snapshot.
+        // Surface derived flags so the frontend can gate UI without shipping
+        // raw billing internals. `subscription_state` collapses the various
+        // Stripe states into the three buckets the UI actually distinguishes:
+        // no subscription (just free trial), trial with a paid sub waiting,
+        // or an already-active paid subscription.
         $accounts = array_map(static function (array $a): array {
             $a['has_billing_details'] =
                 trim((string) ($a['invoice_street']      ?? '')) !== '' &&
@@ -270,6 +273,21 @@ final class AuthController
                 trim((string) ($a['invoice_city']        ?? '')) !== '' &&
                 trim((string) ($a['invoice_ico']         ?? ''));
             unset($a['invoice_street'], $a['invoice_postal_code'], $a['invoice_city'], $a['invoice_ico']);
+
+            $status = $a['stripe_status'] ?? null;
+            $subId  = $a['stripe_subscription_id'] ?? null;
+            $a['subscription_state'] = match (true) {
+                $status === 'active'     => 'active',
+                $status === 'trialing'   => 'trial_paid',
+                $status === 'past_due'   => 'past_due',
+                $status === 'canceled'   => 'canceled',
+                $status === 'incomplete' || $status === 'incomplete_expired' => 'incomplete',
+                $subId !== null && $subId !== ''                              => 'has_subscription',
+                default                                                       => 'none',
+            };
+            // Don't leak the raw subscription id — UI doesn't need it.
+            $a['stripe_cancel_at_period_end'] = (bool) ($a['stripe_cancel_at_period_end'] ?? false);
+            unset($a['stripe_subscription_id']);
             return $a;
         }, $accountsRaw);
 

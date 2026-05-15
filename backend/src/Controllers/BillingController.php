@@ -75,9 +75,12 @@ final class BillingController
 
         $customerId = self::ensureCustomer($account);
 
+        // Land back on /billing — that's where the checkout success handler
+        // lives (calls /api/billing/checkout-sync to pull the fresh
+        // subscription state from Stripe before the webhook arrives).
         $base    = StripeClient::appBaseUrl();
-        $success = $base . '/settings?checkout=success';
-        $cancel  = $base . '/settings?checkout=cancel';
+        $success = $base . '/billing?checkout=success';
+        $cancel  = $base . '/billing?checkout=cancel';
 
         // Spec: subscription must respect any remaining trial. If the
         // user pays today but their local trial ends in 10 days, Stripe
@@ -272,7 +275,7 @@ final class BillingController
         try {
             $session = StripeClient::get()->billingPortal->sessions->create([
                 'customer'    => $customerId,
-                'return_url'  => StripeClient::appBaseUrl() . '/settings',
+                'return_url'  => StripeClient::appBaseUrl() . '/billing',
             ]);
         } catch (\Throwable $e) {
             error_log('[billing.portal] ' . $e->getMessage());
@@ -280,6 +283,83 @@ final class BillingController
         }
 
         Response::json(['url' => $session->url]);
+    }
+
+    /**
+     * POST /api/billing/checkout-sync
+     *
+     * Called by the frontend immediately after Stripe redirects back with
+     * ?checkout=success. We don't trust the session_id alone — we query
+     * Stripe for the customer's most recent subscription directly, so even
+     * if the session is unknown or the webhook is delayed we get the real
+     * state every time.
+     *
+     * Non-fatal — if Stripe is unreachable we just return 204 and the
+     * webhook will catch up later anyway.
+     */
+    public static function checkoutSync(Request $req): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+
+        $stmt = Db::pdo()->prepare(
+            'SELECT stripe_customer_id FROM accounts WHERE id = ?'
+        );
+        $stmt->execute([$accountId]);
+        $customerId = (string) ($stmt->fetchColumn() ?: '');
+        if ($customerId === '') {
+            Response::noContent();
+            return;
+        }
+
+        $sub = self::fetchLatestSubscription($customerId);
+        if ($sub !== null) {
+            self::handleSubscriptionUpsert($sub);
+        }
+
+        Response::noContent();
+    }
+
+    /**
+     * Query Stripe for the most recently created subscription belonging to
+     * the given customer, across any status (including trialing/active).
+     * Returns null on error or when the customer has no subscriptions.
+     */
+    private static function fetchLatestSubscription(string $customerId): ?\Stripe\Subscription
+    {
+        try {
+            $list = StripeClient::get()->subscriptions->all([
+                'customer' => $customerId,
+                'status'   => 'all',
+                'limit'    => 5,
+            ]);
+        } catch (\Throwable $e) {
+            error_log('[billing.fetchLatestSubscription] ' . $e->getMessage());
+            return null;
+        }
+
+        $best = null;
+        $bestRank = -1;
+        // Prefer active/trialing over canceled/incomplete so a stale canceled
+        // sub doesn't shadow a freshly purchased one.
+        $rank = [
+            'active'             => 5,
+            'trialing'           => 4,
+            'past_due'           => 3,
+            'unpaid'             => 2,
+            'incomplete'         => 1,
+            'incomplete_expired' => 0,
+            'canceled'           => 0,
+            'paused'             => 0,
+        ];
+        foreach ($list->data as $s) {
+            $r = $rank[$s->status] ?? -1;
+            if ($r > $bestRank || ($r === $bestRank && (int) $s->created > (int) ($best->created ?? 0))) {
+                $best = $s;
+                $bestRank = $r;
+            }
+        }
+        return $best;
     }
 
     /**

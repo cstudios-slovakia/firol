@@ -39,7 +39,10 @@ export function RedirectIfAuthed({ children }: { children: React.ReactNode }) {
  * have no billing_period stored until they pick a plan in Settings.
  */
 export function RequireBillingComplete({ children }: { children: React.ReactNode }) {
-  const { accounts, activeAccountId } = useAuth();
+  const { accounts, activeAccountId, isAdmin } = useAuth();
+  // App admins (the agency + the client) get free, full access — they
+  // never go through Stripe and shouldn't be redirected to onboarding.
+  if (isAdmin) return <>{children}</>;
   const account = accounts.find((a) => a.id === activeAccountId);
   if (account) {
     const needsBilling =

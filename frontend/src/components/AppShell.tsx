@@ -8,6 +8,7 @@ import {
     GraduationCap,
     LogOut,
     Settings,
+    Shield,
     Sparkles,
 } from "lucide-react";
 import { useState } from "react";
@@ -66,10 +67,30 @@ const BOTTOM_TABS = [
     },
 ] as const;
 
-const TABS = [...TOP_TABS, ...BOTTOM_TABS] as const;
+const ADMIN_TAB = {
+    to: "/admin",
+    label: "Admin",
+    icon: Shield,
+    activeColor: "text-rose-600",
+    activeBg: "bg-rose-50 shadow-[inset_0_0_0_1px_theme(colors.rose.100)]",
+    iconBg: "bg-rose-100",
+} as const;
+
+type Tab = {
+    readonly to: string;
+    readonly label: string;
+    readonly icon: typeof Settings;
+    readonly activeColor: string;
+    readonly activeBg: string;
+    readonly iconBg: string;
+};
 
 export function AppShell() {
-    const { logout } = useAuth();
+    const { logout, isAdmin } = useAuth();
+    const bottomTabs: readonly Tab[] = isAdmin
+        ? [...BOTTOM_TABS, ADMIN_TAB]
+        : BOTTOM_TABS;
+    const allTabs: readonly Tab[] = [...TOP_TABS, ...bottomTabs];
 
     return (
         <div className="bg-app relative min-h-screen pb-20 sm:pb-0">
@@ -106,13 +127,13 @@ export function AppShell() {
             </header>
 
             <div className="mx-auto relative flex max-w-6xl gap-6 px-4 py-5 sm:py-8">
-                <SideNav />
+                <SideNav bottomTabs={bottomTabs} />
                 <main className="min-w-0 flex-1">
                     <Outlet />
                 </main>
             </div>
 
-            <BottomTabBar />
+            <BottomTabBar tabs={allTabs} />
         </div>
     );
 }
@@ -123,13 +144,15 @@ export function AppShell() {
  * until Phase 6b wires up Stripe Checkout.
  */
 function SubscriptionBanner() {
-    const { accounts, activeAccountId, csrfToken } = useAuth();
+    const { accounts, activeAccountId, csrfToken, isAdmin } = useAuth();
     const toast = useToast();
     const navigate = useNavigate();
     const [busy, setBusy] = useState(false);
 
     const account = accounts.find((a) => a.id === activeAccountId);
     if (!account) return null;
+    // App admins get free, full access — no expiry banner.
+    if (isAdmin) return null;
 
     const endStr = account.subscription_end_date;
     const today = new Date();
@@ -196,23 +219,23 @@ function SubscriptionBanner() {
 }
 
 /**
- * Compact trial banner — shown when the account is on a free trial
- * (no active/trialing Stripe subscription yet) and not expired. Informs
- * the user when the trial ends, warns that the app will switch to
- * read-only afterwards, and offers a quick CTA to start a paid plan.
+ * Compact banner shown above the app shell during/near the end of the
+ * trial. Branches on the backend-derived `subscription_state`:
+ *  - `none`       → free trial only, no paid sub → warn + "Predplatiť" CTA
+ *  - `trial_paid` → trial with sub on file       → confirm auto-charge + "Spravovať"
+ *  - anything else → no banner (active sub or expired SubscriptionBanner takes over)
  */
 function TrialBanner() {
-    const { accounts, activeAccountId, csrfToken } = useAuth();
+    const { accounts, activeAccountId, csrfToken, isAdmin } = useAuth();
     const toast = useToast();
     const navigate = useNavigate();
 
     const account = accounts.find((a) => a.id === activeAccountId);
     if (!account) return null;
+    if (isAdmin) return null;
 
-    const status = account.stripe_status;
-    if (status === "active" || status === "trialing" || status === "canceled") {
-        return null;
-    }
+    const state = account.subscription_state;
+    if (state !== "none" && state !== "trial_paid") return null;
 
     const endStr = account.subscription_end_date;
     const today = new Date();
@@ -228,6 +251,12 @@ function TrialBanner() {
         day: "numeric",
         month: "long",
     });
+
+    const periodPrice = account.billing_period === "yearly"
+        ? "199 € / rok"
+        : "19 € / mesiac";
+
+    const isTrialPaid = state === "trial_paid";
 
     async function onPay() {
         try {
@@ -254,27 +283,39 @@ function TrialBanner() {
             <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-1.5 text-xs text-firol-900">
                 <Sparkles className="size-3.5 shrink-0 text-firol-600" />
                 <p className="min-w-0 flex-1 truncate">
-                    <span className="font-semibold">Skúšobné obdobie</span>
+                    <span className="font-semibold">Skúšobné obdobie do {human}</span>
                     <span className="opacity-80">
-                        {" "}· do {human} ({daysLeft}{" "}
+                        {" "}({daysLeft}{" "}
                         {daysLeft === 1 ? "deň" : daysLeft < 5 ? "dni" : "dní"})
-                        · potom režim len na čítanie
+                        {isTrialPaid
+                            ? ` · potom sa automaticky zaúčtuje ${periodPrice}`
+                            : " · potom režim len na čítanie"}
                     </span>
                 </p>
-                <button
-                    type="button"
-                    onClick={onPay}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-firol-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
-                >
-                    Predplatiť
-                </button>
+                {isTrialPaid ? (
+                    <button
+                        type="button"
+                        onClick={() => navigate('/billing')}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-firol-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+                    >
+                        Spravovať predplatné
+                    </button>
+                ) : (
+                    <button
+                        type="button"
+                        onClick={onPay}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-firol-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+                    >
+                        Predplatiť
+                    </button>
+                )}
             </div>
         </div>
     );
 }
 
-function SideNav() {
-    const renderItem = (tab: (typeof TABS)[number]) => (
+function SideNav({ bottomTabs }: { bottomTabs: readonly Tab[] }) {
+    const renderItem = (tab: Tab) => (
         <li key={tab.to}>
             <NavLink
                 to={tab.to}
@@ -310,7 +351,7 @@ function SideNav() {
                 <div className="mt-auto pt-4">
                     <div className="mb-2 border-t border-ink-100" />
                     <ul className="flex flex-col gap-1">
-                        {BOTTOM_TABS.map(renderItem)}
+                        {bottomTabs.map(renderItem)}
                     </ul>
                 </div>
             </nav>
@@ -318,14 +359,14 @@ function SideNav() {
     );
 }
 
-function BottomTabBar() {
+function BottomTabBar({ tabs }: { tabs: readonly Tab[] }) {
     return (
         <nav
             aria-label="Hlavná navigácia"
             className="fixed inset-x-0 bottom-0 z-10 border-t border-ink-100 bg-white/95 backdrop-blur sm:hidden"
         >
             <ul className="mx-auto flex max-w-2xl items-stretch justify-around px-2 py-1.5">
-                {TABS.map((tab) => (
+                {tabs.map((tab) => (
                     <li key={tab.to} className="flex-1">
                         <NavLink
                             to={tab.to}

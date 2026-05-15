@@ -193,12 +193,24 @@ final class AccountController
             'SELECT id, invoice_company_name, invoice_street, invoice_postal_code,
                     invoice_city, invoice_country, invoice_ico, invoice_dic, invoice_ic_dph,
                     logo_path, theme_color, subscription_end_date,
-                    stripe_status, billing_period, stripe_customer_id,
+                    stripe_status, stripe_subscription_id, billing_period, stripe_customer_id,
                     stripe_cancel_at_period_end
              FROM   accounts WHERE id = ?'
         );
         $stmt->execute([$accountId]);
         $row = $stmt->fetch() ?: [];
+
+        $status = $row['stripe_status'] ?? null;
+        $subId  = $row['stripe_subscription_id'] ?? null;
+        $state  = match (true) {
+            $status === 'active'     => 'active',
+            $status === 'trialing'   => 'trial_paid',
+            $status === 'past_due'   => 'past_due',
+            $status === 'canceled'   => 'canceled',
+            $status === 'incomplete' || $status === 'incomplete_expired' => 'incomplete',
+            $subId !== null && $subId !== ''                              => 'has_subscription',
+            default                                                       => 'none',
+        };
 
         return [
             'id'                   => (int) ($row['id'] ?? $accountId),
@@ -215,6 +227,7 @@ final class AccountController
                                        && is_file(Storage::root() . '/' . $row['logo_path']),
             'subscription_end_date' => $row['subscription_end_date'] ?? null,
             'stripe_status'         => $row['stripe_status'] ?? null,
+            'subscription_state'    => $state,
             'billing_period'        => $row['billing_period'] ?? null,
             'has_stripe_customer'   => !empty($row['stripe_customer_id']),
             'stripe_cancel_at_period_end' => !empty($row['stripe_cancel_at_period_end']),

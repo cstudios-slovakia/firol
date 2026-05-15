@@ -18,6 +18,18 @@ import { Dialog } from '@/components/ui/Dialog';
 import { cn } from '@/lib/cn';
 
 export function BillingPage() {
+  const [account, setAccount] = useState<Account | null>(null);
+  const [accountLoading, setAccountLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    AccountApi.show()
+      .then((res) => { if (!cancelled) setAccount(res.account); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setAccountLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div className="flex flex-col gap-5">
       <header>
@@ -27,8 +39,8 @@ export function BillingPage() {
         </p>
       </header>
 
-      <BillingSection />
-      <InvoiceDetailsSection />
+      <BillingSection account={account} loading={accountLoading} onAccountChange={setAccount} />
+      <InvoiceDetailsSection account={account} loading={accountLoading} onAccountChange={setAccount} />
     </div>
   );
 }
@@ -42,12 +54,18 @@ function hasBillingDetails(account: Account): boolean {
   );
 }
 
-function BillingSection() {
+function BillingSection({
+  account,
+  loading,
+  onAccountChange,
+}: {
+  account: Account | null;
+  loading: boolean;
+  onAccountChange: (a: Account) => void;
+}) {
   const { csrfToken, refresh } = useAuth();
   const toast = useToast();
-  const [account, setAccount] = useState<Account | null>(null);
   const [period, setPeriod] = useState<BillingPeriod>('monthly');
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [resuming, setResuming] = useState(false);
@@ -61,17 +79,8 @@ function BillingSection() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    AccountApi.show()
-      .then((res) => {
-        if (cancelled) return;
-        setAccount(res.account);
-        if (res.account.billing_period) setPeriod(res.account.billing_period);
-      })
-      .catch(() => { /* surfaced elsewhere */ })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
+    if (account?.billing_period) setPeriod(account.billing_period);
+  }, [account?.billing_period]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -79,8 +88,15 @@ function BillingSection() {
     if (!status) return;
     if (status === 'success') {
       toast.success('Predplatné aktivované — ďakujeme!');
-      refresh();
-      AccountApi.show().then((res) => setAccount(res.account)).catch(() => {});
+      const sessionId = params.get('session_id') ?? '';
+      // Sync subscription state from Stripe before refreshing the auth context
+      // so the banner updates immediately without waiting for the webhook.
+      Billing.syncCheckout(sessionId, csrfToken)
+        .catch(() => {})
+        .finally(() => {
+          refresh();
+          AccountApi.show().then((res) => onAccountChange(res.account)).catch(() => {});
+        });
     } else if (status === 'cancel') {
       toast.error('Platba zrušená.');
     }
@@ -88,7 +104,7 @@ function BillingSection() {
     params.delete('session_id');
     const qs = params.toString();
     window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
-  }, [refresh, toast]);
+  }, [refresh, toast, onAccountChange]);
 
   async function onCheckout() {
     if (account && !hasBillingDetails(account)) {
@@ -123,7 +139,7 @@ function BillingSection() {
     try {
       await Billing.cancel(csrfToken);
       const fresh = await AccountApi.show();
-      setAccount(fresh.account);
+      onAccountChange(fresh.account);
       setConfirmCancel(false);
       toast.success('Predplatné bude zrušené ku koncu obdobia.');
     } catch (err) {
@@ -139,7 +155,7 @@ function BillingSection() {
     try {
       await Billing.resume(csrfToken);
       const fresh = await AccountApi.show();
-      setAccount(fresh.account);
+      onAccountChange(fresh.account);
       toast.success('Predplatné obnovené — bude pokračovať aj po skončení obdobia.');
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Obnovenie zlyhalo.';
@@ -456,11 +472,17 @@ function PeriodCard({
   );
 }
 
-function InvoiceDetailsSection() {
+function InvoiceDetailsSection({
+  account,
+  loading,
+  onAccountChange,
+}: {
+  account: Account | null;
+  loading: boolean;
+  onAccountChange: (a: Account) => void;
+}) {
   const { csrfToken } = useAuth();
   const toast = useToast();
-  const [account, setAccount] = useState<Account | null>(null);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const [street, setStreet]     = useState('');
@@ -472,23 +494,16 @@ function InvoiceDetailsSection() {
   const [icDph, setIcDph]       = useState('');
 
   useEffect(() => {
-    let cancelled = false;
-    AccountApi.show()
-      .then((res) => {
-        if (cancelled) return;
-        setAccount(res.account);
-        setStreet(res.account.invoice_street ?? '');
-        setPostal(res.account.invoice_postal_code ?? '');
-        setCity(res.account.invoice_city ?? '');
-        setCountry(res.account.invoice_country ?? 'Slovensko');
-        setIco(res.account.invoice_ico ?? '');
-        setDic(res.account.invoice_dic ?? '');
-        setIcDph(res.account.invoice_ic_dph ?? '');
-      })
-      .catch(() => { /* surfaced elsewhere */ })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
+    if (!account) return;
+    setStreet(account.invoice_street ?? '');
+    setPostal(account.invoice_postal_code ?? '');
+    setCity(account.invoice_city ?? '');
+    setCountry(account.invoice_country ?? 'Slovensko');
+    setIco(account.invoice_ico ?? '');
+    setDic(account.invoice_dic ?? '');
+    setIcDph(account.invoice_ic_dph ?? '');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account?.id]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -503,7 +518,7 @@ function InvoiceDetailsSection() {
         invoice_dic:         dic,
         invoice_ic_dph:      icDph,
       }, csrfToken);
-      setAccount(res.account);
+      onAccountChange(res.account);
       const onboarding = new URLSearchParams(window.location.search).get('onboarding') === 'billing';
       if (onboarding) {
         toast.success('Fakturačné údaje uložené. Teraz aktivuj predplatné.');

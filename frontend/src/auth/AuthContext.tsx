@@ -10,15 +10,38 @@ export type User = {
   phone: string | null;
 };
 
+/**
+ * Collapsed subscription state — derived in the backend from raw Stripe
+ * fields so the UI doesn't have to interpret stripe_status itself.
+ *
+ * - `none`             — free trial only, no Stripe subscription yet
+ * - `trial_paid`       — trialing with a subscription on file (will auto-charge)
+ * - `active`           — paid subscription, fully active
+ * - `past_due`         — payment failed, Stripe is retrying
+ * - `canceled`         — subscription canceled (may still have access until period end)
+ * - `incomplete`       — payment never completed or expired
+ * - `has_subscription` — any other Stripe state with a subscription attached
+ */
+export type SubscriptionState =
+  | 'none'
+  | 'trial_paid'
+  | 'active'
+  | 'past_due'
+  | 'canceled'
+  | 'incomplete'
+  | 'has_subscription';
+
 export type Account = {
   id: number;
   invoice_company_name: string;
   subscription_end_date: string;
   main_user_id: number;
   stripe_status: string | null;
+  stripe_cancel_at_period_end: boolean;
   billing_period: 'monthly' | 'yearly' | null;
   stripe_customer_id: string | null;
   has_billing_details: boolean;
+  subscription_state: SubscriptionState;
 };
 
 type Snapshot = {

@@ -1,4 +1,5 @@
 import { api } from '@/lib/api';
+import type { SubscriptionState } from '@/auth/AuthContext';
 
 export type Account = {
   id: number;
@@ -14,6 +15,7 @@ export type Account = {
   has_logo: boolean;
   subscription_end_date: string | null;
   stripe_status: string | null;
+  subscription_state: SubscriptionState;
   billing_period: 'monthly' | 'yearly' | null;
   has_stripe_customer: boolean;
   stripe_cancel_at_period_end: boolean;

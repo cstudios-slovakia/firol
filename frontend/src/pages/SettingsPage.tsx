@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   AtSign, Building2, CalendarDays, Check, Copy, FileSignature, GraduationCap, Hash,
-  ImagePlus, MailPlus, Palette, Phone, Plus, RotateCcw, Settings as SettingsIcon,
+  ImagePlus, MailPlus, Palette, Phone, Plus, RotateCcw,
   ShieldCheck, ShieldOff, Trash2, UploadCloud, User, UserCheck, UsersRound,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
@@ -9,7 +9,6 @@ import { AccountApi, type Account } from '@/api/account';
 import { InspectorProfileApi, type InspectorProfile } from '@/api/inspectorProfile';
 import { Trainers, type Trainer } from '@/api/trainers';
 import { Team, type TeamMember } from '@/api/team';
-import { Admin, type SystemSettings } from '@/api/admin';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -232,8 +231,6 @@ export function SettingsPage() {
       <TrainersSection />
 
       <TeamSection />
-
-      <AdminSection />
     </div>
   );
 }
@@ -994,105 +991,3 @@ function SignaturePreview({
   );
 }
 
-function AdminSection() {
-  const { csrfToken, isAdmin } = useAuth();
-  const toast = useToast();
-  const [settings, setSettings] = useState<SystemSettings | null>(null);
-  const [loading, setLoading]   = useState(true);
-  const [saving, setSaving]     = useState(false);
-
-  const [trialDays, setTrialDays]    = useState('');
-  const [priceMonthly, setMonthly]   = useState('');
-  const [priceYearly, setYearly]     = useState('');
-
-  useEffect(() => {
-    if (!isAdmin) { setLoading(false); return; }
-    let cancelled = false;
-    Admin.settings()
-      .then((res) => {
-        if (cancelled) return;
-        setSettings(res.settings);
-        setTrialDays(res.settings.trial_days);
-        setMonthly(res.settings.price_monthly_eur);
-        setYearly(res.settings.price_yearly_eur);
-      })
-      .catch(() => { /* hidden when not admin */ })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [isAdmin]);
-
-  if (!isAdmin) return null;
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      const res = await Admin.updateSettings({
-        trial_days:        Number(trialDays),
-        price_monthly_eur: Number(priceMonthly),
-        price_yearly_eur:  Number(priceYearly),
-      }, csrfToken);
-      setSettings(res.settings);
-      toast.success('Systémové nastavenia uložené.');
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Uloženie zlyhalo.';
-      toast.error(msg);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (loading) {
-    return <CardBlockSkeleton rows={4} />;
-  }
-  if (!settings) return null;
-
-  return (
-    <Card className="overflow-hidden border-firol-200">
-      <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-100/60 to-transparent px-5 py-4">
-        <div className="grid size-11 place-items-center rounded-2xl bg-ink-900 text-white shadow-[var(--shadow-glow)]">
-          <SettingsIcon className="size-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold text-ink-900">Systémové nastavenia</h2>
-          <p className="text-xs text-ink-500">
-            Globálne hodnoty, ktoré sa dotýkajú všetkých účtov. Viditeľné iba pre admina.
-          </p>
-        </div>
-        <Badge tone="warn">Admin</Badge>
-      </div>
-
-      <form onSubmit={onSubmit} className="flex flex-col gap-3 px-5 py-5">
-        <Field label="Skúšobné obdobie (dni)" hint="Uplatní sa len pri nových registráciách.">
-          {(p) => (
-            <Input {...p} type="number" inputMode="numeric" min={0} max={365}
-                   value={trialDays} onChange={(e) => setTrialDays(e.target.value)} />
-          )}
-        </Field>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Cena mesačne (EUR)">
-            {(p) => (
-              <Input {...p} type="number" inputMode="numeric" min={0}
-                     value={priceMonthly} onChange={(e) => setMonthly(e.target.value)} />
-            )}
-          </Field>
-          <Field label="Cena ročne (EUR)">
-            {(p) => (
-              <Input {...p} type="number" inputMode="numeric" min={0}
-                     value={priceYearly} onChange={(e) => setYearly(e.target.value)} />
-            )}
-          </Field>
-        </div>
-        <p className="text-xs text-ink-400">
-          Pozn.: ceny tu sú len informatívne pre UI/copy. Skutočné sumy účtuje
-          Stripe podľa <code>STRIPE_PRICE_MONTHLY</code> / <code>STRIPE_PRICE_YEARLY</code>.
-        </p>
-        <div className="flex justify-end pt-1">
-          <Button type="submit" loading={saving} leftIcon={<SettingsIcon className="size-4" />}>
-            Uložiť nastavenia
-          </Button>
-        </div>
-      </form>
-    </Card>
-  );
-}
