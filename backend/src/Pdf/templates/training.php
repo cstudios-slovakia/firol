@@ -282,6 +282,19 @@ if (!empty($trainer['certification_number'])) {
 </table>
 
 <div class="footer">
-  <strong>Školenie vykonal:</strong> <?= $trainerLine ?>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Podpis školiteľa: ______________________
+  <table style="border-collapse:collapse; width:100%;">
+    <tr>
+      <td style="width:60%; vertical-align:bottom; padding:0;">
+        <strong>Školenie vykonal:</strong> <?= $trainerLine ?>
+      </td>
+      <td style="width:40%; text-align:right; vertical-align:bottom; padding:0;">
+        <span>Podpis školiteľa:</span>
+        <?php if (!empty($trainer['signature_data_uri'])): ?>
+          <br><img style="max-height:28pt; max-width:110pt; vertical-align:bottom;" src="<?= $h($trainer['signature_data_uri']) ?>" alt="">
+        <?php else: ?>
+          &nbsp;&nbsp;______________________
+        <?php endif ?>
+      </td>
+    </tr>
+  </table>
 </div>

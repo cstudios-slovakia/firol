@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, buildUrl } from '@/lib/api';
 
 export type Trainer = {
   id: number;
@@ -21,9 +21,9 @@ export const Trainers = {
     api<{ trainer: Trainer }>(`/api/trainers/${id}`, { method: 'PATCH', body, csrfToken }),
   archive: (id: number, csrfToken: string | null) =>
     api<void>(`/api/trainers/${id}`, { method: 'DELETE', csrfToken }),
-  uploadSignature: (id: number, file: File, csrfToken: string | null) => {
+  uploadSignature: (id: number, file: Blob | File, csrfToken: string | null) => {
     const fd = new FormData();
-    fd.append('signature', file);
+    fd.append('signature', file, 'signature.png');
     return api<{ trainer: Trainer }>(`/api/trainers/${id}/signature`, {
       method: 'POST',
       body: fd,
@@ -31,7 +31,7 @@ export const Trainers = {
     });
   },
   signatureUrl: (id: number, cacheBuster?: number | string): string => {
-    const base = `/api/trainers/${id}/signature`;
-    return cacheBuster !== undefined ? `${base}?t=${cacheBuster}` : base;
+    const qs = cacheBuster !== undefined ? `?t=${cacheBuster}` : '';
+    return buildUrl(`/api/trainers/${id}/signature${qs}`);
   },
 };
