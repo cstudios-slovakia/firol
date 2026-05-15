@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, Hash, MapPin, Phone, Plus, Warehouse } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, Hash, MapPin, Phone, Plus, Trash2, Warehouse } from 'lucide-react';
+import { useAuth } from '@/auth/AuthContext';
 import { Companies, type CompanyDetail } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
@@ -9,9 +10,21 @@ import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 export function CompanyDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
   const id = Number(idStr);
+  const navigate = useNavigate();
+  const { csrfToken } = useAuth();
 
   const [data, setData] = useState<CompanyDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function onArchive() {
+    if (!window.confirm('Naozaj archivovať firmu? Údaje zostanú v systéme, len sa skryjú.')) return;
+    try {
+      await Companies.archive(id, csrfToken);
+      navigate('/', { replace: true });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Archiváciu sa nepodarilo dokončiť.');
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -76,13 +89,23 @@ export function CompanyDetailPage() {
                 {facilities.length} {plural(facilities.length, 'prevádzka', 'prevádzky', 'prevádzok')}
               </p>
             </div>
-            <Link
-              to={`/companies/${company.id}/edit`}
-              aria-label="Upraviť"
-              className="grid size-9 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-white hover:text-ink-700"
-            >
-              <Edit2 className="size-4" />
-            </Link>
+            <div className="flex items-center gap-1">
+              <Link
+                to={`/companies/${company.id}/edit`}
+                aria-label="Upraviť"
+                className="grid size-9 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-white hover:text-ink-700"
+              >
+                <Edit2 className="size-4" />
+              </Link>
+              <button
+                type="button"
+                aria-label="Archivovať"
+                onClick={onArchive}
+                className="grid size-9 place-items-center rounded-2xl text-ink-400 transition-colors hover:bg-white hover:text-status-bad"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            </div>
           </div>
         </div>
 
