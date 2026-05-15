@@ -135,26 +135,14 @@
     75%        { transform: translate(2.5%, -3.5%)scale(1.04) rotate(2deg);  }
   }
 
-  /* Date / time inputs — hide the WebKit native calendar/clock indicator
-     so only our Lucide icon shows. We still want the picker to open on
-     click, so the indicator is stretched invisibly across the whole
-     field (clickable, just not painted). Firefox renders no native
-     indicator, so this rule is a no-op there. */
+  /* Hide the WebKit native calendar/clock indicator — only our Lucide icon shows.
+     The browser still opens the native picker when the input itself is clicked. */
   input[type="date"]::-webkit-calendar-picker-indicator,
   input[type="time"]::-webkit-calendar-picker-indicator,
   input[type="datetime-local"]::-webkit-calendar-picker-indicator,
   input[type="month"]::-webkit-calendar-picker-indicator,
   input[type="week"]::-webkit-calendar-picker-indicator {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    margin: 0;
-    padding: 0;
-    color: transparent;
-    background: transparent;
-    opacity: 0;
-    cursor: pointer;
+    display: none;
   }
   /* Hide the inner spin / clear buttons too — they look out of place. */
   input[type="date"]::-webkit-inner-spin-button,
