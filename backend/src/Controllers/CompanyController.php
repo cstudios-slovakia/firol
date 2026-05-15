@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
@@ -15,25 +16,46 @@ final class CompanyController
 {
     public static function index(Request $req): void
     {
+        $userId    = Tenant::currentUserId();
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin($userId);
         $search    = $req->query('search');
 
         // Pull facilities count + a quick "last finalized inspection"
         // summary so the dashboard can render status without an extra
         // round-trip per company. Subqueries are scoped to the same
         // tenant via the account_id condition on the parent query.
-        $sql = 'SELECT c.id, c.name, c.ico, c.address, c.contact,
-                       (SELECT COUNT(*) FROM facilities f
-                         WHERE f.company_id = c.id AND f.archived_at IS NULL) AS facilities_count,
-                       (SELECT MAX(i.executed_on) FROM inspections i
-                         WHERE i.company_id = c.id
-                           AND i.status = "finalized" AND i.archived_at IS NULL) AS last_inspection_at,
-                       (SELECT COUNT(*) FROM inspections i
-                         WHERE i.company_id = c.id
-                           AND i.status = "finalized" AND i.archived_at IS NULL) AS inspections_count
-                FROM   companies c
-                WHERE  c.account_id = :account_id AND c.archived_at IS NULL';
-        $params = ['account_id' => $accountId];
+        // Admins get all companies across all accounts (no tenant filter).
+        if ($isAdmin) {
+            $sql = 'SELECT c.id, c.name, c.ico, c.address, c.contact,
+                           c.account_id,
+                           a.invoice_company_name AS account_name,
+                           (SELECT COUNT(*) FROM facilities f
+                             WHERE f.company_id = c.id AND f.archived_at IS NULL) AS facilities_count,
+                           (SELECT MAX(i.executed_on) FROM inspections i
+                             WHERE i.company_id = c.id
+                               AND i.status = "finalized" AND i.archived_at IS NULL) AS last_inspection_at,
+                           (SELECT COUNT(*) FROM inspections i
+                             WHERE i.company_id = c.id
+                               AND i.status = "finalized" AND i.archived_at IS NULL) AS inspections_count
+                    FROM   companies c
+                    JOIN   accounts a ON a.id = c.account_id
+                    WHERE  c.archived_at IS NULL';
+            $params = [];
+        } else {
+            $sql = 'SELECT c.id, c.name, c.ico, c.address, c.contact,
+                           (SELECT COUNT(*) FROM facilities f
+                             WHERE f.company_id = c.id AND f.archived_at IS NULL) AS facilities_count,
+                           (SELECT MAX(i.executed_on) FROM inspections i
+                             WHERE i.company_id = c.id
+                               AND i.status = "finalized" AND i.archived_at IS NULL) AS last_inspection_at,
+                           (SELECT COUNT(*) FROM inspections i
+                             WHERE i.company_id = c.id
+                               AND i.status = "finalized" AND i.archived_at IS NULL) AS inspections_count
+                    FROM   companies c
+                    WHERE  c.account_id = :account_id AND c.archived_at IS NULL';
+            $params = ['account_id' => $accountId];
+        }
 
         if ($search !== null) {
             // Distinct placeholders: PDO with emulate_prepares=false rejects
@@ -42,7 +64,7 @@ final class CompanyController
             $params['search_name'] = '%' . $search . '%';
             $params['search_ico']  = '%' . $search . '%';
         }
-        $sql .= ' ORDER BY c.name ASC LIMIT 200';
+        $sql .= ' ORDER BY c.name ASC LIMIT 500';
 
         $stmt = Db::pdo()->prepare($sql);
         $stmt->execute($params);
@@ -53,10 +75,12 @@ final class CompanyController
 
     public static function show(Request $req, array $params): void
     {
+        $userId    = Tenant::currentUserId();
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin($userId);
         $id        = (int) $params['id'];
 
-        $row = self::findOrFail($accountId, $id);
+        $row = self::findOrFail($isAdmin ? null : $accountId, $id);
 
         $facStmt = Db::pdo()->prepare(
             'SELECT id, name, address, contact_person, notes
@@ -87,7 +111,7 @@ final class CompanyController
              ) t
              WHERE t.rn = 1'
         );
-        $defStmt->execute([$id, $accountId]);
+        $defStmt->execute([$id, (int) $row['account_id']]);
         $defaultsByFacility = [];
         foreach ($defStmt->fetchAll() as $r) {
             $fid = (int) $r['facility_id'];
@@ -175,14 +199,23 @@ final class CompanyController
     }
 
     /** @return array<string, mixed> */
-    private static function findOrFail(int $accountId, int $id): array
+    private static function findOrFail(?int $accountId, int $id): array
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT id, name, ico, address, contact, created_at
-             FROM   companies
-             WHERE  id = ? AND account_id = ? AND archived_at IS NULL'
-        );
-        $stmt->execute([$id, $accountId]);
+        if ($accountId === null) {
+            $stmt = Db::pdo()->prepare(
+                'SELECT id, account_id, name, ico, address, contact, created_at
+                 FROM   companies
+                 WHERE  id = ? AND archived_at IS NULL'
+            );
+            $stmt->execute([$id]);
+        } else {
+            $stmt = Db::pdo()->prepare(
+                'SELECT id, account_id, name, ico, address, contact, created_at
+                 FROM   companies
+                 WHERE  id = ? AND account_id = ? AND archived_at IS NULL'
+            );
+            $stmt->execute([$id, $accountId]);
+        }
         $row = $stmt->fetch();
         if (!$row) {
             Response::error('Company not found', 404);

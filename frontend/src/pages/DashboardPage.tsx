@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Building2, ChevronRight, ClipboardList, Plus, Search } from 'lucide-react';
+import { Building2, ChevronRight, ClipboardList, Plus, Search, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type CompanyListItem } from '@/api/companies';
 import { ApiError } from '@/lib/api';
@@ -15,7 +15,7 @@ import { SkeletonList } from '@/components/ui/Skeleton';
  * card shows the neutral "Žiadne kontroly" badge.
  */
 export function DashboardPage() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [items, setItems] = useState<CompanyListItem[]>([]);
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -56,11 +56,21 @@ export function DashboardPage() {
       <header className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-ink-900">
-            Ahoj, {user?.fullname.split(' ')[0]}
+            {isAdmin ? (
+              <span className="flex items-center gap-2">
+                Všetky firmy
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                  <ShieldCheck className="size-3" />
+                  Admin
+                </span>
+              </span>
+            ) : (
+              <>Ahoj, {user?.fullname.split(' ')[0]}</>
+            )}
           </h1>
           <p className="mt-0.5 text-sm text-ink-500">
             {items.length === 0
-              ? 'Pridaj prvú firmu aby si mohol začať s kontrolami.'
+              ? 'Žiadne firmy.'
               : `${items.length} ${plural(items.length, 'firma', 'firmy', 'firiem')} · ${totalFacilities} ${plural(totalFacilities, 'prevádzka', 'prevádzky', 'prevádzok')}`}
           </p>
         </div>
@@ -131,7 +141,7 @@ export function DashboardPage() {
         <ul className="flex flex-col gap-3">
           {items.map((c) => (
             <li key={c.id}>
-              <CompanyCard company={c} />
+              <CompanyCard company={c} showAccount={isAdmin} />
             </li>
           ))}
         </ul>
@@ -140,7 +150,7 @@ export function DashboardPage() {
   );
 }
 
-function CompanyCard({ company }: { company: CompanyListItem }) {
+function CompanyCard({ company, showAccount }: { company: CompanyListItem; showAccount?: boolean }) {
   const lastDate = company.last_inspection_at;
   const formattedLast = lastDate
     ? new Date(lastDate).toLocaleDateString('sk-SK', { day: 'numeric', month: 'numeric', year: 'numeric' })
@@ -163,7 +173,7 @@ function CompanyCard({ company }: { company: CompanyListItem }) {
               <span>·</span>
               <span>{company.facilities_count} {plural(company.facilities_count, 'prevádzka', 'prevádzky', 'prevádzok')}</span>
             </div>
-            <div className="mt-2">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               {company.inspections_count === 0 ? (
                 <Badge tone="neutral">Žiadne kontroly</Badge>
               ) : (
@@ -171,6 +181,12 @@ function CompanyCard({ company }: { company: CompanyListItem }) {
                   {company.inspections_count} {plural(company.inspections_count, 'kontrola', 'kontroly', 'kontrol')}
                   {formattedLast && ` · posledná ${formattedLast}`}
                 </Badge>
+              )}
+              {showAccount && company.account_name && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-ink-200 bg-ink-50 px-2 py-0.5 text-xs text-ink-500">
+                  <ShieldCheck className="size-3 text-amber-500" />
+                  {company.account_name}
+                </span>
               )}
             </div>
           </div>

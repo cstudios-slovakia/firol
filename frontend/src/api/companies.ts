@@ -9,6 +9,9 @@ export type CompanyListItem = {
   facilities_count: number;
   inspections_count: number;
   last_inspection_at: string | null;
+  /** Present only for system admins — identifies which account owns the company. */
+  account_id?: number;
+  account_name?: string;
 };
 
 export type Company = {
