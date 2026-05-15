@@ -418,6 +418,14 @@ function AddTraineeForm({
   const [empty, setEmpty] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  function handleCancel() {
+    const hasData = !!fullname.trim() || !!position.trim() || !empty;
+    if (hasData && !window.confirm('Formulár obsahuje neuložené údaje. Naozaj zavrieť bez uloženia?')) {
+      return;
+    }
+    onCancel();
+  }
+
   async function handle(e: FormEvent) {
     e.preventDefault();
     if (!fullname.trim()) {
@@ -470,7 +478,7 @@ function AddTraineeForm({
         )}
 
         <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-end">
-          <Button type="button" variant="ghost" onClick={onCancel}>
+          <Button type="button" variant="ghost" onClick={handleCancel}>
             Zrušiť
           </Button>
           <Button
