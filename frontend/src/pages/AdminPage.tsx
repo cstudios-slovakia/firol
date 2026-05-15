@@ -147,7 +147,7 @@ function AccountsSection() {
 
   async function onDeleteAccount(a: AdminAccount) {
     if (!window.confirm(
-      `Naozaj zmazať účet „${a.invoice_company_name}"? Vymažú sa všetky firmy, kontroly, školenia a faktúry tohto účtu. Akcia je nezvratná.`,
+      `Naozaj zmazať účet „${a.invoice_company_name}"? Vymažú sa všetky firmy, kontroly, školenia, faktúry a používatelia tohto účtu. Akcia je nezvratná.`,
     )) return;
     try {
       await AdminPanel.deleteAccount(a.id, csrfToken);

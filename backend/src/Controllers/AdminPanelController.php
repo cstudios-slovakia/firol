@@ -198,10 +198,32 @@ final class AdminPanelController
             Response::error('Nemôžeš zmazať aktívny účet, prepni sa na iný a skús znova.', 409);
         }
 
+        $pdo = Db::pdo();
+
+        // Collect users that belong exclusively to this account so we can
+        // delete them after the account (and its account_users rows) is gone.
+        // Users shared with other accounts are intentionally left intact.
+        $exclusiveStmt = $pdo->prepare(
+            'SELECT u.id FROM users u
+             JOIN account_users au ON au.user_id = u.id AND au.account_id = ?
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM account_users au2
+                 WHERE au2.user_id = u.id AND au2.account_id != ?
+             )'
+        );
+        $exclusiveStmt->execute([$id, $id]);
+        $userIds = $exclusiveStmt->fetchAll(\PDO::FETCH_COLUMN);
+
         // FK cascades handle account_users, companies, facilities,
         // inspections, items, documents, sequences, inspector_profiles,
         // trainers, trainings, trainees and invoices.
-        Db::pdo()->prepare('DELETE FROM accounts WHERE id = ?')->execute([$id]);
+        $pdo->prepare('DELETE FROM accounts WHERE id = ?')->execute([$id]);
+
+        // Delete users that had no other account membership.
+        if ($userIds !== []) {
+            $placeholders = implode(',', array_fill(0, count($userIds), '?'));
+            $pdo->prepare("DELETE FROM users WHERE id IN ($placeholders)")->execute($userIds);
+        }
 
         Response::noContent();
     }
