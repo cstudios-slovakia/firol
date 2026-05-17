@@ -397,6 +397,7 @@ function AccountEditForm({
   const toast = useToast();
   const [name, setName]   = useState(account.invoice_company_name);
   const [end, setEnd]     = useState(account.subscription_end_date ?? '');
+  const [included, setIncluded] = useState(String(account.included_technicians));
   const [saving, setSaving] = useState(false);
 
   async function onSubmit(e: FormEvent) {
@@ -404,7 +405,7 @@ function AccountEditForm({
     setSaving(true);
     try {
       const patch: Partial<AdminAccount> = {};
-      const update: Record<string, string> = {};
+      const update: Record<string, string | number> = {};
       if (name.trim() !== account.invoice_company_name) {
         update.invoice_company_name = name.trim();
         patch.invoice_company_name = name.trim();
@@ -412,6 +413,11 @@ function AccountEditForm({
       if (end !== (account.subscription_end_date ?? '')) {
         update.subscription_end_date = end;
         patch.subscription_end_date = end;
+      }
+      const includedNum = Number(included);
+      if (Number.isFinite(includedNum) && includedNum >= 1 && includedNum !== account.included_technicians) {
+        update.included_technicians = includedNum;
+        patch.included_technicians = includedNum;
       }
       if (Object.keys(update).length === 0) {
         onClose();
@@ -446,6 +452,16 @@ function AccountEditForm({
           )}
         </Field>
       </div>
+      <Field
+        label="Technici zahrnutí v predplatnom (vrátane account admina)"
+        hint={`Aktuálne extra technici: ${account.extra_technicians}. Zmena ihneď preráta Stripe (proratované).`}
+      >
+        {(p) => (
+          <Input {...p} type="number" inputMode="numeric" min={1} max={1000}
+            leftIcon={<Hash className="size-4" />}
+            value={included} onChange={(e) => setIncluded(e.target.value)} />
+        )}
+      </Field>
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" onClick={onClose}>Zrušiť</Button>
         <Button type="submit" loading={saving}>Uložiť</Button>
@@ -599,6 +615,9 @@ function AdminSettingsSection() {
   const [trialDays, setTrialDays]   = useState('');
   const [priceMonthly, setMonthly]  = useState('');
   const [priceYearly, setYearly]    = useState('');
+  const [defaultIncluded, setDefaultIncluded] = useState('');
+  const [extraTechEur, setExtraTechEur]       = useState('');
+  const [maxSelfService, setMaxSelfService]   = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -609,6 +628,11 @@ function AdminSettingsSection() {
         setTrialDays(res.settings.trial_days);
         setMonthly(res.settings.price_monthly_eur);
         setYearly(res.settings.price_yearly_eur);
+        setDefaultIncluded(res.settings.default_included_technicians);
+        // Persist as cents on the backend; display as EUR (×.×× allowed).
+        const cents = Number(res.settings.price_per_extra_technician_cents);
+        setExtraTechEur(Number.isFinite(cents) ? (cents / 100).toFixed(2) : '');
+        setMaxSelfService(res.settings.max_self_service_technicians);
       })
       .catch(() => undefined)
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -619,10 +643,14 @@ function AdminSettingsSection() {
     e.preventDefault();
     setSaving(true);
     try {
+      const extraCents = Math.round(Number(extraTechEur) * 100);
       const res = await Admin.updateSettings({
         trial_days:        Number(trialDays),
         price_monthly_eur: Number(priceMonthly),
         price_yearly_eur:  Number(priceYearly),
+        default_included_technicians:     Number(defaultIncluded),
+        price_per_extra_technician_cents: Number.isFinite(extraCents) ? extraCents : 0,
+        max_self_service_technicians:     Number(maxSelfService),
       }, csrfToken);
       setSettings(res.settings);
       toast.success('Systémové nastavenia uložené.');
@@ -677,6 +705,42 @@ function AdminSettingsSection() {
           Pozn.: ceny tu sú len informatívne pre UI/copy. Skutočné sumy účtuje
           Stripe podľa <code>STRIPE_PRICE_MONTHLY</code> / <code>STRIPE_PRICE_YEARLY</code>.
         </p>
+
+        <div className="mt-2 border-t border-ink-100 pt-4">
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-ink-500">
+            Predplatné — technici
+          </h3>
+          <p className="mb-3 text-xs text-ink-400">
+            Koľko technikov je zahrnutých v základnom pláne (vrátane account admina) a koľko
+            stojí každý ďalší. Nad nastavený limit aplikácia skryje self-service tlačidlo
+            a navrhne kontakt pre individuálnu ponuku.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="Zahrnutých technikov" hint="Nové účty">
+              {(p) => (
+                <Input {...p} type="number" inputMode="numeric" min={1} max={100}
+                  leftIcon={<Hash className="size-4" />}
+                  value={defaultIncluded} onChange={(e) => setDefaultIncluded(e.target.value)} />
+              )}
+            </Field>
+            <Field label="Cena za extra (EUR / mesiac)">
+              {(p) => (
+                <Input {...p} type="number" inputMode="decimal" min={0} step="0.01"
+                  value={extraTechEur} onChange={(e) => setExtraTechEur(e.target.value)} />
+              )}
+            </Field>
+            <Field label="Limit self-service" hint="Nad tento počet ponukneme individuálnu cenu.">
+              {(p) => (
+                <Input {...p} type="number" inputMode="numeric" min={1} max={1000}
+                  value={maxSelfService} onChange={(e) => setMaxSelfService(e.target.value)} />
+              )}
+            </Field>
+          </div>
+          <p className="mt-2 text-xs text-ink-400">
+            Cena za extra technika sa účtuje cez Stripe ako druhá položka v predplatnom
+            (ročne = mesačne × 12), s proráciou pri každej zmene počtu.
+          </p>
+        </div>
         <div className="flex justify-end pt-1">
           <Button type="submit" loading={saving} leftIcon={<SettingsIcon className="size-4" />}>
             Uložiť nastavenia

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
   AlertCircle, Check, CreditCard, Download, ExternalLink, Hash,
-  MapPin, Receipt, RotateCcw, XCircle,
+  MapPin, Receipt, RotateCcw, UsersRound, XCircle,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { AccountApi, type Account } from '@/api/account';
@@ -40,9 +40,91 @@ export function BillingPage() {
       </header>
 
       <BillingSection account={account} loading={accountLoading} onAccountChange={setAccount} />
+      <SeatsSection account={account} loading={accountLoading} />
       <InvoiceDetailsSection account={account} loading={accountLoading} onAccountChange={setAccount} />
     </div>
   );
+}
+
+function SeatsSection({ account, loading }: { account: Account | null; loading: boolean }) {
+  if (loading) return <CardBlockSkeleton rows={3} />;
+  if (!account) return null;
+
+  const active     = account.active_technicians;
+  const included   = account.included_technicians;
+  const extra      = Math.max(0, active - included);
+  const max        = account.max_self_service_technicians;
+  const perExtra   = account.price_per_extra_technician_cents / 100;
+  const isYearly   = account.billing_period === 'yearly';
+  const perPeriod  = isYearly ? perExtra * 12 : perExtra;
+  const periodWord = isYearly ? 'rok' : 'mesiac';
+  const overMax    = active > max;
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/60 to-transparent px-5 py-4">
+        <div className="grid size-11 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
+          <UsersRound className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold text-ink-900">Technici v predplatnom</h2>
+          <p className="text-xs text-ink-500">
+            Plán zahŕňa {included} {pluralTech(included)} (vrátane účtu admina). Aktívnych v tíme: {active}.
+          </p>
+        </div>
+        {extra > 0 && <Badge tone="warn">+{extra} extra</Badge>}
+      </div>
+
+      <div className="flex flex-col gap-3 px-5 py-5 text-sm text-ink-700">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <SeatStat label="Zahrnutých v pláne" value={`${included}`} />
+          <SeatStat label="Aktívnych technikov" value={`${active}`} />
+          <SeatStat
+            label="Extra (nad rámec)"
+            value={extra === 0 ? '0' : `${extra} × ${perExtra.toFixed(2)} €`}
+            hint={extra > 0 ? `+${(extra * perPeriod).toFixed(2)} € / ${periodWord} (proratované)` : 'Plán nie je preplnený.'}
+          />
+        </div>
+
+        {overMax ? (
+          <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
+            <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">Tím prekračuje {max} technikov — pripravíme individuálnu ponuku.</p>
+              <p className="mt-0.5 text-xs text-amber-800">
+                Pre väčšie tímy radi pripravíme cenovú ponuku na mieru. Napíš nám prosím a zaregistrujeme zľavu pre tvoj účet.
+              </p>
+            </div>
+          </div>
+        ) : active >= max ? (
+          <div className="rounded-2xl border border-ink-100 bg-ink-50/40 px-4 py-3 text-xs text-ink-600">
+            Si na hranici self-service plánu ({max} {pluralTech(max)}). Pre väčší tím nás kontaktuj — pripravíme individuálnu ponuku.
+          </div>
+        ) : (
+          <p className="text-xs text-ink-500">
+            Každý ďalší technik nad zahrnutý počet stojí {perExtra.toFixed(2)} € / mesiac
+            (ročne {(perExtra * 12).toFixed(2)} €). Pri pozvaní sa cena pripočíta automaticky a proratovane.
+          </p>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function SeatStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="rounded-2xl border border-ink-100 bg-white px-3 py-2.5">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-400">{label}</p>
+      <p className="mt-0.5 text-base font-semibold text-ink-900">{value}</p>
+      {hint && <p className="mt-0.5 text-[11px] text-ink-500">{hint}</p>}
+    </div>
+  );
+}
+
+function pluralTech(n: number): string {
+  if (n === 1) return 'technika';
+  if (n >= 2 && n <= 4) return 'technikov';
+  return 'technikov';
 }
 
 function hasBillingDetails(account: Account): boolean {

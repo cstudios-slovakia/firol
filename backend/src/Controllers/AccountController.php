@@ -6,6 +6,7 @@ namespace Firol\Controllers;
 
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
+use Firol\Billing\SeatSync;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
@@ -194,7 +195,8 @@ final class AccountController
                     invoice_city, invoice_country, invoice_ico, invoice_dic, invoice_ic_dph,
                     logo_path, theme_color, subscription_end_date,
                     stripe_status, stripe_subscription_id, billing_period, stripe_customer_id,
-                    stripe_cancel_at_period_end
+                    stripe_cancel_at_period_end,
+                    included_technicians, extra_technicians
              FROM   accounts WHERE id = ?'
         );
         $stmt->execute([$accountId]);
@@ -231,6 +233,13 @@ final class AccountController
             'billing_period'        => $row['billing_period'] ?? null,
             'has_stripe_customer'   => !empty($row['stripe_customer_id']),
             'stripe_cancel_at_period_end' => !empty($row['stripe_cancel_at_period_end']),
+            // Seat / technician licensing — surfaced so the UI can show
+            // "X of N seats used" and gate the invite flow client-side.
+            'included_technicians'           => (int) ($row['included_technicians'] ?? 3),
+            'extra_technicians'              => (int) ($row['extra_technicians'] ?? 0),
+            'active_technicians'             => SeatSync::countActiveTechnicians($accountId),
+            'max_self_service_technicians'   => SeatSync::maxSelfServiceTechnicians(),
+            'price_per_extra_technician_cents' => SeatSync::pricePerExtraCents(),
         ];
     }
 }

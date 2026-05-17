@@ -7,6 +7,7 @@ namespace Firol\Controllers;
 use Firol\Auth\Csrf;
 use Firol\Auth\Password;
 use Firol\Auth\Tenant;
+use Firol\Billing\SeatSync;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
@@ -82,6 +83,19 @@ final class TeamController
         }
         $email = strtolower(trim($email));
 
+        // Hard cap: above max_self_service_technicians the account has to
+        // contact us for a custom quote — refuse the invite cleanly so the
+        // UI can render the "contact us" hint instead of a generic error.
+        $maxSelfService = SeatSync::maxSelfServiceTechnicians();
+        $activeNow      = SeatSync::countActiveTechnicians($accountId);
+        if ($activeNow + 1 > $maxSelfService) {
+            Response::error(
+                'Predplatné je obmedzené na ' . $maxSelfService . ' technikov. Pre väčší tím nás prosím kontaktujte — pripravíme individuálnu cenovú ponuku.',
+                422,
+                ['code' => 'seat_cap_exceeded', 'max' => $maxSelfService],
+            );
+        }
+
         $pdo = Db::pdo();
         $pdo->beginTransaction();
         try {
@@ -146,6 +160,12 @@ final class TeamController
             throw $e;
         }
 
+        // Roster changed — push the new seat count to Stripe (proration
+        // happens automatically). No-op during the local trial; once the
+        // subscription exists we'll see the prorated charge on the next
+        // invoice.
+        SeatSync::recompute($accountId);
+
         if ($token !== null) {
             $ctx = $pdo->prepare(
                 'SELECT u.fullname AS inviter_name, a.invoice_company_name AS account_name
@@ -197,9 +217,26 @@ final class TeamController
             Response::error('You cannot deactivate yourself', 409);
         }
 
+        // Re-activating a technician needs to respect the self-service cap
+        // just like a fresh invite — otherwise an admin could route around
+        // it by deactivating + re-activating.
+        if ($isActive && !$member['is_active']) {
+            $maxSelfService = SeatSync::maxSelfServiceTechnicians();
+            $activeNow      = SeatSync::countActiveTechnicians($accountId);
+            if ($activeNow + 1 > $maxSelfService) {
+                Response::error(
+                    'Predplatné je obmedzené na ' . $maxSelfService . ' technikov. Pre väčší tím nás prosím kontaktujte — pripravíme individuálnu cenovú ponuku.',
+                    422,
+                    ['code' => 'seat_cap_exceeded', 'max' => $maxSelfService],
+                );
+            }
+        }
+
         Db::pdo()->prepare(
             'UPDATE account_users SET is_active = ? WHERE account_id = ? AND user_id = ?'
         )->execute([$isActive ? 1 : 0, $accountId, $userId]);
+
+        SeatSync::recompute($accountId);
 
         Response::json(['item' => self::loadMember($accountId, $userId)]);
     }
@@ -226,6 +263,8 @@ final class TeamController
         Db::pdo()->prepare(
             'DELETE FROM account_users WHERE account_id = ? AND user_id = ?'
         )->execute([$accountId, $userId]);
+
+        SeatSync::recompute($accountId);
 
         Response::noContent();
     }

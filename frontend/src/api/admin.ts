@@ -20,6 +20,8 @@ export type AdminAccount = {
   stripe_status: string | null;
   billing_period: 'monthly' | 'yearly' | null;
   created_at: string;
+  included_technicians: number;
+  extra_technicians: number;
   users: AdminUser[];
 };
 
@@ -33,6 +35,7 @@ export type AdminAccountsPage = {
 export type AdminAccountUpdate = Partial<{
   invoice_company_name: string;
   subscription_end_date: string;
+  included_technicians: number;
 }>;
 
 export type AdminUserUpdate = Partial<{
@@ -62,12 +65,18 @@ export type SystemSettings = {
   trial_days: string;
   price_monthly_eur: string;
   price_yearly_eur: string;
+  default_included_technicians: string;
+  price_per_extra_technician_cents: string;
+  max_self_service_technicians: string;
 };
 
 export type SystemSettingsUpdate = Partial<{
   trial_days: number;
   price_monthly_eur: number;
   price_yearly_eur: number;
+  default_included_technicians: number;
+  price_per_extra_technician_cents: number;
+  max_self_service_technicians: number;
 }>;
 
 export const Admin = {
