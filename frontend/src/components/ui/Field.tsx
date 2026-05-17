@@ -1,12 +1,13 @@
 import { useId } from 'react';
+import type { ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
 type FieldProps = {
   label: string;
-  hint?: string;
-  error?: string | null;
+  hint?: ReactNode;
+  error?: ReactNode | null;
   required?: boolean;
-  children: (props: { id: string; 'aria-invalid': boolean | undefined }) => React.ReactNode;
+  children: (props: { id: string; 'aria-invalid': boolean | undefined }) => ReactNode;
   className?: string;
 };
 

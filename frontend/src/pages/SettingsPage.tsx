@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   AtSign, Building2, CalendarDays, Check, Copy, FileSignature, GraduationCap, Hash,
-  ImagePlus, MailPlus, Palette, PenLine, Phone, Plus, RotateCcw,
-  ShieldCheck, ShieldOff, Trash2, Upload, UploadCloud, User, UserCheck, UsersRound, X,
+  ImagePlus, MailPlus, Palette, Phone, Plus, RotateCcw,
+  ShieldCheck, ShieldOff, Trash2, UploadCloud, User, UserCheck, UsersRound,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { AccountApi, type Account } from '@/api/account';
@@ -10,7 +10,6 @@ import { InspectorProfileApi, type InspectorProfile } from '@/api/inspectorProfi
 import { Trainers, type Trainer } from '@/api/trainers';
 import { Team, type TeamMember } from '@/api/team';
 import { ApiError } from '@/lib/api';
-import { cn } from '@/lib/cn';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -19,7 +18,7 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { CardBlockSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { Badge } from '@/components/ui/Badge';
-import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
+import { SignaturePickerModal } from '@/components/SignaturePickerModal';
 
 /**
  * Settings — Phase 3a-1 only renders the Inspector profile section. Other
@@ -590,7 +589,7 @@ function TrainersSection() {
   }
 
   return (
-    <Card className="overflow-hidden">
+    <Card id="skolitellia" className="overflow-hidden">
       <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/60 to-transparent px-5 py-4">
         <div className="grid size-11 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
           <GraduationCap className="size-5" />
@@ -994,125 +993,5 @@ function SignaturePreview({
   );
 }
 
-type SigPickerMode = 'draw' | 'upload';
 
-function SignaturePickerModal({
-  onClose,
-  onSave,
-  saving,
-}: {
-  onClose: () => void;
-  onSave: (blob: Blob) => void;
-  saving: boolean;
-}) {
-  const [mode, setMode] = useState<SigPickerMode>('draw');
-  const padRef = useRef<SignaturePadHandle>(null);
-  const [padEmpty, setPadEmpty] = useState(true);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [pickedFile, setPickedFile] = useState<File | null>(null);
-
-  const canSave = mode === 'draw' ? !padEmpty : pickedFile !== null;
-
-  async function handleSave() {
-    if (mode === 'draw') {
-      const blob = await padRef.current?.toBlob();
-      if (!blob) return;
-      onSave(blob);
-    } else {
-      if (!pickedFile) return;
-      onSave(pickedFile);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 flex w-full max-w-md flex-col gap-4 rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-ink-900">Podpis</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="grid size-8 place-items-center rounded-full text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-700"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-
-        <div className="flex rounded-xl border border-ink-100 bg-ink-50/60 p-1">
-          <button
-            type="button"
-            onClick={() => setMode('draw')}
-            className={cn(
-              'flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-all',
-              mode === 'draw'
-                ? 'bg-white text-ink-900 shadow-sm'
-                : 'text-ink-500 hover:text-ink-700',
-            )}
-          >
-            <PenLine className="size-4" />
-            Nakresliť
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('upload')}
-            className={cn(
-              'flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-all',
-              mode === 'upload'
-                ? 'bg-white text-ink-900 shadow-sm'
-                : 'text-ink-500 hover:text-ink-700',
-            )}
-          >
-            <Upload className="size-4" />
-            Nahrať PNG
-          </button>
-        </div>
-
-        {mode === 'draw' ? (
-          <SignaturePad
-            ref={padRef}
-            heightPx={180}
-            onEmptyChange={setPadEmpty}
-          />
-        ) : (
-          <div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/png"
-              className="hidden"
-              onChange={(e) => setPickedFile(e.target.files?.[0] ?? null)}
-            />
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="flex w-full flex-col items-center gap-2 rounded-2xl border border-dashed border-ink-200 py-8 text-sm text-ink-500 transition-colors hover:border-firol-300 hover:bg-firol-50/50"
-            >
-              <Upload className="size-5" />
-              <span>{pickedFile ? pickedFile.name : 'Vybrať PNG súbor'}</span>
-            </button>
-            <p className="mt-1.5 text-xs text-ink-400">
-              PNG s priehľadným pozadím, max 512 KB. Optimálne ~600×200 px.
-            </p>
-          </div>
-        )}
-
-        <div className="flex gap-2.5">
-          <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
-            Zrušiť
-          </Button>
-          <Button
-            type="button"
-            disabled={!canSave}
-            loading={saving}
-            onClick={handleSave}
-            className="flex-1"
-          >
-            Uložiť podpis
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
