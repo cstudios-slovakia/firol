@@ -66,11 +66,16 @@ final class AuthController
             $insertUser->execute([$fullname, $email, $phone, Password::hash($password)]);
             $userId = (int) $pdo->lastInsertId();
 
+            // Seed `included_technicians` from the current admin default so
+            // the account picks up the global setting at registration time
+            // (later changes to the default don't retroactively touch
+            // existing accounts — admins override per-account if needed).
+            $defaultIncluded = self::settingInt($pdo, 'default_included_technicians', 3);
             $insertAccount = $pdo->prepare(
-                'INSERT INTO accounts (invoice_company_name, subscription_end_date, main_user_id, billing_period)
-                 VALUES (?, ?, ?, ?)'
+                'INSERT INTO accounts (invoice_company_name, subscription_end_date, main_user_id, billing_period, included_technicians)
+                 VALUES (?, ?, ?, ?, ?)'
             );
-            $insertAccount->execute([$invoiceCompanyName, $trialEnd, $userId, $storedBillingPeriod]);
+            $insertAccount->execute([$invoiceCompanyName, $trialEnd, $userId, $storedBillingPeriod, $defaultIncluded]);
             $accountId = (int) $pdo->lastInsertId();
 
             $pdo->prepare(

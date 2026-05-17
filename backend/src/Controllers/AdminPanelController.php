@@ -51,7 +51,8 @@ final class AdminPanelController
 
             $accStmt = $pdo->prepare(
                 'SELECT DISTINCT a.id, a.invoice_company_name, a.subscription_end_date,
-                        a.main_user_id, a.stripe_status, a.billing_period, a.created_at
+                        a.main_user_id, a.stripe_status, a.billing_period, a.created_at,
+                        a.included_technicians, a.extra_technicians
                  FROM   accounts a
                  LEFT JOIN account_users au ON au.account_id = a.id
                  LEFT JOIN users u ON u.id = au.user_id
@@ -72,7 +73,8 @@ final class AdminPanelController
 
             $accStmt = $pdo->prepare(
                 'SELECT id, invoice_company_name, subscription_end_date, main_user_id,
-                        stripe_status, billing_period, created_at
+                        stripe_status, billing_period, created_at,
+                        included_technicians, extra_technicians
                  FROM   accounts
                  ORDER  BY id DESC
                  LIMIT  ? OFFSET ?'
@@ -126,6 +128,8 @@ final class AdminPanelController
                 'stripe_status'         => $a['stripe_status'],
                 'billing_period'        => $a['billing_period'],
                 'created_at'            => $a['created_at'],
+                'included_technicians'  => (int) ($a['included_technicians'] ?? 3),
+                'extra_technicians'     => (int) ($a['extra_technicians'] ?? 0),
                 'users'                 => $usersByAccount[$id] ?? [],
             ];
         }, $accounts);
@@ -166,6 +170,25 @@ final class AdminPanelController
             $bind[] = $end;
         }
 
+        // Per-account override of the base-plan technician seats. Admins use
+        // this for negotiated contracts ("client X gets 5 seats included").
+        // After persisting, re-sync the Stripe extra-seat line so the
+        // customer is charged the correct amount.
+        $includedRaw = $req->json()['included_technicians'] ?? null;
+        $syncSeats   = false;
+        if ($includedRaw !== null) {
+            if (!is_int($includedRaw) && !(is_string($includedRaw) && ctype_digit($includedRaw))) {
+                Response::error('included_technicians must be an integer', 422);
+            }
+            $included = (int) $includedRaw;
+            if ($included < 1 || $included > 1000) {
+                Response::error('included_technicians out of range (1–1000)', 422);
+            }
+            $sets[] = 'included_technicians = ?';
+            $bind[] = $included;
+            $syncSeats = true;
+        }
+
         if ($sets === []) Response::error('Nothing to update', 422);
 
         $bind[] = $id;
@@ -178,6 +201,10 @@ final class AdminPanelController
             $exists = Db::pdo()->prepare('SELECT 1 FROM accounts WHERE id = ?');
             $exists->execute([$id]);
             if ($exists->fetchColumn() === false) Response::error('Account not found', 404);
+        }
+
+        if ($syncSeats) {
+            \Firol\Billing\SeatSync::recompute($id);
         }
 
         Response::json(['ok' => true]);

@@ -699,6 +699,7 @@ function TeamSection() {
   const isMain = user !== null && activeAccount !== null && activeAccount.main_user_id === user.id;
 
   const [members, setMembers] = useState<TeamMember[] | null>(null);
+  const [seatInfo, setSeatInfo] = useState<Account | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
@@ -711,6 +712,10 @@ function TeamSection() {
   const [linkCopied, setLinkCopied] = useState(false);
   const [inviteFieldErrors, setInviteFieldErrors] = useState<{ name?: string; email?: string }>({});
 
+  function reloadSeats() {
+    AccountApi.show().then((res) => setSeatInfo(res.account)).catch(() => {});
+  }
+
   useEffect(() => {
     let cancelled = false;
     Team.list()
@@ -719,8 +724,16 @@ function TeamSection() {
         if (cancelled) return;
         setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať tím.');
       });
+    reloadSeats();
     return () => { cancelled = true; };
   }, []);
+
+  const included = seatInfo?.included_technicians ?? 0;
+  const active   = seatInfo?.active_technicians   ?? (members?.filter((m) => m.is_active).length ?? 0);
+  const extra    = Math.max(0, active - included);
+  const max      = seatInfo?.max_self_service_technicians ?? 20;
+  const perExtra = (seatInfo?.price_per_extra_technician_cents ?? 0) / 100;
+  const atCap    = active >= max;
 
   async function onInvite(e: FormEvent) {
     e.preventDefault();
@@ -741,6 +754,7 @@ function TeamSection() {
         csrfToken,
       );
       setMembers((prev) => prev ? [...prev, res.item] : [res.item]);
+      reloadSeats();
       toast.success('Pozvánka vytvorená');
       if (res.invite_token) {
         const link = `${window.location.origin}/password-reset/confirm?token=${res.invite_token}`;
@@ -767,6 +781,7 @@ function TeamSection() {
     try {
       const res = await Team.setActive(m.id, !m.is_active, csrfToken);
       setMembers((prev) => prev ? prev.map((x) => x.id === m.id ? res.item : x) : prev);
+      reloadSeats();
       toast.success(res.item.is_active ? 'Technik aktivovaný' : 'Technik deaktivovaný');
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Operácia zlyhala.';
@@ -783,6 +798,7 @@ function TeamSection() {
     try {
       await Team.remove(m.id, csrfToken);
       setMembers((prev) => prev ? prev.filter((x) => x.id !== m.id) : prev);
+      reloadSeats();
       toast.success('Technik odstránený');
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Odstránenie zlyhalo.';
@@ -816,7 +832,7 @@ function TeamSection() {
             Ľudia, ktorí majú prístup do tejto firmy. Spravovať môže len hlavný používateľ.
           </p>
         </div>
-        {isMain && (
+        {isMain && !atCap && (
           <Button
             type="button"
             variant="secondary"
@@ -829,6 +845,33 @@ function TeamSection() {
       </div>
 
       <div className="px-5 py-4">
+        {seatInfo && (
+          <div className="mb-3 rounded-2xl border border-ink-100 bg-ink-50/40 px-3 py-2.5 text-xs text-ink-600">
+            <span className="font-semibold text-ink-800">Predplatné</span> zahŕňa {included} technikov
+            (vrátane teba ako admina). Aktívnych v tíme: <span className="font-semibold">{active}</span>
+            {extra > 0 && (
+              <> · extra <span className="font-semibold">{extra}</span> × {perExtra.toFixed(2)} €/mes</>
+            )}
+            . {isMain && !atCap && (
+              <>Každý ďalší technik nad zahrnutý počet stojí {perExtra.toFixed(2)} € / mes a pripočíta sa
+              proratovane k najbližšej fakture.</>
+            )}
+          </div>
+        )}
+
+        {isMain && atCap && (
+          <div className="mb-3 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-3 py-2.5 text-sm text-amber-900">
+            <UsersRound className="mt-0.5 size-4 shrink-0 text-amber-600" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">Si na hranici self-service plánu ({max} technikov).</p>
+              <p className="mt-0.5 text-xs text-amber-800">
+                Pre väčší tím nám napíš — pripravíme individuálnu cenovú ponuku. Po dohode admin Firolu
+                zvýši zahrnutý počet technikov pre tvoj účet.
+              </p>
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="mb-3 rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
             {error}

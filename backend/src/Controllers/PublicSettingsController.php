@@ -17,13 +17,26 @@ final class PublicSettingsController
     public static function show(): void
     {
         $stmt = Db::pdo()->prepare(
-            "SELECT setting_value FROM system_settings WHERE setting_key = 'trial_days' LIMIT 1"
+            "SELECT setting_key, setting_value FROM system_settings
+             WHERE  setting_key IN (
+                 'trial_days',
+                 'default_included_technicians',
+                 'price_per_extra_technician_cents',
+                 'max_self_service_technicians'
+             )"
         );
         $stmt->execute();
-        $row = $stmt->fetchColumn();
 
-        Response::json([
-            'trial_days' => $row !== false ? (int) $row : 14,
-        ]);
+        $defaults = [
+            'trial_days'                       => 14,
+            'default_included_technicians'     => 3,
+            'price_per_extra_technician_cents' => 500,
+            'max_self_service_technicians'     => 20,
+        ];
+        foreach ($stmt->fetchAll() as $row) {
+            $defaults[(string) $row['setting_key']] = (int) $row['setting_value'];
+        }
+
+        Response::json($defaults);
     }
 }

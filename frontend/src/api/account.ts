@@ -19,6 +19,11 @@ export type Account = {
   billing_period: 'monthly' | 'yearly' | null;
   has_stripe_customer: boolean;
   stripe_cancel_at_period_end: boolean;
+  included_technicians: number;
+  extra_technicians: number;
+  active_technicians: number;
+  max_self_service_technicians: number;
+  price_per_extra_technician_cents: number;
 };
 
 export type AccountUpdate = {

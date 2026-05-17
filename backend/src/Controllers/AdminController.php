@@ -22,9 +22,18 @@ final class AdminController
 {
     /** Settings the admin UI is allowed to read/write, with their validators. */
     private const ALLOWED = [
-        'trial_days'        => ['type' => 'int', 'min' => 0,  'max' => 365],
-        'price_monthly_eur' => ['type' => 'int', 'min' => 0,  'max' => 9999],
-        'price_yearly_eur'  => ['type' => 'int', 'min' => 0,  'max' => 99999],
+        'trial_days'                       => ['type' => 'int', 'min' => 0, 'max' => 365],
+        'price_monthly_eur'                => ['type' => 'int', 'min' => 0, 'max' => 9999],
+        'price_yearly_eur'                 => ['type' => 'int', 'min' => 0, 'max' => 99999],
+        // Default number of technician seats (incl. the account admin) included
+        // in the base plan for fresh accounts. Existing accounts keep their
+        // per-account value; admins override individually if needed.
+        'default_included_technicians'     => ['type' => 'int', 'min' => 1, 'max' => 100],
+        // Per-extra-technician monthly price in cents. Yearly = ×12.
+        'price_per_extra_technician_cents' => ['type' => 'int', 'min' => 0, 'max' => 100000],
+        // Above this total technician count the account is steered toward a
+        // custom quote — UI hides self-service and shows a contact-us hint.
+        'max_self_service_technicians'     => ['type' => 'int', 'min' => 1, 'max' => 1000],
     ];
 
     public static function settings(Request $req): void

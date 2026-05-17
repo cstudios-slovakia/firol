@@ -6,6 +6,7 @@ namespace Firol\Controllers;
 
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
+use Firol\Billing\SeatSync;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
@@ -98,14 +99,30 @@ final class BillingController
             $subscriptionData['trial_end'] = $trialEnd;
         }
 
+        // Base line item — the env-configured Stripe Price.
+        $lineItems = [[
+            'price'    => StripeClient::priceFor($billingPeriod),
+            'quantity' => 1,
+        ]];
+        // If the account has invited more technicians than the base plan
+        // includes (typical when extras were added during the local trial
+        // before any Stripe subscription existed), add a second recurring
+        // line item priced from the current admin setting. Quantity is
+        // pulled from the DB so the trial-phase additions roll into the
+        // very first invoice rather than getting lost.
+        $extra = (int) ($account['extra_technicians'] ?? 0);
+        if ($extra > 0) {
+            $lineItems[] = [
+                'price_data' => SeatSync::extraPriceData($billingPeriod),
+                'quantity'   => $extra,
+            ];
+        }
+
         try {
             $session = StripeClient::get()->checkout->sessions->create([
                 'mode'        => 'subscription',
                 'customer'    => $customerId,
-                'line_items'  => [[
-                    'price'    => StripeClient::priceFor($billingPeriod),
-                    'quantity' => 1,
-                ]],
+                'line_items'  => $lineItems,
                 'success_url' => $success . '&session_id={CHECKOUT_SESSION_ID}',
                 'cancel_url'  => $cancel,
                 'allow_promotion_codes' => true,
@@ -469,26 +486,40 @@ final class BillingController
         $period = self::inferBillingPeriod($items);
         $cancelFlag = !empty($sub->cancel_at_period_end) ? 1 : 0;
 
+        // Find the "extra technician" line item. Anything that isn't the
+        // env-configured base Price ID is treated as the extra-seat line.
+        [$extraItemId, $extraQty] = self::extractExtraSeatItem($items);
+
         $pdo = Db::pdo();
         if ($endDate !== null) {
             $pdo->prepare(
                 'UPDATE accounts
-                 SET    stripe_subscription_id      = ?,
-                        stripe_status               = ?,
-                        billing_period              = COALESCE(?, billing_period),
-                        stripe_cancel_at_period_end = ?,
-                        subscription_end_date       = ?
+                 SET    stripe_subscription_id            = ?,
+                        stripe_status                     = ?,
+                        billing_period                    = COALESCE(?, billing_period),
+                        stripe_cancel_at_period_end       = ?,
+                        subscription_end_date             = ?,
+                        stripe_extra_subscription_item_id = ?,
+                        extra_technicians                 = ?
                  WHERE  id = ?'
-            )->execute([(string) $sub->id, $status, $period, $cancelFlag, $endDate, $accountId]);
+            )->execute([
+                (string) $sub->id, $status, $period, $cancelFlag, $endDate,
+                $extraItemId, $extraQty, $accountId,
+            ]);
         } else {
             $pdo->prepare(
                 'UPDATE accounts
-                 SET    stripe_subscription_id      = ?,
-                        stripe_status               = ?,
-                        billing_period              = COALESCE(?, billing_period),
-                        stripe_cancel_at_period_end = ?
+                 SET    stripe_subscription_id            = ?,
+                        stripe_status                     = ?,
+                        billing_period                    = COALESCE(?, billing_period),
+                        stripe_cancel_at_period_end       = ?,
+                        stripe_extra_subscription_item_id = ?,
+                        extra_technicians                 = ?
                  WHERE  id = ?'
-            )->execute([(string) $sub->id, $status, $period, $cancelFlag, $accountId]);
+            )->execute([
+                (string) $sub->id, $status, $period, $cancelFlag,
+                $extraItemId, $extraQty, $accountId,
+            ]);
         }
 
         error_log("[billing.webhook] account=$accountId subscription={$sub->id} status=$status end=$endDate");
@@ -530,7 +561,8 @@ final class BillingController
     {
         $stmt = Db::pdo()->prepare(
             'SELECT id, invoice_company_name, stripe_customer_id, subscription_end_date,
-                    invoice_street, invoice_postal_code, invoice_city, invoice_ico
+                    invoice_street, invoice_postal_code, invoice_city, invoice_ico,
+                    included_technicians, extra_technicians
              FROM   accounts WHERE id = ?'
         );
         $stmt->execute([$accountId]);
@@ -620,6 +652,33 @@ final class BillingController
         $stmt->execute([$customerId]);
         $id = $stmt->fetchColumn();
         return $id === false ? null : (int) $id;
+    }
+
+    /**
+     * Identify the extra-seat line item among a subscription's items.
+     * Returns [item_id, quantity] — both NULL/0 when none found.
+     *
+     * Detection rule: any item whose Price ID is not one of the
+     * env-configured base Price IDs is treated as the extra-seat line.
+     * This matches the way checkout/SeatSync add the line via price_data.
+     *
+     * @param array<int, \Stripe\StripeObject> $items
+     * @return array{0: ?string, 1: int}
+     */
+    private static function extractExtraSeatItem(array $items): array
+    {
+        $basePrices = array_filter([
+            (string) ($_ENV['STRIPE_PRICE_MONTHLY'] ?? ''),
+            (string) ($_ENV['STRIPE_PRICE_YEARLY']  ?? ''),
+        ]);
+        foreach ($items as $item) {
+            $priceId = (string) ($item->price->id ?? '');
+            if ($priceId === '' || in_array($priceId, $basePrices, true)) {
+                continue;
+            }
+            return [(string) $item->id, (int) ($item->quantity ?? 0)];
+        }
+        return [null, 0];
     }
 
     /**
