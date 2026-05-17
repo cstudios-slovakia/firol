@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
@@ -121,13 +122,27 @@ final class TrainingController
 
         // Verify company belongs to the account; facility (optional) must
         // belong to the same company. Trainer (optional) must belong to
-        // the account.
-        $check = Db::pdo()->prepare(
-            'SELECT 1 FROM companies WHERE id = ? AND account_id = ? AND archived_at IS NULL'
-        );
-        $check->execute([$companyId, $accountId]);
-        if ($check->fetchColumn() === false) {
-            Response::error('Company not found', 404);
+        // the account. Admins may create trainings for companies from any
+        // account — the training is stored under the company's account_id.
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        if ($isAdmin) {
+            $check = Db::pdo()->prepare(
+                'SELECT account_id FROM companies WHERE id = ? AND archived_at IS NULL'
+            );
+            $check->execute([$companyId]);
+            $companyAccountId = $check->fetchColumn();
+            if ($companyAccountId === false) {
+                Response::error('Company not found', 404);
+            }
+            $accountId = (int) $companyAccountId;
+        } else {
+            $check = Db::pdo()->prepare(
+                'SELECT 1 FROM companies WHERE id = ? AND account_id = ? AND archived_at IS NULL'
+            );
+            $check->execute([$companyId, $accountId]);
+            if ($check->fetchColumn() === false) {
+                Response::error('Company not found', 404);
+            }
         }
 
         if ($facilityId !== null) {

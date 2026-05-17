@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, Clock, GraduationCap,
@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { NewCompanyDialog } from '@/components/NewCompanyDialog';
 import { NewFacilityDialog } from '@/components/NewFacilityDialog';
+import { NewTrainerDialog } from '@/components/NewTrainerDialog';
 import { cn } from '@/lib/cn';
 
 export function NewTrainingPage() {
@@ -51,6 +52,7 @@ export function NewTrainingPage() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [newCompanyOpen, setNewCompanyOpen] = useState(false);
   const [newFacilityOpen, setNewFacilityOpen] = useState(false);
+  const [newTrainerOpen, setNewTrainerOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,11 +106,20 @@ export function NewTrainingPage() {
     };
   }, [companyId, presetFacilityId]);
 
-  const trainerWithoutSignatureWarning = useMemo(() => {
+  const trainerWithoutSignatureWarning = useMemo((): ReactNode | null => {
     if (trainerId === null || !trainers) return null;
     const t = trainers.find((x) => x.id === trainerId);
     if (!t || t.has_signature) return null;
-    return `Školiteľ „${t.fullname}" zatiaľ nemá nahraný podpis. Bez neho sa nedá vystaviť PDF protokol — podpis nahraj v Nastaveniach.`;
+    return (
+      <>
+        Školiteľ „{t.fullname}" zatiaľ nemá nahraný podpis. Bez neho sa nedá vystaviť PDF
+        protokol —{' '}
+        <Link to="/settings#skolitellia" className="underline underline-offset-2 hover:text-status-bad/80">
+          nahrať podpis
+        </Link>
+        .
+      </>
+    );
   }, [trainerId, trainers]);
 
   async function onSubmit(e: FormEvent) {
@@ -183,8 +194,6 @@ export function NewTrainingPage() {
       </div>
     );
   }
-
-  const noTrainers = trainers !== null && trainers.length === 0;
 
   return (
     <div className="flex flex-col gap-5">
@@ -293,11 +302,7 @@ export function NewTrainingPage() {
 
           <Field
             label="Školiteľ"
-            hint={
-              noTrainers
-                ? 'Nemáš ešte nikoho v zozname školiteľov. Pridaj ich v Nastaveniach.'
-                : trainerWithoutSignatureWarning ?? 'Vyber zo zoznamu školiteľov.'
-            }
+            hint={trainerWithoutSignatureWarning ?? 'Vyber zo zoznamu školiteľov.'}
             error={trainerWithoutSignatureWarning ? trainerWithoutSignatureWarning : undefined}
           >
             {(p) => (
@@ -305,7 +310,7 @@ export function NewTrainingPage() {
                 id={p.id}
                 value={trainerId !== null ? String(trainerId) : ''}
                 onChange={(v) => setTrainerId(v ? Number(v) : null)}
-                disabled={trainers === null || noTrainers}
+                disabled={trainers === null}
                 placeholder="— bez školiteľa —"
                 options={[
                   { value: '', label: '— bez školiteľa —' },
@@ -315,6 +320,21 @@ export function NewTrainingPage() {
                     description: t.certification_number ?? undefined,
                   })),
                 ]}
+                headerSlot={({ closeDropdown }) => (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeDropdown();
+                      setNewTrainerOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
+                  >
+                    <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
+                      <Plus className="size-3.5" />
+                    </span>
+                    Pridať nového školiteľa
+                  </button>
+                )}
               />
             )}
           </Field>
@@ -413,6 +433,19 @@ export function NewTrainingPage() {
           }}
         />
       )}
+
+      <NewTrainerDialog
+        open={newTrainerOpen}
+        onClose={() => setNewTrainerOpen(false)}
+        onCreated={(t) => {
+          setTrainers((prev) => {
+            const next = prev ? [...prev, t] : [t];
+            next.sort((a, b) => a.fullname.localeCompare(b.fullname));
+            return next;
+          });
+          setTrainerId(t.id);
+        }}
+      />
     </div>
   );
 }
