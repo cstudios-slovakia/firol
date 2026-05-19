@@ -11,6 +11,7 @@ import {
     NotebookPen,
     Plus,
     Repeat,
+    Trash2,
     User,
     Warehouse,
 } from "lucide-react";
@@ -39,6 +40,16 @@ export function FacilityDetailPage() {
     );
     const [error, setError] = useState<string | null>(null);
     const [repeatingId, setRepeatingId] = useState<number | null>(null);
+
+    async function onArchive() {
+        if (!window.confirm("Naozaj archivovať prevádzku? Údaje zostanú v systéme, len sa skryjú.")) return;
+        try {
+            await Facilities.archive(id, csrfToken);
+            navigate(facility ? `/companies/${facility.company_id}` : "/", { replace: true });
+        } catch (err) {
+            setError(err instanceof ApiError ? err.message : "Archiváciu sa nepodarilo dokončiť.");
+        }
+    }
 
     async function handleRepeat(insId: number) {
         setRepeatingId(insId);
@@ -143,13 +154,23 @@ export function FacilityDetailPage() {
                                 </Link>
                             )}
                         </div>
-                        <Link
-                            to={`/facilities/${facility.id}/edit`}
-                            aria-label="Upraviť"
-                            className="grid size-9 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-white hover:text-ink-700"
-                        >
-                            <Edit2 className="size-4" />
-                        </Link>
+                        <div className="flex items-center gap-0.5">
+                            <Link
+                                to={`/facilities/${facility.id}/edit`}
+                                aria-label="Upraviť"
+                                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
+                            >
+                                <Edit2 className="size-4" />
+                            </Link>
+                            <button
+                                type="button"
+                                aria-label="Archivovať"
+                                onClick={onArchive}
+                                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
+                            >
+                                <Trash2 className="size-4" />
+                            </button>
+                        </div>
                     </div>
                 </div>
 

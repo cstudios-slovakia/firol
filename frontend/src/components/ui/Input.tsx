@@ -68,7 +68,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
 });
 
 const baseClasses =
-  'h-11 w-full rounded-xl border border-ink-200 bg-white px-3 text-sm text-ink-800 ' +
+  'h-11 w-full min-w-0 appearance-none rounded-xl border border-ink-200 bg-white px-3 text-sm text-ink-800 ' +
   'placeholder:text-ink-400 transition-colors duration-150 ' +
   'hover:border-ink-300 ' +
   'focus:outline-none focus:border-firol-400 focus:ring-2 focus:ring-firol-200 ' +

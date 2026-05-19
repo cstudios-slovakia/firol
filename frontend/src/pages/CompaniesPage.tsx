@@ -145,15 +145,12 @@ function CompanyCard({ company, showAccount }: { company: CompanyListItem; showA
   return (
     <Link to={`/companies/${company.id}`} className="block group">
       <Card className="px-4 py-3.5 transition-shadow group-hover:shadow-[var(--shadow-lift)]">
-        <div className="flex items-start gap-3">
+        <div className="flex items-center gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-600">
             <Building2 className="size-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-2">
-              <h3 className="truncate text-sm font-semibold text-ink-900">{company.name}</h3>
-              <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform group-hover:translate-x-0.5 group-hover:text-ink-500" />
-            </div>
+            <h3 className="truncate text-sm font-semibold text-ink-900">{company.name}</h3>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-500">
               {company.ico && <span>IČO {company.ico}</span>}
               <span>·</span>
@@ -176,6 +173,7 @@ function CompanyCard({ company, showAccount }: { company: CompanyListItem; showA
               )}
             </div>
           </div>
+          <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform group-hover:translate-x-0.5 group-hover:text-ink-500" />
         </div>
       </Card>
     </Link>
