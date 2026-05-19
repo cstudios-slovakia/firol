@@ -156,9 +156,9 @@ foreach ($items as $idx => $it) {
       <th style="width:10%">Číslo / označ.</th>
       <th style="width:12%">Výrobca</th>
       <th style="width:17%">Umiestnenie</th>
-      <th style="width:22%">Vykonané práce</th>
+      <th style="width:19%">Vykonané práce</th>
       <th style="width:12%">Poznámky / závady</th>
-      <th style="width:10%">Výsledok</th>
+      <th style="width:13%">Výsledok</th>
     </tr>
   </thead>
   <tbody>
@@ -171,7 +171,7 @@ foreach ($items as $idx => $it) {
       <td><?= $h($f['location'] ?? null) ?></td>
       <td><?= $h($f['maintenance_work'] ?? null) ?></td>
       <td><?= !empty($f['notes']) ? $h($f['notes']) : '—' ?></td>
-      <td class="<?= $r === 'vyhovuje' ? 'res-ok' : ($r === 'nevyhovuje' ? 'res-bad' : '') ?>"><?= $r === 'vyhovuje' ? 'Vyhovuje' : ($r === 'nevyhovuje' ? 'Nevyhovuje' : $h($r)) ?></td>
+      <td style="white-space:nowrap" class="<?= $r === 'vyhovuje' ? 'res-ok' : ($r === 'nevyhovuje' ? 'res-bad' : '') ?>"><?= $r === 'vyhovuje' ? 'Vyhovuje' : ($r === 'nevyhovuje' ? 'Nevyhovuje' : $h($r)) ?></td>
     </tr>
     <?php endforeach ?>
   </tbody>
@@ -204,7 +204,7 @@ foreach ($items as $idx => $it) {
   </tr>
   <tr>
     <td><?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?><br><span style="font-size:8pt; color:#555;">č. oprávnenia: <?= $h($inspector['certification_number']) ?></span><?php endif ?></td>
-    <td>Konateľovi spoločnosti</td>
+    <td>Štatutárny zástupca / zodpovedná osoba</td>
     <td><?= $h($miesto) ?></td>
   </tr>
   <tr class="sig-row">

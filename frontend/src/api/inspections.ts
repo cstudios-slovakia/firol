@@ -174,6 +174,7 @@ export type PoziarnaKnihaItemFields = {
   activities: PkActivity[];
   custom_activities: string[];
   result: PkResult;
+  defect_deadline: string | null;
   notes: string | null;
 };
 

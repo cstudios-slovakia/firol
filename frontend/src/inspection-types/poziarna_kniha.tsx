@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowRight, BookOpen, Check, CheckCircle2, Edit2, ListChecks,
+  AlertTriangle, ArrowRight, BookOpen, Calendar, Check, CheckCircle2, Edit2, ListChecks,
   NotebookPen, Plus, Save, Trash2, X,
 } from 'lucide-react';
 import {
@@ -17,6 +17,7 @@ import { ApiError } from '@/lib/api';
 import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
+import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
 import { Spinner } from '@/components/ui/Spinner';
@@ -49,6 +50,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   const [activities, setActivities] = useState<PkActivity[]>([]);
   const [customActivities, setCustomActivities] = useState<CustomActivity[]>([]);
   const [result, setResult] = useState<PkResult>('bez_nedostatkov');
+  const [defectDeadline, setDefectDeadline] = useState('');
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
@@ -74,12 +76,14 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           : [];
       setCustomActivities(fromCustom);
       setResult(isPkResult(f.result) ? f.result : 'bez_nedostatkov');
+      setDefectDeadline(typeof f.defect_deadline === 'string' ? f.defect_deadline : '');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
       setWorkspaces('');
       setActivities([]);
       setCustomActivities([]);
       setResult('bez_nedostatkov');
+      setDefectDeadline('');
       setNotes('');
     }
   }, [initialItem]);
@@ -128,6 +132,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           .filter((x) => x.checked && x.label.trim())
           .map((x) => x.label.trim()),
         result,
+        defect_deadline: result === 'zistene_nedostatky' ? (defectDeadline || null) : null,
         notes: notes.trim() || null,
       };
       if (editing && itemId !== null) {
@@ -243,11 +248,20 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
         <Field label="Výsledok" required>
           {() => (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Výsledok záznamu">
-              <ResultButton value="bez_nedostatkov" active={result === 'bez_nedostatkov'} onClick={() => setResult('bez_nedostatkov')} />
+              <ResultButton value="bez_nedostatkov" active={result === 'bez_nedostatkov'} onClick={() => { setResult('bez_nedostatkov'); setDefectDeadline(''); }} />
               <ResultButton value="zistene_nedostatky" active={result === 'zistene_nedostatky'} onClick={() => setResult('zistene_nedostatky')} />
             </div>
           )}
         </Field>
+
+        {result === 'zistene_nedostatky' && (
+          <Field label="Termín na odstránenie nedostatkov" hint="Dátum, do ktorého musia byť nedostatky odstránené.">
+            {(p) => (
+              <Input {...p} type="date" leftIcon={<Calendar className="size-4" />}
+                value={defectDeadline} onChange={(e) => setDefectDeadline(e.target.value)} />
+            )}
+          </Field>
+        )}
 
         <Field label="Poznámky" hint="Voliteľné — popis nálezov a navrhované opatrenia.">
           {(p) => (
@@ -369,6 +383,12 @@ function PkItemRow({
           <p className="mt-0.5 text-xs text-ink-500">
             {totalActivities} {totalActivities === 1 ? 'činnosť' : 'činností'} zaznamenaných
           </p>
+          {f.defect_deadline && (
+            <p className="mt-0.5 text-xs text-ink-600">
+              <Calendar className="-mt-0.5 mr-1 inline size-3 text-status-warn" />
+              Termín: {f.defect_deadline}
+            </p>
+          )}
           {f.notes && (
             <p className="mt-1 line-clamp-2 text-xs text-ink-600">
               <AlertTriangle className="-mt-0.5 mr-1 inline size-3 text-status-warn" />

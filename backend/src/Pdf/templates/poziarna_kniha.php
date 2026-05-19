@@ -80,11 +80,11 @@ foreach ($customActivitiesArr as $ca) {
 }
 
 $defectLines = array_values(array_filter(array_map('trim', explode("\n", $notes))));
+$defectDeadline = isset($record['defect_deadline']) && is_string($record['defect_deadline'])
+    ? $formatDate($record['defect_deadline'])
+    : '';
 
-$contactLine = 'Konateľovi spoločnosti';
-if (!empty($facility['contact_person'])) {
-    $contactLine .= ' – ' . $facility['contact_person'];
-}
+$contactLine = $facility['contact_person'] ?? '';
 ?>
 <style>
   body { font-family: dejavusans, sans-serif; color: #1a1a1f; font-size: 10pt; }
@@ -208,7 +208,7 @@ if (!empty($facility['contact_person'])) {
     <tr>
       <td><?= $i + 1 ?></td>
       <td><?= $h($line) ?></td>
-      <td></td>
+      <td><?= $i === 0 ? $h($defectDeadline) : '' ?></td>
     </tr>
     <?php endforeach ?>
   </tbody>
@@ -224,7 +224,7 @@ if (!empty($facility['contact_person'])) {
     </tr>
   </thead>
   <tbody>
-    <tr><td>1</td><td><?= $h($notes) ?></td><td></td></tr>
+    <tr><td>1</td><td><?= $h($notes) ?></td><td><?= $h($defectDeadline) ?></td></tr>
   </tbody>
 </table>
 <?php endif ?>
@@ -250,7 +250,7 @@ if (!empty($facility['contact_person'])) {
   </tr>
   <tr>
     <td><?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?><br><span style="font-size:8pt; color:#555;">č. oprávnenia: <?= $h($inspector['certification_number']) ?></span><?php endif ?></td>
-    <td>Konateľovi spoločnosti</td>
+    <td>Štatutárny zástupca / zodpovedná osoba</td>
     <td><?= $h($miesto) ?></td>
   </tr>
   <tr class="sig-row">
