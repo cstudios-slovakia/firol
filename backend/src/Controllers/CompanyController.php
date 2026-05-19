@@ -191,8 +191,13 @@ final class CompanyController
         if ($name === null || $name === '') {
             Response::error('Field required: name', 422);
         }
-        if ($ico !== null && !preg_match('/^\d{1,12}$/', $ico)) {
-            Response::error('IČO must be numeric', 422);
+        if ($ico !== null) {
+            $ico = preg_replace('/\s+/', '', $ico);
+            if ($ico === '') {
+                $ico = null;
+            } elseif (!preg_match('/^\d{1,12}$/', $ico)) {
+                Response::error('IČO must be numeric', 422);
+            }
         }
 
         return [$name, $ico, $address, $contact];

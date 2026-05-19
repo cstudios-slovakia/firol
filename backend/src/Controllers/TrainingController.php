@@ -10,6 +10,7 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Storage\Storage;
 
 final class TrainingController
 {
@@ -227,8 +228,17 @@ final class TrainingController
         $id        = (int) $params['id'];
         self::loadOrFail($accountId, $id);
 
+        // Remove trainee signature files from disk before the DB row is gone.
+        $dir = Storage::root() . "/trainings/$id";
+        if (is_dir($dir)) {
+            foreach (glob("$dir/*.png") ?: [] as $file) {
+                @unlink($file);
+            }
+            @rmdir($dir);
+        }
+
         Db::pdo()->prepare(
-            'UPDATE trainings SET archived_at = NOW() WHERE id = ? AND account_id = ?'
+            'DELETE FROM trainings WHERE id = ? AND account_id = ?'
         )->execute([$id, $accountId]);
 
         Response::noContent();

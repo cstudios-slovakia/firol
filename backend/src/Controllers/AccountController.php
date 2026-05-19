@@ -70,9 +70,13 @@ final class AccountController
             $invoiceName !== null ? trim($invoiceName) : null,
             $themeColorValue,
         ];
+        $numericInvoiceFields = ['invoice_ico', 'invoice_dic', 'invoice_ic_dph'];
         foreach ($invoiceFields as $col => $val) {
             if ($val === null) continue;
             $trimmed = trim($val);
+            if (in_array($col, $numericInvoiceFields, true)) {
+                $trimmed = preg_replace('/\s+/', '', $trimmed);
+            }
             // invoice_country is NOT NULL in schema — refuse to clear it.
             if ($col === 'invoice_country' && $trimmed === '') {
                 Response::error('invoice_country cannot be empty', 422);
