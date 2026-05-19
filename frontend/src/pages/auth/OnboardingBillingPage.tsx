@@ -72,9 +72,9 @@ export function OnboardingBillingPage() {
         invoice_postal_code: postal,
         invoice_city:        city,
         invoice_country:     country.trim() || 'Slovensko',
-        invoice_ico:         ico,
-        invoice_dic:         dic,
-        invoice_ic_dph:      icDph,
+        invoice_ico:         ico.replace(/\s+/g, ''),
+        invoice_dic:         dic.replace(/\s+/g, ''),
+        invoice_ic_dph:      icDph.replace(/\s+/g, ''),
       }, csrfToken);
 
       const res = await Billing.checkout(plan, csrfToken);

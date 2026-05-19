@@ -90,6 +90,73 @@ final class TraineeController
         Response::json(['trainee' => self::loadTrainee($traineeId)], 201);
     }
 
+    public static function update(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId  = Tenant::currentAccountId();
+        $trainingId = (int) $params['id'];
+        $traineeId  = (int) $params['trainee_id'];
+
+        $training = self::loadTrainingOrFail($accountId, $trainingId);
+        if ($training['status'] === 'finalized') {
+            Response::error('Školenie je uzamknuté — účastníkov už nemožno meniť.', 409);
+        }
+        self::loadTraineeForTrainingOrFail($traineeId, $trainingId);
+
+        $fullname = self::trimmedPostString('fullname', max: 191, required: true);
+        $position = self::trimmedPostString('position', max: 191, required: false);
+
+        $file           = $_FILES['signature'] ?? null;
+        $hasNewSig      = is_array($file) && ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK;
+
+        if ($hasNewSig) {
+            if (($file['size'] ?? 0) > self::MAX_SIGNATURE_BYTES) {
+                Response::error('Podpis je príliš veľký (max 512 KB).', 422);
+            }
+            $tmp = (string) ($file['tmp_name'] ?? '');
+            if ($tmp === '' || !is_uploaded_file($tmp)) {
+                Response::error('Upload zlyhal.', 422);
+            }
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime  = $finfo ? finfo_file($finfo, $tmp) : false;
+            if ($finfo) {
+                finfo_close($finfo);
+            }
+            if ($mime !== 'image/png') {
+                Response::error('Podpis musí byť PNG obrázok.', 422);
+            }
+        }
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            if ($hasNewSig) {
+                $dest = Storage::traineeSignaturePath($trainingId, $traineeId);
+                Storage::ensureDir(dirname($dest));
+                if (!move_uploaded_file($tmp, $dest)) {
+                    throw new \RuntimeException('Failed to store signature file.');
+                }
+                $rel = Storage::traineeSignatureRelative($trainingId, $traineeId);
+                $pdo->prepare(
+                    'UPDATE trainees SET fullname = ?, position = ?, signature_path = ?, signed_at = NOW()
+                     WHERE id = ? AND training_id = ?'
+                )->execute([$fullname, $position, $rel, $traineeId, $trainingId]);
+            } else {
+                $pdo->prepare(
+                    'UPDATE trainees SET fullname = ?, position = ?
+                     WHERE id = ? AND training_id = ?'
+                )->execute([$fullname, $position, $traineeId, $trainingId]);
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            error_log('[trainee-update] ' . $e::class . ': ' . $e->getMessage());
+            Response::error('Účastníka sa nepodarilo uložiť.', 500);
+        }
+
+        Response::json(['trainee' => self::loadTrainee($traineeId)]);
+    }
+
     public static function destroy(Request $req, array $params): void
     {
         Csrf::require($req);

@@ -56,7 +56,7 @@ export function CompanyForm({
     setSubmitting(true);
     const payload: CompanyPayload = {
       name: name.trim(),
-      ico: ico.trim() || undefined,
+      ico: ico.replace(/\s+/g, '') || undefined,
       address: address.trim() || undefined,
       contact: contact.trim() || undefined,
     };
