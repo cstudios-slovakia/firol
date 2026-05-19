@@ -35,9 +35,8 @@ final class InspectionItemController
     private const OPRAVA_TS_ACTIONS = ['tlakova_skuska', 'oprava', 'plnenie'];
 
     /**
-     * Predefined activity slugs for Požiarna kniha entries. Mirrors the 14
-     * checkboxes from the spec; the "other" free-text input is stored
-     * separately in `activities_other` so it never collides with the slugs.
+     * Predefined activity slugs for Požiarna kniha entries. Custom activities
+     * are stored as free-text strings in `custom_activities`.
      */
     private const PK_ACTIVITIES = [
         'visual_check',
@@ -53,7 +52,6 @@ final class InspectionItemController
         'documentation_check',
         'employee_list_check',
         'fire_drill',
-        'fire_cabinet_check',
     ];
 
     /** Result of a Požiarna kniha entry. */
@@ -69,9 +67,6 @@ final class InspectionItemController
         $inspectionId = (int) $params['id'];
 
         $inspection = self::loadInspectionOrFail($accountId, $inspectionId);
-        if ($inspection['status'] === 'finalized') {
-            Response::error('Inspection is finalized — items cannot change.', 409);
-        }
 
         // Požiarna kniha is conceptually a single-record protocol; the
         // schema supports many items but the domain doesn't, so block it
@@ -127,9 +122,6 @@ final class InspectionItemController
         $itemId = (int) $params['item_id'];
 
         $inspection = self::loadInspectionOrFail($accountId, $inspectionId);
-        if ($inspection['status'] === 'finalized') {
-            Response::error('Inspection is finalized — items cannot change.', 409);
-        }
 
         self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
@@ -154,9 +146,6 @@ final class InspectionItemController
         $itemId = (int) $params['item_id'];
 
         $inspection = self::loadInspectionOrFail($accountId, $inspectionId);
-        if ($inspection['status'] === 'finalized') {
-            Response::error('Inspection is finalized — items cannot change.', 409);
-        }
 
         self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
@@ -295,9 +284,8 @@ final class InspectionItemController
      */
     private static function validatePoziarnaKnihaFields(array $body): array
     {
-        $workspaces       = self::stringField($body, 'workspaces', required: true, max: 500);
-        $activitiesOther  = self::stringField($body, 'activities_other', required: false, max: 500);
-        $notes            = self::stringField($body, 'notes', required: false, max: 1000);
+        $workspaces = self::stringField($body, 'workspaces', required: true, max: 500);
+        $notes      = self::stringField($body, 'notes', required: false, max: 1000);
 
         $activitiesRaw = $body['activities'] ?? null;
         if (!is_array($activitiesRaw)) {
@@ -312,8 +300,20 @@ final class InspectionItemController
                 $activities[] = $a;
             }
         }
-        if (count($activities) === 0 && ($activitiesOther === null || $activitiesOther === '')) {
-            self::failValidation('Vyber aspoň jednu vykonanú činnosť alebo doplň vlastnú v poli „iné".');
+
+        $customRaw = $body['custom_activities'] ?? [];
+        if (!is_array($customRaw)) {
+            $customRaw = [];
+        }
+        $customActivities = [];
+        foreach ($customRaw as $ca) {
+            if (is_string($ca) && ($ca = trim($ca)) !== '' && mb_strlen($ca) <= 200) {
+                $customActivities[] = $ca;
+            }
+        }
+
+        if (count($activities) === 0 && count($customActivities) === 0) {
+            self::failValidation('Vyber aspoň jednu vykonanú činnosť alebo pridaj vlastnú.');
         }
 
         $result = $body['result'] ?? null;
@@ -322,11 +322,11 @@ final class InspectionItemController
         }
 
         return [
-            'workspaces'       => $workspaces,
-            'activities'       => $activities,
-            'activities_other' => $activitiesOther,
-            'result'           => $result,
-            'notes'            => $notes,
+            'workspaces'        => $workspaces,
+            'activities'        => $activities,
+            'custom_activities' => $customActivities,
+            'result'            => $result,
+            'notes'             => $notes,
         ];
     }
 
@@ -409,8 +409,10 @@ final class InspectionItemController
      */
     private static function validateNudzoveOsvetlenieFields(array $body): array
     {
+        $evidNumber    = self::stringField($body, 'evid_number',    required: false, max: 40);
+        $floor         = self::stringField($body, 'floor',          required: false, max: 20);
         $luminaireType = self::stringField($body, 'luminaire_type', required: true,  max: 80);
-        $manufacturer  = self::stringField($body, 'manufacturer',   required: true,  max: 80);
+        $manufacturer  = self::stringField($body, 'manufacturer',   required: false, max: 80);
         $location      = self::stringField($body, 'location',       required: true,  max: 191);
         $notes         = self::stringField($body, 'notes',          required: false, max: 500);
         $durationMin   = self::nonNegativeInt($body, 'duration_min', max: 600);
@@ -421,6 +423,8 @@ final class InspectionItemController
         }
 
         return [
+            'evid_number'    => $evidNumber,
+            'floor'          => $floor,
             'luminaire_type' => $luminaireType,
             'manufacturer'   => $manufacturer,
             'location'       => $location,
@@ -438,11 +442,14 @@ final class InspectionItemController
      */
     private static function validateTsHadicFields(array $body): array
     {
-        $hoseType     = self::stringField($body, 'hose_type', required: true,  max: 40);
-        $serial       = self::stringField($body, 'serial',    required: true,  max: 80);
-        $location     = self::stringField($body, 'location',  required: true,  max: 191);
-        $notes        = self::stringField($body, 'notes',     required: false, max: 500);
-        $testPressure = self::float($body, 'test_pressure', min: 0, max: 50);
+        $hoseType          = self::stringField($body, 'hose_type',           required: true,  max: 40);
+        $location          = self::stringField($body, 'location',            required: true,  max: 191);
+        $manufacturer      = self::stringField($body, 'manufacturer',        required: true,  max: 100);
+        $notes             = self::stringField($body, 'notes',               required: false, max: 500);
+        $workingPressure   = self::float($body, 'working_pressure',   min: 0, max: 50);
+        $testPressure      = self::float($body, 'test_pressure',      min: 0, max: 50);
+        $length            = self::float($body, 'length',             min: 0.1, max: 9999);
+        $yearOfManufacture = (int) self::float($body, 'year_of_manufacture', min: 1900, max: (float) date('Y'));
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
@@ -450,12 +457,15 @@ final class InspectionItemController
         }
 
         return [
-            'hose_type'     => $hoseType,
-            'serial'        => $serial,
-            'location'      => $location,
-            'test_pressure' => $testPressure,
-            'result'        => $result,
-            'notes'         => $notes,
+            'hose_type'           => $hoseType,
+            'location'            => $location,
+            'manufacturer'        => $manufacturer,
+            'working_pressure'    => $workingPressure,
+            'test_pressure'       => $testPressure,
+            'length'              => $length,
+            'year_of_manufacture' => $yearOfManufacture,
+            'result'              => $result,
+            'notes'               => $notes,
         ];
     }
 

@@ -1,12 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, Edit2, Gauge, Hash, ListChecks,
-  MapPin, NotebookPen, Save, Trash2,
+  AlertTriangle, ArrowRight, Building2, CheckCircle2, Edit2, Gauge,
+  ListChecks, MapPin, NotebookPen, Ruler, Save, Trash2,
 } from 'lucide-react';
 import {
   Inspections,
-  PASS_FAIL_LABELS,
   type PassFailResult,
   type TsHadicItemFields,
 } from '@/api/inspections';
@@ -27,6 +26,11 @@ import type {
   Step2FormProps,
 } from './common';
 
+const TS_HADIC_RESULT_LABELS: Record<PassFailResult, string> = {
+  vyhovuje:    'Funkčná',
+  nevyhovuje:  'Nefunkčná',
+};
+
 function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
 }
@@ -35,54 +39,55 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
-  const [hoseType, setHoseType] = useState('');
-  const [serial, setSerial] = useState('');
-  const [location, setLocation] = useState('');
-  const [testPressure, setTestPressure] = useState<string>('');
-  const [result, setResult] = useState<PassFailResult>('vyhovuje');
-  const [notes, setNotes] = useState('');
+  const [hoseType, setHoseType]               = useState('');
+  const [location, setLocation]               = useState('');
+  const [manufacturer, setManufacturer]       = useState('');
+  const [workingPressure, setWorkingPressure] = useState('');
+  const [testPressure, setTestPressure]       = useState('');
+  const [length, setLength]                   = useState('');
+  const [yearOfManufacture, setYearOfManufacture] = useState('');
+  const [result, setResult]                   = useState<PassFailResult>('vyhovuje');
+  const [notes, setNotes]                     = useState('');
 
-  const [submitting, setSubmitting] = useState(false);
+  const [submitting, setSubmitting]   = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [apiError, setApiError] = useState<string | null>(null);
+  const [apiError, setApiError]       = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
     if (initialItem) {
       const f = initialItem.fields as Partial<TsHadicItemFields>;
       setHoseType(typeof f.hose_type === 'string' ? f.hose_type : '');
-      setSerial(typeof f.serial === 'string' ? f.serial : '');
       setLocation(typeof f.location === 'string' ? f.location : '');
+      setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
+      setWorkingPressure(typeof f.working_pressure === 'number' ? String(f.working_pressure) : '');
       setTestPressure(typeof f.test_pressure === 'number' ? String(f.test_pressure) : '');
+      setLength(typeof f.length === 'number' ? String(f.length) : '');
+      setYearOfManufacture(typeof f.year_of_manufacture === 'number' ? String(f.year_of_manufacture) : '');
       setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
-      setHoseType('');
-      setSerial('');
-      setLocation('');
-      setTestPressure('');
-      setResult('vyhovuje');
-      setNotes('');
+      setHoseType(''); setLocation(''); setManufacturer('');
+      setWorkingPressure(''); setTestPressure('');
+      setLength(''); setYearOfManufacture('');
+      setResult('vyhovuje'); setNotes('');
     }
   }, [initialItem]);
 
+  function clearErr(key: string) {
+    setFieldErrors((prev) => { const n = { ...prev }; delete n[key]; return n; });
+  }
+
   function isPristine() {
-    return (
-      !hoseType && !serial && !location && !testPressure && !notes &&
-      result === 'vyhovuje'
-    );
+    return !hoseType && !location && !manufacturer && !workingPressure &&
+      !testPressure && !length && !yearOfManufacture && !notes &&
+      result === 'vyhovuje';
   }
 
   function handleGoToSummary(e: React.SyntheticEvent) {
-    if (editing) {
-      void handleSubmit(e as FormEvent, 'save-and-summary');
-      return;
-    }
+    if (editing) { void handleSubmit(e as FormEvent, 'save-and-summary'); return; }
     e.preventDefault();
-    if (isPristine()) {
-      onSaved('save-and-summary');
-      return;
-    }
+    if (isPristine()) { onSaved('save-and-summary'); return; }
     if (window.confirm('Formulár obsahuje neuložené údaje. Naozaj prejsť na súhrn bez uloženia?')) {
       onSaved('save-and-summary');
     }
@@ -91,21 +96,34 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
   async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
     e.preventDefault();
     const errs: Record<string, string> = {};
-    if (!hoseType.trim()) errs.hoseType = 'Doplň typ hadice (napr. C52, D25).';
-    if (!serial.trim()) errs.serial = 'Doplň výrobné číslo.';
+    if (!hoseType.trim()) errs.hoseType = 'Doplň typ / priemer hadice (napr. DN33, C52).';
     if (!location.trim()) errs.location = 'Doplň umiestnenie.';
+    if (!manufacturer.trim()) errs.manufacturer = 'Doplň výrobcu.';
+    const wp = Number(workingPressure);
+    if (!workingPressure || !Number.isFinite(wp) || wp < 0 || wp > 50)
+      errs.workingPressure = 'Pracovný pretlak musí byť číslo v rozsahu 0–50 MPa.';
     const tp = Number(testPressure);
-    if (!Number.isFinite(tp) || tp < 0 || tp > 50) errs.testPressure = 'Skúšobný tlak musí byť číslo v rozsahu 0–50 MPa.';
+    if (!testPressure || !Number.isFinite(tp) || tp < 0 || tp > 50)
+      errs.testPressure = 'Skúšobný pretlak musí byť číslo v rozsahu 0–50 MPa.';
+    const len = Number(length);
+    if (!length || !Number.isFinite(len) || len <= 0 || len > 9999)
+      errs.length = 'Dĺžka musí byť kladné číslo (v metroch).';
+    const year = Number(yearOfManufacture);
+    if (!yearOfManufacture || !Number.isInteger(year) || year < 1900 || year > new Date().getFullYear())
+      errs.yearOfManufacture = 'Zadaj platný rok výroby.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
     setApiError(null);
     setSubmitting(true);
     try {
       const fields: TsHadicItemFields = {
-        hose_type: hoseType.trim(),
-        serial: serial.trim(),
-        location: location.trim(),
-        test_pressure: Number(testPressure),
+        hose_type:           hoseType.trim(),
+        location:            location.trim(),
+        manufacturer:        manufacturer.trim(),
+        working_pressure:    wp,
+        test_pressure:       tp,
+        length:              len,
+        year_of_manufacture: year,
         result,
         notes: notes.trim() || null,
       };
@@ -117,10 +135,7 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
       onSaved(action);
       toast.success('Položka uložená');
     } catch (err) {
-      if (handleOfflineSave(err, toast)) {
-        onSaved(action);
-        return;
-      }
+      if (handleOfflineSave(err, toast)) { onSaved(action); return; }
       setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
@@ -130,39 +145,65 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
   return (
     <Card className="p-5">
       <form className="flex flex-col gap-4" noValidate onSubmit={(e) => handleSubmit(e, 'save-and-next')}>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Typ hadice" required hint={fieldErrors.hoseType ? undefined : 'Napr. C52, D25, B65.'} error={fieldErrors.hoseType}>
+
+        <Field label="Typ / priemer hadice" required hint={fieldErrors.hoseType ? undefined : 'Napr. DN33, C52, D25, B65.'} error={fieldErrors.hoseType}>
+          {(p) => (
+            <Input {...p} required leftIcon={<Gauge className="size-4" />}
+              value={hoseType} onChange={(e) => { setHoseType(e.target.value); clearErr('hoseType'); }}
+              placeholder="DN33" />
+          )}
+        </Field>
+
+        <Field label="Umiestnenie" required error={fieldErrors.location}>
+          {(p) => (
+            <Input {...p} required leftIcon={<MapPin className="size-4" />}
+              value={location} onChange={(e) => { setLocation(e.target.value); clearErr('location'); }}
+              placeholder="Chodba — 2. poschodie" />
+          )}
+        </Field>
+
+        <Field label="Výrobca" required error={fieldErrors.manufacturer}>
+          {(p) => (
+            <Input {...p} required leftIcon={<Building2 className="size-4" />}
+              value={manufacturer} onChange={(e) => { setManufacturer(e.target.value); clearErr('manufacturer'); }}
+              placeholder="PYROSTOP s.r.o." />
+          )}
+        </Field>
+
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Pracovný pretlak (MPa)" required error={fieldErrors.workingPressure}>
             {(p) => (
-              <Input {...p} required leftIcon={<Gauge className="size-4" />}
-                value={hoseType} onChange={(e) => { setHoseType(e.target.value); if (fieldErrors.hoseType) setFieldErrors((prev) => { const n = { ...prev }; delete n.hoseType; return n; }); }}
-                placeholder="C52" />
+              <Input {...p} required type="number" inputMode="decimal" step="0.1" min={0} max={50}
+                leftIcon={<Gauge className="size-4" />}
+                value={workingPressure} onChange={(e) => { setWorkingPressure(e.target.value); clearErr('workingPressure'); }}
+                placeholder="1,2" />
             )}
           </Field>
-          <Field label="Výrobné číslo" required error={fieldErrors.serial}>
+          <Field label="Skúšobný pretlak (MPa)" required error={fieldErrors.testPressure}>
             {(p) => (
-              <Input {...p} required leftIcon={<Hash className="size-4" />}
-                value={serial} onChange={(e) => { setSerial(e.target.value); if (fieldErrors.serial) setFieldErrors((prev) => { const n = { ...prev }; delete n.serial; return n; }); }}
-                placeholder="ZP-2020-014" />
+              <Input {...p} required type="number" inputMode="decimal" step="0.1" min={0} max={50}
+                leftIcon={<Gauge className="size-4" />}
+                value={testPressure} onChange={(e) => { setTestPressure(e.target.value); clearErr('testPressure'); }}
+                placeholder="1,8" />
             )}
           </Field>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="sm:col-span-2">
-            <Field label="Umiestnenie" required error={fieldErrors.location}>
-              {(p) => (
-                <Input {...p} required leftIcon={<MapPin className="size-4" />}
-                  value={location} onChange={(e) => { setLocation(e.target.value); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
-                  placeholder="Hydrant H-2 chodba 1.NP" />
-              )}
-            </Field>
-          </div>
-          <Field label="Skúšobný tlak (MPa)" required error={fieldErrors.testPressure}>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Dĺžka (m)" required error={fieldErrors.length}>
             {(p) => (
-              <Input {...p} required type="number" inputMode="decimal" step="0.1" min={0} max={50}
-                leftIcon={<Gauge className="size-4" />}
-                value={testPressure} onChange={(e) => { setTestPressure(e.target.value); if (fieldErrors.testPressure) setFieldErrors((prev) => { const n = { ...prev }; delete n.testPressure; return n; }); }}
-                placeholder="1,2" />
+              <Input {...p} required type="number" inputMode="decimal" step="0.5" min={0.5} max={9999}
+                leftIcon={<Ruler className="size-4" />}
+                value={length} onChange={(e) => { setLength(e.target.value); clearErr('length'); }}
+                placeholder="20" />
+            )}
+          </Field>
+          <Field label="Rok výroby" required error={fieldErrors.yearOfManufacture}>
+            {(p) => (
+              <Input {...p} required type="number" inputMode="numeric" step={1} min={1900} max={new Date().getFullYear()}
+                leftIcon={<Ruler className="size-4" />}
+                value={yearOfManufacture} onChange={(e) => { setYearOfManufacture(e.target.value); clearErr('yearOfManufacture'); }}
+                placeholder="2021" />
             )}
           </Field>
         </div>
@@ -203,7 +244,7 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
           </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
-            {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}
+            {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalšia hadica'}
           </Button>
         </div>
       </form>
@@ -231,7 +272,7 @@ function ResultButton({
         active ? tone.active : `bg-white text-ink-700 ${tone.idle}`)}>
       <div className="flex items-center gap-1.5">
         {active && <CheckCircle2 className="size-3.5" />}
-        <span className="font-semibold">{PASS_FAIL_LABELS[value]}</span>
+        <span className="font-semibold">{TS_HADIC_RESULT_LABELS[value]}</span>
       </div>
     </button>
   );
@@ -247,9 +288,10 @@ function TsHadicItemRow({
 }: ItemRowProps) {
   const f = item.fields as Partial<TsHadicItemFields>;
   const result = isPassFail(f.result) ? f.result : null;
-  const fmt = (n: unknown): string =>
+
+  const fmtPressure = (n: unknown): string =>
     typeof n === 'number' && Number.isFinite(n)
-      ? n.toLocaleString('sk-SK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      ? n.toLocaleString('sk-SK', { minimumFractionDigits: 1, maximumFractionDigits: 2 })
       : '—';
 
   return (
@@ -262,20 +304,32 @@ function TsHadicItemRow({
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h3 className="truncate text-sm font-semibold text-ink-900">
               <Gauge className="-mt-0.5 mr-1 inline size-3 text-ink-400" />
-              {f.hose_type} · {f.serial}
+              {f.hose_type ?? '—'}
             </h3>
             {result && (
               <Badge tone={result === 'vyhovuje' ? 'ok' : 'bad'}>
-                {PASS_FAIL_LABELS[result]}
+                {TS_HADIC_RESULT_LABELS[result]}
               </Badge>
             )}
           </div>
           <p className="mt-0.5 truncate text-xs text-ink-500">
             <MapPin className="-mt-0.5 mr-1 inline size-3" />
-            {f.location}
+            {f.location ?? '—'}
           </p>
-          <p className="mt-0.5 font-mono text-xs text-ink-600">
-            Skúšobný tlak {fmt(f.test_pressure)} <span className="text-ink-400">MPa</span>
+          <p className="mt-0.5 text-xs text-ink-600">
+            {f.manufacturer && (
+              <span className="mr-3">{f.manufacturer}</span>
+            )}
+            <span className="font-mono">
+              {fmtPressure(f.working_pressure)} / {fmtPressure(f.test_pressure)}{' '}
+              <span className="text-ink-400">MPa</span>
+            </span>
+            {typeof f.length === 'number' && (
+              <span className="ml-2 font-mono">{f.length} <span className="text-ink-400">m</span></span>
+            )}
+            {typeof f.year_of_manufacture === 'number' && (
+              <span className="ml-2 text-ink-400">r. {f.year_of_manufacture}</span>
+            )}
           </p>
           {f.notes && (
             <p className="mt-1 line-clamp-2 text-xs text-ink-600">
@@ -287,11 +341,11 @@ function TsHadicItemRow({
         {canEdit && (
           <div className="flex shrink-0 items-center gap-1">
             <Link to={`/inspections/${inspectionId}/items/${item.id}`} aria-label="Opraviť"
-              className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700">
+              className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]">
               <Edit2 className="size-4" />
             </Link>
             <button type="button" onClick={onDelete} disabled={deleting} aria-label="Zmazať"
-              className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad disabled:opacity-50">
+              className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)] disabled:opacity-50">
               {deleting ? <Spinner size="sm" /> : <Trash2 className="size-4" />}
             </button>
           </div>
@@ -318,11 +372,11 @@ function TsHadicStatsBar({ items }: StatsBarProps) {
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
         <div className="flex items-center justify-between gap-2 rounded-xl bg-[var(--color-status-ok-bg)] px-3 py-2 text-sm text-[var(--color-status-ok)]">
-          <span className="text-xs">Vyhovujú</span>
+          <span className="text-xs">Funkčné</span>
           <span className="text-base font-semibold tabular-nums">{pass}</span>
         </div>
         <div className="flex items-center justify-between gap-2 rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-          <span className="text-xs">Nevyhovujú</span>
+          <span className="text-xs">Nefunkčné</span>
           <span className="text-base font-semibold tabular-nums">{fail}</span>
         </div>
       </div>

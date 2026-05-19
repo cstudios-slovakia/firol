@@ -137,15 +137,14 @@ export type PkActivity =
   | 'electrical_appliances_check'
   | 'documentation_check'
   | 'employee_list_check'
-  | 'fire_drill'
-  | 'fire_cabinet_check';
+  | 'fire_drill';
 
 export const PK_ACTIVITIES: PkActivity[] = [
   'visual_check', 'rphp_check', 'hydranty_check', 'escape_routes_check',
   'pu_check', 'training_initial', 'training_repeated',
   'electrical_equipment_check', 'technical_equipment_check',
   'electrical_appliances_check', 'documentation_check',
-  'employee_list_check', 'fire_drill', 'fire_cabinet_check',
+  'employee_list_check', 'fire_drill',
 ];
 
 export const PK_ACTIVITY_LABELS: Record<PkActivity, string> = {
@@ -162,7 +161,6 @@ export const PK_ACTIVITY_LABELS: Record<PkActivity, string> = {
   documentation_check: 'Kontrola aktuálnosti dokumentácie požiarnej ochrany',
   employee_list_check: 'Kontrola aktuálneho zoznamu zamestnancov a ich školení',
   fire_drill: 'Vykonaný cvičný požiarny poplach',
-  fire_cabinet_check: 'Kontrola hasičskej skrine na 2. poschodí',
 };
 
 export type PkResult = 'bez_nedostatkov' | 'zistene_nedostatky';
@@ -174,7 +172,7 @@ export const PK_RESULT_LABELS: Record<PkResult, string> = {
 export type PoziarnaKnihaItemFields = {
   workspaces: string;
   activities: PkActivity[];
-  activities_other: string | null;
+  custom_activities: string[];
   result: PkResult;
   notes: string | null;
 };
@@ -212,16 +210,19 @@ export type NudzoveOsvetlenieItemFields = {
   luminaire_type: string;
   manufacturer: string;
   location: string;
-  duration_min?: number;
+  duration_min: number;
   result: PassFailResult;
   notes: string | null;
 };
 
 export type TsHadicItemFields = {
   hose_type: string;
-  serial: string;
   location: string;
+  manufacturer: string;
+  working_pressure: number;
   test_pressure: number;
+  length: number;
+  year_of_manufacture: number;
   result: PassFailResult;
   notes: string | null;
 };

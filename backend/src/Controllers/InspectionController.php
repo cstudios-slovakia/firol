@@ -227,8 +227,7 @@ final class InspectionController
      * "Opakovať" — clone a finalized inspection into a fresh draft so the
      * technician can re-issue the protocol with a new date and minor edits
      * (items copied verbatim). The source inspection and its document
-     * remain untouched. Per spec, this is intentionally NOT available for
-     * Požiarna kniha because each entry is a unique record.
+     * remain untouched.
      */
     public static function repeat(Request $req, array $params): void
     {
@@ -238,9 +237,6 @@ final class InspectionController
 
         $source = self::loadOrFail($accountId, $sourceId);
 
-        if ($source['type'] === 'poziarna_kniha') {
-            Response::error('Požiarna kniha nemá Opakovať flow — každý záznam je unikátny.', 422);
-        }
         if ($source['status'] !== 'finalized') {
             Response::error('Opakovať možno len ukončenú kontrolu (s vystaveným PDF).', 422);
         }
