@@ -100,7 +100,7 @@ export function InspectionsListPage() {
           className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
         >
           <Plus className="size-4" />
-          Nová
+          Nová kontrola
         </Link>
       </header>
 

@@ -6,6 +6,7 @@ import {
     CreditCard,
     Flame,
     GraduationCap,
+    LayoutDashboard,
     LogOut,
     Settings,
     Shield,
@@ -24,6 +25,14 @@ import { cn } from "@/lib/cn";
 const TOP_TABS = [
     {
         to: "/",
+        label: "Prehľad",
+        icon: LayoutDashboard,
+        activeColor: "text-firol-600",
+        activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
+        iconBg: "bg-firol-100",
+    },
+    {
+        to: "/companies",
         label: "Firmy",
         icon: Building2,
         activeColor: "text-blue-600",
@@ -35,7 +44,8 @@ const TOP_TABS = [
         label: "Kontroly",
         icon: ClipboardList,
         activeColor: "text-orange-600",
-        activeBg: "bg-orange-50 shadow-[inset_0_0_0_1px_theme(colors.orange.100)]",
+        activeBg:
+            "bg-orange-50 shadow-[inset_0_0_0_1px_theme(colors.orange.100)]",
         iconBg: "bg-orange-100",
     },
     {
@@ -43,7 +53,8 @@ const TOP_TABS = [
         label: "Školenia",
         icon: GraduationCap,
         activeColor: "text-emerald-600",
-        activeBg: "bg-emerald-50 shadow-[inset_0_0_0_1px_theme(colors.emerald.100)]",
+        activeBg:
+            "bg-emerald-50 shadow-[inset_0_0_0_1px_theme(colors.emerald.100)]",
         iconBg: "bg-emerald-100",
     },
 ] as const;
@@ -62,7 +73,8 @@ const BOTTOM_TABS = [
         label: "Nastavenia",
         icon: Settings,
         activeColor: "text-violet-600",
-        activeBg: "bg-violet-50 shadow-[inset_0_0_0_1px_theme(colors.violet.100)]",
+        activeBg:
+            "bg-violet-50 shadow-[inset_0_0_0_1px_theme(colors.violet.100)]",
         iconBg: "bg-violet-100",
     },
 ] as const;
@@ -178,7 +190,7 @@ function SubscriptionBanner() {
         } catch (err) {
             if (err instanceof ApiError && err.status === 422) {
                 // Billing details missing — redirect to settings to fill them.
-                navigate('/billing?onboarding=billing');
+                navigate("/billing?onboarding=billing");
                 return;
             }
             const msg =
@@ -252,9 +264,8 @@ function TrialBanner() {
         month: "long",
     });
 
-    const periodPrice = account.billing_period === "yearly"
-        ? "199 € / rok"
-        : "19 € / mesiac";
+    const periodPrice =
+        account.billing_period === "yearly" ? "199 € / rok" : "19 € / mesiac";
 
     const isTrialPaid = state === "trial_paid";
 
@@ -283,9 +294,12 @@ function TrialBanner() {
             <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-1.5 text-xs text-firol-900">
                 <Sparkles className="size-3.5 shrink-0 text-firol-600" />
                 <p className="min-w-0 flex-1 truncate">
-                    <span className="font-semibold">Skúšobné obdobie do {human}</span>
+                    <span className="font-semibold">
+                        Skúšobné obdobie do {human}
+                    </span>
                     <span className="opacity-80">
-                        {" "}({daysLeft}{" "}
+                        {" "}
+                        ({daysLeft}{" "}
                         {daysLeft === 1 ? "deň" : daysLeft < 5 ? "dni" : "dní"})
                         {isTrialPaid
                             ? ` · potom sa automaticky zaúčtuje ${periodPrice}`
@@ -295,7 +309,7 @@ function TrialBanner() {
                 {isTrialPaid ? (
                     <button
                         type="button"
-                        onClick={() => navigate('/billing')}
+                        onClick={() => navigate("/billing")}
                         className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-firol-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
                     >
                         Spravovať predplatné
@@ -331,7 +345,9 @@ function SideNav({ bottomTabs }: { bottomTabs: readonly Tab[] }) {
             >
                 {() => (
                     <>
-                        <tab.icon className={cn("size-4 shrink-0", tab.activeColor)} />
+                        <tab.icon
+                            className={cn("size-4 shrink-0", tab.activeColor)}
+                        />
                         <span>{tab.label}</span>
                     </>
                 )}
@@ -339,14 +355,20 @@ function SideNav({ bottomTabs }: { bottomTabs: readonly Tab[] }) {
         </li>
     );
 
+    const [dashboardTab, ...sectionTabs] = TOP_TABS;
+
     return (
         <aside
             aria-label="Hlavná navigácia"
             className="hidden sm:block w-56 shrink-0"
         >
-            <nav className="sticky top-[81px] flex min-h-[calc(100vh-113px)] flex-col">
+            <nav className="sticky top-[81px] flex h-[calc(100vh-81px)] flex-col">
                 <ul className="flex flex-col gap-1">
-                    {TOP_TABS.map(renderItem)}
+                    {renderItem(dashboardTab)}
+                </ul>
+                <div className="mt-3" />
+                <ul className="flex flex-col gap-1">
+                    {sectionTabs.map(renderItem)}
                 </ul>
                 <div className="mt-auto pt-4">
                     <div className="mb-2 border-t border-ink-100" />
