@@ -52,7 +52,7 @@ foreach ($items as $idx => $it) {
     $f = $it['fields'];
     if ((string) ($f['result'] ?? '') !== 'nevyhovuje') continue;
     $label = 'Hadica č. ' . ($idx + 1) . ' (' . ($f['hose_type'] ?? '') . ', ' . ($f['location'] ?? '') . ')';
-    $note = !empty($f['notes']) ? (string) $f['notes'] : 'Nevyhovuje';
+    $note = !empty($f['notes']) ? (string) $f['notes'] : 'Nefunkčná';
     $bulletItems[] = ['label' => $label, 'note' => $note];
 }
 ?>
@@ -150,12 +150,15 @@ foreach ($items as $idx => $it) {
   <thead>
     <tr>
       <th style="width:4%">Č.</th>
-      <th style="width:14%">Typ hadice</th>
-      <th style="width:16%">Výrobné č.</th>
-      <th style="width:25%">Umiestnenie</th>
-      <th style="width:12%">Tlak (MPa)</th>
-      <th style="width:12%">Výsledok</th>
-      <th style="width:17%">Zistené závady</th>
+      <th style="width:12%">Typ / priemer</th>
+      <th style="width:18%">Výrobca</th>
+      <th style="width:20%">Umiestnenie</th>
+      <th style="width:8%">Prac. tlak</th>
+      <th style="width:8%">Skúš. tlak</th>
+      <th style="width:6%">Dĺžka</th>
+      <th style="width:6%">Rok výr.</th>
+      <th style="width:9%">Výsledok</th>
+      <th style="width:9%">Závady</th>
     </tr>
   </thead>
   <tbody>
@@ -163,10 +166,13 @@ foreach ($items as $idx => $it) {
     <tr>
       <td><?= $idx + 1 ?></td>
       <td><?= $h($f['hose_type'] ?? null) ?></td>
-      <td><?= $h($f['serial'] ?? null) ?></td>
+      <td><?= $h($f['manufacturer'] ?? null) ?></td>
       <td><?= $h($f['location'] ?? null) ?></td>
-      <td class="num"><?= $formatNum($f['test_pressure'] ?? null) ?></td>
-      <td class="<?= $r === 'vyhovuje' ? 'res-ok' : ($r === 'nevyhovuje' ? 'res-bad' : '') ?>"><?= $r === 'vyhovuje' ? 'Vyhovuje' : ($r === 'nevyhovuje' ? 'Nevyhovuje' : $h($r)) ?></td>
+      <td class="num"><?= $formatNum($f['working_pressure'] ?? null) ?> MPa</td>
+      <td class="num"><?= $formatNum($f['test_pressure'] ?? null) ?> MPa</td>
+      <td class="num"><?= is_numeric($f['length'] ?? null) ? $formatNum($f['length'], 1) . ' m' : '—' ?></td>
+      <td class="num"><?= isset($f['year_of_manufacture']) ? (int) $f['year_of_manufacture'] : '—' ?></td>
+      <td class="<?= $r === 'vyhovuje' ? 'res-ok' : ($r === 'nevyhovuje' ? 'res-bad' : '') ?>"><?= $r === 'vyhovuje' ? 'Funkčná' : ($r === 'nevyhovuje' ? 'Nefunkčná' : $h($r)) ?></td>
       <td><?= !empty($f['notes']) ? $h($f['notes']) : '—' ?></td>
     </tr>
     <?php endforeach ?>
@@ -177,8 +183,8 @@ foreach ($items as $idx => $it) {
 <table class="stats">
   <tr>
     <td>Skúšaných hadíc<br><span class="num"><?= (int) $stats['total'] ?></span></td>
-    <td>Vyhovuje<br><span class="num" style="color:#2e7d32"><?= (int) ($stats['vyhovuje'] ?? 0) ?></span></td>
-    <td>Nevyhovuje<br><span class="num" style="color:#c4231b"><?= (int) ($stats['nevyhovuje'] ?? 0) ?></span></td>
+    <td>Funkčné<br><span class="num" style="color:#2e7d32"><?= (int) ($stats['vyhovuje'] ?? 0) ?></span></td>
+    <td>Nefunkčné<br><span class="num" style="color:#c4231b"><?= (int) ($stats['nevyhovuje'] ?? 0) ?></span></td>
   </tr>
 </table>
 

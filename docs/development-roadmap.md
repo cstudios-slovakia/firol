@@ -171,8 +171,8 @@ Phase 3 is split into **3a-1 → 3a-2 → 3a-3 → 3a-4** for RPHP, then
 ### 3a-4 — Opakovať flow + polish ✅
 - ✅ `POST /api/inspections/{id}/repeat` — clones a finalized inspection
   into a fresh draft (items copied via `INSERT … SELECT`, `executed_on`
-  reset to NULL, status = draft); rejects drafts (422), rejects
-  `poziarna_kniha` (each entry is unique per spec)
+  reset to NULL, status = draft); rejects drafts (422); available for
+  all inspection types including `poziarna_kniha`
 - ✅ Verified locally: re-issued protocol got fresh sequence
   (`RPHP-2027-001`) because the new date was in a different year bucket
 - ✅ "Opakovať" CTA on `InspectionDetailPage` (replaces the "Pridať

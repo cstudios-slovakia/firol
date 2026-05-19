@@ -49,8 +49,6 @@ $activeSlugs = is_array($record['activities'] ?? null) ? $record['activities'] :
 $result = (string) ($record['result'] ?? '');
 $workspaces = (string) ($record['workspaces'] ?? '');
 $notes = (string) ($record['notes'] ?? '');
-$activitiesOther = (string) ($record['activities_other'] ?? '');
-
 $activityLabels = [
     'visual_check'                => 'Vizuálna kontrola priestorov spoločnosti',
     'rphp_check'                  => 'Kontrola stavu, označenia a dostupnosti RPHP',
@@ -65,7 +63,6 @@ $activityLabels = [
     'documentation_check'         => 'Kontrola aktuálnosti dokumentácie požiarnej ochrany',
     'employee_list_check'         => 'Kontrola aktuálneho zoznamu zamestnancov a ich školení',
     'fire_drill'                  => 'Vykonaný cvičný požiarny poplach',
-    'fire_cabinet_check'          => 'Kontrola hasičskej skrine na 2. poschodí',
 ];
 
 $checkedActivities = [];
@@ -74,8 +71,12 @@ foreach ($activeSlugs as $slug) {
         $checkedActivities[] = $activityLabels[$slug];
     }
 }
-if (!empty($activitiesOther)) {
-    $checkedActivities[] = $activitiesOther;
+// Custom activities (new field); backward compat with old activities_other string
+$customActivitiesArr = isset($record['custom_activities']) && is_array($record['custom_activities'])
+    ? $record['custom_activities']
+    : (isset($record['activities_other']) && $record['activities_other'] ? [(string) $record['activities_other']] : []);
+foreach ($customActivitiesArr as $ca) {
+    $checkedActivities[] = (string) $ca;
 }
 
 $defectLines = array_values(array_filter(array_map('trim', explode("\n", $notes))));

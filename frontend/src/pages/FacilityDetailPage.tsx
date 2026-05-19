@@ -168,13 +168,13 @@ export function FacilityDetailPage() {
           <ul className="flex flex-col gap-2">
             {inspections.map((ins) => {
               const finalized = ins.status === 'finalized';
-              const canRepeat = finalized && ins.type !== 'poziarna_kniha';
+              const canRepeat = finalized;
               return (
                 <li key={ins.id}>
-                  <Card className="flex items-start gap-3 px-4 py-3 transition-shadow hover:shadow-[var(--shadow-lift)]">
+                  <Card className="flex items-center gap-3 px-4 py-3 transition-shadow hover:shadow-[var(--shadow-lift)]">
                     <Link
                       to={`/inspections/${ins.id}`}
-                      className="flex flex-1 items-start gap-3 group min-w-0"
+                      className="flex flex-1 items-center gap-3 group min-w-0"
                     >
                       <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-600">
                         <ClipboardList className="size-5" />
@@ -197,22 +197,31 @@ export function FacilityDetailPage() {
                           {ins.inspector_name}
                         </p>
                       </div>
-                      {finalized && (
-                        <FileText className="size-4 shrink-0 text-firol-500" aria-label="PDF protokol" />
-                      )}
                     </Link>
-                    {canRepeat && (
-                      <button
-                        type="button"
-                        onClick={() => handleRepeat(ins.id)}
-                        disabled={repeatingId === ins.id}
-                        title="Vytvor novú kontrolu s tými istými prístrojmi"
-                        aria-label="Opakovať"
-                        className="grid size-9 shrink-0 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-firol-50 hover:text-firol-700 disabled:opacity-50"
-                      >
-                        {repeatingId === ins.id ? <Spinner size="sm" /> : <Repeat className="size-4" />}
-                      </button>
-                    )}
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      {finalized && (
+                        <Link
+                          to={`/inspections/${ins.id}`}
+                          title="PDF protokol"
+                          aria-label="PDF protokol"
+                          className="grid size-8 place-items-center rounded-xl text-firol-500 transition-colors hover:bg-firol-50"
+                        >
+                          <FileText className="size-4" />
+                        </Link>
+                      )}
+                      {canRepeat && (
+                        <button
+                          type="button"
+                          onClick={() => handleRepeat(ins.id)}
+                          disabled={repeatingId === ins.id}
+                          title="Vytvor novú kontrolu s tými istými prístrojmi"
+                          aria-label="Opakovať"
+                          className="grid size-8 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-firol-50 hover:text-firol-700 disabled:opacity-50"
+                        >
+                          {repeatingId === ins.id ? <Spinner size="sm" /> : <Repeat className="size-4" />}
+                        </button>
+                      )}
+                    </div>
                   </Card>
                 </li>
               );

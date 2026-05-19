@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle, ArrowRight, CheckCircle2, Edit2, Hash, Lightbulb,
-  ListChecks, Layers, MapPin, NotebookPen, Save, Tag, Trash2,
+  ListChecks, Layers, MapPin, NotebookPen, Save, Tag, Timer, Trash2,
 } from 'lucide-react';
 import {
   Inspections,
@@ -40,6 +40,7 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   const [luminaireType, setLuminaireType] = useState('');
   const [manufacturer, setManufacturer] = useState('');
   const [location, setLocation] = useState('');
+  const [durationMin, setDurationMin] = useState('');
   const [result, setResult] = useState<PassFailResult>('vyhovuje');
   const [notes, setNotes] = useState('');
 
@@ -56,6 +57,7 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
       setLuminaireType(typeof f.luminaire_type === 'string' ? f.luminaire_type : '');
       setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
       setLocation(typeof f.location === 'string' ? f.location : '');
+      setDurationMin(typeof f.duration_min === 'number' ? String(f.duration_min) : '');
       setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
@@ -64,6 +66,7 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
       setLuminaireType('');
       setManufacturer('');
       setLocation('');
+      setDurationMin('');
       setResult('vyhovuje');
       setNotes('');
     }
@@ -72,7 +75,7 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   function isPristine() {
     return (
       !evidNumber && !floor && !luminaireType && !manufacturer && !location &&
-      !notes && result === 'vyhovuje'
+      !durationMin && !notes && result === 'vyhovuje'
     );
   }
 
@@ -97,6 +100,9 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
     if (!evidNumber.trim()) errs.evidNumber = 'Doplň evidenčné číslo svietidla.';
     if (!luminaireType.trim()) errs.luminaireType = 'Doplň druh / typ svietidla.';
     if (!location.trim()) errs.location = 'Doplň umiestnenie.';
+    const dur = Number(durationMin);
+    if (!durationMin || !Number.isInteger(dur) || dur < 0 || dur > 600)
+      errs.durationMin = 'Zadaj dobu svietenia v minútach (0–600).';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
     setApiError(null);
@@ -108,6 +114,7 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
         luminaire_type: luminaireType.trim(),
         manufacturer: manufacturer.trim(),
         location: location.trim(),
+        duration_min: dur,
         result,
         notes: notes.trim() || null,
       };
@@ -171,6 +178,17 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
             <Input {...p} required leftIcon={<MapPin className="size-4" />}
               value={location} onChange={(e) => { setLocation(e.target.value); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
               placeholder="Chodba 2.NP, nad únikovým východom" />
+          )}
+        </Field>
+
+        <Field label="Doba svietenia v núdzovom režime (min)" required
+          hint={fieldErrors.durationMin ? undefined : 'Napr. 60 (1 hod.), 180 (3 hod.)'}
+          error={fieldErrors.durationMin}>
+          {(p) => (
+            <Input {...p} required type="number" inputMode="numeric" step={1} min={0} max={600}
+              leftIcon={<Timer className="size-4" />}
+              value={durationMin} onChange={(e) => { setDurationMin(e.target.value); if (fieldErrors.durationMin) setFieldErrors((prev) => { const n = { ...prev }; delete n.durationMin; return n; }); }}
+              placeholder="60" />
           )}
         </Field>
 
@@ -286,11 +304,11 @@ function NoItemRow({
         {canEdit && (
           <div className="flex shrink-0 items-center gap-1">
             <Link to={`/inspections/${inspectionId}/items/${item.id}`} aria-label="Opraviť"
-              className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700">
+              className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]">
               <Edit2 className="size-4" />
             </Link>
             <button type="button" onClick={onDelete} disabled={deleting} aria-label="Zmazať"
-              className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad disabled:opacity-50">
+              className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)] disabled:opacity-50">
               {deleting ? <Spinner size="sm" /> : <Trash2 className="size-4" />}
             </button>
           </div>

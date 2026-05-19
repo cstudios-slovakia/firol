@@ -197,7 +197,7 @@ export function InspectionDetailPage() {
             <Plus className="size-4" />
             {i.type === 'poziarna_kniha' ? 'Pridať záznam' : 'Pridať položku'}
           </Link>
-        ) : !isDraft && i.type !== 'poziarna_kniha' ? (
+        ) : !isDraft ? (
           <Button
             type="button"
             onClick={handleRepeat}
@@ -252,7 +252,7 @@ export function InspectionDetailPage() {
                 inspectionId={id}
                 index={idx + 1}
                 item={it}
-                canEdit={isDraft}
+                canEdit={true}
                 deleting={deletingItemId === it.id}
                 onDelete={() => handleDeleteItem(it.id)}
               />

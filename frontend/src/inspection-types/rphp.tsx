@@ -305,11 +305,11 @@ function RphpItemRow({
         {canEdit && (
           <div className="flex shrink-0 items-center gap-1">
             <Link to={`/inspections/${inspectionId}/items/${item.id}`} aria-label="Opraviť"
-              className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700">
+              className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]">
               <Edit2 className="size-4" />
             </Link>
             <button type="button" onClick={onDelete} disabled={deleting} aria-label="Zmazať"
-              className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad disabled:opacity-50">
+              className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)] disabled:opacity-50">
               {deleting ? <Spinner size="sm" /> : <Trash2 className="size-4" />}
             </button>
           </div>
