@@ -7,6 +7,7 @@ import { OnboardingBillingPage } from '@/pages/auth/OnboardingBillingPage';
 import { PasswordResetRequestPage } from '@/pages/auth/PasswordResetRequestPage';
 import { PasswordResetConfirmPage } from '@/pages/auth/PasswordResetConfirmPage';
 import { DashboardPage } from '@/pages/DashboardPage';
+import { CompaniesPage } from '@/pages/CompaniesPage';
 import { CompanyDetailPage } from '@/pages/CompanyDetailPage';
 import { CompanyEditPage } from '@/pages/CompanyEditPage';
 import { FacilityDetailPage } from '@/pages/FacilityDetailPage';
@@ -65,6 +66,7 @@ export default function App() {
         }
       >
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/companies" element={<CompaniesPage />} />
 
         <Route path="/companies/new" element={<CompanyEditPage />} />
         <Route path="/companies/:id" element={<CompanyDetailPage />} />

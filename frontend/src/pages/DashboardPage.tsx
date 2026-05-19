@@ -1,198 +1,297 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Building2, ChevronRight, ClipboardList, Plus, Search, ShieldCheck } from 'lucide-react';
+import {
+  Building2,
+  ChevronRight,
+  ClipboardList,
+  GraduationCap,
+  Plus,
+} from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type CompanyListItem } from '@/api/companies';
-import { ApiError } from '@/lib/api';
+import { Inspections, type InspectionListItem, INSPECTION_TYPE_LABELS } from '@/api/inspections';
+import { Trainings, type TrainingListItem, TRAINING_TYPE_SHORT } from '@/api/trainings';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { SkeletonList } from '@/components/ui/Skeleton';
 
-/**
- * "Moje firmy" — landing screen after login. Per spec: header + count of
- * facilities, search bar, company cards with status badges. Status comes
- * from the most recent inspection; until inspections exist (Phase 3) every
- * card shows the neutral "Žiadne kontroly" badge.
- */
 export function DashboardPage() {
-  const { user, isAdmin } = useAuth();
-  const [items, setItems] = useState<CompanyListItem[]>([]);
-  const [search, setSearch] = useState('');
-  const [debounced, setDebounced] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('loading');
-  const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth();
+  const [companies, setCompanies] = useState<CompanyListItem[]>([]);
+  const [inspections, setInspections] = useState<InspectionListItem[]>([]);
+  const [trainings, setTrainings] = useState<TrainingListItem[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(search.trim()), 200);
-    return () => clearTimeout(t);
-  }, [search]);
+    Promise.all([
+      Companies.list(),
+      Inspections.list(),
+      Trainings.list(),
+    ]).then(([co, ins, tr]) => {
+      setCompanies(co.items);
+      setInspections(ins.items);
+      setTrainings(tr.items);
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    setStatus((s) => (s === 'idle' ? s : 'loading'));
-    Companies.list(debounced || undefined)
-      .then((res) => {
-        if (cancelled) return;
-        setItems(res.items);
-        setStatus('idle');
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať firmy.');
-        setStatus('error');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [debounced]);
-
-  const totalFacilities = useMemo(
-    () => items.reduce((acc, c) => acc + c.facilities_count, 0),
-    [items],
-  );
+  const firstName = user?.fullname.split(' ')[0] ?? '';
 
   return (
-    <div className="flex flex-col gap-5">
-      <header className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-ink-900">
-            {isAdmin ? (
-              <span className="flex items-center gap-2">
-                Všetky firmy
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
-                  <ShieldCheck className="size-3" />
-                  Admin
-                </span>
-              </span>
-            ) : (
-              <>Ahoj, {user?.fullname.split(' ')[0]}</>
-            )}
-          </h1>
-          <p className="mt-0.5 text-sm text-ink-500">
-            {items.length === 0
-              ? 'Žiadne firmy.'
-              : `${items.length} ${plural(items.length, 'firma', 'firmy', 'firiem')} · ${totalFacilities} ${plural(totalFacilities, 'prevádzka', 'prevádzky', 'prevádzok')}`}
-          </p>
-        </div>
-        <Link
-          to="/inspections/new"
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] transition-colors hover:bg-firol-600"
-        >
-          <ClipboardList className="size-4" />
-          Nová kontrola
-        </Link>
-      </header>
-
-      <Card className="flex items-center gap-2 px-3 py-2">
-        <Search className="size-4 shrink-0 text-ink-400" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Vyhľadať firmu alebo IČO"
-          className="w-full bg-transparent text-sm text-ink-800 placeholder:text-ink-400 focus:outline-none"
-          aria-label="Vyhľadávanie"
-        />
-        <Link
-          to="/companies/new"
-          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs font-medium text-ink-500 hover:bg-ink-100 hover:text-ink-700"
-          title="Pridať novú firmu"
-        >
-          <Plus className="size-3" />
-          Firma
-        </Link>
-      </Card>
-
-      {status === 'loading' && items.length === 0 && (
-        <SkeletonList variant="company" count={3} />
-      )}
-
-      {status === 'error' && error && (
-        <Card className="border-status-bad/30 bg-[var(--color-status-bad-bg)]/50 px-4 py-3 text-sm text-[var(--color-status-bad)]">
-          {error}
-        </Card>
-      )}
-
-      {status !== 'loading' && items.length === 0 && !debounced && (
-        <Card className="flex flex-col items-center gap-3 px-6 py-12 text-center">
-          <div className="grid size-14 place-items-center rounded-2xl bg-firol-50 text-firol-500">
-            <Building2 className="size-6" />
-          </div>
-          <h2 className="text-base font-semibold text-ink-900">Zatiaľ žiadne firmy</h2>
-          <p className="max-w-xs text-sm text-ink-500">
-            Pridaj prvú firmu, ku ktorej budeš zaznamenávať revízie a kontroly.
-          </p>
+    <div className="flex flex-col gap-6">
+      <div className="rounded-3xl bg-gradient-to-br from-firol-500 to-firol-600 px-5 py-6 text-white shadow-[var(--shadow-glow)]">
+        <p className="text-xs font-medium uppercase tracking-wider opacity-70">Vitaj späť</p>
+        <h1 className="mt-1 text-2xl font-bold tracking-tight">
+          Ahoj, {firstName}
+        </h1>
+        <p className="mt-2 text-sm opacity-75">
+          Tu je prehľad tvojej aktuálnej činnosti.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
           <Link
-            to="/companies/new"
-            className="mt-2 inline-flex h-11 items-center gap-2 rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+            to="/inspections/new"
+            className="inline-flex items-center gap-1.5 rounded-2xl bg-white/20 px-3 py-1.5 text-xs font-semibold backdrop-blur-sm transition-colors hover:bg-white/30"
           >
-            <Plus className="size-4" />
-            Pridať firmu
+            <ClipboardList className="size-3.5" />
+            Nová kontrola
           </Link>
-        </Card>
-      )}
+          <Link
+            to="/trainings/new"
+            className="inline-flex items-center gap-1.5 rounded-2xl bg-white/20 px-3 py-1.5 text-xs font-semibold backdrop-blur-sm transition-colors hover:bg-white/30"
+          >
+            <GraduationCap className="size-3.5" />
+            Nové školenie
+          </Link>
+        </div>
+      </div>
 
-      {debounced && items.length === 0 && status !== 'loading' && (
-        <Card className="px-4 py-6 text-center text-sm text-ink-500">
-          Pre „{debounced}" nič nenájdené.
-        </Card>
-      )}
-
-      {items.length > 0 && (
-        <ul className="flex flex-col gap-3">
-          {items.map((c) => (
-            <li key={c.id}>
-              <CompanyCard company={c} showAccount={isAdmin} />
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="flex flex-col gap-4">
+        <InspectionsWidget items={inspections.slice(0, 4)} total={inspections.length} loaded={loaded} />
+        <CompaniesWidget items={companies.slice(0, 4)} total={companies.length} loaded={loaded} />
+        <TrainingsWidget items={trainings.slice(0, 4)} total={trainings.length} loaded={loaded} />
+      </div>
     </div>
   );
 }
 
-function CompanyCard({ company, showAccount }: { company: CompanyListItem; showAccount?: boolean }) {
-  const lastDate = company.last_inspection_at;
-  const formattedLast = lastDate
-    ? new Date(lastDate).toLocaleDateString('sk-SK', { day: 'numeric', month: 'numeric', year: 'numeric' })
-    : null;
-
+function InspectionsWidget({
+  items,
+  total,
+  loaded,
+}: {
+  items: InspectionListItem[];
+  total: number;
+  loaded: boolean;
+}) {
   return (
-    <Link to={`/companies/${company.id}`} className="block group">
-      <Card className="px-4 py-3.5 transition-shadow group-hover:shadow-[var(--shadow-lift)]">
-        <div className="flex items-start gap-3">
-          <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-600">
-            <Building2 className="size-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-2">
-              <h3 className="truncate text-sm font-semibold text-ink-900">{company.name}</h3>
-              <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform group-hover:translate-x-0.5 group-hover:text-ink-500" />
-            </div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-500">
-              {company.ico && <span>IČO {company.ico}</span>}
-              <span>·</span>
-              <span>{company.facilities_count} {plural(company.facilities_count, 'prevádzka', 'prevádzky', 'prevádzok')}</span>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {company.inspections_count === 0 ? (
-                <Badge tone="neutral">Žiadne kontroly</Badge>
-              ) : (
-                <Badge tone="brand">
-                  {company.inspections_count} {plural(company.inspections_count, 'kontrola', 'kontroly', 'kontrol')}
-                  {formattedLast && ` · posledná ${formattedLast}`}
-                </Badge>
-              )}
-              {showAccount && company.account_name && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-ink-200 bg-ink-50 px-2 py-0.5 text-xs text-ink-500">
-                  <ShieldCheck className="size-3 text-amber-500" />
-                  {company.account_name}
-                </span>
-              )}
-            </div>
-          </div>
+    <Card className="overflow-hidden p-0">
+      <div className="flex items-center justify-between gap-3 border-b border-ink-100 px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <span className="grid size-8 place-items-center rounded-xl bg-orange-100 text-orange-600">
+            <ClipboardList className="size-4" />
+          </span>
+          <span className="text-sm font-semibold text-ink-900">Kontroly</span>
+          {total > 0 && (
+            <span className="rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-500">{total}</span>
+          )}
         </div>
-      </Card>
-    </Link>
+        <Link
+          to="/inspections/new"
+          className="inline-flex items-center gap-1 rounded-xl bg-firol-500 px-3 py-1.5 text-xs font-medium text-white shadow-[var(--shadow-glow)] transition-colors hover:bg-firol-600"
+        >
+          <Plus className="size-3.5" />
+          Nová kontrola
+        </Link>
+      </div>
+
+      {!loaded ? (
+        <p className="px-4 py-4 text-sm text-ink-400">Načítavam…</p>
+      ) : items.length === 0 ? (
+        <p className="px-4 py-6 text-center text-sm text-ink-400">Žiadne kontroly.</p>
+      ) : (
+        <ul className="divide-y divide-ink-50">
+          {items.map((item) => (
+            <li key={item.id}>
+              <Link
+                to={`/inspections/${item.id}`}
+                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-ink-50"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium text-ink-900">
+                      {INSPECTION_TYPE_LABELS[item.type]}
+                    </span>
+                    <Badge tone={item.status === 'finalized' ? 'ok' : 'warn'}>
+                      {item.status === 'finalized' ? 'Hotová' : 'Draft'}
+                    </Badge>
+                  </div>
+                  <p className="mt-0.5 truncate text-xs text-ink-500">
+                    {item.company_name} · {item.facility_name}
+                  </p>
+                </div>
+                {item.executed_on && (
+                  <span className="shrink-0 text-xs text-ink-400">
+                    {new Date(item.executed_on).toLocaleDateString('sk-SK')}
+                  </span>
+                )}
+                <ChevronRight className="size-4 shrink-0 text-ink-300" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {loaded && total > 4 && (
+        <div className="border-t border-ink-100 px-4 py-2.5">
+          <Link to="/inspections" className="text-xs font-medium text-firol-600 hover:text-firol-700">
+            Zobraziť všetky ({total}) →
+          </Link>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function CompaniesWidget({
+  items,
+  total,
+  loaded,
+}: {
+  items: CompanyListItem[];
+  total: number;
+  loaded: boolean;
+}) {
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="flex items-center justify-between gap-3 border-b border-ink-100 px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <span className="grid size-8 place-items-center rounded-xl bg-blue-100 text-blue-600">
+            <Building2 className="size-4" />
+          </span>
+          <span className="text-sm font-semibold text-ink-900">Firmy</span>
+          {total > 0 && (
+            <span className="rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-500">{total}</span>
+          )}
+        </div>
+        <Link
+          to="/companies/new"
+          className="inline-flex items-center gap-1 rounded-xl bg-blue-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-600"
+        >
+          <Plus className="size-3.5" />
+          Nová firma
+        </Link>
+      </div>
+
+      {!loaded ? (
+        <p className="px-4 py-4 text-sm text-ink-400">Načítavam…</p>
+      ) : items.length === 0 ? (
+        <p className="px-4 py-6 text-center text-sm text-ink-400">Žiadne firmy.</p>
+      ) : (
+        <ul className="divide-y divide-ink-50">
+          {items.map((company) => (
+            <li key={company.id}>
+              <Link
+                to={`/companies/${company.id}`}
+                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-ink-50"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-ink-900">{company.name}</p>
+                  <p className="mt-0.5 text-xs text-ink-500">
+                    {company.ico && `IČO ${company.ico} · `}
+                    {company.facilities_count} {plural(company.facilities_count, 'prevádzka', 'prevádzky', 'prevádzok')} ·{' '}
+                    {company.inspections_count} {plural(company.inspections_count, 'kontrola', 'kontroly', 'kontrol')}
+                  </p>
+                </div>
+                <ChevronRight className="size-4 shrink-0 text-ink-300" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {loaded && total > 4 && (
+        <div className="border-t border-ink-100 px-4 py-2.5">
+          <Link to="/companies" className="text-xs font-medium text-firol-600 hover:text-firol-700">
+            Zobraziť všetky ({total}) →
+          </Link>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function TrainingsWidget({
+  items,
+  total,
+  loaded,
+}: {
+  items: TrainingListItem[];
+  total: number;
+  loaded: boolean;
+}) {
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="flex items-center justify-between gap-3 border-b border-ink-100 px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <span className="grid size-8 place-items-center rounded-xl bg-emerald-100 text-emerald-600">
+            <GraduationCap className="size-4" />
+          </span>
+          <span className="text-sm font-semibold text-ink-900">Školenia</span>
+          {total > 0 && (
+            <span className="rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-500">{total}</span>
+          )}
+        </div>
+        <Link
+          to="/trainings/new"
+          className="inline-flex items-center gap-1 rounded-xl bg-emerald-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-600"
+        >
+          <Plus className="size-3.5" />
+          Nové školenie
+        </Link>
+      </div>
+
+      {!loaded ? (
+        <p className="px-4 py-4 text-sm text-ink-400">Načítavam…</p>
+      ) : items.length === 0 ? (
+        <p className="px-4 py-6 text-center text-sm text-ink-400">Žiadne školenia.</p>
+      ) : (
+        <ul className="divide-y divide-ink-50">
+          {items.map((training) => (
+            <li key={training.id}>
+              <Link
+                to={`/trainings/${training.id}`}
+                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-ink-50"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium text-ink-900">
+                      {TRAINING_TYPE_SHORT[training.type]}
+                    </span>
+                    <Badge tone={training.status === 'finalized' ? 'ok' : 'warn'}>
+                      {training.status === 'finalized' ? 'Hotové' : 'Draft'}
+                    </Badge>
+                  </div>
+                  <p className="mt-0.5 truncate text-xs text-ink-500">{training.company_name}</p>
+                </div>
+                {training.date && (
+                  <span className="shrink-0 text-xs text-ink-400">
+                    {new Date(training.date).toLocaleDateString('sk-SK')}
+                  </span>
+                )}
+                <ChevronRight className="size-4 shrink-0 text-ink-300" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {loaded && total > 4 && (
+        <div className="border-t border-ink-100 px-4 py-2.5">
+          <Link to="/trainings" className="text-xs font-medium text-firol-600 hover:text-firol-700">
+            Zobraziť všetky ({total}) →
+          </Link>
+        </div>
+      )}
+    </Card>
   );
 }
 
