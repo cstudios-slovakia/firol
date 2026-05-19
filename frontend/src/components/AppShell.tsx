@@ -12,7 +12,7 @@ import {
     Shield,
     Sparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
 import { Billing } from "@/api/billing";
 import { ApiError } from "@/lib/api";
@@ -104,43 +104,58 @@ export function AppShell() {
         : BOTTOM_TABS;
     const allTabs: readonly Tab[] = [...TOP_TABS, ...bottomTabs];
 
+    const topBarRef = useRef<HTMLDivElement>(null);
+    const [topBarH, setTopBarH] = useState(65);
+
+    useLayoutEffect(() => {
+        const el = topBarRef.current;
+        if (!el) return;
+        const update = () => setTopBarH(el.offsetHeight);
+        update();
+        const obs = new ResizeObserver(update);
+        obs.observe(el);
+        return () => obs.disconnect();
+    }, []);
+
     return (
         <div className="bg-app relative min-h-screen pb-20 sm:pb-0">
             <AuroraBackground />
-            <SubscriptionBanner />
-            <TrialBanner />
-            <header className="sticky top-0 z-20 border-b border-ink-100/80 bg-white/80 backdrop-blur">
-                <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
-                    <Link
-                        to="/"
-                        aria-label="Domov"
-                        className="group flex items-center gap-2.5 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
-                    >
-                        <span className="grid size-9 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)] transition-transform group-hover:scale-105">
-                            <Flame className="size-4" />
-                        </span>
-                        <span className="font-semibold tracking-tight text-ink-900 transition-colors group-hover:text-firol-700">
-                            Firol
-                        </span>
-                    </Link>
-                    <div className="flex items-center gap-2">
-                        <OfflineIndicator />
-                        <AccountSwitcher />
-                        <button
-                            type="button"
-                            onClick={logout}
-                            aria-label="Odhlásiť"
-                            className="grid size-9 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700"
+            <div ref={topBarRef} className="sticky top-0 z-20">
+                <SubscriptionBanner />
+                <TrialBanner />
+                <header className="border-b border-ink-100/80 bg-white/80 backdrop-blur">
+                    <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
+                        <Link
+                            to="/"
+                            aria-label="Domov"
+                            className="group flex items-center gap-2.5 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
                         >
-                            <LogOut className="size-4" />
-                        </button>
+                            <span className="grid size-9 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)] transition-transform group-hover:scale-105">
+                                <Flame className="size-4" />
+                            </span>
+                            <span className="font-semibold tracking-tight text-ink-900 transition-colors group-hover:text-firol-700">
+                                Firol
+                            </span>
+                        </Link>
+                        <div className="flex items-center gap-2">
+                            <OfflineIndicator />
+                            <AccountSwitcher />
+                            <button
+                                type="button"
+                                onClick={logout}
+                                aria-label="Odhlásiť"
+                                className="grid size-9 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700"
+                            >
+                                <LogOut className="size-4" />
+                            </button>
+                        </div>
                     </div>
-                </div>
-            </header>
+                </header>
+            </div>
 
-            <div className="mx-auto relative flex max-w-6xl gap-6 px-4 py-5 sm:py-8">
-                <SideNav bottomTabs={bottomTabs} />
-                <main className="min-w-0 flex-1">
+            <div className="mx-auto relative flex max-w-6xl gap-6 px-4">
+                <SideNav bottomTabs={bottomTabs} topOffset={topBarH} />
+                <main className="min-w-0 flex-1 py-5 sm:py-8">
                     <Outlet />
                 </main>
             </div>
@@ -328,7 +343,7 @@ function TrialBanner() {
     );
 }
 
-function SideNav({ bottomTabs }: { bottomTabs: readonly Tab[] }) {
+function SideNav({ bottomTabs, topOffset }: { bottomTabs: readonly Tab[]; topOffset: number }) {
     const renderItem = (tab: Tab) => (
         <li key={tab.to}>
             <NavLink
@@ -362,7 +377,10 @@ function SideNav({ bottomTabs }: { bottomTabs: readonly Tab[] }) {
             aria-label="Hlavná navigácia"
             className="hidden sm:block w-56 shrink-0"
         >
-            <nav className="sticky top-[81px] flex h-[calc(100vh-81px)] flex-col">
+            <nav
+                className="sticky flex flex-col pt-5 sm:pt-8"
+                style={{ top: topOffset, height: `calc(100vh - ${topOffset}px)` }}
+            >
                 <ul className="flex flex-col gap-1">
                     {renderItem(dashboardTab)}
                 </ul>
