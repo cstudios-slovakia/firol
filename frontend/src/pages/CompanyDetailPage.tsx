@@ -20,7 +20,7 @@ export function CompanyDetailPage() {
     if (!window.confirm('Naozaj archivovať firmu? Údaje zostanú v systéme, len sa skryjú.')) return;
     try {
       await Companies.archive(id, csrfToken);
-      navigate('/', { replace: true });
+      navigate('/companies', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Archiváciu sa nepodarilo dokončiť.');
     }
@@ -44,7 +44,7 @@ export function CompanyDetailPage() {
   if (error) {
     return (
       <div className="flex flex-col gap-4">
-        <Link to="/" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <Link to="/companies" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
           <ArrowLeft className="size-4" />
           Späť na zoznam
         </Link>
@@ -56,7 +56,7 @@ export function CompanyDetailPage() {
   if (!data) {
     return (
       <div className="flex flex-col gap-5">
-        <Link to="/" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <Link to="/companies" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
           <ArrowLeft className="size-4" />
           Späť na zoznam
         </Link>
@@ -70,7 +70,7 @@ export function CompanyDetailPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link to="/" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+      <Link to="/companies" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
         <ArrowLeft className="size-4" />
         Späť na zoznam
       </Link>
@@ -89,11 +89,11 @@ export function CompanyDetailPage() {
                 {facilities.length} {plural(facilities.length, 'prevádzka', 'prevádzky', 'prevádzok')}
               </p>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-0.5">
               <Link
                 to={`/companies/${company.id}/edit`}
                 aria-label="Upraviť"
-                className="grid size-9 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-white hover:text-ink-700"
+                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
               >
                 <Edit2 className="size-4" />
               </Link>
@@ -101,7 +101,7 @@ export function CompanyDetailPage() {
                 type="button"
                 aria-label="Archivovať"
                 onClick={onArchive}
-                className="grid size-9 place-items-center rounded-2xl text-ink-400 transition-colors hover:bg-white hover:text-status-bad"
+                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
               >
                 <Trash2 className="size-4" />
               </button>

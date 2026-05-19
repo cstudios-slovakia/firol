@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Trash2 } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type Company } from '@/api/companies';
 import { ApiError } from '@/lib/api';
@@ -39,17 +39,6 @@ export function CompanyEditPage() {
       cancelled = true;
     };
   }, [editing, id]);
-
-  async function onArchive() {
-    if (!editing || id === null) return;
-    if (!window.confirm('Naozaj archivovať firmu? Údaje zostanú v systéme, len sa skryjú.')) return;
-    try {
-      await Companies.archive(id, csrfToken);
-      navigate('/', { replace: true });
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Archiváciu sa nepodarilo dokončiť.');
-    }
-  }
 
   function handleSaved(saved: Company) {
     navigate(`/companies/${saved.id}`, { replace: true });
@@ -94,19 +83,6 @@ export function CompanyEditPage() {
             initial={company ?? undefined}
             onSaved={handleSaved}
           />
-          {editing && (
-            <div className="mt-4 border-t border-ink-100 pt-4">
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={onArchive}
-                leftIcon={<Trash2 className="size-4" />}
-                className="text-status-bad hover:bg-[var(--color-status-bad-bg)]"
-              >
-                Archivovať firmu
-              </Button>
-            </div>
-          )}
         </Card>
       )}
     </div>

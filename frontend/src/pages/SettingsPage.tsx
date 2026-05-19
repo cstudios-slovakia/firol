@@ -1052,26 +1052,31 @@ function TeamSection() {
 
   return (
     <Card className="overflow-hidden">
-      <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/60 to-transparent px-5 py-4">
-        <div className="grid size-11 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
+      <div className="flex items-start gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/60 to-transparent px-5 py-4">
+        <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
           <UsersRound className="size-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold text-ink-900">Technici</h2>
-          <p className="text-xs text-ink-500">
-            Ľudia, ktorí majú prístup do tejto firmy. Spravovať môže len hlavný používateľ.
-          </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base font-semibold text-ink-900">Technici</h2>
+              <p className="text-xs text-ink-500">
+                Ľudia, ktorí majú prístup do tejto firmy. Spravovať môže len hlavný používateľ.
+              </p>
+            </div>
+            {isMain && !atCap && (
+              <Button
+                type="button"
+                variant="secondary"
+                leftIcon={<MailPlus className="size-4" />}
+                onClick={() => { setShowInvite((v) => !v); setInviteLink(null); setInviteFieldErrors({}); }}
+                className="self-start shrink-0"
+              >
+                {showInvite ? 'Zrušiť' : 'Pozvať technika'}
+              </Button>
+            )}
+          </div>
         </div>
-        {isMain && !atCap && (
-          <Button
-            type="button"
-            variant="secondary"
-            leftIcon={<MailPlus className="size-4" />}
-            onClick={() => { setShowInvite((v) => !v); setInviteLink(null); setInviteFieldErrors({}); }}
-          >
-            {showInvite ? 'Zrušiť' : 'Pozvať technika'}
-          </Button>
-        )}
       </div>
 
       <div className="px-5 py-4">

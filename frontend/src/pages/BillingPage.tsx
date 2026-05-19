@@ -307,31 +307,35 @@ function BillingSection({
 
   return (
     <Card id="billing-section" className="overflow-hidden">
-      <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/60 to-transparent px-5 py-4">
-        <div className="grid size-11 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
+      <div className="flex items-start gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/60 to-transparent px-5 py-4">
+        <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
           <CreditCard className="size-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold text-ink-900">Predplatné a fakturácia</h2>
-          <p className="text-xs text-ink-500">{subtitle}</p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h2 className="text-base font-semibold text-ink-900">Predplatné a fakturácia</h2>
+            {statusBadge}
+          </div>
+          <p className="mt-0.5 text-xs text-ink-500">{subtitle}</p>
         </div>
-        {statusBadge}
       </div>
 
       <div className="flex flex-col gap-4 px-5 py-5">
         {locked && (
-          <div className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
-            <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" />
-            <div className="min-w-0 flex-1">
-              <p className="font-semibold">Predplatné je možné aktivovať až po vyplnení fakturačných údajov</p>
-              <p className="mt-0.5 text-xs text-amber-800">
-                Doplň IČO a adresu v sekcii <strong>Fakturačné údaje</strong> nižšie — potrebujeme ich pre vystavenie faktúry.
-              </p>
+          <div className="pointer-events-auto flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-start">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+              <div className="min-w-0">
+                <p className="font-semibold">Predplatné je možné aktivovať až po vyplnení fakturačných údajov</p>
+                <p className="mt-0.5 text-xs text-amber-800">
+                  Doplň IČO a adresu v sekcii <strong>Fakturačné údaje</strong> nižšie — potrebujeme ich pre vystavenie faktúry.
+                </p>
+              </div>
             </div>
             <button
               type="button"
               onClick={() => document.getElementById('invoice-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              className="shrink-0 rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-amber-700"
+              className="shrink-0 self-stretch rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-amber-700 sm:self-start sm:py-1.5"
             >
               Vyplniť údaje
             </button>

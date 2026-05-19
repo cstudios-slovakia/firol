@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, MapPin, NotebookPen, Trash2, User, Warehouse } from 'lucide-react';
+import { ArrowLeft, MapPin, NotebookPen, User, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Facilities } from '@/api/facilities';
 import { ApiError } from '@/lib/api';
@@ -95,20 +95,6 @@ export function FacilityEditPage() {
       toast.error(msg);
     } finally {
       setSubmitting(false);
-    }
-  }
-
-  async function onArchive() {
-    if (mode.kind !== 'edit') return;
-    if (!window.confirm('Naozaj archivovať prevádzku?')) return;
-    try {
-      await Facilities.archive(mode.facilityId, csrfToken);
-      toast.success('Prevádzka archivovaná');
-      navigate(companyId ? `/companies/${companyId}` : '/', { replace: true });
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Archiváciu sa nepodarilo dokončiť.';
-      setError(msg);
-      toast.error(msg);
     }
   }
 
@@ -207,18 +193,7 @@ export function FacilityEditPage() {
               </div>
             )}
 
-            <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
-              {mode.kind === 'edit' && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={onArchive}
-                  leftIcon={<Trash2 className="size-4" />}
-                  className="sm:mr-auto text-status-bad hover:bg-[var(--color-status-bad-bg)]"
-                >
-                  Archivovať
-                </Button>
-              )}
+            <div className="flex justify-end pt-2">
               <Button type="submit" loading={submitting}>
                 {mode.kind === 'edit' ? 'Uložiť zmeny' : 'Vytvoriť prevádzku'}
               </Button>
