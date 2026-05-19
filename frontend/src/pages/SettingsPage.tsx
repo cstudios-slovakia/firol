@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  AtSign, Building2, CalendarDays, Check, Copy, FileSignature, GraduationCap, Hash,
-  ImagePlus, MailPlus, Palette, Phone, Plus, RotateCcw,
-  ShieldCheck, ShieldOff, Trash2, UploadCloud, User, UserCheck, UsersRound,
+  AtSign, Building2, CalendarDays, Check, ChevronLeft, ChevronRight, Copy, CreditCard,
+  FileSignature, GraduationCap, Hash, ImagePlus, MailPlus, Palette, Phone, Plus,
+  RotateCcw, Shield, ShieldCheck, ShieldOff, Trash2, UploadCloud, User, UserCheck,
+  UsersRound,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { AccountApi, type Account } from '@/api/account';
@@ -19,12 +21,197 @@ import { Spinner } from '@/components/ui/Spinner';
 import { CardBlockSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { Badge } from '@/components/ui/Badge';
 import { SignaturePickerModal } from '@/components/SignaturePickerModal';
+import { cn } from '@/lib/cn';
 
-/**
- * Settings — Phase 3a-1 only renders the Inspector profile section. Other
- * sections (account branding, technicians, billing) land in Phase 5.
- */
-export function SettingsPage() {
+// ─── Tab definitions ─────────────────────────────────────────────────────────
+
+const SECTION_TABS = [
+  { to: '/settings/profil',      label: 'Profil technika', icon: ShieldCheck },
+  { to: '/settings/branding',    label: 'Branding PDF',    icon: Palette },
+  { to: '/settings/skolitellia', label: 'Školitelia',      icon: GraduationCap },
+  { to: '/settings/technici',    label: 'Technici',        icon: UsersRound },
+] as const;
+
+const MENU_ITEMS = [
+  {
+    to: '/billing',
+    label: 'Predplatné',
+    description: 'Správa predplatného a fakturačné údaje',
+    icon: CreditCard,
+    color: 'text-firol-600',
+    bg: 'bg-firol-50',
+  },
+  {
+    to: '/settings/profil',
+    label: 'Profil revízneho technika',
+    description: 'Podpis, číslo oprávnenia a platnosť',
+    icon: ShieldCheck,
+    color: 'text-violet-600',
+    bg: 'bg-violet-50',
+  },
+  {
+    to: '/settings/branding',
+    label: 'Branding na PDF',
+    description: 'Logo, farba a názov spoločnosti',
+    icon: Palette,
+    color: 'text-blue-600',
+    bg: 'bg-blue-50',
+  },
+  {
+    to: '/settings/skolitellia',
+    label: 'Školitelia',
+    description: 'Osoby, ktoré vykonávajú školenia',
+    icon: GraduationCap,
+    color: 'text-emerald-600',
+    bg: 'bg-emerald-50',
+  },
+  {
+    to: '/settings/technici',
+    label: 'Technici',
+    description: 'Ľudia s prístupom do vašej firmy',
+    icon: UsersRound,
+    color: 'text-orange-600',
+    bg: 'bg-orange-50',
+  },
+] as const;
+
+const ADMIN_MENU_ITEM = {
+  to: '/admin',
+  label: 'Admin',
+  description: 'Správa účtov a systémové nastavenia',
+  icon: Shield,
+  color: 'text-rose-600',
+  bg: 'bg-rose-50',
+} as const;
+
+// ─── Layout ───────────────────────────────────────────────────────────────────
+
+export function SettingsLayout() {
+  const { isAdmin } = useAuth();
+  const location = useLocation();
+  const isIndex = location.pathname === '/settings' || location.pathname === '/settings/';
+
+  return (
+    <div className="flex flex-col gap-5">
+      {/* Header: always on desktop, only on index on mobile */}
+      <header className={cn(isIndex ? 'block' : 'hidden sm:block')}>
+        <h1 className="text-xl font-semibold tracking-tight text-ink-900">Nastavenia</h1>
+        <p className="mt-0.5 text-sm text-ink-500">
+          Profil, branding, tím a administrácia vášho účtu.
+        </p>
+      </header>
+
+      {/* Desktop tabs */}
+      <nav
+        aria-label="Sekcie nastavení"
+        className="hidden sm:flex items-center gap-0.5 border-b border-ink-100"
+      >
+        {SECTION_TABS.map((tab) => (
+          <NavLink
+            key={tab.to}
+            to={tab.to}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-2 px-3.5 py-2.5 text-sm font-medium rounded-t-xl border-b-2 -mb-px transition-colors',
+                isActive
+                  ? 'border-firol-500 text-firol-700 bg-firol-50/60'
+                  : 'border-transparent text-ink-500 hover:text-ink-800 hover:bg-ink-50',
+              )
+            }
+          >
+            <tab.icon className="size-4 shrink-0" />
+            <span>{tab.label}</span>
+          </NavLink>
+        ))}
+        {isAdmin && (
+          <NavLink
+            to="/admin"
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-2 px-3.5 py-2.5 text-sm font-medium rounded-t-xl border-b-2 -mb-px transition-colors',
+                isActive
+                  ? 'border-rose-500 text-rose-700 bg-rose-50/60'
+                  : 'border-transparent text-ink-500 hover:text-ink-800 hover:bg-ink-50',
+              )
+            }
+          >
+            <Shield className="size-4 shrink-0" />
+            <span>Admin</span>
+          </NavLink>
+        )}
+      </nav>
+
+      <Outlet />
+    </div>
+  );
+}
+
+// ─── Index (mobile menu / desktop redirect) ───────────────────────────────────
+
+export function SettingsIndexPage() {
+  const { isAdmin } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 640px)');
+    if (mq.matches) {
+      navigate('/settings/profil', { replace: true });
+    }
+  }, [navigate]);
+
+  const items = isAdmin ? [...MENU_ITEMS, ADMIN_MENU_ITEM] : [...MENU_ITEMS];
+
+  return (
+    <div className="flex flex-col gap-2 sm:hidden">
+      {items.map((item) => (
+        <Link
+          key={item.to}
+          to={item.to}
+          className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-colors hover:bg-ink-50 active:bg-ink-100"
+        >
+          <span className={cn('grid size-11 shrink-0 place-items-center rounded-2xl', item.bg)}>
+            <item.icon className={cn('size-5', item.color)} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-ink-900">{item.label}</p>
+            <p className="mt-0.5 text-xs text-ink-500">{item.description}</p>
+          </div>
+          <ChevronRight className="size-4 shrink-0 text-ink-300" />
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+// ─── Section back link (mobile only) ─────────────────────────────────────────
+
+function SectionBack({ label }: { label: string }) {
+  return (
+    <div className="sm:hidden">
+      <Link
+        to="/settings"
+        className="inline-flex items-center gap-1.5 rounded-xl py-1 text-sm font-medium text-ink-500 transition-colors hover:text-ink-800"
+      >
+        <ChevronLeft className="size-4" />
+        Nastavenia
+      </Link>
+      <h2 className="mt-1 text-lg font-semibold tracking-tight text-ink-900">{label}</h2>
+    </div>
+  );
+}
+
+// ─── Inspector Profile Page ───────────────────────────────────────────────────
+
+export function InspectorProfilePage() {
+  return (
+    <>
+      <SectionBack label="Profil revízneho technika" />
+      <InspectorProfileSection />
+    </>
+  );
+}
+
+function InspectorProfileSection() {
   const { csrfToken } = useAuth();
   const toast = useToast();
 
@@ -56,9 +243,7 @@ export function SettingsPage() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   function applyProfile(p: InspectorProfile) {
@@ -124,146 +309,142 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <header>
-        <h1 className="text-xl font-semibold tracking-tight text-ink-900">Nastavenia</h1>
-        <p className="mt-0.5 text-sm text-ink-500">
-          Profil revízneho technika sa použije na PDF protokoloch.
-        </p>
-      </header>
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/60 to-transparent px-5 py-4">
+        <div className="grid size-11 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
+          <ShieldCheck className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold text-ink-900">Profil revízneho technika</h2>
+          <p className="text-xs text-ink-500">
+            Podpis, číslo oprávnenia a platnosť — všetko pôjde do hlavičky a päty PDF.
+          </p>
+        </div>
+        {profile && (
+          <Badge tone={profile.is_active ? 'ok' : 'neutral'}>
+            {profile.is_active ? 'Aktívny' : 'Neaktívny'}
+          </Badge>
+        )}
+      </div>
 
-      <Card className="overflow-hidden">
-        <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/60 to-transparent px-5 py-4">
-          <div className="grid size-11 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
-            <ShieldCheck className="size-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-base font-semibold text-ink-900">Profil revízneho technika</h2>
-            <p className="text-xs text-ink-500">
-              Podpis, číslo oprávnenia a platnosť — všetko pôjde do hlavičky a päty PDF.
-            </p>
-          </div>
-          {profile && (
-            <Badge tone={profile.is_active ? 'ok' : 'neutral'}>
-              {profile.is_active ? 'Aktívny' : 'Neaktívny'}
-            </Badge>
+      <div className="grid gap-5 px-5 py-5 lg:grid-cols-[260px_1fr]">
+        <div className="flex flex-col gap-3">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+            Podpis
+          </span>
+          <SignaturePreview
+            hasSignature={profile?.has_signature ?? false}
+            cacheBuster={signatureCacheBust}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            leftIcon={<FileSignature className="size-4" />}
+            onClick={() => setShowSigPicker(true)}
+            loading={saving}
+          >
+            {profile?.has_signature ? 'Zmeniť podpis' : 'Pridať podpis'}
+          </Button>
+          {showSigPicker && (
+            <SignaturePickerModal
+              onClose={() => setShowSigPicker(false)}
+              onSave={onSignatureChosen}
+              saving={saving}
+            />
           )}
         </div>
 
-        <div className="grid gap-5 px-5 py-5 lg:grid-cols-[260px_1fr]">
-          <div className="flex flex-col gap-3">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-400">
-              Podpis
-            </span>
-            <SignaturePreview
-              hasSignature={profile?.has_signature ?? false}
-              cacheBuster={signatureCacheBust}
-            />
-            <Button
-              type="button"
-              variant="secondary"
-              leftIcon={<FileSignature className="size-4" />}
-              onClick={() => setShowSigPicker(true)}
-              loading={saving}
-            >
-              {profile?.has_signature ? 'Zmeniť podpis' : 'Pridať podpis'}
-            </Button>
-            {showSigPicker && (
-              <SignaturePickerModal
-                onClose={() => setShowSigPicker(false)}
-                onSave={onSignatureChosen}
-                saving={saving}
-              />
-            )}
+        <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
+          <div className="rounded-xl border border-ink-100 bg-ink-50/40 px-3 py-2 text-xs text-ink-500">
+            Každý typ kontroly vyžaduje iné oprávnenie. Vypíš čísla, ktoré máš — do každého PDF pôjde to správne.
           </div>
 
-          <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-            <div className="rounded-xl border border-ink-100 bg-ink-50/40 px-3 py-2 text-xs text-ink-500">
-              Každý typ kontroly vyžaduje iné oprávnenie. Vypíš čísla, ktoré máš — do každého PDF pôjde to správne.
-            </div>
-
-            <Field label="Č. oprávnenia — kontrola RPHP" hint="Oprávnenie na kontrolu hasiacich prístrojov">
-              {(p) => (
-                <Input
-                  {...p}
-                  leftIcon={<Hash className="size-4" />}
-                  value={certRphp}
-                  onChange={(e) => setCertRphp(e.target.value)}
-                  placeholder="napr. RT-RPHP-2024-0123"
-                />
-              )}
-            </Field>
-
-            <Field label="Č. oprávnenia — oprava / plnenie / TS RPHP" hint="Oprávnenie na opravu, plnenie a tlakovú skúšku RPHP">
-              {(p) => (
-                <Input
-                  {...p}
-                  leftIcon={<Hash className="size-4" />}
-                  value={certOprava}
-                  onChange={(e) => setCertOprava(e.target.value)}
-                  placeholder="napr. RT-TS-2024-0456"
-                />
-              )}
-            </Field>
-
-            <Field label="Č. osvedčenia — technik PO" hint="Platí pre hydranty, požiarnu knihu, požiarne uzávery, núdzové osvetlenia, TS hadíc a školenia">
-              {(p) => (
-                <Input
-                  {...p}
-                  leftIcon={<Hash className="size-4" />}
-                  value={certGeneral}
-                  onChange={(e) => setCertGeneral(e.target.value)}
-                  placeholder="napr. TPO-2024-0789"
-                />
-              )}
-            </Field>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Platnosť od">
-                {(p) => (
-                  <Input
-                    {...p}
-                    type="date"
-                    leftIcon={<CalendarDays className="size-4" />}
-                    value={validFrom}
-                    onChange={(e) => setValidFrom(e.target.value)}
-                  />
-                )}
-              </Field>
-              <Field label="Platnosť do">
-                {(p) => (
-                  <Input
-                    {...p}
-                    type="date"
-                    leftIcon={<CalendarDays className="size-4" />}
-                    value={validTo}
-                    onChange={(e) => setValidTo(e.target.value)}
-                  />
-                )}
-              </Field>
-            </div>
-
-            {error && (
-              <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-                {error}
-              </div>
+          <Field label="Č. oprávnenia — kontrola RPHP" hint="Oprávnenie na kontrolu hasiacich prístrojov">
+            {(p) => (
+              <Input
+                {...p}
+                leftIcon={<Hash className="size-4" />}
+                value={certRphp}
+                onChange={(e) => setCertRphp(e.target.value)}
+                placeholder="napr. RT-RPHP-2024-0123"
+              />
             )}
+          </Field>
 
-            <div className="flex justify-end pt-1">
-              <Button type="submit" loading={saving} leftIcon={<FileSignature className="size-4" />}>
-                Uložiť profil
-              </Button>
+          <Field label="Č. oprávnenia — oprava / plnenie / TS RPHP" hint="Oprávnenie na opravu, plnenie a tlakovú skúšku RPHP">
+            {(p) => (
+              <Input
+                {...p}
+                leftIcon={<Hash className="size-4" />}
+                value={certOprava}
+                onChange={(e) => setCertOprava(e.target.value)}
+                placeholder="napr. RT-TS-2024-0456"
+              />
+            )}
+          </Field>
+
+          <Field label="Č. osvedčenia — technik PO" hint="Platí pre hydranty, požiarnu knihu, požiarne uzávery, núdzové osvetlenia, TS hadíc a školenia">
+            {(p) => (
+              <Input
+                {...p}
+                leftIcon={<Hash className="size-4" />}
+                value={certGeneral}
+                onChange={(e) => setCertGeneral(e.target.value)}
+                placeholder="napr. TPO-2024-0789"
+              />
+            )}
+          </Field>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Platnosť od">
+              {(p) => (
+                <Input
+                  {...p}
+                  type="date"
+                  leftIcon={<CalendarDays className="size-4" />}
+                  value={validFrom}
+                  onChange={(e) => setValidFrom(e.target.value)}
+                />
+              )}
+            </Field>
+            <Field label="Platnosť do">
+              {(p) => (
+                <Input
+                  {...p}
+                  type="date"
+                  leftIcon={<CalendarDays className="size-4" />}
+                  value={validTo}
+                  onChange={(e) => setValidTo(e.target.value)}
+                />
+              )}
+            </Field>
+          </div>
+
+          {error && (
+            <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
+              {error}
             </div>
-          </form>
-        </div>
-      </Card>
+          )}
 
+          <div className="flex justify-end pt-1">
+            <Button type="submit" loading={saving} leftIcon={<FileSignature className="size-4" />}>
+              Uložiť profil
+            </Button>
+          </div>
+        </form>
+      </div>
+    </Card>
+  );
+}
+
+// ─── Branding Page ────────────────────────────────────────────────────────────
+
+export function BrandingPage() {
+  return (
+    <>
+      <SectionBack label="Branding na PDF" />
       <BrandingSection />
-
-      <TrainersSection />
-
-      <TeamSection />
-    </div>
+    </>
   );
 }
 
@@ -440,7 +621,7 @@ function BrandingSection() {
         <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
           <Field
             label="Názov spoločnosti"
-            hint="Zobrazí sa v záhlaví PDF: „<Názov> · Záznam o kontrole RPHP"
+            hint={'Zobrazí sa v záhlaví PDF: „<Názov> · Záznam o kontrole RPHP“'}
           >
             {(p) => (
               <Input
@@ -512,13 +693,7 @@ function BrandingSection() {
   );
 }
 
-function LogoPreview({
-  hasLogo,
-  cacheBuster,
-}: {
-  hasLogo: boolean;
-  cacheBuster: number;
-}) {
+function LogoPreview({ hasLogo, cacheBuster }: { hasLogo: boolean; cacheBuster: number }) {
   if (!hasLogo) {
     return (
       <div className="flex aspect-[3/1] flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-ink-200 bg-white text-center text-ink-400">
@@ -535,6 +710,17 @@ function LogoPreview({
         className="max-h-full max-w-full object-contain"
       />
     </div>
+  );
+}
+
+// ─── Trainers Page ────────────────────────────────────────────────────────────
+
+export function TrainersPage() {
+  return (
+    <>
+      <SectionBack label="Školitelia" />
+      <TrainersSection />
+    </>
   );
 }
 
@@ -725,6 +911,17 @@ function TrainersSection() {
   );
 }
 
+// ─── Team Page ────────────────────────────────────────────────────────────────
+
+export function TeamPage() {
+  return (
+    <>
+      <SectionBack label="Technici" />
+      <TeamSection />
+    </>
+  );
+}
+
 function TeamSection() {
   const { csrfToken, user, accounts, activeAccountId } = useAuth();
   const toast = useToast();
@@ -795,7 +992,6 @@ function TeamSection() {
         setInviteLink(link);
         setLinkCopied(false);
       } else {
-        // Existing user — they already know their password, no link needed.
         setShowInvite(false);
       }
       setInviteName('');
@@ -1044,13 +1240,9 @@ function TeamSection() {
   );
 }
 
-function SignaturePreview({
-  hasSignature,
-  cacheBuster,
-}: {
-  hasSignature: boolean;
-  cacheBuster: number;
-}) {
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+function SignaturePreview({ hasSignature, cacheBuster }: { hasSignature: boolean; cacheBuster: number }) {
   if (!hasSignature) {
     return (
       <div className="flex aspect-[3/1] flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-ink-200 bg-white text-center text-ink-400">
@@ -1069,6 +1261,3 @@ function SignaturePreview({
     </div>
   );
 }
-
-
-

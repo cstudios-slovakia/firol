@@ -21,7 +21,14 @@ import { TrainingsListPage } from '@/pages/TrainingsListPage';
 import { NewTrainingPage } from '@/pages/NewTrainingPage';
 import { TrainingDetailPage } from '@/pages/TrainingDetailPage';
 import { TrainingEditPage } from '@/pages/TrainingEditPage';
-import { SettingsPage } from '@/pages/SettingsPage';
+import {
+  SettingsLayout,
+  SettingsIndexPage,
+  InspectorProfilePage,
+  BrandingPage,
+  TrainersPage,
+  TeamPage,
+} from '@/pages/SettingsPage';
 import { BillingPage } from '@/pages/BillingPage';
 import { AdminPage, RequireAdmin } from '@/pages/AdminPage';
 
@@ -87,7 +94,13 @@ export default function App() {
         <Route path="/trainings/new" element={<NewTrainingPage />} />
         <Route path="/trainings/:id" element={<TrainingDetailPage />} />
         <Route path="/trainings/:id/edit" element={<TrainingEditPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings" element={<SettingsLayout />}>
+          <Route index element={<SettingsIndexPage />} />
+          <Route path="profil" element={<InspectorProfilePage />} />
+          <Route path="branding" element={<BrandingPage />} />
+          <Route path="skolitellia" element={<TrainersPage />} />
+          <Route path="technici" element={<TeamPage />} />
+        </Route>
         <Route path="/billing" element={<BillingPage />} />
         <Route
           path="/admin"
