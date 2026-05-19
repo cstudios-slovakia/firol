@@ -34,7 +34,9 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [signatureCacheBust, setSignatureCacheBust] = useState<number>(() => Date.now());
 
-  const [certNumber, setCertNumber] = useState('');
+  const [certRphp, setCertRphp] = useState('');
+  const [certOprava, setCertOprava] = useState('');
+  const [certGeneral, setCertGeneral] = useState('');
   const [validFrom, setValidFrom] = useState('');
   const [validTo, setValidTo] = useState('');
 
@@ -61,7 +63,9 @@ export function SettingsPage() {
 
   function applyProfile(p: InspectorProfile) {
     setProfile(p);
-    setCertNumber(p.certification_number ?? '');
+    setCertRphp(p.cert_rphp ?? '');
+    setCertOprava(p.cert_oprava ?? '');
+    setCertGeneral(p.cert_general ?? '');
     setValidFrom(p.valid_from ?? '');
     setValidTo(p.valid_to ?? '');
   }
@@ -73,7 +77,9 @@ export function SettingsPage() {
     try {
       const res = await InspectorProfileApi.update(
         {
-          certification_number: certNumber.trim() || null,
+          cert_rphp:    certRphp.trim() || null,
+          cert_oprava:  certOprava.trim() || null,
+          cert_general: certGeneral.trim() || null,
           valid_from: validFrom || null,
           valid_to: validTo || null,
         },
@@ -172,14 +178,42 @@ export function SettingsPage() {
           </div>
 
           <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-            <Field label="Číslo oprávnenia" hint="Napr. RT-OPP-2024-0123">
+            <div className="rounded-xl border border-ink-100 bg-ink-50/40 px-3 py-2 text-xs text-ink-500">
+              Každý typ kontroly vyžaduje iné oprávnenie. Vypíš čísla, ktoré máš — do každého PDF pôjde to správne.
+            </div>
+
+            <Field label="Č. oprávnenia — kontrola RPHP" hint="Oprávnenie na kontrolu hasiacich prístrojov">
               {(p) => (
                 <Input
                   {...p}
                   leftIcon={<Hash className="size-4" />}
-                  value={certNumber}
-                  onChange={(e) => setCertNumber(e.target.value)}
-                  placeholder="RT-OPP-2024-0123"
+                  value={certRphp}
+                  onChange={(e) => setCertRphp(e.target.value)}
+                  placeholder="napr. RT-RPHP-2024-0123"
+                />
+              )}
+            </Field>
+
+            <Field label="Č. oprávnenia — oprava / plnenie / TS RPHP" hint="Oprávnenie na opravu, plnenie a tlakovú skúšku RPHP">
+              {(p) => (
+                <Input
+                  {...p}
+                  leftIcon={<Hash className="size-4" />}
+                  value={certOprava}
+                  onChange={(e) => setCertOprava(e.target.value)}
+                  placeholder="napr. RT-TS-2024-0456"
+                />
+              )}
+            </Field>
+
+            <Field label="Č. osvedčenia — technik PO" hint="Platí pre hydranty, požiarnu knihu, požiarne uzávery, núdzové osvetlenia, TS hadíc a školenia">
+              {(p) => (
+                <Input
+                  {...p}
+                  leftIcon={<Hash className="size-4" />}
+                  value={certGeneral}
+                  onChange={(e) => setCertGeneral(e.target.value)}
+                  placeholder="napr. TPO-2024-0789"
                 />
               )}
             </Field>

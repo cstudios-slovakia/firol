@@ -432,7 +432,8 @@ final class DocumentController
         $userRow = $userStmt->fetch();
 
         $profStmt = Db::pdo()->prepare(
-            'SELECT signature_path, certification_number, valid_from, valid_to
+            'SELECT signature_path, cert_rphp, cert_oprava, cert_general,
+                    certification_number, valid_from, valid_to
              FROM   inspector_profiles
              WHERE  user_id = ? AND account_id = ?'
         );
@@ -469,7 +470,10 @@ final class DocumentController
             ],
             'inspector' => [
                 'fullname'             => $userRow['fullname'] ?? '—',
-                'certification_number' => $profile['certification_number'] ?? null,
+                'certification_number' => self::certForType(
+                    (string) $inspection['type'],
+                    $profile,
+                ),
                 'valid_from'           => $profile['valid_from'] ?? null,
                 'valid_to'             => $profile['valid_to'] ?? null,
                 'signature_data_uri'   => $signatureUri,
@@ -576,6 +580,33 @@ final class DocumentController
      * row. Falls back to Firol defaults so the PDFs stay branded even
      * before the user uploads a logo or picks a custom color.
      *
+     * Pick the right certification number for the given inspection type.
+     * Falls back to the legacy certification_number column for profiles
+     * that predate the three-column split.
+     *
+     * Mapping:
+     *   rphp           → cert_rphp
+     *   oprava_ts_rphp → cert_oprava
+     *   everything else → cert_general
+     *
+     * @param array<string, mixed> $profile inspector_profiles row
+     */
+    private static function certForType(string $type, array $profile): ?string
+    {
+        $key = match ($type) {
+            'rphp'           => 'cert_rphp',
+            'oprava_ts_rphp' => 'cert_oprava',
+            default          => 'cert_general',
+        };
+        $val = $profile[$key] ?? null;
+        // Backward compat: fall back to the legacy single column
+        if ($val === null || $val === '') {
+            $val = $profile['certification_number'] ?? null;
+        }
+        return $val ?: null;
+    }
+
+    /**
      * @param array<string, mixed> $accRow Result of SELECT invoice_company_name, theme_color, logo_path
      * @return array{name: string, color: string, logo_data_uri: string|null}
      */

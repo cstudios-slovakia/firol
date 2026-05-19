@@ -209,7 +209,7 @@ foreach ($items as $idx => $it) {
   </tr>
   <tr>
     <td><?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?><br><span style="font-size:8pt; color:#555;">č. oprávnenia: <?= $h($inspector['certification_number']) ?></span><?php endif ?></td>
-    <td>Konateľovi spoločnosti</td>
+    <td>Štatutárny zástupca / zodpovedná osoba</td>
     <td><?= $h($miesto) ?></td>
   </tr>
   <tr class="sig-row">

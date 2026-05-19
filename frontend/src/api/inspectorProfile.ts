@@ -4,14 +4,18 @@ export type InspectorProfile = {
   user_id: number;
   account_id: number;
   has_signature: boolean;
-  certification_number: string | null;
+  cert_rphp: string | null;
+  cert_oprava: string | null;
+  cert_general: string | null;
   valid_from: string | null;
   valid_to: string | null;
   is_active: boolean;
 };
 
 export type InspectorProfileUpdate = {
-  certification_number?: string | null;
+  cert_rphp?: string | null;
+  cert_oprava?: string | null;
+  cert_general?: string | null;
   valid_from?: string | null;
   valid_to?: string | null;
   is_active?: boolean;

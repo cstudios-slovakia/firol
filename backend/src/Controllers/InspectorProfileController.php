@@ -43,10 +43,12 @@ final class InspectorProfileController
 
         self::loadOrCreate($userId, $accountId);
 
-        $certification = $req->jsonString('certification_number');
-        $validFrom     = $req->jsonString('valid_from');
-        $validTo       = $req->jsonString('valid_to');
-        $isActiveRaw   = $req->json()['is_active'] ?? null;
+        $certRphp   = $req->jsonString('cert_rphp');
+        $certOprava = $req->jsonString('cert_oprava');
+        $certGeneral = $req->jsonString('cert_general');
+        $validFrom   = $req->jsonString('valid_from');
+        $validTo     = $req->jsonString('valid_to');
+        $isActiveRaw = $req->json()['is_active'] ?? null;
 
         if ($validFrom !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $validFrom)) {
             Response::error('Invalid valid_from (expected YYYY-MM-DD)', 422);
@@ -62,13 +64,17 @@ final class InspectorProfileController
 
         Db::pdo()->prepare(
             'UPDATE inspector_profiles
-             SET    certification_number = ?,
-                    valid_from           = ?,
-                    valid_to             = ?,
-                    is_active            = COALESCE(?, is_active)
+             SET    cert_rphp   = ?,
+                    cert_oprava = ?,
+                    cert_general = ?,
+                    valid_from   = ?,
+                    valid_to     = ?,
+                    is_active    = COALESCE(?, is_active)
              WHERE  user_id = ? AND account_id = ?'
         )->execute([
-            $certification,
+            $certRphp,
+            $certOprava,
+            $certGeneral,
             $validFrom,
             $validTo,
             $isActive,
@@ -155,7 +161,7 @@ final class InspectorProfileController
     private static function loadOrCreate(int $userId, int $accountId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT signature_path, certification_number, valid_from, valid_to, is_active
+            'SELECT signature_path, cert_rphp, cert_oprava, cert_general, valid_from, valid_to, is_active
              FROM   inspector_profiles
              WHERE  user_id = ? AND account_id = ?'
         );
@@ -173,11 +179,13 @@ final class InspectorProfileController
 
         $stmt->execute([$userId, $accountId]);
         return $stmt->fetch() ?: [
-            'signature_path'       => null,
-            'certification_number' => null,
-            'valid_from'           => null,
-            'valid_to'             => null,
-            'is_active'            => 1,
+            'signature_path' => null,
+            'cert_rphp'      => null,
+            'cert_oprava'    => null,
+            'cert_general'   => null,
+            'valid_from'     => null,
+            'valid_to'       => null,
+            'is_active'      => 1,
         ];
     }
 
@@ -188,14 +196,16 @@ final class InspectorProfileController
     private static function shape(array $row, int $userId, int $accountId): array
     {
         return [
-            'user_id'              => $userId,
-            'account_id'           => $accountId,
-            'has_signature'        => !empty($row['signature_path'])
-                                       && is_file(Storage::signaturePath($accountId, $userId)),
-            'certification_number' => $row['certification_number'] ?? null,
-            'valid_from'           => $row['valid_from'] ?? null,
-            'valid_to'             => $row['valid_to'] ?? null,
-            'is_active'            => (int) ($row['is_active'] ?? 1) === 1,
+            'user_id'       => $userId,
+            'account_id'    => $accountId,
+            'has_signature' => !empty($row['signature_path'])
+                                && is_file(Storage::signaturePath($accountId, $userId)),
+            'cert_rphp'     => $row['cert_rphp'] ?? null,
+            'cert_oprava'   => $row['cert_oprava'] ?? null,
+            'cert_general'  => $row['cert_general'] ?? null,
+            'valid_from'    => $row['valid_from'] ?? null,
+            'valid_to'      => $row['valid_to'] ?? null,
+            'is_active'     => (int) ($row['is_active'] ?? 1) === 1,
         ];
     }
 }

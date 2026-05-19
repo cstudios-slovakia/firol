@@ -321,11 +321,20 @@ final class InspectionItemController
             self::failValidation('Field result must be bez_nedostatkov or zistene_nedostatky.');
         }
 
+        $defectDeadline = null;
+        if ($result === 'zistene_nedostatky') {
+            $raw = $body['defect_deadline'] ?? null;
+            if (is_string($raw) && $raw !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
+                $defectDeadline = $raw;
+            }
+        }
+
         return [
             'workspaces'        => $workspaces,
             'activities'        => $activities,
             'custom_activities' => $customActivities,
             'result'            => $result,
+            'defect_deadline'   => $defectDeadline,
             'notes'             => $notes,
         ];
     }

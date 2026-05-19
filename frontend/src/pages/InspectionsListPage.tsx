@@ -212,6 +212,33 @@ export function InspectionsListPage() {
   );
 }
 
+function daysUntilNext(executedOn: string | null, periodicityMonths: number): number | null {
+  if (!executedOn) return null;
+  const base = new Date(executedOn);
+  if (isNaN(base.getTime())) return null;
+  const next = new Date(base);
+  next.setMonth(next.getMonth() + periodicityMonths);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  next.setHours(0, 0, 0, 0);
+  return Math.round((next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function NextDueBadge({ days }: { days: number }) {
+  const overdue = days < 0;
+  const soon = days >= 0 && days <= 50;
+  const cls = overdue
+    ? 'bg-[var(--color-status-bad-bg)] text-[var(--color-status-bad)]'
+    : soon
+      ? 'bg-[var(--color-status-warn-bg)] text-[var(--color-status-warn)]'
+      : 'bg-[var(--color-status-ok-bg)] text-[var(--color-status-ok)]';
+  return (
+    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${cls}`}>
+      {days < 0 ? `${days} dní` : `${days} dní`}
+    </span>
+  );
+}
+
 function InspectionRow({
   it,
   onDelete,
@@ -219,6 +246,7 @@ function InspectionRow({
   it: InspectionListItem;
   onDelete: (id: number) => void;
 }) {
+  const days = daysUntilNext(it.executed_on, it.periodicity_months);
   return (
     <Card className="px-4 py-3">
       <div className="flex items-center gap-3">
@@ -240,6 +268,9 @@ function InspectionRow({
             <Badge tone={it.status === 'draft' ? 'warn' : 'ok'} className="shrink-0">
               {it.status === 'draft' ? 'Draft' : 'Hotová'}
             </Badge>
+            {it.status === 'finalized' && days !== null && (
+              <NextDueBadge days={days} />
+            )}
           </div>
           <p className="mt-0.5 truncate text-xs text-ink-500">
             <Building2 className="-mt-0.5 mr-1 inline size-3" />
