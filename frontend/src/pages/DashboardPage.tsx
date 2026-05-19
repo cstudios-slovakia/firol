@@ -178,7 +178,7 @@ function InspectionsWidget({
             )}
 
             {loaded && total > 4 && (
-                <div className="border-t border-ink-100 px-4 py-2.5">
+                <div className="flex justify-center border-t border-ink-100 px-4 py-2.5">
                     <Link
                         to="/inspections"
                         className="text-xs font-medium text-firol-600 hover:text-firol-700"
@@ -269,7 +269,7 @@ function CompaniesWidget({
             )}
 
             {loaded && total > 4 && (
-                <div className="border-t border-ink-100 px-4 py-2.5">
+                <div className="flex justify-center border-t border-ink-100 px-4 py-2.5">
                     <Link
                         to="/companies"
                         className="text-xs font-medium text-firol-600 hover:text-firol-700"
@@ -366,7 +366,7 @@ function TrainingsWidget({
             )}
 
             {loaded && total > 4 && (
-                <div className="border-t border-ink-100 px-4 py-2.5">
+                <div className="flex justify-center border-t border-ink-100 px-4 py-2.5">
                     <Link
                         to="/trainings"
                         className="text-xs font-medium text-firol-600 hover:text-firol-700"

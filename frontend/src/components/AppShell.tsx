@@ -9,7 +9,6 @@ import {
     LayoutDashboard,
     LogOut,
     Settings,
-    Shield,
     Sparkles,
 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
@@ -59,7 +58,17 @@ const TOP_TABS = [
     },
 ] as const;
 
-const BOTTOM_TABS = [
+const SETTINGS_TAB = {
+    to: "/settings",
+    label: "Nastavenia",
+    icon: Settings,
+    activeColor: "text-violet-600",
+    activeBg: "bg-violet-50 shadow-[inset_0_0_0_1px_theme(colors.violet.100)]",
+    iconBg: "bg-violet-100",
+} as const;
+
+// Desktop sidebar only — not shown in mobile bottom nav
+const DESKTOP_BOTTOM_TABS = [
     {
         to: "/billing",
         label: "Predplatné",
@@ -68,25 +77,11 @@ const BOTTOM_TABS = [
         activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
         iconBg: "bg-firol-100",
     },
-    {
-        to: "/settings",
-        label: "Nastavenia",
-        icon: Settings,
-        activeColor: "text-violet-600",
-        activeBg:
-            "bg-violet-50 shadow-[inset_0_0_0_1px_theme(colors.violet.100)]",
-        iconBg: "bg-violet-100",
-    },
+    SETTINGS_TAB,
 ] as const;
 
-const ADMIN_TAB = {
-    to: "/admin",
-    label: "Admin",
-    icon: Shield,
-    activeColor: "text-rose-600",
-    activeBg: "bg-rose-50 shadow-[inset_0_0_0_1px_theme(colors.rose.100)]",
-    iconBg: "bg-rose-100",
-} as const;
+// Mobile bottom nav — 5 tabs only
+const MOBILE_TABS = [...TOP_TABS, SETTINGS_TAB] as const;
 
 type Tab = {
     readonly to: string;
@@ -98,11 +93,7 @@ type Tab = {
 };
 
 export function AppShell() {
-    const { logout, isAdmin } = useAuth();
-    const bottomTabs: readonly Tab[] = isAdmin
-        ? [...BOTTOM_TABS, ADMIN_TAB]
-        : BOTTOM_TABS;
-    const allTabs: readonly Tab[] = [...TOP_TABS, ...bottomTabs];
+    const { logout } = useAuth();
 
     const topBarRef = useRef<HTMLDivElement>(null);
     const [topBarH, setTopBarH] = useState(65);
@@ -154,13 +145,13 @@ export function AppShell() {
             </div>
 
             <div className="mx-auto relative flex max-w-6xl gap-6 px-4">
-                <SideNav bottomTabs={bottomTabs} topOffset={topBarH} />
+                <SideNav topOffset={topBarH} />
                 <main className="min-w-0 flex-1 py-5 sm:py-8">
                     <Outlet />
                 </main>
             </div>
 
-            <BottomTabBar tabs={allTabs} />
+            <BottomTabBar />
         </div>
     );
 }
@@ -343,7 +334,7 @@ function TrialBanner() {
     );
 }
 
-function SideNav({ bottomTabs, topOffset }: { bottomTabs: readonly Tab[]; topOffset: number }) {
+function SideNav({ topOffset }: { topOffset: number }) {
     const renderItem = (tab: Tab) => (
         <li key={tab.to}>
             <NavLink
@@ -388,10 +379,10 @@ function SideNav({ bottomTabs, topOffset }: { bottomTabs: readonly Tab[]; topOff
                 <ul className="flex flex-col gap-1">
                     {sectionTabs.map(renderItem)}
                 </ul>
-                <div className="mt-auto pt-4">
+                <div className="mt-auto pt-4 pb-5 sm:pb-8">
                     <div className="mb-2 border-t border-ink-100" />
                     <ul className="flex flex-col gap-1">
-                        {bottomTabs.map(renderItem)}
+                        {DESKTOP_BOTTOM_TABS.map(renderItem)}
                     </ul>
                 </div>
             </nav>
@@ -399,14 +390,14 @@ function SideNav({ bottomTabs, topOffset }: { bottomTabs: readonly Tab[]; topOff
     );
 }
 
-function BottomTabBar({ tabs }: { tabs: readonly Tab[] }) {
+function BottomTabBar() {
     return (
         <nav
             aria-label="Hlavná navigácia"
             className="fixed inset-x-0 bottom-0 z-10 border-t border-ink-100 bg-white/95 backdrop-blur sm:hidden"
         >
             <ul className="mx-auto flex max-w-2xl items-stretch justify-around px-2 py-1.5">
-                {tabs.map((tab) => (
+                {MOBILE_TABS.map((tab) => (
                     <li key={tab.to} className="flex-1">
                         <NavLink
                             to={tab.to}
