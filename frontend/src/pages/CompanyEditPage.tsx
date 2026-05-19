@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import { useAuth } from '@/auth/AuthContext';
 import { Companies, type Company } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { CompanyForm } from '@/components/CompanyForm';
 
@@ -15,7 +13,6 @@ export function CompanyEditPage() {
   const id = editing ? Number(params.id) : null;
 
   const navigate = useNavigate();
-  const { csrfToken } = useAuth();
 
   const [company, setCompany] = useState<Company | null>(null);
   const [loadStatus, setLoadStatus] = useState<'idle' | 'loading'>(editing ? 'loading' : 'idle');
