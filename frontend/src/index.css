@@ -135,6 +135,27 @@
     75%        { transform: translate(2.5%, -3.5%)scale(1.04) rotate(2deg);  }
   }
 
+  /* iOS Safari sizes date/time inputs to their intrinsic content width and ignores
+     parent constraints, causing horizontal overflow. Force them to honor box width. */
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"],
+  input[type="month"],
+  input[type="week"] {
+    -webkit-appearance: none;
+    appearance: none;
+    min-width: 0;
+    max-width: 100%;
+  }
+  /* Inside the inner pseudo-element wrapper, the placeholder/value text can still
+     blow out the width on iOS — clip the inner field so it cannot push the box. */
+  input[type="date"]::-webkit-date-and-time-value,
+  input[type="time"]::-webkit-date-and-time-value,
+  input[type="datetime-local"]::-webkit-date-and-time-value {
+    min-width: 0;
+    text-align: left;
+  }
+
   /* Hide the native indicator — picker is opened programmatically via showPicker(). */
   input[type="date"]::-webkit-calendar-picker-indicator,
   input[type="time"]::-webkit-calendar-picker-indicator,
