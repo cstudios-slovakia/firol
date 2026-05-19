@@ -31,7 +31,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
 
   if (leftIcon || rightSlot) {
     return (
-      <div className="relative">
+      <div className="relative w-full min-w-0">
         {leftIcon && (
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">
             {leftIcon}
