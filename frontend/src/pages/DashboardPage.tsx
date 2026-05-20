@@ -105,7 +105,7 @@ function InspectionsWidget({
     return (
         <Card className="overflow-hidden p-0">
             <div className="flex items-center justify-between gap-3 border-b border-ink-100 px-4 py-3">
-                <div className="flex items-center gap-2.5">
+                <Link to="/inspections" className="flex items-center gap-2.5 transition-opacity hover:opacity-70">
                     <span className="grid size-8 place-items-center rounded-xl bg-orange-100 text-orange-600">
                         <ClipboardList className="size-4" />
                     </span>
@@ -117,7 +117,7 @@ function InspectionsWidget({
                             {total}
                         </span>
                     )}
-                </div>
+                </Link>
                 <Link
                     to="/inspections/new"
                     className="inline-flex items-center gap-1 rounded-xl bg-firol-500 px-3 py-1.5 text-xs font-medium text-white shadow-[var(--shadow-glow)] transition-colors hover:bg-firol-600"
@@ -203,7 +203,7 @@ function CompaniesWidget({
     return (
         <Card className="overflow-hidden p-0">
             <div className="flex items-center justify-between gap-3 border-b border-ink-100 px-4 py-3">
-                <div className="flex items-center gap-2.5">
+                <Link to="/companies" className="flex items-center gap-2.5 transition-opacity hover:opacity-70">
                     <span className="grid size-8 place-items-center rounded-xl bg-blue-100 text-blue-600">
                         <Building2 className="size-4" />
                     </span>
@@ -215,7 +215,7 @@ function CompaniesWidget({
                             {total}
                         </span>
                     )}
-                </div>
+                </Link>
                 <Link
                     to="/companies/new"
                     className="inline-flex items-center gap-1 rounded-xl bg-blue-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-600"
@@ -294,7 +294,7 @@ function TrainingsWidget({
     return (
         <Card className="overflow-hidden p-0">
             <div className="flex items-center justify-between gap-3 border-b border-ink-100 px-4 py-3">
-                <div className="flex items-center gap-2.5">
+                <Link to="/trainings" className="flex items-center gap-2.5 transition-opacity hover:opacity-70">
                     <span className="grid size-8 place-items-center rounded-xl bg-emerald-100 text-emerald-600">
                         <GraduationCap className="size-4" />
                     </span>
@@ -306,7 +306,7 @@ function TrainingsWidget({
                             {total}
                         </span>
                     )}
-                </div>
+                </Link>
                 <Link
                     to="/trainings/new"
                     className="inline-flex items-center gap-1 rounded-xl bg-emerald-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-600"

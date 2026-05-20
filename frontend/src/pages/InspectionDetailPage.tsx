@@ -158,11 +158,11 @@ export function InspectionDetailPage() {
   return (
     <div className="flex flex-col gap-5">
       <Link
-        to={`/facilities/${i.facility_id}`}
+        to="/inspections"
         className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start"
       >
         <ArrowLeft className="size-4" />
-        Späť na prevádzku
+        Späť na zoznam kontrol
       </Link>
 
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
