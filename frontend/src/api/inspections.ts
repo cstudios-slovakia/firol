@@ -169,12 +169,20 @@ export const PK_RESULT_LABELS: Record<PkResult, string> = {
   zistene_nedostatky: 'Zistené nedostatky',
 };
 
+export type PkDefect = {
+  description: string;
+  deadline: string | null;
+};
+
 export type PoziarnaKnihaItemFields = {
   workspaces: string;
   activities: PkActivity[];
   custom_activities: string[];
   result: PkResult;
-  defect_deadline: string | null;
+  /** Per-defect list with its own deadline. Required when result = zistene_nedostatky. */
+  defects: PkDefect[];
+  /** Legacy single deadline — kept for reading older records; new writes use `defects`. */
+  defect_deadline?: string | null;
   notes: string | null;
 };
 

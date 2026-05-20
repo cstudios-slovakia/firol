@@ -325,11 +325,33 @@ final class InspectionItemController
             self::failValidation('Field result must be bez_nedostatkov or zistene_nedostatky.');
         }
 
-        $defectDeadline = null;
+        // Per the PDF protokol (docs/handoff/.../04_Poziarna_kniha.pdf) every
+        // defect carries its OWN deadline — not a single global date. The
+        // legacy `defect_deadline` is still read by the PDF renderer for
+        // backward compat with old records, but new writes use `defects`.
+        $defects = [];
         if ($result === 'zistene_nedostatky') {
-            $raw = $body['defect_deadline'] ?? null;
-            if (is_string($raw) && $raw !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
-                $defectDeadline = $raw;
+            $defectsRaw = $body['defects'] ?? null;
+            if (!is_array($defectsRaw) || count($defectsRaw) === 0) {
+                self::failValidation('Pri "Zistené nedostatky" treba pridať aspoň jeden nedostatok.');
+            }
+            foreach ($defectsRaw as $d) {
+                if (!is_array($d)) {
+                    self::failValidation('Field defects must be an array of objects.');
+                }
+                $desc = isset($d['description']) && is_string($d['description']) ? trim($d['description']) : '';
+                if ($desc === '') {
+                    self::failValidation('Každý nedostatok musí mať popis.');
+                }
+                if (mb_strlen($desc) > 500) {
+                    self::failValidation('Popis nedostatku je príliš dlhý (max 500 znakov).');
+                }
+                $deadline = null;
+                $rawDl = $d['deadline'] ?? null;
+                if (is_string($rawDl) && $rawDl !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawDl)) {
+                    $deadline = $rawDl;
+                }
+                $defects[] = ['description' => $desc, 'deadline' => $deadline];
             }
         }
 
@@ -338,7 +360,7 @@ final class InspectionItemController
             'activities'        => $activities,
             'custom_activities' => $customActivities,
             'result'            => $result,
-            'defect_deadline'   => $defectDeadline,
+            'defects'           => $defects,
             'notes'             => $notes,
         ];
     }

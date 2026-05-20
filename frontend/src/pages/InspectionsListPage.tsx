@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pagination } from "@/components/ui/Pagination";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
     Building2,
     CalendarDays,
     ClipboardList,
     Edit2,
     Plus,
+    Repeat,
     Search,
     Trash2,
     Warehouse,
@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { SkeletonList } from "@/components/ui/Skeleton";
+import { Spinner } from "@/components/ui/Spinner";
 
 const TYPE_CHIPS: [InspectionType, string][] = [
     ["rphp", "RPHP"],
@@ -41,6 +42,7 @@ const TYPE_CHIPS: [InspectionType, string][] = [
 export function InspectionsListPage() {
     const { csrfToken } = useAuth();
     const toast = useToast();
+    const navigate = useNavigate();
 
     const [items, setItems] = useState<InspectionListItem[] | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -48,9 +50,7 @@ export function InspectionsListPage() {
     const [typeFilter, setTypeFilter] = useState<InspectionType | "">("");
     const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
     const [deleting, setDeleting] = useState(false);
-    const [page, setPage] = useState(1);
-
-    const PAGE_SIZE = 10;
+    const [repeatingId, setRepeatingId] = useState<number | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -86,12 +86,38 @@ export function InspectionsListPage() {
         });
     }, [items, query, typeFilter]);
 
-    useEffect(() => { setPage(1); }, [query, typeFilter]);
-
-    const totalPages = filtered ? Math.ceil(filtered.length / PAGE_SIZE) : 0;
-    const paged = filtered
-        ? filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-        : null;
+    const grouped = useMemo(() => {
+        if (!filtered) return null;
+        const byDaysAsc = (a: InspectionListItem, b: InspectionListItem) => {
+            const da = daysUntilNext(a.executed_on, a.periodicity_months) ?? 0;
+            const db = daysUntilNext(b.executed_on, b.periodicity_months) ?? 0;
+            return da - db;
+        };
+        const byDateDesc = (a: InspectionListItem, b: InspectionListItem) => {
+            if (!a.executed_on && !b.executed_on) return 0;
+            if (!a.executed_on) return 1;
+            if (!b.executed_on) return -1;
+            return b.executed_on.localeCompare(a.executed_on);
+        };
+        const overdue: InspectionListItem[] = [];
+        const soon: InspectionListItem[] = [];
+        const valid: InspectionListItem[] = [];
+        for (const it of filtered) {
+            const days = daysUntilNext(it.executed_on, it.periodicity_months);
+            if (it.status === "finalized" && days !== null && days < 0) {
+                overdue.push(it);
+            } else if (it.status === "finalized" && days !== null && days >= 0 && days <= 30) {
+                soon.push(it);
+            } else {
+                valid.push(it);
+            }
+        }
+        return {
+            overdue: overdue.sort(byDaysAsc),
+            soon: soon.sort(byDaysAsc),
+            valid: valid.sort(byDateDesc),
+        };
+    }, [filtered]);
 
     async function handleDelete() {
         if (pendingDeleteId === null) return;
@@ -114,6 +140,20 @@ export function InspectionsListPage() {
         }
     }
 
+    async function handleRepeat(insId: number) {
+        setRepeatingId(insId);
+        try {
+            const res = await Inspections.repeat(insId, csrfToken);
+            navigate(`/inspections/${res.inspection.id}`);
+        } catch (err) {
+            toast.error(
+                err instanceof ApiError ? err.message : "Opakovať sa nepodarilo.",
+            );
+        } finally {
+            setRepeatingId(null);
+        }
+    }
+
     return (
         <div className="flex flex-col gap-4">
             <header className="flex items-center justify-between gap-3">
@@ -122,7 +162,7 @@ export function InspectionsListPage() {
                         Kontroly
                     </h1>
                     <p className="mt-0.5 text-sm text-ink-500">
-                        Všetky vykonané kontroly a rozpracované drafty.
+                        Všetky vykonané kontroly a rozpracované koncepty.
                     </p>
                 </div>
                 <Link
@@ -220,26 +260,60 @@ export function InspectionsListPage() {
                 </Card>
             )}
 
-            {paged && paged.length > 0 && (
-                <>
-                    <ul className="flex flex-col gap-2">
-                        {paged.map((it) => (
-                            <li key={it.id}>
-                                <InspectionRow
-                                    it={it}
-                                    onDelete={setPendingDeleteId}
-                                />
-                            </li>
-                        ))}
-                    </ul>
-                    <Pagination
-                        page={page}
-                        totalPages={totalPages}
-                        totalItems={filtered!.length}
-                        pageSize={PAGE_SIZE}
-                        onChange={setPage}
-                    />
-                </>
+            {grouped && (grouped.overdue.length > 0 || grouped.soon.length > 0 || grouped.valid.length > 0) && (
+                <div className="flex flex-col gap-5">
+                    {grouped.overdue.length > 0 && (
+                        <section>
+                            <div className="mb-2 flex items-center gap-2">
+                                <span className="size-2 rounded-full bg-[var(--color-status-bad)]" />
+                                <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-status-bad)]">
+                                    Po termíne
+                                </h2>
+                            </div>
+                            <ul className="flex flex-col gap-2">
+                                {grouped.overdue.map((it) => (
+                                    <li key={it.id}>
+                                        <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} />
+                                    </li>
+                                ))}
+                            </ul>
+                        </section>
+                    )}
+                    {grouped.soon.length > 0 && (
+                        <section>
+                            <div className="mb-2 flex items-center gap-2">
+                                <span className="size-2 rounded-full bg-[var(--color-status-warn)]" />
+                                <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-status-warn)]">
+                                    Blíži sa termín
+                                </h2>
+                            </div>
+                            <ul className="flex flex-col gap-2">
+                                {grouped.soon.map((it) => (
+                                    <li key={it.id}>
+                                        <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} />
+                                    </li>
+                                ))}
+                            </ul>
+                        </section>
+                    )}
+                    {grouped.valid.length > 0 && (
+                        <section>
+                            <div className="mb-2 flex items-center gap-2">
+                                <span className="size-2 rounded-full bg-[var(--color-status-ok)]" />
+                                <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-status-ok)]">
+                                    Platné
+                                </h2>
+                            </div>
+                            <ul className="flex flex-col gap-2">
+                                {grouped.valid.map((it) => (
+                                    <li key={it.id}>
+                                        <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} />
+                                    </li>
+                                ))}
+                            </ul>
+                        </section>
+                    )}
+                </div>
             )}
 
             <Dialog
@@ -311,33 +385,67 @@ function NextDueBadge({ days }: { days: number }) {
 function InspectionRow({
     it,
     onDelete,
+    onRepeat,
+    repeatingId,
 }: {
     it: InspectionListItem;
     onDelete: (id: number) => void;
+    onRepeat: (id: number) => void;
+    repeatingId: number | null;
 }) {
     const days = daysUntilNext(it.executed_on, it.periodicity_months);
+    const isRepeating = repeatingId === it.id;
+
+    const actions = (
+        <>
+            {it.status === "finalized" && (
+                <button
+                    type="button"
+                    title="Opakovať kontrolu"
+                    disabled={repeatingId !== null}
+                    onClick={() => onRepeat(it.id)}
+                    className="grid size-8 place-items-center rounded-xl text-blue-500 transition-colors hover:bg-blue-50 disabled:opacity-50"
+                >
+                    {isRepeating ? <Spinner size="sm" /> : <Repeat className="size-4" />}
+                </button>
+            )}
+            <Link
+                to={`/inspections/${it.id}`}
+                title="Upraviť"
+                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
+            >
+                <Edit2 className="size-4" />
+            </Link>
+            <button
+                type="button"
+                title="Odstrániť"
+                onClick={() => onDelete(it.id)}
+                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
+            >
+                <Trash2 className="size-4" />
+            </button>
+        </>
+    );
+
     return (
         <Card className="px-4 py-3">
-            <div className="flex items-center gap-3">
+            <div className="flex items-start gap-3">
                 <Link
                     to={`/inspections/${it.id}`}
-                    className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)] transition-colors hover:bg-firol-600"
+                    className="mt-0.5 grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)] transition-colors hover:bg-firol-600"
                 >
                     <ClipboardList className="size-5" />
                 </Link>
 
                 <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <Link
                             to={`/inspections/${it.id}`}
-                            className="truncate text-sm font-semibold text-ink-900 transition-colors hover:text-firol-600"
+                            className="text-sm font-semibold text-ink-900 transition-colors hover:text-firol-600"
                         >
                             {INSPECTION_TYPE_LABELS[it.type]}
                         </Link>
-                        <Badge
-                            tone={it.status === "draft" ? "warn" : "ok"}
-                            className="shrink-0"
-                        >
+                        <Badge tone={it.status === "draft" ? "warn" : "ok"} className="shrink-0">
                             {it.status === "draft" ? "Koncept" : "Hotová"}
                         </Badge>
                         {it.status === "finalized" && days !== null && (
@@ -359,24 +467,16 @@ function InspectionRow({
                         <span className="mx-1.5 text-ink-300">·</span>
                         {it.inspector_name}
                     </p>
+
+                    {/* Mobile actions — second row */}
+                    <div className="mt-2 flex items-center justify-end gap-3 sm:hidden">
+                        {actions}
+                    </div>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-3">
-                    <Link
-                        to={`/inspections/${it.id}`}
-                        title="Upraviť"
-                        className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
-                    >
-                        <Edit2 className="size-4" />
-                    </Link>
-                    <button
-                        type="button"
-                        title="Odstrániť"
-                        onClick={() => onDelete(it.id)}
-                        className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-                    >
-                        <Trash2 className="size-4" />
-                    </button>
+                {/* Desktop actions — right column */}
+                <div className="hidden shrink-0 items-center gap-3 self-center sm:flex">
+                    {actions}
                 </div>
             </div>
         </Card>

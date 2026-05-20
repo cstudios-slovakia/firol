@@ -79,10 +79,31 @@ foreach ($customActivitiesArr as $ca) {
     $checkedActivities[] = (string) $ca;
 }
 
-$defectLines = array_values(array_filter(array_map('trim', explode("\n", $notes))));
-$defectDeadline = isset($record['defect_deadline']) && is_string($record['defect_deadline'])
-    ? $formatDate($record['defect_deadline'])
-    : '';
+// New shape: `defects` is a list of {description, deadline?} — each row
+// renders with its own deadline. Legacy records carry a single
+// `defect_deadline` plus free-text `notes`; we split notes line-by-line
+// and reuse the single deadline so old PDFs still render predictably.
+$legacyDeadline = isset($record['defect_deadline']) && is_string($record['defect_deadline'])
+    ? $record['defect_deadline']
+    : null;
+
+$defectRows = [];
+if (isset($record['defects']) && is_array($record['defects']) && $record['defects']) {
+    foreach ($record['defects'] as $d) {
+        if (!is_array($d)) continue;
+        $desc = isset($d['description']) && is_string($d['description']) ? trim($d['description']) : '';
+        if ($desc === '') continue;
+        $dl = isset($d['deadline']) && is_string($d['deadline']) ? $d['deadline'] : null;
+        $defectRows[] = ['description' => $desc, 'deadline' => $dl];
+    }
+} elseif ($result === 'zistene_nedostatky') {
+    foreach (array_filter(array_map('trim', explode("\n", $notes))) as $line) {
+        $defectRows[] = ['description' => $line, 'deadline' => $legacyDeadline];
+    }
+    if (!$defectRows && $notes !== '') {
+        $defectRows[] = ['description' => $notes, 'deadline' => $legacyDeadline];
+    }
+}
 
 $contactLine = $facility['contact_person'] ?? '';
 ?>
@@ -193,7 +214,7 @@ $contactLine = $facility['contact_person'] ?? '';
 </table>
 <?php endif ?>
 
-<?php if ($result === 'zistene_nedostatky' && $defectLines): ?>
+<?php if ($result === 'zistene_nedostatky' && $defectRows): ?>
 <h2>Zistené nedostatky</h2>
 <table class="defects">
   <thead>
@@ -204,27 +225,13 @@ $contactLine = $facility['contact_person'] ?? '';
     </tr>
   </thead>
   <tbody>
-    <?php foreach ($defectLines as $i => $line): ?>
+    <?php foreach ($defectRows as $i => $row): ?>
     <tr>
       <td><?= $i + 1 ?></td>
-      <td><?= $h($line) ?></td>
-      <td><?= $i === 0 ? $h($defectDeadline) : '' ?></td>
+      <td><?= $h($row['description']) ?></td>
+      <td><?= $row['deadline'] ? $h($formatDate($row['deadline'])) : '—' ?></td>
     </tr>
     <?php endforeach ?>
-  </tbody>
-</table>
-<?php elseif ($result === 'zistene_nedostatky' && $notes): ?>
-<h2>Zistené nedostatky</h2>
-<table class="defects">
-  <thead>
-    <tr>
-      <th style="width:4%">Č.</th>
-      <th style="width:72%">Popis nedostatku</th>
-      <th style="width:24%">Termín odstránenia</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr><td>1</td><td><?= $h($notes) ?></td><td><?= $h($defectDeadline) ?></td></tr>
   </tbody>
 </table>
 <?php endif ?>

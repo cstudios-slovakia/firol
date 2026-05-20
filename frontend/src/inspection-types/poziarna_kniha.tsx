@@ -10,6 +10,7 @@ import {
   PK_ACTIVITY_LABELS,
   PK_RESULT_LABELS,
   type PkActivity,
+  type PkDefect,
   type PkResult,
   type PoziarnaKnihaItemFields,
 } from '@/api/inspections';
@@ -31,6 +32,7 @@ import type {
 } from './common';
 
 type CustomActivity = { id: number; label: string; checked: boolean };
+type DefectRow = { id: number; description: string; deadline: string };
 
 function isPkActivity(s: unknown): s is PkActivity {
   return typeof s === 'string' && (PK_ACTIVITIES as string[]).includes(s);
@@ -50,12 +52,13 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   const [activities, setActivities] = useState<PkActivity[]>([]);
   const [customActivities, setCustomActivities] = useState<CustomActivity[]>([]);
   const [result, setResult] = useState<PkResult>('bez_nedostatkov');
-  const [defectDeadline, setDefectDeadline] = useState('');
+  const [defects, setDefects] = useState<DefectRow[]>([]);
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [workspacesError, setWorkspacesError] = useState<string | null>(null);
   const [activitiesError, setActivitiesError] = useState<string | null>(null);
+  const [defectsError, setDefectsError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
   const toast = useToast();
   const lastInputRef = useRef<HTMLInputElement | null>(null);
@@ -75,18 +78,49 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           ? [{ id: nextId(), label: legacy, checked: true }]
           : [];
       setCustomActivities(fromCustom);
-      setResult(isPkResult(f.result) ? f.result : 'bez_nedostatkov');
-      setDefectDeadline(typeof f.defect_deadline === 'string' ? f.defect_deadline : '');
-      setNotes(typeof f.notes === 'string' ? f.notes : '');
+      const resultVal = isPkResult(f.result) ? f.result : 'bez_nedostatkov';
+      setResult(resultVal);
+      // Prefer new per-defect list. Legacy fallback: split notes by newlines
+      // using the single deadline for each row, so re-opening an old record
+      // keeps all the data the technician originally entered.
+      const legacyDeadline = typeof f.defect_deadline === 'string' ? f.defect_deadline : '';
+      const fromDefects = Array.isArray(f.defects)
+        ? (f.defects as PkDefect[]).map((d) => ({
+            id: nextId(),
+            description: typeof d.description === 'string' ? d.description : '',
+            deadline: typeof d.deadline === 'string' ? d.deadline : '',
+          }))
+        : [];
+      const legacyFromNotes = resultVal === 'zistene_nedostatky' && fromDefects.length === 0 && typeof f.notes === 'string'
+        ? f.notes.split('\n').map((l) => l.trim()).filter(Boolean).map((description) => ({
+            id: nextId(), description, deadline: legacyDeadline,
+          }))
+        : [];
+      setDefects([...fromDefects, ...legacyFromNotes]);
+      // For legacy records the notes field was used to carry defect lines —
+      // when we promote them to `defects`, clear notes so they aren't shown twice.
+      setNotes(legacyFromNotes.length > 0 ? '' : (typeof f.notes === 'string' ? f.notes : ''));
     } else {
       setWorkspaces('');
       setActivities([]);
       setCustomActivities([]);
       setResult('bez_nedostatkov');
-      setDefectDeadline('');
+      setDefects([]);
       setNotes('');
     }
   }, [initialItem]);
+
+  function addDefect() {
+    setDefects((prev) => [...prev, { id: nextId(), description: '', deadline: '' }]);
+    if (defectsError) setDefectsError(null);
+  }
+  function removeDefect(id: number) {
+    setDefects((prev) => prev.filter((d) => d.id !== id));
+  }
+  function updateDefect(id: number, changes: Partial<Pick<DefectRow, 'description' | 'deadline'>>) {
+    setDefects((prev) => prev.map((d) => d.id === id ? { ...d, ...changes } : d));
+    if (defectsError) setDefectsError(null);
+  }
 
   function toggleActivity(a: PkActivity) {
     setActivities((prev) => prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]);
@@ -119,9 +153,17 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
       setActivitiesError('Vyber aspoň jednu vykonanú činnosť alebo pridaj vlastnú pomocou tlačidla +.');
       hasError = true;
     }
+    const cleanedDefects = defects
+      .map((d) => ({ description: d.description.trim(), deadline: d.deadline.trim() || null }))
+      .filter((d) => d.description !== '');
+    if (result === 'zistene_nedostatky' && cleanedDefects.length === 0) {
+      setDefectsError('Pridaj aspoň jeden nedostatok s popisom.');
+      hasError = true;
+    }
     if (hasError) return;
     setWorkspacesError(null);
     setActivitiesError(null);
+    setDefectsError(null);
     setApiError(null);
     setSubmitting(true);
     try {
@@ -132,7 +174,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           .filter((x) => x.checked && x.label.trim())
           .map((x) => x.label.trim()),
         result,
-        defect_deadline: result === 'zistene_nedostatky' ? (defectDeadline || null) : null,
+        defects: result === 'zistene_nedostatky' ? cleanedDefects : [],
         notes: notes.trim() || null,
       };
       if (editing && itemId !== null) {
@@ -248,17 +290,63 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
         <Field label="Výsledok" required>
           {() => (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Výsledok záznamu">
-              <ResultButton value="bez_nedostatkov" active={result === 'bez_nedostatkov'} onClick={() => { setResult('bez_nedostatkov'); setDefectDeadline(''); }} />
-              <ResultButton value="zistene_nedostatky" active={result === 'zistene_nedostatky'} onClick={() => setResult('zistene_nedostatky')} />
+              <ResultButton value="bez_nedostatkov" active={result === 'bez_nedostatkov'} onClick={() => { setResult('bez_nedostatkov'); setDefects([]); setDefectsError(null); }} />
+              <ResultButton value="zistene_nedostatky" active={result === 'zistene_nedostatky'} onClick={() => { setResult('zistene_nedostatky'); if (defects.length === 0) addDefect(); }} />
             </div>
           )}
         </Field>
 
         {result === 'zistene_nedostatky' && (
-          <Field label="Termín na odstránenie nedostatkov" hint="Dátum, do ktorého musia byť nedostatky odstránené.">
-            {(p) => (
-              <Input {...p} type="date" leftIcon={<Calendar className="size-4" />}
-                value={defectDeadline} onChange={(e) => setDefectDeadline(e.target.value)} />
+          <Field
+            label="Zistené nedostatky"
+            required
+            hint={defectsError ? undefined : 'Pre každý nedostatok zadaj popis a vlastný termín odstránenia.'}
+            error={defectsError}
+          >
+            {() => (
+              <div className="flex flex-col gap-2">
+                {defects.map((d, idx) => (
+                  <div key={d.id} className="rounded-xl border border-ink-200 bg-white p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-ink-500">
+                        Nedostatok č. {idx + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeDefect(d.id)}
+                        aria-label="Odstrániť nedostatok"
+                        className="grid size-7 place-items-center rounded-lg text-ink-400 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={d.description}
+                      onChange={(e) => updateDefect(d.id, { description: e.target.value })}
+                      placeholder="Popis nedostatku (napr. Hasiaci prístroj v Sklade B – chýba kontrolná nálepka.)"
+                      className="w-full rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200"
+                    />
+                    <div className="mt-2">
+                      <Input
+                        type="date"
+                        leftIcon={<Calendar className="size-4" />}
+                        value={d.deadline}
+                        onChange={(e) => updateDefect(d.id, { deadline: e.target.value })}
+                        aria-label="Termín odstránenia"
+                      />
+                    </div>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addDefect}
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-ink-300 px-3 py-2 text-sm text-ink-500 transition-colors hover:border-firol-400 hover:text-firol-600"
+                >
+                  <Plus className="size-4" />
+                  Pridať nedostatok
+                </button>
+              </div>
             )}
           </Field>
         )}
@@ -281,7 +369,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
             {apiError}
           </div>
         )}
-        {(workspacesError !== null || activitiesError !== null) && (
+        {(workspacesError !== null || activitiesError !== null || defectsError !== null) && (
           <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
             Formulár obsahuje nevyplnené povinné polia.
           </p>
@@ -388,12 +476,29 @@ function PkItemRow({
           <p className="mt-0.5 text-xs text-ink-500">
             {totalActivities} {totalActivities === 1 ? 'činnosť' : 'činností'} zaznamenaných
           </p>
-          {f.defect_deadline && (
-            <p className="mt-0.5 text-xs text-ink-600">
-              <Calendar className="-mt-0.5 mr-1 inline size-3 text-status-warn" />
-              Termín: {f.defect_deadline}
-            </p>
-          )}
+          {(() => {
+            const list = Array.isArray(f.defects) ? f.defects : [];
+            if (list.length > 0) {
+              const deadlines = list.map((d) => d.deadline).filter((x): x is string => !!x).sort();
+              const earliest = deadlines[0];
+              return (
+                <p className="mt-0.5 text-xs text-ink-600">
+                  <AlertTriangle className="-mt-0.5 mr-1 inline size-3 text-status-bad" />
+                  {list.length} {list.length === 1 ? 'nedostatok' : (list.length < 5 ? 'nedostatky' : 'nedostatkov')}
+                  {earliest && (<><span> · </span><Calendar className="-mt-0.5 mr-1 inline size-3 text-status-warn" />Najbližší termín: {earliest}</>)}
+                </p>
+              );
+            }
+            if (f.defect_deadline) {
+              return (
+                <p className="mt-0.5 text-xs text-ink-600">
+                  <Calendar className="-mt-0.5 mr-1 inline size-3 text-status-warn" />
+                  Termín: {f.defect_deadline}
+                </p>
+              );
+            }
+            return null;
+          })()}
           {f.notes && (
             <p className="mt-1 line-clamp-2 text-xs text-ink-600">
               <AlertTriangle className="-mt-0.5 mr-1 inline size-3 text-status-warn" />

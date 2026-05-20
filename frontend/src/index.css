@@ -156,14 +156,6 @@
     text-align: left;
   }
 
-  /* Hide the native indicator — picker is opened programmatically via showPicker(). */
-  input[type="date"]::-webkit-calendar-picker-indicator,
-  input[type="time"]::-webkit-calendar-picker-indicator,
-  input[type="datetime-local"]::-webkit-calendar-picker-indicator,
-  input[type="month"]::-webkit-calendar-picker-indicator,
-  input[type="week"]::-webkit-calendar-picker-indicator {
-    display: none;
-  }
   /* Hide the inner spin / clear buttons too — they look out of place. */
   input[type="date"]::-webkit-inner-spin-button,
   input[type="date"]::-webkit-clear-button,
