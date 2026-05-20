@@ -103,6 +103,11 @@ export function LoginPage() {
               {error}
             </div>
           )}
+          {Object.keys(fieldErrors).length > 0 && (
+            <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
+              Formulár obsahuje nevyplnené povinné polia.
+            </p>
+          )}
 
           <Button type="submit" loading={loading} className="mt-2 w-full">
             Prihlásiť sa

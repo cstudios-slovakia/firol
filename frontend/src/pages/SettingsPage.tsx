@@ -905,6 +905,11 @@ function TrainersSection() {
               )}
             </Field>
           </div>
+          {newNameError && (
+            <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)] sm:col-span-2">
+              Formulár obsahuje nevyplnené povinné polia.
+            </p>
+          )}
           <Button type="submit" loading={adding} leftIcon={<Plus className="size-4" />}>
             Pridať
           </Button>
@@ -1151,6 +1156,11 @@ function TeamSection() {
                   placeholder="+421 900 000 000" />
               )}
             </Field>
+            {Object.keys(inviteFieldErrors).length > 0 && (
+              <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
+                Formulár obsahuje nevyplnené povinné polia.
+              </p>
+            )}
             <div className="flex items-center justify-end gap-2">
               <Button type="submit" loading={adding} leftIcon={<MailPlus className="size-4" />}>
                 Vytvoriť pozvánku

@@ -281,6 +281,11 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
             {apiError}
           </div>
         )}
+        {(workspacesError !== null || activitiesError !== null) && (
+          <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
+            Formulár obsahuje nevyplnené povinné polia.
+          </p>
+        )}
 
         <div className="flex justify-end pt-1">
           <Button type="submit" loading={submitting}

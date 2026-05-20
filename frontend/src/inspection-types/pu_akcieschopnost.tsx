@@ -188,6 +188,11 @@ function PuAkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
             {apiError}
           </div>
         )}
+        {Object.keys(fieldErrors).length > 0 && (
+          <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
+            Formulár obsahuje nevyplnené povinné polia.
+          </p>
+        )}
 
         <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}

@@ -41,6 +41,7 @@ export function InspectionDetailPage() {
   const [documents, setDocuments] = useState<InspectionDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [savingDate, setSavingDate] = useState(false);
+  const [localDate, setLocalDate] = useState<string>('');
   const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
   const [generating, setGenerating] = useState(false);
   const [repeating, setRepeating] = useState(false);
@@ -61,6 +62,10 @@ export function InspectionDetailPage() {
       cancelled = true;
     };
   }, [id]);
+
+  // Sync localDate from API data; runs on initial load and after save confirms.
+  const savedDate = data?.inspection.executed_on ?? '';
+  useEffect(() => { setLocalDate(savedDate); }, [savedDate]);
 
   async function handleRepeat() {
     if (!data) return;
@@ -219,13 +224,22 @@ export function InspectionDetailPage() {
         </div>
         <input
           type="date"
-          value={i.executed_on ?? ''}
+          value={localDate}
           disabled={!isDraft || savingDate}
-          onChange={(e) => handleDateChange(e.target.value)}
-          onClick={(e) => e.currentTarget.showPicker?.()}
+          onChange={(e) => setLocalDate(e.target.value)}
           aria-label="Dátum kontroly"
           className="h-11 w-full rounded-xl border border-status-warn/40 bg-white px-3 text-sm font-medium text-ink-900 transition-colors hover:border-status-warn focus:border-status-warn focus:outline-none focus:ring-2 focus:ring-status-warn/30 disabled:bg-ink-50 disabled:text-ink-500"
         />
+        {isDraft && localDate && localDate !== savedDate && (
+          <Button
+            type="button"
+            loading={savingDate}
+            onClick={() => handleDateChange(localDate)}
+            className="w-full"
+          >
+            Uložiť dátum
+          </Button>
+        )}
       </Card>
 
       {module && items.length > 0 && <module.StatsBar items={items} />}
