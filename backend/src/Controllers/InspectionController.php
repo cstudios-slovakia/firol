@@ -173,12 +173,16 @@ final class InspectionController
         }
 
         // Inspector must be a user attached to the inspection's account.
-        $auCheck = Db::pdo()->prepare(
-            'SELECT 1 FROM account_users WHERE account_id = ? AND user_id = ?'
-        );
-        $auCheck->execute([$accountId, $inspectorUserId]);
-        if ($auCheck->fetchColumn() === false) {
-            Response::error('Inspector is not a member of this account', 422);
+        // Sys-admins are exempt — they act across accounts and may assign
+        // themselves as inspector even without an account_users row.
+        if (!$isAdmin) {
+            $auCheck = Db::pdo()->prepare(
+                'SELECT 1 FROM account_users WHERE account_id = ? AND user_id = ?'
+            );
+            $auCheck->execute([$accountId, $inspectorUserId]);
+            if ($auCheck->fetchColumn() === false) {
+                Response::error('Inspector is not a member of this account', 422);
+            }
         }
 
         $stmt = Db::pdo()->prepare(
