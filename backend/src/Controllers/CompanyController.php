@@ -151,9 +151,11 @@ final class CompanyController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id        = (int) $params['id'];
 
-        self::findOrFail($accountId, $id);
+        $existing = self::findOrFail($isAdmin ? null : $accountId, $id);
+        $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
         [$name, $ico, $address, $contact] = self::readBody($req);
 
@@ -161,21 +163,23 @@ final class CompanyController
             'UPDATE companies SET name = ?, ico = ?, address = ?, contact = ?
              WHERE  id = ? AND account_id = ?'
         );
-        $stmt->execute([$name, $ico, $address, $contact, $id, $accountId]);
+        $stmt->execute([$name, $ico, $address, $contact, $id, $scopeAccountId]);
 
-        Response::json(['company' => self::shape(self::findOrFail($accountId, $id))]);
+        Response::json(['company' => self::shape(self::findOrFail($isAdmin ? null : $accountId, $id))]);
     }
 
     public static function archive(Request $req, array $params): void
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id        = (int) $params['id'];
 
-        self::findOrFail($accountId, $id);
+        $existing = self::findOrFail($isAdmin ? null : $accountId, $id);
+        $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
         Db::pdo()->prepare('UPDATE companies SET archived_at = NOW() WHERE id = ? AND account_id = ?')
-            ->execute([$id, $accountId]);
+            ->execute([$id, $scopeAccountId]);
 
         Response::noContent();
     }

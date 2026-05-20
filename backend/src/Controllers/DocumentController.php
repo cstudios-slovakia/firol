@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
@@ -37,9 +38,13 @@ final class DocumentController
         Csrf::require($req);
         $accountId    = Tenant::currentAccountId();
         $userId       = Tenant::currentUserId();
+        $isAdmin      = Admin::isAdmin($userId);
         $inspectionId = (int) $params['id'];
 
-        $inspection = self::loadInspectionForGenerate($accountId, $inspectionId);
+        $inspection = self::loadInspectionForGenerate($isAdmin ? null : $accountId, $inspectionId);
+        // PDF is filed under the inspection's own account, not the
+        // (possibly impersonating) admin's session account.
+        $accountId = (int) $inspection['account_id'];
 
         if ($inspection['status'] === 'finalized') {
             Response::error(
@@ -129,6 +134,7 @@ final class DocumentController
     {
         Csrf::require($req);
         $accountId  = Tenant::currentAccountId();
+        $isAdmin    = Admin::isAdmin(Tenant::currentUserId());
         $documentId = (int) $params['id'];
 
         $email = $req->jsonString('email');
@@ -138,9 +144,12 @@ final class DocumentController
 
         $note = $req->jsonString('note');
 
-        $doc = self::loadDocument($accountId, $documentId);
+        $doc = self::loadDocument($isAdmin ? null : $accountId, $documentId);
         if (!$doc) {
             Response::error('Document not found', 404);
+        }
+        if ($isAdmin) {
+            $accountId = (int) $doc['account_id'];
         }
 
         $abs = Storage::documentAbsolute($doc['file_path']);
@@ -182,9 +191,10 @@ final class DocumentController
     public static function download(Request $req, array $params): void
     {
         $accountId  = Tenant::currentAccountId();
+        $isAdmin    = Admin::isAdmin(Tenant::currentUserId());
         $documentId = (int) $params['id'];
 
-        $doc = self::loadDocument($accountId, $documentId);
+        $doc = self::loadDocument($isAdmin ? null : $accountId, $documentId);
         if (!$doc) {
             Response::error('Document not found', 404);
         }
@@ -216,9 +226,11 @@ final class DocumentController
     {
         Csrf::require($req);
         $accountId  = Tenant::currentAccountId();
+        $isAdmin    = Admin::isAdmin(Tenant::currentUserId());
         $trainingId = (int) $params['id'];
 
-        $training = self::loadTrainingForGenerate($accountId, $trainingId);
+        $training = self::loadTrainingForGenerate($isAdmin ? null : $accountId, $trainingId);
+        $accountId = (int) $training['account_id'];
 
         if ($training['status'] === 'finalized') {
             Response::error(
@@ -298,14 +310,27 @@ final class DocumentController
     public static function indexForTraining(Request $req, array $params): void
     {
         $accountId  = Tenant::currentAccountId();
+        $isAdmin    = Admin::isAdmin(Tenant::currentUserId());
         $trainingId = (int) $params['id'];
 
-        $check = Db::pdo()->prepare(
-            'SELECT 1 FROM trainings WHERE id = ? AND account_id = ? AND archived_at IS NULL'
-        );
-        $check->execute([$trainingId, $accountId]);
-        if ($check->fetchColumn() === false) {
-            Response::error('Training not found', 404);
+        if ($isAdmin) {
+            $check = Db::pdo()->prepare(
+                'SELECT account_id FROM trainings WHERE id = ? AND archived_at IS NULL'
+            );
+            $check->execute([$trainingId]);
+            $trainingAccountId = $check->fetchColumn();
+            if ($trainingAccountId === false) {
+                Response::error('Training not found', 404);
+            }
+            $accountId = (int) $trainingAccountId;
+        } else {
+            $check = Db::pdo()->prepare(
+                'SELECT 1 FROM trainings WHERE id = ? AND account_id = ? AND archived_at IS NULL'
+            );
+            $check->execute([$trainingId, $accountId]);
+            if ($check->fetchColumn() === false) {
+                Response::error('Training not found', 404);
+            }
         }
 
         $stmt = Db::pdo()->prepare(
@@ -333,16 +358,29 @@ final class DocumentController
     public static function indexForInspection(Request $req, array $params): void
     {
         $accountId    = Tenant::currentAccountId();
+        $isAdmin      = Admin::isAdmin(Tenant::currentUserId());
         $inspectionId = (int) $params['id'];
 
         // Make sure the parent inspection belongs to this tenant before
-        // exposing any documents.
-        $check = Db::pdo()->prepare(
-            'SELECT 1 FROM inspections WHERE id = ? AND account_id = ? AND archived_at IS NULL'
-        );
-        $check->execute([$inspectionId, $accountId]);
-        if ($check->fetchColumn() === false) {
-            Response::error('Inspection not found', 404);
+        // exposing any documents. Admins may inspect any account's data.
+        if ($isAdmin) {
+            $check = Db::pdo()->prepare(
+                'SELECT account_id FROM inspections WHERE id = ? AND archived_at IS NULL'
+            );
+            $check->execute([$inspectionId]);
+            $insAccountId = $check->fetchColumn();
+            if ($insAccountId === false) {
+                Response::error('Inspection not found', 404);
+            }
+            $accountId = (int) $insAccountId;
+        } else {
+            $check = Db::pdo()->prepare(
+                'SELECT 1 FROM inspections WHERE id = ? AND account_id = ? AND archived_at IS NULL'
+            );
+            $check->execute([$inspectionId, $accountId]);
+            if ($check->fetchColumn() === false) {
+                Response::error('Inspection not found', 404);
+            }
         }
 
         $stmt = Db::pdo()->prepare(
@@ -370,21 +408,25 @@ final class DocumentController
     /**
      * @return array<string, mixed>
      */
-    private static function loadInspectionForGenerate(int $accountId, int $inspectionId): array
+    private static function loadInspectionForGenerate(?int $accountId, int $inspectionId): array
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT i.id, i.type, i.periodicity_months, i.executed_on, i.status,
-                    i.notes, i.inspector_user_id,
-                    i.company_id, c.name AS company_name, c.ico AS company_ico,
-                    c.address AS company_address,
-                    i.facility_id, f.name AS facility_name, f.address AS facility_address,
-                    f.contact_person AS facility_contact_person
-             FROM   inspections i
-             JOIN   companies   c ON c.id = i.company_id
-             JOIN   facilities  f ON f.id = i.facility_id
-             WHERE  i.id = ? AND i.account_id = ? AND i.archived_at IS NULL'
-        );
-        $stmt->execute([$inspectionId, $accountId]);
+        $sql = 'SELECT i.id, i.account_id, i.type, i.periodicity_months, i.executed_on, i.status,
+                       i.notes, i.inspector_user_id,
+                       i.company_id, c.name AS company_name, c.ico AS company_ico,
+                       c.address AS company_address,
+                       i.facility_id, f.name AS facility_name, f.address AS facility_address,
+                       f.contact_person AS facility_contact_person
+                FROM   inspections i
+                JOIN   companies   c ON c.id = i.company_id
+                JOIN   facilities  f ON f.id = i.facility_id
+                WHERE  i.id = ? AND i.archived_at IS NULL';
+        $params = [$inspectionId];
+        if ($accountId !== null) {
+            $sql .= ' AND i.account_id = ?';
+            $params[] = $accountId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
             Response::error('Inspection not found', 404);
@@ -635,21 +677,26 @@ final class DocumentController
     /**
      * @return array<string, mixed>|null
      */
-    private static function loadDocument(int $accountId, int $documentId): ?array
+    private static function loadDocument(?int $accountId, int $documentId): ?array
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT id, parent_type, parent_id, type, number, file_path,
-                    generated_at, signed, signed_at
-             FROM   documents
-             WHERE  id = ? AND account_id = ?'
-        );
-        $stmt->execute([$documentId, $accountId]);
+        $sql = 'SELECT id, account_id, parent_type, parent_id, type, number, file_path,
+                       generated_at, signed, signed_at
+                FROM   documents
+                WHERE  id = ?';
+        $params = [$documentId];
+        if ($accountId !== null) {
+            $sql .= ' AND account_id = ?';
+            $params[] = $accountId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
             return null;
         }
         return [
             'id'           => (int) $row['id'],
+            'account_id'   => (int) $row['account_id'],
             'parent_type'  => $row['parent_type'],
             'parent_id'    => (int) $row['parent_id'],
             'type'         => $row['type'],
@@ -673,23 +720,27 @@ final class DocumentController
     ];
 
     /** @return array<string, mixed> */
-    private static function loadTrainingForGenerate(int $accountId, int $trainingId): array
+    private static function loadTrainingForGenerate(?int $accountId, int $trainingId): array
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT t.id, t.type, t.date, t.duration_min, t.topics, t.status,
-                    t.company_id, c.name AS company_name, c.ico AS company_ico,
-                    c.address AS company_address,
-                    t.facility_id, f.name AS facility_name, f.address AS facility_address,
-                    t.trainer_id, tr.fullname AS trainer_name,
-                    tr.certification_number AS trainer_certification_number,
-                    tr.signature_path     AS trainer_signature_path
-             FROM   trainings t
-             JOIN   companies  c  ON c.id = t.company_id
-             LEFT JOIN facilities f  ON f.id = t.facility_id
-             LEFT JOIN trainers   tr ON tr.id = t.trainer_id
-             WHERE  t.id = ? AND t.account_id = ? AND t.archived_at IS NULL'
-        );
-        $stmt->execute([$trainingId, $accountId]);
+        $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics, t.status,
+                       t.company_id, c.name AS company_name, c.ico AS company_ico,
+                       c.address AS company_address,
+                       t.facility_id, f.name AS facility_name, f.address AS facility_address,
+                       t.trainer_id, tr.fullname AS trainer_name,
+                       tr.certification_number AS trainer_certification_number,
+                       tr.signature_path     AS trainer_signature_path
+                FROM   trainings t
+                JOIN   companies  c  ON c.id = t.company_id
+                LEFT JOIN facilities f  ON f.id = t.facility_id
+                LEFT JOIN trainers   tr ON tr.id = t.trainer_id
+                WHERE  t.id = ? AND t.archived_at IS NULL';
+        $params = [$trainingId];
+        if ($accountId !== null) {
+            $sql .= ' AND t.account_id = ?';
+            $params[] = $accountId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
             Response::error('Training not found', 404);

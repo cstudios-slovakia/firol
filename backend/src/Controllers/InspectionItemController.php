@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
@@ -66,7 +67,8 @@ final class InspectionItemController
         $accountId = Tenant::currentAccountId();
         $inspectionId = (int) $params['id'];
 
-        $inspection = self::loadInspectionOrFail($accountId, $inspectionId);
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $inspection = self::loadInspectionOrFail($isAdmin ? null : $accountId, $inspectionId);
 
         // Požiarna kniha is conceptually a single-record protocol; the
         // schema supports many items but the domain doesn't, so block it
@@ -593,13 +595,17 @@ final class InspectionItemController
     }
 
     /** @return array<string, mixed> */
-    private static function loadInspectionOrFail(int $accountId, int $inspectionId): array
+    private static function loadInspectionOrFail(?int $accountId, int $inspectionId): array
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT id, type, status FROM inspections
-             WHERE id = ? AND account_id = ? AND archived_at IS NULL'
-        );
-        $stmt->execute([$inspectionId, $accountId]);
+        $sql = 'SELECT id, type, status FROM inspections
+                WHERE id = ? AND archived_at IS NULL';
+        $params = [$inspectionId];
+        if ($accountId !== null) {
+            $sql .= ' AND account_id = ?';
+            $params[] = $accountId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
             Response::error('Inspection not found', 404);

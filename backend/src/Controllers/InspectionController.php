@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
@@ -34,6 +35,7 @@ final class InspectionController
     public static function index(Request $req): void
     {
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
 
         $companyId  = self::queryInt($req, 'company_id');
         $facilityId = self::queryInt($req, 'facility_id');
@@ -48,8 +50,12 @@ final class InspectionController
                 JOIN   companies   c ON c.id = i.company_id
                 JOIN   facilities  f ON f.id = i.facility_id
                 JOIN   users       u ON u.id = i.inspector_user_id
-                WHERE  i.account_id = :account_id AND i.archived_at IS NULL';
-        $params = ['account_id' => $accountId];
+                WHERE  i.archived_at IS NULL';
+        $params = [];
+        if (!$isAdmin) {
+            $sql .= ' AND i.account_id = :account_id';
+            $params['account_id'] = $accountId;
+        }
 
         if ($companyId !== null) {
             $sql .= ' AND i.company_id = :company_id';
@@ -75,9 +81,10 @@ final class InspectionController
     public static function show(Request $req, array $params): void
     {
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id        = (int) $params['id'];
 
-        $row = self::loadOrFail($accountId, $id);
+        $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
 
         $itemsStmt = Db::pdo()->prepare(
             'SELECT id, position, fields, created_at, updated_at
@@ -108,6 +115,7 @@ final class InspectionController
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
         $userId    = Tenant::currentUserId();
+        $isAdmin   = Admin::isAdmin($userId);
 
         $type              = $req->jsonString('type');
         $periodicityMonths = $req->jsonInt('periodicity_months');
@@ -132,21 +140,39 @@ final class InspectionController
             Response::error('Invalid executed_on (expected YYYY-MM-DD)', 422);
         }
 
-        // Verify company + facility belong to this account, and facility
-        // belongs to the company. Single round-trip via JOIN.
-        $check = Db::pdo()->prepare(
-            'SELECT 1
-             FROM   facilities f
-             JOIN   companies  c ON c.id = f.company_id
-             WHERE  f.id = ? AND f.company_id = ? AND f.account_id = ?
-                AND f.archived_at IS NULL AND c.archived_at IS NULL'
-        );
-        $check->execute([$facilityId, $companyId, $accountId]);
-        if ($check->fetchColumn() === false) {
-            Response::error('Company or facility not found', 404);
+        // Verify the facility exists, belongs to the company, and (for
+        // non-admins) sits inside the active account. Admins may create
+        // inspections under any account — the inspection inherits the
+        // facility's account_id.
+        if ($isAdmin) {
+            $check = Db::pdo()->prepare(
+                'SELECT f.account_id
+                 FROM   facilities f
+                 JOIN   companies  c ON c.id = f.company_id
+                 WHERE  f.id = ? AND f.company_id = ?
+                    AND f.archived_at IS NULL AND c.archived_at IS NULL'
+            );
+            $check->execute([$facilityId, $companyId]);
+            $facAccountId = $check->fetchColumn();
+            if ($facAccountId === false) {
+                Response::error('Company or facility not found', 404);
+            }
+            $accountId = (int) $facAccountId;
+        } else {
+            $check = Db::pdo()->prepare(
+                'SELECT 1
+                 FROM   facilities f
+                 JOIN   companies  c ON c.id = f.company_id
+                 WHERE  f.id = ? AND f.company_id = ? AND f.account_id = ?
+                    AND f.archived_at IS NULL AND c.archived_at IS NULL'
+            );
+            $check->execute([$facilityId, $companyId, $accountId]);
+            if ($check->fetchColumn() === false) {
+                Response::error('Company or facility not found', 404);
+            }
         }
 
-        // Inspector must be a user attached to this account.
+        // Inspector must be a user attached to the inspection's account.
         $auCheck = Db::pdo()->prepare(
             'SELECT 1 FROM account_users WHERE account_id = ? AND user_id = ?'
         );
@@ -177,9 +203,11 @@ final class InspectionController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id        = (int) $params['id'];
 
-        $row = self::loadOrFail($accountId, $id);
+        $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        $scopeAccountId = $isAdmin ? (int) $row['account_id'] : $accountId;
 
         $executedOn = $req->jsonString('executed_on');
         $notes      = $req->jsonString('notes');
@@ -202,9 +230,9 @@ final class InspectionController
                     notes              = COALESCE(?, notes),
                     periodicity_months = COALESCE(?, periodicity_months)
              WHERE  id = ? AND account_id = ?'
-        )->execute([$executedOn, $notes, $periodicityMonths, $id, $accountId]);
+        )->execute([$executedOn, $notes, $periodicityMonths, $id, $scopeAccountId]);
 
-        $fresh = self::loadOrFail($accountId, $id);
+        $fresh = self::loadOrFail($scopeAccountId, $id);
         Response::json(['inspection' => self::shapeRow($fresh)]);
     }
 
@@ -212,13 +240,15 @@ final class InspectionController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id        = (int) $params['id'];
 
-        self::loadOrFail($accountId, $id);
+        $existing = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
         Db::pdo()->prepare(
             'UPDATE inspections SET archived_at = NOW() WHERE id = ? AND account_id = ?'
-        )->execute([$id, $accountId]);
+        )->execute([$id, $scopeAccountId]);
 
         Response::noContent();
     }
@@ -233,9 +263,13 @@ final class InspectionController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $sourceId  = (int) $params['id'];
 
-        $source = self::loadOrFail($accountId, $sourceId);
+        $source = self::loadOrFail($isAdmin ? null : $accountId, $sourceId);
+        // Repeat lives in the same account as the source — admins repeating
+        // a foreign-account inspection keep that account context.
+        $accountId = (int) $source['account_id'];
 
         if ($source['status'] !== 'finalized') {
             Response::error('Opakovať možno len ukončenú kontrolu (s vystaveným PDF).', 422);
@@ -307,22 +341,26 @@ final class InspectionController
     }
 
     /** @return array<string, mixed> */
-    private static function loadOrFail(int $accountId, int $id): array
+    private static function loadOrFail(?int $accountId, int $id): array
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT i.id, i.account_id, i.type, i.periodicity_months,
-                    i.executed_on, i.status, i.notes,
-                    i.created_at, i.updated_at,
-                    i.company_id, c.name AS company_name, c.ico AS company_ico,
-                    i.facility_id, f.name AS facility_name,
-                    i.inspector_user_id, u.fullname AS inspector_name
-             FROM   inspections i
-             JOIN   companies   c ON c.id = i.company_id
-             JOIN   facilities  f ON f.id = i.facility_id
-             JOIN   users       u ON u.id = i.inspector_user_id
-             WHERE  i.id = ? AND i.account_id = ? AND i.archived_at IS NULL'
-        );
-        $stmt->execute([$id, $accountId]);
+        $sql = 'SELECT i.id, i.account_id, i.type, i.periodicity_months,
+                       i.executed_on, i.status, i.notes,
+                       i.created_at, i.updated_at,
+                       i.company_id, c.name AS company_name, c.ico AS company_ico,
+                       i.facility_id, f.name AS facility_name,
+                       i.inspector_user_id, u.fullname AS inspector_name
+                FROM   inspections i
+                JOIN   companies   c ON c.id = i.company_id
+                JOIN   facilities  f ON f.id = i.facility_id
+                JOIN   users       u ON u.id = i.inspector_user_id
+                WHERE  i.id = ? AND i.archived_at IS NULL';
+        $params = [$id];
+        if ($accountId !== null) {
+            $sql .= ' AND i.account_id = ?';
+            $params[] = $accountId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
             Response::error('Inspection not found', 404);

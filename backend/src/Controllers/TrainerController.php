@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
@@ -16,6 +17,8 @@ use Firol\Storage\Storage;
  * (typically contractors) used as the "Vykonal školenie" entry on the
  * generated PDF. Signatures are stored as PNG outside the docroot, same
  * pattern as inspector signatures.
+ *
+ * System admins see and manage trainers across all accounts.
  */
 final class TrainerController
 {
@@ -24,13 +27,25 @@ final class TrainerController
     public static function index(Request $req): void
     {
         $accountId = Tenant::currentAccountId();
-        $stmt = Db::pdo()->prepare(
-            'SELECT id, fullname, certification_number, signature_path
-             FROM   trainers
-             WHERE  account_id = ? AND archived_at IS NULL
-             ORDER  BY fullname ASC'
-        );
-        $stmt->execute([$accountId]);
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
+
+        if ($isAdmin) {
+            $stmt = Db::pdo()->prepare(
+                'SELECT id, fullname, certification_number, signature_path
+                 FROM   trainers
+                 WHERE  archived_at IS NULL
+                 ORDER  BY fullname ASC'
+            );
+            $stmt->execute();
+        } else {
+            $stmt = Db::pdo()->prepare(
+                'SELECT id, fullname, certification_number, signature_path
+                 FROM   trainers
+                 WHERE  account_id = ? AND archived_at IS NULL
+                 ORDER  BY fullname ASC'
+            );
+            $stmt->execute([$accountId]);
+        }
         $items = array_map([self::class, 'shape'], $stmt->fetchAll());
         Response::json(['items' => $items]);
     }
@@ -38,7 +53,8 @@ final class TrainerController
     public static function show(Request $req, array $params): void
     {
         $accountId = Tenant::currentAccountId();
-        $row = self::loadOrFail($accountId, (int) $params['id']);
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
+        $row = self::loadOrFail($isAdmin ? null : $accountId, (int) $params['id']);
         Response::json(['trainer' => self::shape($row)]);
     }
 
@@ -62,8 +78,10 @@ final class TrainerController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id = (int) $params['id'];
-        self::loadOrFail($accountId, $id);
+        $existing = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
         [$fullname, $cert] = self::readBody($req);
 
@@ -71,21 +89,23 @@ final class TrainerController
             'UPDATE trainers
              SET    fullname = ?, certification_number = ?
              WHERE  id = ? AND account_id = ?'
-        )->execute([$fullname, $cert, $id, $accountId]);
+        )->execute([$fullname, $cert, $id, $scopeAccountId]);
 
-        Response::json(['trainer' => self::shape(self::loadOrFail($accountId, $id))]);
+        Response::json(['trainer' => self::shape(self::loadOrFail($scopeAccountId, $id))]);
     }
 
     public static function archive(Request $req, array $params): void
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id = (int) $params['id'];
-        self::loadOrFail($accountId, $id);
+        $existing = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
         Db::pdo()->prepare(
             'UPDATE trainers SET archived_at = NOW() WHERE id = ? AND account_id = ?'
-        )->execute([$id, $accountId]);
+        )->execute([$id, $scopeAccountId]);
 
         Response::noContent();
     }
@@ -94,8 +114,10 @@ final class TrainerController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id = (int) $params['id'];
-        self::loadOrFail($accountId, $id);
+        $existing = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
         $file = $_FILES['signature'] ?? null;
         if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
@@ -118,7 +140,7 @@ final class TrainerController
             Response::error('Signature must be a PNG image', 422);
         }
 
-        $dest = Storage::trainerSignaturePath($accountId, $id);
+        $dest = Storage::trainerSignaturePath($scopeAccountId, $id);
         Storage::ensureDir(dirname($dest));
         if (!move_uploaded_file($tmp, $dest)) {
             Response::error('Failed to store signature', 500);
@@ -127,16 +149,17 @@ final class TrainerController
         Db::pdo()->prepare(
             'UPDATE trainers SET signature_path = ?
              WHERE  id = ? AND account_id = ?'
-        )->execute([Storage::trainerSignatureRelative($accountId, $id), $id, $accountId]);
+        )->execute([Storage::trainerSignatureRelative($scopeAccountId, $id), $id, $scopeAccountId]);
 
-        Response::json(['trainer' => self::shape(self::loadOrFail($accountId, $id))]);
+        Response::json(['trainer' => self::shape(self::loadOrFail($scopeAccountId, $id))]);
     }
 
     public static function downloadSignature(Request $req, array $params): void
     {
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id = (int) $params['id'];
-        $row = self::loadOrFail($accountId, $id);
+        $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
 
         $abs = $row['signature_path']
             ? Storage::documentAbsolute((string) $row['signature_path'])
@@ -164,14 +187,18 @@ final class TrainerController
     }
 
     /** @return array<string, mixed> */
-    private static function loadOrFail(int $accountId, int $id): array
+    private static function loadOrFail(?int $accountId, int $id): array
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT id, fullname, certification_number, signature_path
-             FROM   trainers
-             WHERE  id = ? AND account_id = ? AND archived_at IS NULL'
-        );
-        $stmt->execute([$id, $accountId]);
+        $sql = 'SELECT id, account_id, fullname, certification_number, signature_path
+                FROM   trainers
+                WHERE  id = ? AND archived_at IS NULL';
+        $params = [$id];
+        if ($accountId !== null) {
+            $sql .= ' AND account_id = ?';
+            $params[] = $accountId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
             Response::error('Trainer not found', 404);

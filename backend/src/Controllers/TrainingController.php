@@ -27,6 +27,7 @@ final class TrainingController
     public static function index(Request $req): void
     {
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
 
         $companyId  = self::queryInt($req, 'company_id');
         $facilityId = self::queryInt($req, 'facility_id');
@@ -42,8 +43,12 @@ final class TrainingController
                 JOIN   companies  c  ON c.id = t.company_id
                 LEFT JOIN facilities f  ON f.id = t.facility_id
                 LEFT JOIN trainers   tr ON tr.id = t.trainer_id
-                WHERE  t.account_id = :account_id AND t.archived_at IS NULL';
-        $params = ['account_id' => $accountId];
+                WHERE  t.archived_at IS NULL';
+        $params = [];
+        if (!$isAdmin) {
+            $sql .= ' AND t.account_id = :account_id';
+            $params['account_id'] = $accountId;
+        }
 
         if ($companyId !== null) {
             $sql .= ' AND t.company_id = :company_id';
@@ -68,9 +73,10 @@ final class TrainingController
     public static function show(Request $req, array $params): void
     {
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id        = (int) $params['id'];
 
-        $row = self::loadOrFail($accountId, $id);
+        $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
 
         $tStmt = Db::pdo()->prepare(
             'SELECT id, fullname, position, signature_path, signed_at,
@@ -147,22 +153,32 @@ final class TrainingController
         }
 
         if ($facilityId !== null) {
+            // Facility must belong to the chosen company; tenant scope on
+            // the facility itself is implied by the company check above.
+            // Admins are not constrained by account here.
             $fc = Db::pdo()->prepare(
                 'SELECT 1 FROM facilities
-                 WHERE id = ? AND company_id = ? AND account_id = ? AND archived_at IS NULL'
+                 WHERE id = ? AND company_id = ? AND archived_at IS NULL'
             );
-            $fc->execute([$facilityId, $companyId, $accountId]);
+            $fc->execute([$facilityId, $companyId]);
             if ($fc->fetchColumn() === false) {
                 Response::error('Facility does not belong to the chosen company', 422);
             }
         }
 
         if ($trainerId !== null) {
-            $tc = Db::pdo()->prepare(
-                'SELECT 1 FROM trainers
-                 WHERE id = ? AND account_id = ? AND archived_at IS NULL'
-            );
-            $tc->execute([$trainerId, $accountId]);
+            if ($isAdmin) {
+                $tc = Db::pdo()->prepare(
+                    'SELECT 1 FROM trainers WHERE id = ? AND archived_at IS NULL'
+                );
+                $tc->execute([$trainerId]);
+            } else {
+                $tc = Db::pdo()->prepare(
+                    'SELECT 1 FROM trainers
+                     WHERE id = ? AND account_id = ? AND archived_at IS NULL'
+                );
+                $tc->execute([$trainerId, $accountId]);
+            }
             if ($tc->fetchColumn() === false) {
                 Response::error('Trainer not found', 422);
             }
@@ -186,8 +202,12 @@ final class TrainingController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id        = (int) $params['id'];
-        $existing  = self::loadOrFail($accountId, $id);
+        $existing  = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        // For admins, persist the update under the training's own account
+        // rather than the admin's session account.
+        $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
         $date        = $req->jsonString('date');
         $trainerId   = $req->jsonInt('trainer_id');
@@ -198,11 +218,18 @@ final class TrainingController
             Response::error('Invalid date (expected YYYY-MM-DD)', 422);
         }
         if ($trainerId !== null) {
-            $tc = Db::pdo()->prepare(
-                'SELECT 1 FROM trainers
-                 WHERE id = ? AND account_id = ? AND archived_at IS NULL'
-            );
-            $tc->execute([$trainerId, $accountId]);
+            if ($isAdmin) {
+                $tc = Db::pdo()->prepare(
+                    'SELECT 1 FROM trainers WHERE id = ? AND archived_at IS NULL'
+                );
+                $tc->execute([$trainerId]);
+            } else {
+                $tc = Db::pdo()->prepare(
+                    'SELECT 1 FROM trainers
+                     WHERE id = ? AND account_id = ? AND archived_at IS NULL'
+                );
+                $tc->execute([$trainerId, $accountId]);
+            }
             if ($tc->fetchColumn() === false) {
                 Response::error('Trainer not found', 422);
             }
@@ -215,18 +242,20 @@ final class TrainingController
                     topics       = COALESCE(?, topics),
                     duration_min = COALESCE(?, duration_min)
              WHERE  id = ? AND account_id = ?'
-        )->execute([$date, $trainerId, $topics, $durationMin, $id, $accountId]);
+        )->execute([$date, $trainerId, $topics, $durationMin, $id, $scopeAccountId]);
         unset($existing);
 
-        Response::json(['training' => self::shape(self::loadOrFail($accountId, $id))]);
+        Response::json(['training' => self::shape(self::loadOrFail($isAdmin ? null : $accountId, $id))]);
     }
 
     public static function archive(Request $req, array $params): void
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id        = (int) $params['id'];
-        self::loadOrFail($accountId, $id);
+        $existing  = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
         // Remove trainee signature files from disk before the DB row is gone.
         $dir = Storage::root() . "/trainings/$id";
@@ -239,29 +268,33 @@ final class TrainingController
 
         Db::pdo()->prepare(
             'DELETE FROM trainings WHERE id = ? AND account_id = ?'
-        )->execute([$id, $accountId]);
+        )->execute([$id, $scopeAccountId]);
 
         Response::noContent();
     }
 
     /** @return array<string, mixed> */
-    private static function loadOrFail(int $accountId, int $id): array
+    private static function loadOrFail(?int $accountId, int $id): array
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics,
-                    t.status, t.created_at, t.updated_at,
-                    t.company_id, c.name AS company_name, c.ico AS company_ico,
-                    t.facility_id, f.name AS facility_name,
-                    t.trainer_id, tr.fullname AS trainer_name,
-                    tr.certification_number AS trainer_certification_number,
-                    (SELECT COUNT(*) FROM trainees WHERE training_id = t.id) AS trainees_count
-             FROM   trainings t
-             JOIN   companies   c  ON c.id = t.company_id
-             LEFT JOIN facilities f  ON f.id = t.facility_id
-             LEFT JOIN trainers   tr ON tr.id = t.trainer_id
-             WHERE  t.id = ? AND t.account_id = ? AND t.archived_at IS NULL'
-        );
-        $stmt->execute([$id, $accountId]);
+        $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics,
+                       t.status, t.created_at, t.updated_at,
+                       t.company_id, c.name AS company_name, c.ico AS company_ico,
+                       t.facility_id, f.name AS facility_name,
+                       t.trainer_id, tr.fullname AS trainer_name,
+                       tr.certification_number AS trainer_certification_number,
+                       (SELECT COUNT(*) FROM trainees WHERE training_id = t.id) AS trainees_count
+                FROM   trainings t
+                JOIN   companies   c  ON c.id = t.company_id
+                LEFT JOIN facilities f  ON f.id = t.facility_id
+                LEFT JOIN trainers   tr ON tr.id = t.trainer_id
+                WHERE  t.id = ? AND t.archived_at IS NULL';
+        $params = [$id];
+        if ($accountId !== null) {
+            $sql .= ' AND t.account_id = ?';
+            $params[] = $accountId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
             Response::error('Training not found', 404);

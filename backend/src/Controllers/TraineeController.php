@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
@@ -28,9 +29,10 @@ final class TraineeController
     {
         Csrf::require($req);
         $accountId  = Tenant::currentAccountId();
+        $isAdmin    = Admin::isAdmin(Tenant::currentUserId());
         $trainingId = (int) $params['id'];
 
-        $training = self::loadTrainingOrFail($accountId, $trainingId);
+        $training = self::loadTrainingOrFail($isAdmin ? null : $accountId, $trainingId);
         if ($training['status'] === 'finalized') {
             Response::error('Školenie je uzamknuté — účastníkov už nemožno meniť.', 409);
         }
@@ -94,10 +96,11 @@ final class TraineeController
     {
         Csrf::require($req);
         $accountId  = Tenant::currentAccountId();
+        $isAdmin    = Admin::isAdmin(Tenant::currentUserId());
         $trainingId = (int) $params['id'];
         $traineeId  = (int) $params['trainee_id'];
 
-        $training = self::loadTrainingOrFail($accountId, $trainingId);
+        $training = self::loadTrainingOrFail($isAdmin ? null : $accountId, $trainingId);
         if ($training['status'] === 'finalized') {
             Response::error('Školenie je uzamknuté — účastníkov už nemožno meniť.', 409);
         }
@@ -161,10 +164,11 @@ final class TraineeController
     {
         Csrf::require($req);
         $accountId  = Tenant::currentAccountId();
+        $isAdmin    = Admin::isAdmin(Tenant::currentUserId());
         $trainingId = (int) $params['id'];
         $traineeId  = (int) $params['trainee_id'];
 
-        $training = self::loadTrainingOrFail($accountId, $trainingId);
+        $training = self::loadTrainingOrFail($isAdmin ? null : $accountId, $trainingId);
         if ($training['status'] === 'finalized') {
             Response::error('Školenie je uzamknuté — účastníkov už nemožno meniť.', 409);
         }
@@ -193,15 +197,26 @@ final class TraineeController
     public static function downloadSignature(Request $req, array $params): void
     {
         $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $traineeId = (int) $params['id'];
 
-        $stmt = Db::pdo()->prepare(
-            'SELECT t.signature_path, tr.account_id
-             FROM   trainees  t
-             JOIN   trainings tr ON tr.id = t.training_id
-             WHERE  t.id = ? AND tr.account_id = ? AND tr.archived_at IS NULL'
-        );
-        $stmt->execute([$traineeId, $accountId]);
+        if ($isAdmin) {
+            $stmt = Db::pdo()->prepare(
+                'SELECT t.signature_path, tr.account_id
+                 FROM   trainees  t
+                 JOIN   trainings tr ON tr.id = t.training_id
+                 WHERE  t.id = ? AND tr.archived_at IS NULL'
+            );
+            $stmt->execute([$traineeId]);
+        } else {
+            $stmt = Db::pdo()->prepare(
+                'SELECT t.signature_path, tr.account_id
+                 FROM   trainees  t
+                 JOIN   trainings tr ON tr.id = t.training_id
+                 WHERE  t.id = ? AND tr.account_id = ? AND tr.archived_at IS NULL'
+            );
+            $stmt->execute([$traineeId, $accountId]);
+        }
         $row = $stmt->fetch();
         if (!$row || empty($row['signature_path'])) {
             Response::error('Podpis sa nenašiel.', 404);
@@ -220,13 +235,17 @@ final class TraineeController
     }
 
     /** @return array<string, mixed> */
-    private static function loadTrainingOrFail(int $accountId, int $trainingId): array
+    private static function loadTrainingOrFail(?int $accountId, int $trainingId): array
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT id, status FROM trainings
-             WHERE id = ? AND account_id = ? AND archived_at IS NULL'
-        );
-        $stmt->execute([$trainingId, $accountId]);
+        $sql = 'SELECT id, status FROM trainings
+                WHERE id = ? AND archived_at IS NULL';
+        $params = [$trainingId];
+        if ($accountId !== null) {
+            $sql .= ' AND account_id = ?';
+            $params[] = $accountId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
             Response::error('Školenie sa nenašlo.', 404);
