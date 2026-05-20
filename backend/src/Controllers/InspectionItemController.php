@@ -120,10 +120,11 @@ final class InspectionItemController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
         $inspectionId = (int) $params['id'];
         $itemId = (int) $params['item_id'];
 
-        $inspection = self::loadInspectionOrFail($accountId, $inspectionId);
+        $inspection = self::loadInspectionOrFail($isAdmin ? null : $accountId, $inspectionId);
 
         self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
@@ -144,10 +145,11 @@ final class InspectionItemController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
         $inspectionId = (int) $params['id'];
         $itemId = (int) $params['item_id'];
 
-        $inspection = self::loadInspectionOrFail($accountId, $inspectionId);
+        $inspection = self::loadInspectionOrFail($isAdmin ? null : $accountId, $inspectionId);
 
         self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
