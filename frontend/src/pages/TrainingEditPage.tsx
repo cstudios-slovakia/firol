@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Building2, CalendarDays, Clock, NotebookPen, Save, Trash2, User, Warehouse,
+  ArrowLeft, Building2, CalendarDays, Clock, NotebookPen, Save, User, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Trainers, type Trainer } from '@/api/trainers';
@@ -36,7 +36,6 @@ export function TrainingEditPage() {
   const [topics, setTopics] = useState('');
   const [durationMin, setDurationMin] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [archiving, setArchiving] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -92,21 +91,6 @@ export function TrainingEditPage() {
     }
   }
 
-  async function onArchive() {
-    if (!window.confirm('Naozaj archivovať školenie? Údaje zostanú v systéme, len sa skryjú.')) return;
-    setArchiving(true);
-    try {
-      await Trainings.archive(id, csrfToken);
-      toast.success('Školenie archivované');
-      navigate('/trainings', { replace: true });
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Archiváciu sa nepodarilo dokončiť.';
-      setError(msg);
-      toast.error(msg);
-    } finally {
-      setArchiving(false);
-    }
-  }
 
   if (loading) {
     return (
