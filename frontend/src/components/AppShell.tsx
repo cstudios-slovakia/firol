@@ -375,7 +375,7 @@ function SideNav({ topOffset }: { topOffset: number }) {
                 <ul className="flex flex-col gap-1">
                     {renderItem(dashboardTab)}
                 </ul>
-                <div className="mt-3" />
+                <div className="my-3 border-t border-ink-100" />
                 <ul className="flex flex-col gap-1">
                     {sectionTabs.map(renderItem)}
                 </ul>

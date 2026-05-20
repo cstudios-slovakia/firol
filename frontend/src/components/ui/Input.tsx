@@ -10,6 +10,8 @@ type InputProps = React.InputHTMLAttributes<HTMLInputElement> & {
    * pointer-active so it can be clicked.
    */
   rightSlot?: React.ReactNode;
+  /** Non-interactive unit label shown inside the right edge (e.g. "MPa", "m", "l/s"). */
+  suffix?: string;
 };
 
 const DATE_TYPES = new Set(['date', 'time', 'datetime-local', 'month', 'week']);
@@ -24,12 +26,12 @@ function makePickerClick(userOnClick?: React.MouseEventHandler<HTMLInputElement>
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { className, invalid, leftIcon, rightSlot, onClick, ...rest },
+  { className, invalid, leftIcon, rightSlot, suffix, onClick, ...rest },
   ref,
 ) {
   const handleClick = DATE_TYPES.has(rest.type ?? '') ? makePickerClick(onClick) : onClick;
 
-  if (leftIcon || rightSlot) {
+  if (leftIcon || rightSlot || suffix) {
     return (
       <div className="relative w-full min-w-0">
         {leftIcon && (
@@ -43,6 +45,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
             baseClasses,
             leftIcon && 'pl-10',
             rightSlot && 'pr-11',
+            suffix && 'pr-14',
             (invalid || rest['aria-invalid'] === true) && invalidClasses,
             className,
           )}
@@ -52,6 +55,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         {rightSlot && (
           <span className="absolute right-1 top-1/2 -translate-y-1/2">
             {rightSlot}
+          </span>
+        )}
+        {suffix && (
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-ink-400">
+            {suffix}
           </span>
         )}
       </div>

@@ -80,18 +80,9 @@ function PuAkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
   }
 
   function handleGoToSummary(e: React.SyntheticEvent) {
-    if (editing) {
-      void handleSubmit(e as FormEvent, 'save-and-summary');
-      return;
-    }
     e.preventDefault();
-    if (isPristine()) {
-      onSaved('save-and-summary');
-      return;
-    }
-    if (window.confirm('Formulár obsahuje neuložené údaje. Naozaj prejsť na súhrn bez uloženia?')) {
-      onSaved('save-and-summary');
-    }
+    if (isPristine()) { onSaved('save-and-summary'); return; }
+    void handleSubmit(e as FormEvent, 'save-and-summary');
   }
 
   async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
@@ -201,7 +192,7 @@ function PuAkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
         <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
-            {editing ? 'Uložiť a späť na súhrn' : 'Prejsť na súhrn'}
+            Uložiť a prejsť na súhrn
           </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>

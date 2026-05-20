@@ -88,18 +88,9 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
   }
 
   function handleGoToSummary(e: React.SyntheticEvent) {
-    if (editing) {
-      void handleSubmit(e as FormEvent, 'save-and-summary');
-      return;
-    }
     e.preventDefault();
-    if (isPristine()) {
-      onSaved('save-and-summary');
-      return;
-    }
-    if (window.confirm('Formulár obsahuje neuložené údaje. Naozaj prejsť na súhrn bez uloženia?')) {
-      onSaved('save-and-summary');
-    }
+    if (isPristine()) { onSaved('save-and-summary'); return; }
+    void handleSubmit(e as FormEvent, 'save-and-summary');
   }
 
   async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
@@ -188,24 +179,24 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
                 value={hoseCount} onChange={(e) => { setHoseCount(e.target.value); if (fieldErrors.hoseCount) setFieldErrors((prev) => { const n = { ...prev }; delete n.hoseCount; return n; }); }} />
             )}
           </Field>
-          <Field label="HS (MPa)" required hint={fieldErrors.hs ? undefined : 'Statický tlak'} error={fieldErrors.hs}>
+          <Field label="HS" required hint={fieldErrors.hs ? undefined : 'Statický tlak'} error={fieldErrors.hs}>
             {(p) => (
               <Input {...p} required type="number" inputMode="decimal" step="0.01" min={0} max={50}
-                leftIcon={<Gauge className="size-4" />}
+                leftIcon={<Gauge className="size-4" />} suffix="MPa"
                 value={hs} onChange={(e) => { setHs(e.target.value); if (fieldErrors.hs) setFieldErrors((prev) => { const n = { ...prev }; delete n.hs; return n; }); }} placeholder="0,55" />
             )}
           </Field>
-          <Field label="HD (MPa)" required hint={fieldErrors.hd ? undefined : 'Dynamický tlak'} error={fieldErrors.hd}>
+          <Field label="HD" required hint={fieldErrors.hd ? undefined : 'Dynamický tlak'} error={fieldErrors.hd}>
             {(p) => (
               <Input {...p} required type="number" inputMode="decimal" step="0.01" min={0} max={50}
-                leftIcon={<Gauge className="size-4" />}
+                leftIcon={<Gauge className="size-4" />} suffix="MPa"
                 value={hd} onChange={(e) => { setHd(e.target.value); if (fieldErrors.hd) setFieldErrors((prev) => { const n = { ...prev }; delete n.hd; return n; }); }} placeholder="0,42" />
             )}
           </Field>
-          <Field label="Q (l/s)" required hint={fieldErrors.q ? undefined : 'Prietok'} error={fieldErrors.q}>
+          <Field label="Q" required hint={fieldErrors.q ? undefined : 'Prietok'} error={fieldErrors.q}>
             {(p) => (
               <Input {...p} required type="number" inputMode="decimal" step="0.01" min={0} max={100}
-                leftIcon={<Gauge className="size-4" />}
+                leftIcon={<Gauge className="size-4" />} suffix="l/s"
                 value={q} onChange={(e) => { setQ(e.target.value); if (fieldErrors.q) setFieldErrors((prev) => { const n = { ...prev }; delete n.q; return n; }); }} placeholder="1,8" />
             )}
           </Field>
@@ -243,7 +234,7 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
         <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
-            {editing ? 'Uložiť a späť na súhrn' : 'Prejsť na súhrn'}
+            Uložiť a prejsť na súhrn
           </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>

@@ -85,12 +85,9 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
   }
 
   function handleGoToSummary(e: React.SyntheticEvent) {
-    if (editing) { void handleSubmit(e as FormEvent, 'save-and-summary'); return; }
     e.preventDefault();
     if (isPristine()) { onSaved('save-and-summary'); return; }
-    if (window.confirm('Formulár obsahuje neuložené údaje. Naozaj prejsť na súhrn bez uloženia?')) {
-      onSaved('save-and-summary');
-    }
+    void handleSubmit(e as FormEvent, 'save-and-summary');
   }
 
   async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
@@ -171,18 +168,18 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
         </Field>
 
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Pracovný pretlak (MPa)" required error={fieldErrors.workingPressure}>
+          <Field label="Pracovný pretlak" required error={fieldErrors.workingPressure}>
             {(p) => (
               <Input {...p} required type="number" inputMode="decimal" step="0.1" min={0} max={50}
-                leftIcon={<Gauge className="size-4" />}
+                leftIcon={<Gauge className="size-4" />} suffix="MPa"
                 value={workingPressure} onChange={(e) => { setWorkingPressure(e.target.value); clearErr('workingPressure'); }}
                 placeholder="1,2" />
             )}
           </Field>
-          <Field label="Skúšobný pretlak (MPa)" required error={fieldErrors.testPressure}>
+          <Field label="Skúšobný pretlak" required error={fieldErrors.testPressure}>
             {(p) => (
               <Input {...p} required type="number" inputMode="decimal" step="0.1" min={0} max={50}
-                leftIcon={<Gauge className="size-4" />}
+                leftIcon={<Gauge className="size-4" />} suffix="MPa"
                 value={testPressure} onChange={(e) => { setTestPressure(e.target.value); clearErr('testPressure'); }}
                 placeholder="1,8" />
             )}
@@ -190,10 +187,10 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Dĺžka (m)" required error={fieldErrors.length}>
+          <Field label="Dĺžka" required error={fieldErrors.length}>
             {(p) => (
               <Input {...p} required type="number" inputMode="decimal" step="0.5" min={0.5} max={9999}
-                leftIcon={<Ruler className="size-4" />}
+                leftIcon={<Ruler className="size-4" />} suffix="m"
                 value={length} onChange={(e) => { setLength(e.target.value); clearErr('length'); }}
                 placeholder="20" />
             )}
@@ -240,7 +237,7 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
         <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
-            {editing ? 'Uložiť a späť na súhrn' : 'Prejsť na súhrn'}
+            Uložiť a prejsť na súhrn
           </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>

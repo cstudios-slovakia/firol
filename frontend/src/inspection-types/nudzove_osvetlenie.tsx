@@ -80,18 +80,9 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   }
 
   function handleGoToSummary(e: React.SyntheticEvent) {
-    if (editing) {
-      void handleSubmit(e as FormEvent, 'save-and-summary');
-      return;
-    }
     e.preventDefault();
-    if (isPristine()) {
-      onSaved('save-and-summary');
-      return;
-    }
-    if (window.confirm('Formulár obsahuje neuložené údaje. Naozaj prejsť na súhrn bez uloženia?')) {
-      onSaved('save-and-summary');
-    }
+    if (isPristine()) { onSaved('save-and-summary'); return; }
+    void handleSubmit(e as FormEvent, 'save-and-summary');
   }
 
   async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
@@ -181,12 +172,12 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           )}
         </Field>
 
-        <Field label="Doba svietenia v núdzovom režime (min)" required
+        <Field label="Doba svietenia v núdzovom režime" required
           hint={fieldErrors.durationMin ? undefined : 'Napr. 60 (1 hod.), 180 (3 hod.)'}
           error={fieldErrors.durationMin}>
           {(p) => (
             <Input {...p} required type="number" inputMode="numeric" step={1} min={0} max={600}
-              leftIcon={<Timer className="size-4" />}
+              leftIcon={<Timer className="size-4" />} suffix="min"
               value={durationMin} onChange={(e) => { setDurationMin(e.target.value); if (fieldErrors.durationMin) setFieldErrors((prev) => { const n = { ...prev }; delete n.durationMin; return n; }); }}
               placeholder="60" />
           )}
@@ -224,7 +215,7 @@ function NoStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
         <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
-            {editing ? 'Uložiť a späť na súhrn' : 'Prejsť na súhrn'}
+            Uložiť a prejsť na súhrn
           </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
