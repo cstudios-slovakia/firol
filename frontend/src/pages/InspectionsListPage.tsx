@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Pagination } from "@/components/ui/Pagination";
 import { Link } from "react-router-dom";
 import {
     Building2,
@@ -47,6 +48,9 @@ export function InspectionsListPage() {
     const [typeFilter, setTypeFilter] = useState<InspectionType | "">("");
     const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
     const [deleting, setDeleting] = useState(false);
+    const [page, setPage] = useState(1);
+
+    const PAGE_SIZE = 10;
 
     useEffect(() => {
         let cancelled = false;
@@ -81,6 +85,13 @@ export function InspectionsListPage() {
             );
         });
     }, [items, query, typeFilter]);
+
+    useEffect(() => { setPage(1); }, [query, typeFilter]);
+
+    const totalPages = filtered ? Math.ceil(filtered.length / PAGE_SIZE) : 0;
+    const paged = filtered
+        ? filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+        : null;
 
     async function handleDelete() {
         if (pendingDeleteId === null) return;
@@ -209,17 +220,26 @@ export function InspectionsListPage() {
                 </Card>
             )}
 
-            {filtered && filtered.length > 0 && (
-                <ul className="flex flex-col gap-2">
-                    {filtered.map((it) => (
-                        <li key={it.id}>
-                            <InspectionRow
-                                it={it}
-                                onDelete={setPendingDeleteId}
-                            />
-                        </li>
-                    ))}
-                </ul>
+            {paged && paged.length > 0 && (
+                <>
+                    <ul className="flex flex-col gap-2">
+                        {paged.map((it) => (
+                            <li key={it.id}>
+                                <InspectionRow
+                                    it={it}
+                                    onDelete={setPendingDeleteId}
+                                />
+                            </li>
+                        ))}
+                    </ul>
+                    <Pagination
+                        page={page}
+                        totalPages={totalPages}
+                        totalItems={filtered!.length}
+                        pageSize={PAGE_SIZE}
+                        onChange={setPage}
+                    />
+                </>
             )}
 
             <Dialog

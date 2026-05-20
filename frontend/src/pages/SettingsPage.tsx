@@ -102,44 +102,50 @@ export function SettingsLayout() {
       </header>
 
       {/* Desktop tabs */}
-      <nav
-        aria-label="Sekcie nastavení"
-        className="hidden sm:flex items-center gap-0.5 border-b border-ink-100"
-      >
-        {SECTION_TABS.map((tab) => (
-          <NavLink
-            key={tab.to}
-            to={tab.to}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-2 px-3.5 py-2.5 text-sm font-medium rounded-t-xl border-b-2 -mb-px transition-colors',
-                isActive
-                  ? 'border-firol-500 text-firol-700 bg-firol-50/60'
-                  : 'border-transparent text-ink-500 hover:text-ink-800 hover:bg-ink-50',
-              )
-            }
-          >
-            <tab.icon className="size-4 shrink-0" />
-            <span>{tab.label}</span>
-          </NavLink>
-        ))}
-        {isAdmin && (
-          <NavLink
-            to="/admin"
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-2 px-3.5 py-2.5 text-sm font-medium rounded-t-xl border-b-2 -mb-px transition-colors',
-                isActive
-                  ? 'border-rose-500 text-rose-700 bg-rose-50/60'
-                  : 'border-transparent text-ink-500 hover:text-ink-800 hover:bg-ink-50',
-              )
-            }
-          >
-            <Shield className="size-4 shrink-0" />
-            <span>Admin</span>
-          </NavLink>
-        )}
-      </nav>
+      <div className="relative hidden sm:block">
+        <nav
+          aria-label="Sekcie nastavení"
+          className="flex items-center gap-0.5 overflow-x-auto border-b border-ink-100 [&::-webkit-scrollbar]:hidden"
+        >
+          {SECTION_TABS.map((tab) => (
+            <NavLink
+              key={tab.to}
+              to={tab.to}
+              className={({ isActive }) =>
+                cn(
+                  'flex shrink-0 items-center gap-2 px-3.5 py-2.5 text-sm font-medium rounded-t-xl border-b-2 -mb-px transition-colors',
+                  isActive
+                    ? 'border-firol-500 text-firol-700 bg-firol-50/60'
+                    : 'border-transparent text-ink-500 hover:text-ink-800 hover:bg-ink-50',
+                )
+              }
+            >
+              <tab.icon className="size-4 shrink-0" />
+              <span>{tab.label}</span>
+            </NavLink>
+          ))}
+          {isAdmin && (
+            <NavLink
+              to="/admin"
+              className={({ isActive }) =>
+                cn(
+                  'flex shrink-0 items-center gap-2 px-3.5 py-2.5 text-sm font-medium rounded-t-xl border-b-2 -mb-px transition-colors',
+                  isActive
+                    ? 'border-rose-500 text-rose-700 bg-rose-50/60'
+                    : 'border-transparent text-ink-500 hover:text-ink-800 hover:bg-ink-50',
+                )
+              }
+            >
+              <Shield className="size-4 shrink-0" />
+              <span>Admin</span>
+            </NavLink>
+          )}
+        </nav>
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-white to-transparent"
+        />
+      </div>
 
       <Outlet />
     </div>
