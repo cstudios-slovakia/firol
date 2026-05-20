@@ -57,7 +57,7 @@ export function Dialog({
   return (
     <div
       className={cn(
-        'fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:items-center',
+        'fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4',
         // Backdrop fades in/out independently of the panel so we get the
         // dimmed-room feel without the panel popping in cold.
         'bg-ink-900/40 backdrop-blur-sm transition-opacity duration-200 ease-out',
@@ -76,10 +76,7 @@ export function Dialog({
         onClick={(e) => e.stopPropagation()}
         className={cn(
           'relative w-full overflow-hidden rounded-2xl bg-white shadow-[var(--shadow-lift)] outline-none',
-          'mt-12 sm:mt-0',
-          // Scale + opacity entry. Origin top because the dialog often
-          // anchors visually to a trigger above on mobile.
-          'origin-top transition-[opacity,transform] duration-200 ease-out',
+          'transition-[opacity,transform] duration-200 ease-out',
           entered ? 'scale-100 opacity-100' : 'scale-95 opacity-0',
           maxWidthClassName,
         )}

@@ -55,7 +55,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       <div
         // Bottom-left so it doesn't collide with the bottom-right CTAs
         // (e.g. "Uložiť" buttons in forms align to the right).
-        className="pointer-events-none fixed bottom-6 left-6 z-50 flex w-full max-w-md flex-col gap-3"
+        className="pointer-events-none fixed bottom-6 left-4 right-4 z-50 flex max-w-md flex-col gap-3 sm:left-6 sm:right-auto sm:w-full"
         role="region"
         aria-label="Oznámenia"
       >

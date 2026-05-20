@@ -245,18 +245,6 @@ export function TrainingEditPage() {
           </div>
         </form>
 
-        <div className="mt-4 border-t border-ink-100 pt-4">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={onArchive}
-            loading={archiving}
-            leftIcon={<Trash2 className="size-4" />}
-            className="text-status-bad hover:bg-[var(--color-status-bad-bg)]"
-          >
-            Archivovať školenie
-          </Button>
-        </div>
       </Card>
     </div>
   );

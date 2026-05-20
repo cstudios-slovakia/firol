@@ -269,7 +269,7 @@ function OpravaItemRow({
   const actions = Array.isArray(f.actions) ? f.actions.filter(isOpravaAction) : [];
   return (
     <Card className="px-4 py-3">
-      <div className="flex items-start gap-3">
+      <div className="flex items-center gap-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-700 text-sm font-semibold">
           {index}
         </span>
