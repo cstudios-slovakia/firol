@@ -189,15 +189,7 @@ export function InspectionDetailPage() {
             </Badge>
           </p>
         </div>
-        {isDraft && !(i.type === 'poziarna_kniha' && items.length >= 1) ? (
-          <Link
-            to={`/inspections/${id}/items/new`}
-            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
-          >
-            <Plus className="size-4" />
-            {i.type === 'poziarna_kniha' ? 'Pridať záznam' : 'Pridať položku'}
-          </Link>
-        ) : !isDraft ? (
+        {!isDraft ? (
           <Button
             type="button"
             onClick={handleRepeat}
@@ -244,24 +236,43 @@ export function InspectionDetailPage() {
 
       {items.length === 0 ? (
         <EmptyItems inspectionId={id} disabled={!isDraft} />
-      ) : module ? (
-        <ul className="flex flex-col gap-2">
-          {items.map((it, idx) => (
-            <li key={it.id}>
-              <module.ItemRow
-                inspectionId={id}
-                index={idx + 1}
-                item={it}
-                canEdit={true}
-                deleting={deletingItemId === it.id}
-                onDelete={() => handleDeleteItem(it.id)}
-              />
-            </li>
-          ))}
-        </ul>
       ) : (
-        <Card className="px-3 py-3 text-xs text-ink-500">
-          Pre tento typ kontroly ešte nemáme zobrazenie položiek.
+        <Card className="overflow-hidden">
+          <div className="flex items-center justify-between gap-2 border-b border-ink-100 px-4 py-3">
+            <span className="text-xs font-semibold uppercase tracking-wider text-ink-500">
+              {i.type === 'poziarna_kniha' ? 'Záznamy' : 'Položky'}
+            </span>
+            <span className="text-xs text-ink-500">spolu {items.length}</span>
+          </div>
+          {module ? (
+            <ul className="divide-y divide-ink-100">
+              {items.map((it, idx) => (
+                <li key={it.id}>
+                  <module.ItemRow
+                    inspectionId={id}
+                    index={idx + 1}
+                    item={it}
+                    canEdit={true}
+                    deleting={deletingItemId === it.id}
+                    onDelete={() => handleDeleteItem(it.id)}
+                  />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="px-4 py-3 text-xs text-ink-500">
+              Pre tento typ kontroly ešte nemáme zobrazenie položiek.
+            </p>
+          )}
+          {isDraft && !(i.type === 'poziarna_kniha' && items.length >= 1) && (
+            <Link
+              to={`/inspections/${id}/items/new`}
+              className="flex items-center gap-1.5 border-t border-ink-100 px-4 py-3 text-sm font-medium text-firol-600 transition-colors hover:bg-firol-50"
+            >
+              <Plus className="size-4" />
+              {i.type === 'poziarna_kniha' ? 'Pridať záznam' : 'Pridať položku'}
+            </Link>
+          )}
         </Card>
       )}
 

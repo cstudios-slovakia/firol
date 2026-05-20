@@ -264,7 +264,7 @@ function NoItemRow({
   const f = item.fields as Partial<NudzoveOsvetlenieItemFields>;
   const result = isPassFail(f.result) ? f.result : null;
   return (
-    <Card className="px-4 py-3">
+    <div className="px-4 py-3">
       <div className="flex items-center gap-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-700 text-sm font-semibold">
           {index}
@@ -305,7 +305,7 @@ function NoItemRow({
           </div>
         )}
       </div>
-    </Card>
+    </div>
   );
 }
 

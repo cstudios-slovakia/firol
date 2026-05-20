@@ -696,19 +696,23 @@ function BrandingSection() {
 function LogoPreview({ hasLogo, cacheBuster }: { hasLogo: boolean; cacheBuster: number }) {
   if (!hasLogo) {
     return (
-      <div className="flex aspect-[3/1] flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-ink-200 bg-white text-center text-ink-400">
-        <ImagePlus className="size-5" />
-        <span className="text-xs">Zatiaľ bez loga</span>
+      <div className="relative w-full overflow-hidden rounded-2xl border border-dashed border-ink-200 bg-white" style={{ paddingTop: 'calc(100% / 3)' }}>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-center text-ink-400">
+          <ImagePlus className="size-5" />
+          <span className="text-xs">Zatiaľ bez loga</span>
+        </div>
       </div>
     );
   }
   return (
-    <div className="flex aspect-[3/1] items-center justify-center rounded-2xl border border-ink-200 bg-white p-3">
-      <img
-        src={AccountApi.logoUrl(cacheBuster)}
-        alt="Logo spoločnosti"
-        className="max-h-full max-w-full object-contain"
-      />
+    <div className="relative w-full overflow-hidden rounded-2xl border border-ink-200 bg-white" style={{ paddingTop: 'calc(100% / 3)' }}>
+      <div className="absolute inset-0 flex items-center justify-center p-3">
+        <img
+          src={AccountApi.logoUrl(cacheBuster)}
+          alt="Logo spoločnosti"
+          className="max-h-full max-w-full object-contain"
+        />
+      </div>
     </div>
   );
 }
@@ -1250,19 +1254,23 @@ function TeamSection() {
 function SignaturePreview({ hasSignature, cacheBuster }: { hasSignature: boolean; cacheBuster: number }) {
   if (!hasSignature) {
     return (
-      <div className="flex aspect-[3/1] flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-ink-200 bg-white text-center text-ink-400">
-        <ImagePlus className="size-5" />
-        <span className="text-xs">Zatiaľ bez podpisu</span>
+      <div className="relative w-full overflow-hidden rounded-2xl border border-dashed border-ink-200 bg-white" style={{ paddingTop: 'calc(100% / 3)' }}>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-center text-ink-400">
+          <ImagePlus className="size-5" />
+          <span className="text-xs">Zatiaľ bez podpisu</span>
+        </div>
       </div>
     );
   }
   return (
-    <div className="flex aspect-[3/1] items-center justify-center rounded-2xl border border-ink-200 bg-white p-3">
-      <img
-        src={InspectorProfileApi.signatureUrl(cacheBuster)}
-        alt="Podpis revízneho technika"
-        className="max-h-full max-w-full object-contain"
-      />
+    <div className="relative w-full overflow-hidden rounded-2xl border border-ink-200 bg-white" style={{ paddingTop: 'calc(100% / 3)' }}>
+      <div className="absolute inset-0 flex items-center justify-center p-3">
+        <img
+          src={InspectorProfileApi.signatureUrl(cacheBuster)}
+          alt="Podpis revízneho technika"
+          className="max-h-full max-w-full object-contain"
+        />
+      </div>
     </div>
   );
 }
