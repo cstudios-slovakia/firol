@@ -281,7 +281,7 @@ export function InspectionDetailPage() {
           {isDraft && !(i.type === 'poziarna_kniha' && items.length >= 1) && (
             <Link
               to={`/inspections/${id}/items/new`}
-              className="flex items-center gap-1.5 border-t border-ink-100 px-4 py-3 text-sm font-medium text-firol-600 transition-colors hover:bg-firol-50"
+              className="flex items-center justify-center gap-1.5 border-t border-ink-100 px-4 py-3 text-sm font-medium text-firol-600 transition-colors hover:bg-firol-50"
             >
               <Plus className="size-4" />
               {i.type === 'poziarna_kniha' ? 'Pridať záznam' : 'Pridať položku'}

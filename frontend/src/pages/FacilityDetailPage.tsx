@@ -154,7 +154,7 @@ export function FacilityDetailPage() {
                                 </Link>
                             )}
                         </div>
-                        <div className="flex items-center gap-0.5">
+                        <div className="flex items-center gap-3">
                             <Link
                                 to={`/facilities/${facility.id}/edit`}
                                 aria-label="Upraviť"

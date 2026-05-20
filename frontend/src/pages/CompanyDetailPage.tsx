@@ -89,7 +89,7 @@ export function CompanyDetailPage() {
                 {facilities.length} {plural(facilities.length, 'prevádzka', 'prevádzky', 'prevádzok')}
               </p>
             </div>
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-3">
               <Link
                 to={`/companies/${company.id}/edit`}
                 aria-label="Upraviť"

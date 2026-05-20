@@ -18,7 +18,7 @@ export function Pagination({ page, totalPages, totalItems, pageSize, onChange }:
   const slots: (number | 'gap')[] = buildSlots(page, totalPages);
 
   return (
-    <div className="flex items-center justify-center gap-3">
+    <div className="flex flex-col items-center gap-1.5">
       <div className="flex items-center gap-1">
         <button
           type="button"
@@ -72,7 +72,7 @@ export function Pagination({ page, totalPages, totalItems, pageSize, onChange }:
 }
 
 function buildSlots(page: number, total: number): (number | 'gap')[] {
-  if (total <= 7) {
+  if (total <= 5) {
     return Array.from({ length: total }, (_, i) => i + 1);
   }
   const slots: (number | 'gap')[] = [1];

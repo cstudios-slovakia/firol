@@ -350,7 +350,7 @@ function AccountRow({
           type="button"
           onClick={onAccountDelete}
           title="Zmazať účet"
-          className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad"
+          className="ml-2.5 grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad"
         >
           <Trash2 className="size-4" />
         </button>
@@ -522,7 +522,7 @@ function UserRow({
           type="button"
           onClick={onDelete}
           title="Zmazať používateľa"
-          className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad"
+          className="ml-2.5 grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad"
         >
           <Trash2 className="size-4" />
         </button>

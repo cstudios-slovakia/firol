@@ -299,7 +299,7 @@ function RphpItemRow({
           )}
         </div>
         {canEdit && (
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-3.5">
             <Link to={`/inspections/${inspectionId}/items/${item.id}`} aria-label="Opraviť"
               className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]">
               <Edit2 className="size-4" />
