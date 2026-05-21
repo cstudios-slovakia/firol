@@ -164,4 +164,29 @@
     display: none;
     -webkit-appearance: none;
   }
+
+  /* The native ::-webkit-calendar-picker-indicator renders a calendar glyph on
+     the right edge in desktop Chromium / Edge / Safari. We render our own left
+     icon via the Input component, so the native glyph shows up as a duplicate.
+     Instead of `display: none` (which would also kill click-to-open on
+     browsers where `showPicker()` is unavailable or blocked), stretch the
+     indicator across the whole field and make it transparent. Clicking
+     anywhere on the input opens the native picker on every Chromium/Safari
+     platform — no JS, no duplicated icon. */
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+  input[type="month"]::-webkit-calendar-picker-indicator,
+  input[type="week"]::-webkit-calendar-picker-indicator {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    color: transparent;
+    background: transparent;
+    opacity: 0;
+    cursor: pointer;
+  }
 }

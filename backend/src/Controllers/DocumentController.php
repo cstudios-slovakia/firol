@@ -475,7 +475,11 @@ final class DocumentController
 
         $profStmt = Db::pdo()->prepare(
             'SELECT signature_path, cert_rphp, cert_oprava, cert_general,
-                    certification_number, valid_from, valid_to
+                    certification_number,
+                    valid_from_rphp, valid_to_rphp,
+                    valid_from_oprava, valid_to_oprava,
+                    valid_from_general, valid_to_general,
+                    valid_from, valid_to
              FROM   inspector_profiles
              WHERE  user_id = ? AND account_id = ?'
         );
@@ -516,8 +520,7 @@ final class DocumentController
                     (string) $inspection['type'],
                     $profile,
                 ),
-                'valid_from'           => $profile['valid_from'] ?? null,
-                'valid_to'             => $profile['valid_to'] ?? null,
+                ...self::validityForType((string) $inspection['type'], $profile),
                 'signature_data_uri'   => $signatureUri,
             ],
             'items' => $items,
@@ -646,6 +649,30 @@ final class DocumentController
             $val = $profile['certification_number'] ?? null;
         }
         return $val ?: null;
+    }
+
+    /**
+     * Returns valid_from / valid_to for the given inspection type, preferring
+     * per-cert columns and falling back to the legacy shared pair.
+     *
+     * @param array<string, mixed> $profile
+     * @return array{valid_from: string|null, valid_to: string|null}
+     */
+    private static function validityForType(string $type, array $profile): array
+    {
+        [$fromKey, $toKey] = match ($type) {
+            'rphp'           => ['valid_from_rphp',    'valid_to_rphp'],
+            'oprava_ts_rphp' => ['valid_from_oprava',  'valid_to_oprava'],
+            default          => ['valid_from_general', 'valid_to_general'],
+        };
+        $from = $profile[$fromKey] ?? null;
+        $to   = $profile[$toKey]   ?? null;
+        // Backward compat: fall back to legacy single pair
+        if (($from === null || $from === '') && ($to === null || $to === '')) {
+            $from = $profile['valid_from'] ?? null;
+            $to   = $profile['valid_to']   ?? null;
+        }
+        return ['valid_from' => $from ?: null, 'valid_to' => $to ?: null];
     }
 
     /**

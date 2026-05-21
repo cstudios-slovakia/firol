@@ -228,10 +228,14 @@ function InspectorProfileSection() {
   const [signatureCacheBust, setSignatureCacheBust] = useState<number>(() => Date.now());
 
   const [certRphp, setCertRphp] = useState('');
+  const [validFromRphp, setValidFromRphp] = useState('');
+  const [validToRphp, setValidToRphp] = useState('');
   const [certOprava, setCertOprava] = useState('');
+  const [validFromOprava, setValidFromOprava] = useState('');
+  const [validToOprava, setValidToOprava] = useState('');
   const [certGeneral, setCertGeneral] = useState('');
-  const [validFrom, setValidFrom] = useState('');
-  const [validTo, setValidTo] = useState('');
+  const [validFromGeneral, setValidFromGeneral] = useState('');
+  const [validToGeneral, setValidToGeneral] = useState('');
 
   const [showSigPicker, setShowSigPicker] = useState(false);
 
@@ -255,10 +259,14 @@ function InspectorProfileSection() {
   function applyProfile(p: InspectorProfile) {
     setProfile(p);
     setCertRphp(p.cert_rphp ?? '');
+    setValidFromRphp(p.valid_from_rphp ?? '');
+    setValidToRphp(p.valid_to_rphp ?? '');
     setCertOprava(p.cert_oprava ?? '');
+    setValidFromOprava(p.valid_from_oprava ?? '');
+    setValidToOprava(p.valid_to_oprava ?? '');
     setCertGeneral(p.cert_general ?? '');
-    setValidFrom(p.valid_from ?? '');
-    setValidTo(p.valid_to ?? '');
+    setValidFromGeneral(p.valid_from_general ?? '');
+    setValidToGeneral(p.valid_to_general ?? '');
   }
 
   async function onSubmit(e: FormEvent) {
@@ -271,8 +279,12 @@ function InspectorProfileSection() {
           cert_rphp:    certRphp.trim() || null,
           cert_oprava:  certOprava.trim() || null,
           cert_general: certGeneral.trim() || null,
-          valid_from: validFrom || null,
-          valid_to: validTo || null,
+          valid_from_rphp:    validFromRphp || null,
+          valid_to_rphp:      validToRphp || null,
+          valid_from_oprava:  validFromOprava || null,
+          valid_to_oprava:    validToOprava || null,
+          valid_from_general: validFromGeneral || null,
+          valid_to_general:   validToGeneral || null,
         },
         csrfToken,
       );
@@ -360,71 +372,49 @@ function InspectorProfileSection() {
           )}
         </div>
 
-        <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-          <div className="rounded-xl border border-ink-100 bg-ink-50/40 px-3 py-2 text-xs text-ink-500">
+        <form onSubmit={onSubmit} className="flex flex-col gap-3" noValidate>
+          <p className="rounded-xl border border-ink-100 bg-ink-50/40 px-3 py-2 text-xs text-ink-500">
             Každý typ kontroly vyžaduje iné oprávnenie. Vypíš čísla, ktoré máš — do každého PDF pôjde to správne.
-          </div>
+          </p>
 
-          <Field label="Č. oprávnenia — kontrola RPHP" hint="Oprávnenie na kontrolu hasiacich prístrojov">
-            {(p) => (
-              <Input
-                {...p}
-                leftIcon={<Hash className="size-4" />}
-                value={certRphp}
-                onChange={(e) => setCertRphp(e.target.value)}
-                placeholder="napr. RT-RPHP-2024-0123"
-              />
-            )}
-          </Field>
+          <CertCard
+            color="firol"
+            title="Kontrola RPHP"
+            subtitle="Oprávnenie na kontrolu hasiacich prístrojov"
+            certValue={certRphp}
+            certPlaceholder="napr. RT-RPHP-2024-0123"
+            onCertChange={setCertRphp}
+            validFrom={validFromRphp}
+            validTo={validToRphp}
+            onValidFromChange={setValidFromRphp}
+            onValidToChange={setValidToRphp}
+          />
 
-          <Field label="Č. oprávnenia — oprava / plnenie / TS RPHP" hint="Oprávnenie na opravu, plnenie a tlakovú skúšku RPHP">
-            {(p) => (
-              <Input
-                {...p}
-                leftIcon={<Hash className="size-4" />}
-                value={certOprava}
-                onChange={(e) => setCertOprava(e.target.value)}
-                placeholder="napr. RT-TS-2024-0456"
-              />
-            )}
-          </Field>
+          <CertCard
+            color="violet"
+            title="Oprava / plnenie / TS RPHP"
+            subtitle="Oprávnenie na opravu, plnenie a tlakovú skúšku RPHP"
+            certValue={certOprava}
+            certPlaceholder="napr. RT-TS-2024-0456"
+            onCertChange={setCertOprava}
+            validFrom={validFromOprava}
+            validTo={validToOprava}
+            onValidFromChange={setValidFromOprava}
+            onValidToChange={setValidToOprava}
+          />
 
-          <Field label="Č. osvedčenia — technik PO" hint="Platí pre hydranty, požiarnu knihu, požiarne uzávery, núdzové osvetlenia, TS hadíc a školenia">
-            {(p) => (
-              <Input
-                {...p}
-                leftIcon={<Hash className="size-4" />}
-                value={certGeneral}
-                onChange={(e) => setCertGeneral(e.target.value)}
-                placeholder="napr. TPO-2024-0789"
-              />
-            )}
-          </Field>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Platnosť od">
-              {(p) => (
-                <Input
-                  {...p}
-                  type="date"
-                  leftIcon={<CalendarDays className="size-4" />}
-                  value={validFrom}
-                  onChange={(e) => setValidFrom(e.target.value)}
-                />
-              )}
-            </Field>
-            <Field label="Platnosť do">
-              {(p) => (
-                <Input
-                  {...p}
-                  type="date"
-                  leftIcon={<CalendarDays className="size-4" />}
-                  value={validTo}
-                  onChange={(e) => setValidTo(e.target.value)}
-                />
-              )}
-            </Field>
-          </div>
+          <CertCard
+            color="blue"
+            title="Technik PO"
+            subtitle="Hydranty, požiarna kniha, PU, núdzové osvetlenia, TS hadíc, školenia"
+            certValue={certGeneral}
+            certPlaceholder="napr. TPO-2024-0789"
+            onCertChange={setCertGeneral}
+            validFrom={validFromGeneral}
+            validTo={validToGeneral}
+            onValidFromChange={setValidFromGeneral}
+            onValidToChange={setValidToGeneral}
+          />
 
           {error && (
             <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
@@ -1262,6 +1252,92 @@ function TeamSection() {
         )}
       </div>
     </Card>
+  );
+}
+
+// ─── Cert Card ────────────────────────────────────────────────────────────────
+
+type CertCardColor = 'firol' | 'violet' | 'blue';
+
+const CERT_CARD_STYLES: Record<CertCardColor, { border: string; bg: string; iconBg: string; iconColor: string; dot: string }> = {
+  firol:  { border: 'border-firol-200',  bg: 'bg-firol-50/40',  iconBg: 'bg-firol-100',  iconColor: 'text-firol-600',  dot: 'bg-firol-400' },
+  violet: { border: 'border-violet-200', bg: 'bg-violet-50/40', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', dot: 'bg-violet-400' },
+  blue:   { border: 'border-blue-200',   bg: 'bg-blue-50/40',   iconBg: 'bg-blue-100',   iconColor: 'text-blue-600',   dot: 'bg-blue-400' },
+};
+
+function CertCard({
+  color,
+  title,
+  subtitle,
+  certValue,
+  certPlaceholder,
+  onCertChange,
+  validFrom,
+  validTo,
+  onValidFromChange,
+  onValidToChange,
+}: {
+  color: CertCardColor;
+  title: string;
+  subtitle: string;
+  certValue: string;
+  certPlaceholder: string;
+  onCertChange: (v: string) => void;
+  validFrom: string;
+  validTo: string;
+  onValidFromChange: (v: string) => void;
+  onValidToChange: (v: string) => void;
+}) {
+  const s = CERT_CARD_STYLES[color];
+  return (
+    <div className={cn('rounded-2xl border p-4 flex flex-col gap-3', s.border, s.bg)}>
+      <div className="flex items-start gap-2.5">
+        <div className={cn('mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl', s.iconBg)}>
+          <Hash className={cn('size-4', s.iconColor)} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-ink-900">{title}</p>
+          <p className="mt-0.5 text-xs text-ink-500">{subtitle}</p>
+        </div>
+      </div>
+
+      <Field label="Číslo oprávnenia / osvedčenia">
+        {(p) => (
+          <Input
+            {...p}
+            leftIcon={<Hash className="size-4" />}
+            value={certValue}
+            onChange={(e) => onCertChange(e.target.value)}
+            placeholder={certPlaceholder}
+          />
+        )}
+      </Field>
+
+      <div className="grid gap-3 grid-cols-2">
+        <Field label="Platnosť od">
+          {(p) => (
+            <Input
+              {...p}
+              type="date"
+              leftIcon={<CalendarDays className="size-4" />}
+              value={validFrom}
+              onChange={(e) => onValidFromChange(e.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Platnosť do">
+          {(p) => (
+            <Input
+              {...p}
+              type="date"
+              leftIcon={<CalendarDays className="size-4" />}
+              value={validTo}
+              onChange={(e) => onValidToChange(e.target.value)}
+            />
+          )}
+        </Field>
+      </div>
+    </div>
   );
 }
 

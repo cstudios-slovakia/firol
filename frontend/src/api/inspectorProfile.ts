@@ -7,8 +7,12 @@ export type InspectorProfile = {
   cert_rphp: string | null;
   cert_oprava: string | null;
   cert_general: string | null;
-  valid_from: string | null;
-  valid_to: string | null;
+  valid_from_rphp: string | null;
+  valid_to_rphp: string | null;
+  valid_from_oprava: string | null;
+  valid_to_oprava: string | null;
+  valid_from_general: string | null;
+  valid_to_general: string | null;
   is_active: boolean;
 };
 
@@ -16,8 +20,12 @@ export type InspectorProfileUpdate = {
   cert_rphp?: string | null;
   cert_oprava?: string | null;
   cert_general?: string | null;
-  valid_from?: string | null;
-  valid_to?: string | null;
+  valid_from_rphp?: string | null;
+  valid_to_rphp?: string | null;
+  valid_from_oprava?: string | null;
+  valid_to_oprava?: string | null;
+  valid_from_general?: string | null;
+  valid_to_general?: string | null;
   is_active?: boolean;
 };
 
