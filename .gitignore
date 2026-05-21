@@ -33,6 +33,7 @@ handoff.zip
 docs/*
 # …ale roadmap je tracked (referencuje sa z CLAUDE.md)
 !docs/development-roadmap.md
+opravy-pdf/
 
 # Deploy artefakty (zostavujú sa v CI)
 deploy/

@@ -43,11 +43,11 @@ final class InspectorProfileController
 
         self::loadOrCreate($userId, $accountId);
 
-        $certRphp        = $req->jsonString('cert_rphp');
+        $certPhp        = $req->jsonString('cert_php');
         $certOprava      = $req->jsonString('cert_oprava');
         $certGeneral     = $req->jsonString('cert_general');
-        $validFromRphp   = $req->jsonString('valid_from_rphp');
-        $validToRphp     = $req->jsonString('valid_to_rphp');
+        $validFromPhp   = $req->jsonString('valid_from_php');
+        $validToPhp     = $req->jsonString('valid_to_php');
         $validFromOprava = $req->jsonString('valid_from_oprava');
         $validToOprava   = $req->jsonString('valid_to_oprava');
         $validFromGeneral = $req->jsonString('valid_from_general');
@@ -55,8 +55,8 @@ final class InspectorProfileController
         $isActiveRaw     = $req->json()['is_active'] ?? null;
 
         foreach ([
-            'valid_from_rphp'    => $validFromRphp,
-            'valid_to_rphp'      => $validToRphp,
+            'valid_from_php'    => $validFromPhp,
+            'valid_to_php'      => $validToPhp,
             'valid_from_oprava'  => $validFromOprava,
             'valid_to_oprava'    => $validToOprava,
             'valid_from_general' => $validFromGeneral,
@@ -67,7 +67,7 @@ final class InspectorProfileController
             }
         }
         foreach ([
-            ['valid_from_rphp',    $validFromRphp,   'valid_to_rphp',    $validToRphp],
+            ['valid_from_php',    $validFromPhp,   'valid_to_php',    $validToPhp],
             ['valid_from_oprava',  $validFromOprava,  'valid_to_oprava',  $validToOprava],
             ['valid_from_general', $validFromGeneral, 'valid_to_general', $validToGeneral],
         ] as [$fk, $fv, $tk, $tv]) {
@@ -80,11 +80,11 @@ final class InspectorProfileController
 
         Db::pdo()->prepare(
             'UPDATE inspector_profiles
-             SET    cert_rphp        = ?,
+             SET    cert_php        = ?,
                     cert_oprava      = ?,
                     cert_general     = ?,
-                    valid_from_rphp    = ?,
-                    valid_to_rphp      = ?,
+                    valid_from_php    = ?,
+                    valid_to_php      = ?,
                     valid_from_oprava  = ?,
                     valid_to_oprava    = ?,
                     valid_from_general = ?,
@@ -92,11 +92,11 @@ final class InspectorProfileController
                     is_active          = COALESCE(?, is_active)
              WHERE  user_id = ? AND account_id = ?'
         )->execute([
-            $certRphp,
+            $certPhp,
             $certOprava,
             $certGeneral,
-            $validFromRphp,
-            $validToRphp,
+            $validFromPhp,
+            $validToPhp,
             $validFromOprava,
             $validToOprava,
             $validFromGeneral,
@@ -185,8 +185,8 @@ final class InspectorProfileController
     private static function loadOrCreate(int $userId, int $accountId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT signature_path, cert_rphp, cert_oprava, cert_general,
-                    valid_from_rphp, valid_to_rphp,
+            'SELECT signature_path, cert_php, cert_oprava, cert_general,
+                    valid_from_php, valid_to_php,
                     valid_from_oprava, valid_to_oprava,
                     valid_from_general, valid_to_general,
                     valid_from, valid_to,
@@ -209,11 +209,11 @@ final class InspectorProfileController
         $stmt->execute([$userId, $accountId]);
         return $stmt->fetch() ?: [
             'signature_path'   => null,
-            'cert_rphp'        => null,
+            'cert_php'        => null,
             'cert_oprava'      => null,
             'cert_general'     => null,
-            'valid_from_rphp'    => null,
-            'valid_to_rphp'      => null,
+            'valid_from_php'    => null,
+            'valid_to_php'      => null,
             'valid_from_oprava'  => null,
             'valid_to_oprava'    => null,
             'valid_from_general' => null,
@@ -235,11 +235,11 @@ final class InspectorProfileController
             'account_id'    => $accountId,
             'has_signature' => !empty($row['signature_path'])
                                 && is_file(Storage::signaturePath($accountId, $userId)),
-            'cert_rphp'          => $row['cert_rphp'] ?? null,
+            'cert_php'          => $row['cert_php'] ?? null,
             'cert_oprava'        => $row['cert_oprava'] ?? null,
             'cert_general'       => $row['cert_general'] ?? null,
-            'valid_from_rphp'    => $row['valid_from_rphp'] ?? null,
-            'valid_to_rphp'      => $row['valid_to_rphp'] ?? null,
+            'valid_from_php'    => $row['valid_from_php'] ?? null,
+            'valid_to_php'      => $row['valid_to_php'] ?? null,
             'valid_from_oprava'  => $row['valid_from_oprava'] ?? null,
             'valid_to_oprava'    => $row['valid_to_oprava'] ?? null,
             'valid_from_general' => $row['valid_from_general'] ?? null,

@@ -32,7 +32,7 @@ export type FacilityListItem = {
   /**
    * Most recent periodicity used per inspection type for this facility,
    * derived from history. Step 1 uses this to prefill the periodicity
-   * dropdown for types where it's selectable (RPHP, požiarna kniha).
+   * dropdown for types where it's selectable (PHP, požiarna kniha).
    */
   last_periodicities: Record<string, number>;
 };

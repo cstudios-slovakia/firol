@@ -93,7 +93,7 @@ final class CompanyController
 
         // Last-used periodicity per (facility, inspection type) — used by
         // Step 1 to prefill the periodicity dropdown for types where it's
-        // selectable (RPHP, požiarna kniha). The window function picks the
+        // selectable (PHP, požiarna kniha). The window function picks the
         // most recent finalized inspection per facility+type.
         $defStmt = Db::pdo()->prepare(
             'SELECT facility_id, type, periodicity_months

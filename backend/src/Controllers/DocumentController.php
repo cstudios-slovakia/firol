@@ -474,9 +474,9 @@ final class DocumentController
         $userRow = $userStmt->fetch();
 
         $profStmt = Db::pdo()->prepare(
-            'SELECT signature_path, cert_rphp, cert_oprava, cert_general,
+            'SELECT signature_path, cert_php, cert_oprava, cert_general,
                     certification_number,
-                    valid_from_rphp, valid_to_rphp,
+                    valid_from_php, valid_to_php,
                     valid_from_oprava, valid_to_oprava,
                     valid_from_general, valid_to_general,
                     valid_from, valid_to
@@ -529,7 +529,7 @@ final class DocumentController
     }
 
     /**
-     * Per-type aggregate counts shown in the PDF stats row. RPHP cares
+     * Per-type aggregate counts shown in the PDF stats row. PHP cares
      * about A/TS/O/V; pass-fail types (hydranty, PU, NO, TS-HAD) reduce
      * to vyhovuje/nevyhovuje. Always exposes `total` so templates can
      * print the headline number without knowing the type.
@@ -541,7 +541,7 @@ final class DocumentController
     {
         $stats = ['total' => count($items)];
         switch ($type) {
-            case 'rphp':
+            case 'php':
                 $stats += ['A' => 0, 'TS' => 0, 'O' => 0, 'V' => 0];
                 foreach ($items as $it) {
                     $st = (string) ($it['fields']['status'] ?? '');
@@ -559,7 +559,7 @@ final class DocumentController
                     }
                 }
                 return $stats;
-            case 'oprava_ts_rphp':
+            case 'oprava_ts_php':
                 // Counts how many items had each action performed. An item
                 // can contribute to multiple buckets (tlakova_skuska +
                 // plnenie are typically combined on the same prístroj).
@@ -630,8 +630,8 @@ final class DocumentController
      * that predate the three-column split.
      *
      * Mapping:
-     *   rphp           → cert_rphp
-     *   oprava_ts_rphp → cert_oprava
+     *   php            → cert_php
+     *   oprava_ts_php  → cert_oprava
      *   everything else → cert_general
      *
      * @param array<string, mixed> $profile inspector_profiles row
@@ -639,8 +639,8 @@ final class DocumentController
     private static function certForType(string $type, array $profile): ?string
     {
         $key = match ($type) {
-            'rphp'           => 'cert_rphp',
-            'oprava_ts_rphp' => 'cert_oprava',
+            'php'            => 'cert_php',
+            'oprava_ts_php'  => 'cert_oprava',
             default          => 'cert_general',
         };
         $val = $profile[$key] ?? null;
@@ -661,8 +661,8 @@ final class DocumentController
     private static function validityForType(string $type, array $profile): array
     {
         [$fromKey, $toKey] = match ($type) {
-            'rphp'           => ['valid_from_rphp',    'valid_to_rphp'],
-            'oprava_ts_rphp' => ['valid_from_oprava',  'valid_to_oprava'],
+            'php'            => ['valid_from_php',     'valid_to_php'],
+            'oprava_ts_php'  => ['valid_from_oprava',  'valid_to_oprava'],
             default          => ['valid_from_general', 'valid_to_general'],
         };
         $from = $profile[$fromKey] ?? null;

@@ -323,7 +323,7 @@ function DocumentsBlock({
         <h2 className="text-sm font-semibold text-ink-900">PDF protokol</h2>
         <p className="max-w-sm text-xs text-ink-500">
           {canGenerate
-            ? 'Po vygenerovaní sa kontrola uzamkne a dostane svoje číslo (napr. RPHP-2026-001).'
+            ? 'Po vygenerovaní sa kontrola uzamkne a dostane svoje číslo (napr. PHP-2026-001).'
             : 'Pre vygenerovanie pridaj aspoň jednu položku a skontroluj dátum kontroly.'}
         </p>
         <Button

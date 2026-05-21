@@ -1,8 +1,8 @@
 import type { InspectionType } from '@/api/inspections';
 import type { InspectionTypeModule } from './common';
-import { rphpModule } from './rphp';
+import { phpModule } from './php';
 import { hydrantyModule } from './hydranty';
-import { opravaTsRphpModule } from './oprava_ts_rphp';
+import { opravaTsPhpModule } from './oprava_ts_php';
 import { poziarnaKnihaModule } from './poziarna_kniha';
 import { puAkcieschopnostModule } from './pu_akcieschopnost';
 import { puUdrzbaModule } from './pu_udrzba';
@@ -17,9 +17,9 @@ import { tsHadicModule } from './ts_hadic';
  * Add new types by importing the module and registering it here.
  */
 const REGISTRY: Partial<Record<InspectionType, InspectionTypeModule>> = {
-  rphp: rphpModule,
+  php: phpModule,
   hydranty: hydrantyModule,
-  oprava_ts_rphp: opravaTsRphpModule,
+  oprava_ts_php: opravaTsPhpModule,
   poziarna_kniha: poziarnaKnihaModule,
   pu_akcieschopnost: puAkcieschopnostModule,
   pu_udrzba: puUdrzbaModule,

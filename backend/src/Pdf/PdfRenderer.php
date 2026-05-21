@@ -10,7 +10,7 @@ use Mpdf\Output\Destination;
 
 /**
  * Renders inspection PDF protocols. One method per inspection type;
- * Phase 3a-3 ships RPHP, others land alongside their own form types.
+ * Phase 3a-3 ships PHP, others land alongside their own form types.
  *
  * Templates are plain PHP files in templates/ that read their data from
  * `$payload` (extracted into local variables). Keeping them as PHP keeps
@@ -29,12 +29,12 @@ final class PdfRenderer
      *   brand{name,logo_path?,color}, inspection (date, periodicity, notes),
      *   company (name, ico, address), facility (name, address),
      *   inspector (fullname, certification_number, valid_from, valid_to,
-     *   signature_path?), items (list of RPHP fields + position),
+     *   signature_path?), items (list of PHP fields + position),
      *   stats (A, TS, O, V, total).
      */
-    public static function renderRphp(array $payload): string
+    public static function renderPhp(array $payload): string
     {
-        $html = self::renderTemplate(__DIR__ . '/templates/rphp.php', $payload);
+        $html = self::renderTemplate(__DIR__ . '/templates/php.php', $payload);
         return self::buildPdf($html, $payload['number'] ?? 'firol');
     }
 
@@ -44,9 +44,9 @@ final class PdfRenderer
         return self::buildPdf($html, $payload['number'] ?? 'firol');
     }
 
-    public static function renderOpravaTsRphp(array $payload): string
+    public static function renderOpravaTsPhp(array $payload): string
     {
-        $html = self::renderTemplate(__DIR__ . '/templates/oprava_ts_rphp.php', $payload);
+        $html = self::renderTemplate(__DIR__ . '/templates/oprava_ts_php.php', $payload);
         return self::buildPdf($html, $payload['number'] ?? 'firol');
     }
 
@@ -93,9 +93,9 @@ final class PdfRenderer
     public static function renderForType(string $type, array $payload): string
     {
         return match ($type) {
-            'rphp'               => self::renderRphp($payload),
+            'php'                => self::renderPhp($payload),
             'hydranty'           => self::renderHydranty($payload),
-            'oprava_ts_rphp'     => self::renderOpravaTsRphp($payload),
+            'oprava_ts_php'      => self::renderOpravaTsPhp($payload),
             'poziarna_kniha'     => self::renderPoziarnaKniha($payload),
             'pu_akcieschopnost'  => self::renderPuAkcieschopnost($payload),
             'pu_udrzba'          => self::renderPuUdrzba($payload),

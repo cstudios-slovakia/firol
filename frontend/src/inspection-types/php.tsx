@@ -6,10 +6,10 @@ import {
 } from 'lucide-react';
 import {
   Inspections,
-  RPHP_STATUS_LABELS,
-  RPHP_STATUS_TONES,
-  type RphpItemFields,
-  type RphpStatus,
+  PHP_STATUS_LABELS,
+  PHP_STATUS_TONES,
+  type PhpItemFields,
+  type PhpStatus,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
 import { handleOfflineSave } from '@/lib/offline';
@@ -28,7 +28,7 @@ import type {
   Step2FormProps,
 } from './common';
 
-function isRphpStatus(s: unknown): s is RphpStatus {
+function isPhpStatus(s: unknown): s is PhpStatus {
   return s === 'A' || s === 'TS' || s === 'O' || s === 'V';
 }
 
@@ -41,7 +41,7 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
   const [serial, setSerial] = useState('');
   const [year, setYear] = useState<string>('');
   const [location, setLocation] = useState('');
-  const [status, setStatus] = useState<RphpStatus>('A');
+  const [status, setStatus] = useState<PhpStatus>('A');
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
@@ -51,13 +51,13 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<RphpItemFields>;
+      const f = initialItem.fields as Partial<PhpItemFields>;
       setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
       setExtType(typeof f.type === 'string' ? f.type : '');
       setSerial(typeof f.serial === 'string' ? f.serial : '');
       setYear(typeof f.year === 'number' ? String(f.year) : '');
       setLocation(typeof f.location === 'string' ? f.location : '');
-      setStatus(isRphpStatus(f.status) ? f.status : 'A');
+      setStatus(isPhpStatus(f.status) ? f.status : 'A');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
       setManufacturer('');
@@ -97,7 +97,7 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
     setApiError(null);
     setSubmitting(true);
     try {
-      const fields: RphpItemFields = {
+      const fields: PhpItemFields = {
         manufacturer: manufacturer.trim(),
         type: extType.trim(),
         serial: serial.trim(),
@@ -173,8 +173,8 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
         <Field label="Stav" required>
           {() => (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Stav prístroja">
-              {(Object.keys(RPHP_STATUS_LABELS) as RphpStatus[]).map((s) => (
-                <RphpStatusButton key={s} value={s} active={status === s} onClick={() => setStatus(s)} />
+              {(Object.keys(PHP_STATUS_LABELS) as PhpStatus[]).map((s) => (
+                <PhpStatusButton key={s} value={s} active={status === s} onClick={() => setStatus(s)} />
               ))}
             </div>
           )}
@@ -219,16 +219,16 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
   );
 }
 
-function RphpStatusButton({
+function PhpStatusButton({
   value,
   active,
   onClick,
 }: {
-  value: RphpStatus;
+  value: PhpStatus;
   active: boolean;
   onClick: () => void;
 }) {
-  const tones: Record<RphpStatus, { active: string; idle: string }> = {
+  const tones: Record<PhpStatus, { active: string; idle: string }> = {
     A:  { active: 'border-status-ok bg-[var(--color-status-ok-bg)] text-[var(--color-status-ok)]',
           idle: 'border-ink-200 hover:border-status-ok' },
     TS: { active: 'border-status-warn bg-[var(--color-status-warn-bg)] text-[var(--color-status-warn)]',
@@ -248,7 +248,7 @@ function RphpStatusButton({
         <span className="font-semibold">{value}</span>
       </div>
       <p className={cn('mt-0.5 text-[11px]', active ? 'opacity-80' : 'text-ink-500')}>
-        {RPHP_STATUS_LABELS[value]}
+        {PHP_STATUS_LABELS[value]}
       </p>
     </button>
   );
@@ -262,8 +262,8 @@ function RphpItemRow({
   deleting,
   onDelete,
 }: ItemRowProps) {
-  const f = item.fields as Partial<RphpItemFields>;
-  const status = isRphpStatus(f.status) ? f.status : null;
+  const f = item.fields as Partial<PhpItemFields>;
+  const status = isPhpStatus(f.status) ? f.status : null;
   return (
     <div className="px-4 py-3">
       <div className="flex items-center gap-3">
@@ -277,8 +277,8 @@ function RphpItemRow({
               {f.manufacturer} · {f.type}
             </h3>
             {status && (
-              <Badge tone={RPHP_STATUS_TONES[status]}>
-                {status} · {RPHP_STATUS_LABELS[status]}
+              <Badge tone={PHP_STATUS_TONES[status]}>
+                {status} · {PHP_STATUS_LABELS[status]}
               </Badge>
             )}
           </div>
@@ -317,12 +317,12 @@ function RphpItemRow({
 
 function RphpStatsBar({ items }: StatsBarProps) {
   if (items.length === 0) return null;
-  const stats: Record<RphpStatus, number> = { A: 0, TS: 0, O: 0, V: 0 };
+  const stats: Record<PhpStatus, number> = { A: 0, TS: 0, O: 0, V: 0 };
   for (const it of items) {
-    const s = (it.fields as Partial<RphpItemFields>).status;
-    if (isRphpStatus(s)) stats[s] += 1;
+    const s = (it.fields as Partial<PhpItemFields>).status;
+    if (isPhpStatus(s)) stats[s] += 1;
   }
-  const entries: { key: RphpStatus; label: string; tone: 'ok' | 'warn' | 'bad' | 'neutral' }[] = [
+  const entries: { key: PhpStatus; label: string; tone: 'ok' | 'warn' | 'bad' | 'neutral' }[] = [
     { key: 'A',  label: 'Akcieschopné',     tone: 'ok' },
     { key: 'TS', label: 'Tlaková skúška',  tone: 'warn' },
     { key: 'O',  label: 'Vyžaduje opravu', tone: 'bad' },
@@ -354,8 +354,8 @@ function RphpStatsBar({ items }: StatsBarProps) {
   );
 }
 
-export const rphpModule: InspectionTypeModule = {
-  type: 'rphp',
+export const phpModule: InspectionTypeModule = {
+  type: 'php',
   Step2Form: RphpStep2Form,
   ItemRow: RphpItemRow,
   StatsBar: RphpStatsBar,

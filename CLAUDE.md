@@ -49,7 +49,7 @@ build frontend → composer install → SCP only artifacts to Websupport.
 - Unique IDs for critical interactive elements.
 
 ## Modules (from specifications in docs/handoff/Specifikacie/)
-1. **RPHP** — fire extinguisher inspection (12 / 24 months)
+1. **PHP** — fire extinguisher inspection (12 / 24 months)
 2. **Hydranty** — fire hydrant inspection (12 months)
 3. **Oprava / plnenie / TS HP** — fire extinguisher servicing
 4. **Požiarna kniha** — periodic records (3 / 6 months)

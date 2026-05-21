@@ -1,6 +1,6 @@
 <?php
 /**
- * Oprava, plnenie a tlaková skúška RPHP protocol template.
+ * Oprava, plnenie a tlaková skúška PHP protocol template.
  *
  * @var string $number
  * @var string $generated_at
@@ -114,7 +114,7 @@ $checklistItems = [
       </table>
     </td>
     <td width="43%" class="hdr-right">
-      <div class="hdr-title">Oprava, plnenie a tlaková skúška RPHP</div>
+      <div class="hdr-title">Potvrdenie o vykonaní opravy a plnenia prenosného / pojazdného hasiaceho prístroja</div>
       <div class="hdr-meta">Č. dokumentu: <?= $h($number) ?></div>
       <div class="hdr-meta">Dátum: <?= $formatDate($inspection['executed_on'] ?? null) ?></div>
     </td>

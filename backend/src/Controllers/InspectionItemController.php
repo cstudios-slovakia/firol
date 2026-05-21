@@ -14,7 +14,7 @@ use PDO;
 
 /**
  * CRUD for inspection_items. The shape of `fields` is validated against
- * the parent inspection's type — RPHP enforces extinguisher metadata
+ * the parent inspection's type — PHP enforces extinguisher metadata
  * plus the four-state A/TS/O/V status. Other inspection types land in
  * later phases (3b/3c…) and will register additional validators here.
  *
@@ -23,8 +23,8 @@ use PDO;
  */
 final class InspectionItemController
 {
-    /** Allowed RPHP statuses: Akcieschopný / Tlaková skúška / Oprava / Vyradený. */
-    private const RPHP_STATUSES = ['A', 'TS', 'O', 'V'];
+    /** Allowed PHP statuses: Akcieschopný / Tlaková skúška / Oprava / Vyradený. */
+    private const PHP_STATUSES = ['A', 'TS', 'O', 'V'];
 
     /** Hydrant nominal diameters per spec (DN25/33/52, C52, custom "other"). */
     private const HYDRANTY_TYPES = ['DN25', 'DN33', 'DN52', 'C52', 'other'];
@@ -32,7 +32,7 @@ final class InspectionItemController
     /** Common pass/fail enum reused across hydranty / PU / NO / TS-HAD. */
     private const RESULT_ENUM = ['vyhovuje', 'nevyhovuje'];
 
-    /** Service actions that may be checked on an Oprava+TS RPHP item. */
+    /** Service actions that may be checked on an Oprava+TS PHP item. */
     private const OPRAVA_TS_ACTIONS = ['tlakova_skuska', 'oprava', 'plnenie'];
 
     /**
@@ -41,7 +41,7 @@ final class InspectionItemController
      */
     private const PK_ACTIVITIES = [
         'visual_check',
-        'rphp_check',
+        'php_check',
         'hydranty_check',
         'escape_routes_check',
         'pu_check',
@@ -174,9 +174,9 @@ final class InspectionItemController
     private static function validateFields(string $type, array $body): array
     {
         return match ($type) {
-            'rphp'               => self::validateRphpFields($body),
+            'php'                => self::validatePhpFields($body),
             'hydranty'           => self::validateHydrantyFields($body),
-            'oprava_ts_rphp'     => self::validateOpravaTsRphpFields($body),
+            'oprava_ts_php'      => self::validateOpravaTsPhpFields($body),
             'poziarna_kniha'     => self::validatePoziarnaKnihaFields($body),
             'pu_akcieschopnost'  => self::validatePuAkcieschopnostFields($body),
             'pu_udrzba'          => self::validatePuUdrzbaFields($body),
@@ -190,7 +190,7 @@ final class InspectionItemController
      * @param array<string, mixed> $body
      * @return array<string, mixed>
      */
-    private static function validateRphpFields(array $body): array
+    private static function validatePhpFields(array $body): array
     {
         $manufacturer = self::stringField($body, 'manufacturer', required: true, max: 80);
         $extType      = self::stringField($body, 'type', required: true, max: 40);
@@ -207,7 +207,7 @@ final class InspectionItemController
         }
 
         $status = $body['status'] ?? null;
-        if (!is_string($status) || !in_array($status, self::RPHP_STATUSES, true)) {
+        if (!is_string($status) || !in_array($status, self::PHP_STATUSES, true)) {
             self::failValidation('Field status must be one of: A, TS, O, V.');
         }
 
@@ -223,7 +223,7 @@ final class InspectionItemController
     }
 
     /**
-     * Oprava + plnenie + TS RPHP. Same identification block as RPHP
+     * Oprava + plnenie + TS PHP. Same identification block as PHP
      * (manufacturer/type/serial/year/location) plus a multi-select of
      * service actions performed during the visit. At least one action
      * must be checked — otherwise the item is meaningless on this kind
@@ -232,7 +232,7 @@ final class InspectionItemController
      * @param array<string, mixed> $body
      * @return array<string, mixed>
      */
-    private static function validateOpravaTsRphpFields(array $body): array
+    private static function validateOpravaTsPhpFields(array $body): array
     {
         $manufacturer = self::stringField($body, 'manufacturer', required: true, max: 80);
         $extType      = self::stringField($body, 'type', required: true, max: 40);

@@ -227,9 +227,9 @@ function InspectorProfileSection() {
   const [error, setError] = useState<string | null>(null);
   const [signatureCacheBust, setSignatureCacheBust] = useState<number>(() => Date.now());
 
-  const [certRphp, setCertRphp] = useState('');
-  const [validFromRphp, setValidFromRphp] = useState('');
-  const [validToRphp, setValidToRphp] = useState('');
+  const [certPhp, setCertPhp] = useState('');
+  const [validFromPhp, setValidFromPhp] = useState('');
+  const [validToPhp, setValidToPhp] = useState('');
   const [certOprava, setCertOprava] = useState('');
   const [validFromOprava, setValidFromOprava] = useState('');
   const [validToOprava, setValidToOprava] = useState('');
@@ -258,9 +258,9 @@ function InspectorProfileSection() {
 
   function applyProfile(p: InspectorProfile) {
     setProfile(p);
-    setCertRphp(p.cert_rphp ?? '');
-    setValidFromRphp(p.valid_from_rphp ?? '');
-    setValidToRphp(p.valid_to_rphp ?? '');
+    setCertPhp(p.cert_php ?? '');
+    setValidFromPhp(p.valid_from_php ?? '');
+    setValidToPhp(p.valid_to_php ?? '');
     setCertOprava(p.cert_oprava ?? '');
     setValidFromOprava(p.valid_from_oprava ?? '');
     setValidToOprava(p.valid_to_oprava ?? '');
@@ -276,11 +276,11 @@ function InspectorProfileSection() {
     try {
       const res = await InspectorProfileApi.update(
         {
-          cert_rphp:    certRphp.trim() || null,
+          cert_php:    certPhp.trim() || null,
           cert_oprava:  certOprava.trim() || null,
           cert_general: certGeneral.trim() || null,
-          valid_from_rphp:    validFromRphp || null,
-          valid_to_rphp:      validToRphp || null,
+          valid_from_php:    validFromPhp || null,
+          valid_to_php:      validToPhp || null,
           valid_from_oprava:  validFromOprava || null,
           valid_to_oprava:    validToOprava || null,
           valid_from_general: validFromGeneral || null,
@@ -379,21 +379,21 @@ function InspectorProfileSection() {
 
           <CertCard
             color="firol"
-            title="Kontrola RPHP"
+            title="Kontrola PHP"
             subtitle="Oprávnenie na kontrolu hasiacich prístrojov"
-            certValue={certRphp}
-            certPlaceholder="napr. RT-RPHP-2024-0123"
-            onCertChange={setCertRphp}
-            validFrom={validFromRphp}
-            validTo={validToRphp}
-            onValidFromChange={setValidFromRphp}
-            onValidToChange={setValidToRphp}
+            certValue={certPhp}
+            certPlaceholder="napr. RT-PHP-2024-0123"
+            onCertChange={setCertPhp}
+            validFrom={validFromPhp}
+            validTo={validToPhp}
+            onValidFromChange={setValidFromPhp}
+            onValidToChange={setValidToPhp}
           />
 
           <CertCard
             color="violet"
-            title="Oprava / plnenie / TS RPHP"
-            subtitle="Oprávnenie na opravu, plnenie a tlakovú skúšku RPHP"
+            title="Oprava / plnenie / TS PHP"
+            subtitle="Oprávnenie na opravu, plnenie a tlakovú skúšku PHP"
             certValue={certOprava}
             certPlaceholder="napr. RT-TS-2024-0456"
             onCertChange={setCertOprava}
@@ -617,7 +617,7 @@ function BrandingSection() {
         <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
           <Field
             label="Názov spoločnosti"
-            hint={'Zobrazí sa v záhlaví PDF: „<Názov> · Záznam o kontrole RPHP“'}
+            hint={'Zobrazí sa v záhlaví PDF: „<Názov> · Záznam o kontrole PHP”'}
           >
             {(p) => (
               <Input

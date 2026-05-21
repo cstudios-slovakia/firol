@@ -60,7 +60,7 @@ export type InspectionTypeModule = {
   ItemRow: React.ComponentType<ItemRowProps>;
   /**
    * Per-type aggregate counts shown above the items list. Each type
-   * exposes its own metric (RPHP shows A/TS/O/V, hydranty shows
+   * exposes its own metric (PHP shows A/TS/O/V, hydranty shows
    * vyhovuje/nevyhovuje).
    */
   StatsBar: React.ComponentType<StatsBarProps>;

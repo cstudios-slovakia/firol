@@ -29,9 +29,9 @@ import { SkeletonList } from "@/components/ui/Skeleton";
 import { Spinner } from "@/components/ui/Spinner";
 
 const TYPE_CHIPS: [InspectionType, string][] = [
-    ["rphp", "RPHP"],
+    ["php", "PHP"],
     ["hydranty", "Hydranty"],
-    ["oprava_ts_rphp", "Oprava & TS"],
+    ["oprava_ts_php", "Oprava & TS"],
     ["poziarna_kniha", "Pož. kniha"],
     ["pu_akcieschopnost", "PU – akciesch."],
     ["pu_udrzba", "PU – údržba"],

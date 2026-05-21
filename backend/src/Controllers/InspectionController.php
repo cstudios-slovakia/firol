@@ -22,9 +22,9 @@ final class InspectionController
      * @var array<string, list<int>>
      */
     private const TYPE_PERIODICITIES = [
-        'rphp'               => [12, 24],
+        'php'                => [12, 24],
         'hydranty'           => [12],
-        'oprava_ts_rphp'     => [60],
+        'oprava_ts_php'      => [60],
         'poziarna_kniha'     => [3, 6],
         'pu_akcieschopnost'  => [3],
         'pu_udrzba'          => [12],

@@ -9,7 +9,7 @@ import {
   OPRAVA_ACTIONS,
   OPRAVA_ACTION_LABELS,
   type OpravaAction,
-  type OpravaTsRphpItemFields,
+  type OpravaTsPhpItemFields,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
 import { handleOfflineSave } from '@/lib/offline';
@@ -51,7 +51,7 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<OpravaTsRphpItemFields>;
+      const f = initialItem.fields as Partial<OpravaTsPhpItemFields>;
       setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
       setExtType(typeof f.type === 'string' ? f.type : '');
       setSerial(typeof f.serial === 'string' ? f.serial : '');
@@ -103,7 +103,7 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
     setApiError(null);
     setSubmitting(true);
     try {
-      const fields: OpravaTsRphpItemFields = {
+      const fields: OpravaTsPhpItemFields = {
         manufacturer: manufacturer.trim(),
         type: extType.trim(),
         serial: serial.trim(),
@@ -261,7 +261,7 @@ function OpravaItemRow({
   deleting,
   onDelete,
 }: ItemRowProps) {
-  const f = item.fields as Partial<OpravaTsRphpItemFields>;
+  const f = item.fields as Partial<OpravaTsPhpItemFields>;
   const actions = Array.isArray(f.actions) ? f.actions.filter(isOpravaAction) : [];
   return (
     <div className="px-4 py-3">
@@ -315,7 +315,7 @@ function OpravaStatsBar({ items }: StatsBarProps) {
   if (items.length === 0) return null;
   const counts: Record<OpravaAction, number> = { tlakova_skuska: 0, oprava: 0, plnenie: 0 };
   for (const it of items) {
-    const acts = (it.fields as Partial<OpravaTsRphpItemFields>).actions;
+    const acts = (it.fields as Partial<OpravaTsPhpItemFields>).actions;
     if (Array.isArray(acts)) {
       for (const a of acts) {
         if (isOpravaAction(a)) counts[a] += 1;
@@ -341,8 +341,8 @@ function OpravaStatsBar({ items }: StatsBarProps) {
   );
 }
 
-export const opravaTsRphpModule: InspectionTypeModule = {
-  type: 'oprava_ts_rphp',
+export const opravaTsPhpModule: InspectionTypeModule = {
+  type: 'oprava_ts_php',
   Step2Form: OpravaStep2Form,
   ItemRow: OpravaItemRow,
   StatsBar: OpravaStatsBar,

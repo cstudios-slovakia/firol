@@ -25,7 +25,7 @@ import { NewFacilityDialog } from '@/components/NewFacilityDialog';
 import { cn } from '@/lib/cn';
 
 const KNOWN_TYPES: InspectionType[] = [
-  'rphp', 'hydranty', 'oprava_ts_rphp', 'poziarna_kniha',
+  'php', 'hydranty', 'oprava_ts_php', 'poziarna_kniha',
   'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'ts_hadic',
 ];
 
@@ -507,8 +507,8 @@ function numericParam(raw: string | null): number | null {
 
 function stepTwoCta(type: InspectionType): string {
   switch (type) {
-    case 'rphp':
-    case 'oprava_ts_rphp':
+    case 'php':
+    case 'oprava_ts_php':
       return 'Pokračovať — zadanie prístrojov';
     case 'hydranty':
       return 'Pokračovať — zadanie hydrantov';

@@ -21,15 +21,15 @@ type TypeMeta = {
 };
 
 /**
- * Order matters — RPHP first because it's the most common workflow and
+ * Order matters — PHP first because it's the most common workflow and
  * the only enabled type in Phase 3a-1. Disabled cards stay visible so
  * the technician can see what's coming.
  */
 const TYPES: TypeMeta[] = [
   {
-    type: 'rphp',
+    type: 'php',
     shortLabel: 'Hasiace prístroje',
-    description: 'Kontrola RPHP s hodnotením A / TS / O / V.',
+    description: 'Kontrola PHP s hodnotením A / TS / O / V.',
     intervalLabel: '12 / 24 mes.',
     icon: <Flame className="size-5" />,
     enabled: true,
@@ -43,8 +43,8 @@ const TYPES: TypeMeta[] = [
     enabled: true,
   },
   {
-    type: 'oprava_ts_rphp',
-    shortLabel: 'Oprava + TS RPHP',
+    type: 'oprava_ts_php',
+    shortLabel: 'Oprava + TS PHP',
     description: 'Oprava, plnenie a tlaková skúška hasiacich prístrojov.',
     intervalLabel: '60 mes.',
     icon: <Wrench className="size-5" />,

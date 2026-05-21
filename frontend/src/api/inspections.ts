@@ -5,9 +5,9 @@ import { api } from '@/lib/api';
  * The frontend uses these everywhere (URL params, form values, API payloads).
  */
 export type InspectionType =
-  | 'rphp'
+  | 'php'
   | 'hydranty'
-  | 'oprava_ts_rphp'
+  | 'oprava_ts_php'
   | 'poziarna_kniha'
   | 'pu_akcieschopnost'
   | 'pu_udrzba'
@@ -15,9 +15,9 @@ export type InspectionType =
   | 'ts_hadic';
 
 export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
-  rphp: 'Hasiace prístroje (RPHP)',
+  php: 'Hasiace prístroje (PHP)',
   hydranty: 'Požiarne hydranty',
-  oprava_ts_rphp: 'Oprava, plnenie a TS RPHP',
+  oprava_ts_php: 'Oprava, plnenie a TS PHP',
   poziarna_kniha: 'Požiarna kniha',
   pu_akcieschopnost: 'Požiarne uzávery — akcieschopnosť',
   pu_udrzba: 'Požiarne uzávery — údržba',
@@ -26,9 +26,9 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
 };
 
 export const INSPECTION_TYPE_PERIODICITIES: Record<InspectionType, number[]> = {
-  rphp: [12, 24],
+  php: [12, 24],
   hydranty: [12],
-  oprava_ts_rphp: [60],
+  oprava_ts_php: [60],
   poziarna_kniha: [3, 6],
   pu_akcieschopnost: [3],
   pu_udrzba: [12],
@@ -59,29 +59,29 @@ export type Inspection = InspectionListItem & {
   company_ico: string | null;
 };
 
-export type RphpStatus = 'A' | 'TS' | 'O' | 'V';
+export type PhpStatus = 'A' | 'TS' | 'O' | 'V';
 
-export const RPHP_STATUS_LABELS: Record<RphpStatus, string> = {
+export const PHP_STATUS_LABELS: Record<PhpStatus, string> = {
   A: 'Akcieschopný',
   TS: 'Tlaková skúška',
   O: 'Vyžaduje opravu',
   V: 'Vyradený',
 };
 
-export const RPHP_STATUS_TONES: Record<RphpStatus, 'ok' | 'warn' | 'bad' | 'neutral'> = {
+export const PHP_STATUS_TONES: Record<PhpStatus, 'ok' | 'warn' | 'bad' | 'neutral'> = {
   A: 'ok',
   TS: 'warn',
   O: 'bad',
   V: 'neutral',
 };
 
-export type RphpItemFields = {
+export type PhpItemFields = {
   manufacturer: string;
   type: string;
   serial: string;
   year: number;
   location: string;
-  status: RphpStatus;
+  status: PhpStatus;
   notes: string | null;
 };
 
@@ -114,7 +114,7 @@ export const OPRAVA_ACTION_LABELS: Record<OpravaAction, string> = {
   plnenie: 'Plnenie',
 };
 
-export type OpravaTsRphpItemFields = {
+export type OpravaTsPhpItemFields = {
   manufacturer: string;
   type: string;
   serial: string;
@@ -126,7 +126,7 @@ export type OpravaTsRphpItemFields = {
 
 export type PkActivity =
   | 'visual_check'
-  | 'rphp_check'
+  | 'php_check'
   | 'hydranty_check'
   | 'escape_routes_check'
   | 'pu_check'
@@ -140,7 +140,7 @@ export type PkActivity =
   | 'fire_drill';
 
 export const PK_ACTIVITIES: PkActivity[] = [
-  'visual_check', 'rphp_check', 'hydranty_check', 'escape_routes_check',
+  'visual_check', 'php_check', 'hydranty_check', 'escape_routes_check',
   'pu_check', 'training_initial', 'training_repeated',
   'electrical_equipment_check', 'technical_equipment_check',
   'electrical_appliances_check', 'documentation_check',
@@ -149,7 +149,7 @@ export const PK_ACTIVITIES: PkActivity[] = [
 
 export const PK_ACTIVITY_LABELS: Record<PkActivity, string> = {
   visual_check: 'Vizuálna kontrola priestorov spoločnosti',
-  rphp_check: 'Kontrola stavu, označenia a dostupnosti RPHP',
+  php_check: 'Kontrola stavu, označenia a dostupnosti PHP',
   hydranty_check: 'Kontrola stavu, označenia a dostupnosti požiarnych hydrantov',
   escape_routes_check: 'Kontrola stavu, označenia a voľnosti únikových ciest',
   pu_check: 'Kontrola akcieschopnosti požiarnych uzáverov',
@@ -316,9 +316,9 @@ export const Inspections = {
   addItem: (
     inspectionId: number,
     fields:
-      | RphpItemFields
+      | PhpItemFields
       | HydrantItemFields
-      | OpravaTsRphpItemFields
+      | OpravaTsPhpItemFields
       | PoziarnaKnihaItemFields
       | PuAkcieschopnostItemFields
       | PuUdrzbaItemFields
@@ -335,9 +335,9 @@ export const Inspections = {
     inspectionId: number,
     itemId: number,
     fields:
-      | RphpItemFields
+      | PhpItemFields
       | HydrantItemFields
-      | OpravaTsRphpItemFields
+      | OpravaTsPhpItemFields
       | PoziarnaKnihaItemFields
       | PuAkcieschopnostItemFields
       | PuUdrzbaItemFields

@@ -349,7 +349,7 @@ export function NewTrainingPage() {
                     </span>
                     <textarea id={p.id} rows={3} value={topics}
                       onChange={(e) => setTopics(e.target.value)}
-                      placeholder="OPP osnova, evakuácia, RPHP — zaobchádzanie, prvá pomoc."
+                      placeholder="OPP osnova, evakuácia, PHP — zaobchádzanie, prvá pomoc."
                       className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
                   </div>
                 )}

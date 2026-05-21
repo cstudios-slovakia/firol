@@ -12,7 +12,7 @@ use PDO;
  * (account, inspection-type, year) triple. Uses the document_sequences
  * table with a row-level FOR UPDATE lock so concurrent PDF generations
  * never collide. Number format is `<PREFIX>-<YEAR>-<SEQ>` with seq
- * left-padded to 3 digits (RPHP-2026-001).
+ * left-padded to 3 digits (PHP-2026-001).
  *
  * Caller MUST be inside a transaction (or the lock is released
  * immediately on UPDATE commit boundary). The InspectionController
@@ -22,9 +22,9 @@ final class NumberAllocator
 {
     /** type slug → PDF number prefix. Locked, see roadmap. */
     public const TYPE_PREFIXES = [
-        'rphp'               => 'RPHP',
+        'php'                => 'PHP',
         'hydranty'           => 'HYD',
-        'oprava_ts_rphp'     => 'OPR-RPHP',
+        'oprava_ts_php'      => 'OPR-PHP',
         'poziarna_kniha'     => 'PK',
         'pu_akcieschopnost'  => 'PU-AK',
         'pu_udrzba'          => 'PU-UD',
