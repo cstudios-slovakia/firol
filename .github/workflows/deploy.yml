@@ -1,4 +1,4 @@
-name: Deploy to Websupport
+name: Deploy to Hetzner
 
 on:
   push:
@@ -14,19 +14,23 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          port: ${{ secrets.SSH_PORT }}
+          host: ${{ secrets.PROD_SSH_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          password: ${{ secrets.PROD_SSH_PASSWORD }}
+          port: ${{ secrets.PROD_SSH_PORT }}
           script: |
             set -e
-            ROOT=~/cstudios.ninja/sub/firol
+            ROOT=/usr/home/awgefy/public_html/app.poapp.sk
+
+            # # --- staging (firol.cstudios.ninja) ---
+            # ROOT=~/cstudios.ninja/sub/firol
+
             cd $ROOT
             git clean -f backend/composer.lock
             git pull origin main
 
             # Build frontend — output lands in frontend/dist/, which is
-            # the actual document root for firol.cstudios.ninja. The PHP
+            # the actual document root for app.poapp.sk. The PHP
             # entry (frontend/public/api.php) is auto-copied to dist/ by
             # Vite. No further file shuffling is needed.
             cd $ROOT/frontend && npm ci && npm run build

@@ -17,7 +17,7 @@ export const TRAINING_TYPE_LABELS: Record<TrainingType, string> = {
   opakovane: 'Opakované školenie vedúcich a ostatných zamestnancov',
   opp_mimo: 'Školenie osôb zabezpečujúcich OPP v mimopracovnom čase',
   zdrzujuca_sa: 'Školenie osôb zdržujúcich sa na pracovisku',
-  hliadka_oph: 'Odborná príprava protipožiarnych hliadok',
+  hliadka_oph: 'Odborná príprava protipožiarnej hliadky pracoviska',
   hliadka_opah: 'Odborná príprava protipožiarnej asistenčnej hliadky',
 };
 
@@ -132,13 +132,14 @@ export const Trainings = {
 
   addTrainee: (
     trainingId: number,
-    payload: { fullname: string; position?: string | null; signature: Blob },
+    // SIGNATURE DISABLED — restore `signature: Blob` to the payload type when re-enabling on-screen capture
+    payload: { fullname: string; position?: string | null },
     csrfToken: string | null,
   ) => {
     const fd = new FormData();
     fd.append('fullname', payload.fullname);
     if (payload.position) fd.append('position', payload.position);
-    fd.append('signature', payload.signature, 'signature.png');
+    // SIGNATURE DISABLED — fd.append('signature', payload.signature, 'signature.png');
     return api<{ trainee: Trainee }>(`/api/trainings/${trainingId}/trainees`, {
       method: 'POST',
       body: fd,

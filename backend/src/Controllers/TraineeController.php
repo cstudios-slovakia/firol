@@ -40,6 +40,8 @@ final class TraineeController
         $fullname = self::trimmedPostString('fullname', max: 191, required: true);
         $position = self::trimmedPostString('position', max: 191, required: false);
 
+        /* SIGNATURE DISABLED — on-screen capture removed; PDF has a blank field for manual signing.
+           To restore: uncomment this block and the file-move block inside the transaction below.
         $file = $_FILES['signature'] ?? null;
         if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
             Response::error('Podpis je povinný — bez neho protokol nemá platnosť.', 422);
@@ -59,19 +61,18 @@ final class TraineeController
         if ($mime !== 'image/png') {
             Response::error('Podpis musí byť PNG obrázok.', 422);
         }
+        */
 
-        // INSERT first to get the id, then move the upload to a path keyed
-        // by that id. If the move fails we roll back to keep storage and
-        // DB in sync.
         $pdo = Db::pdo();
         $pdo->beginTransaction();
         try {
             $pdo->prepare(
-                'INSERT INTO trainees (training_id, fullname, position, signed_at)
-                 VALUES (?, ?, ?, NOW())'
+                'INSERT INTO trainees (training_id, fullname, position)
+                 VALUES (?, ?, ?)'
             )->execute([$trainingId, $fullname, $position]);
             $traineeId = (int) $pdo->lastInsertId();
 
+            /* SIGNATURE DISABLED — file-move + path update; restore together with the block above.
             $dest = Storage::traineeSignaturePath($trainingId, $traineeId);
             Storage::ensureDir(dirname($dest));
             if (!move_uploaded_file($tmp, $dest)) {
@@ -81,6 +82,7 @@ final class TraineeController
             $pdo->prepare(
                 'UPDATE trainees SET signature_path = ? WHERE id = ?'
             )->execute([$rel, $traineeId]);
+            */
 
             $pdo->commit();
         } catch (\Throwable $e) {

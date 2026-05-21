@@ -742,7 +742,7 @@ final class DocumentController
         'opakovane'    => 'Opakované školenie vedúcich a ostatných zamestnancov',
         'opp_mimo'     => 'Školenie osôb zabezpečujúcich OPP v mimopracovnom čase',
         'zdrzujuca_sa' => 'Školenie osôb zdržujúcich sa na pracovisku',
-        'hliadka_oph'  => 'Odborná príprava protipožiarnych hliadok',
+        'hliadka_oph'  => 'Odborná príprava protipožiarnej hliadky pracoviska',
         'hliadka_opah' => 'Odborná príprava protipožiarnej asistenčnej hliadky',
     ];
 

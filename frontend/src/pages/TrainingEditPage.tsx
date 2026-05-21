@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Building2, CalendarDays, Clock, NotebookPen, Save, User, Warehouse,
+  ArrowLeft, Building2, CalendarDays, Save, User, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Trainers, type Trainer } from '@/api/trainers';
@@ -33,8 +33,6 @@ export function TrainingEditPage() {
 
   const [date, setDate] = useState('');
   const [trainerId, setTrainerId] = useState<number | null>(null);
-  const [topics, setTopics] = useState('');
-  const [durationMin, setDurationMin] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
 
@@ -48,8 +46,6 @@ export function TrainingEditPage() {
         setTrainers(trs.items);
         setDate(t.date ?? '');
         setTrainerId(t.trainer_id);
-        setTopics(t.topics ?? '');
-        setDurationMin(t.duration_min !== null ? String(t.duration_min) : '');
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -77,8 +73,6 @@ export function TrainingEditPage() {
       await Trainings.update(id, {
         date,
         trainer_id: trainerId,
-        topics: topics.trim() || null,
-        duration_min: durationMin ? Number(durationMin) : null,
       }, csrfToken);
       toast.success('Školenie uložené');
       navigate(`/trainings/${id}`, { replace: true });
@@ -190,31 +184,6 @@ export function TrainingEditPage() {
             )}
           </Field>
 
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="sm:col-span-2">
-              <Field label="Témy školenia" hint="Stručný zoznam preberaných tém — pôjde do PDF protokolu.">
-                {(p) => (
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
-                      <NotebookPen className="size-4" />
-                    </span>
-                    <textarea id={p.id} rows={3} value={topics}
-                      onChange={(e) => setTopics(e.target.value)}
-                      placeholder="OPP osnova, evakuácia, PHP — zaobchádzanie, prvá pomoc."
-                      className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
-                  </div>
-                )}
-              </Field>
-            </div>
-            <Field label="Dĺžka (min)" hint="Voliteľné">
-              {(p) => (
-                <Input {...p} type="number" inputMode="numeric" min={0} max={1440}
-                  leftIcon={<Clock className="size-4" />}
-                  value={durationMin} onChange={(e) => setDurationMin(e.target.value)}
-                  placeholder="120" />
-              )}
-            </Field>
-          </div>
 
           {error && !dateError && (
             <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">

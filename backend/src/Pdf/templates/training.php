@@ -94,6 +94,15 @@ $twoPartTopics = [
     ],
 ];
 
+// Fixed total duration per type derived from the topic lists — not stored in DB.
+$totalMin = 0;
+if (isset($simpleTopics[$type])) {
+    $totalMin = array_sum(array_column($simpleTopics[$type], 1));
+} elseif (isset($twoPartTopics[$type])) {
+    $parts    = $twoPartTopics[$type];
+    $totalMin = $parts['teoreticka']['rozsah'] + $parts['prakticka']['rozsah'];
+}
+
 $trainerLine = $h($trainer['fullname']);
 if (!empty($trainer['certification_number'])) {
     $trainerLine .= ' | č. oprávnenia: ' . $h($trainer['certification_number']);
@@ -156,7 +165,7 @@ if (!empty($trainer['certification_number'])) {
       </table>
     </td>
     <td width="43%" class="hdr-right">
-      <div class="hdr-title">Školenie PO</div>
+      <div class="hdr-title"><?= in_array($type, ['hliadka_oph', 'hliadka_opah'], true) ? 'Odborná príprava' : 'Školenie PO' ?></div>
       <div class="hdr-meta">Č. dokumentu: <?= $h($number) ?></div>
       <div class="hdr-meta">Dátum: <?= $formatDate($training['date'] ?? null) ?></div>
     </td>
@@ -169,7 +178,7 @@ if (!empty($trainer['certification_number'])) {
   <tr>
     <td class="bl">Spoločnosť</td>
     <td class="bv"><?= $h($company['name']) ?></td>
-    <td class="bl">Druh školenia</td>
+    <td class="bl"><?= in_array($type, ['hliadka_oph', 'hliadka_opah'], true) ? 'Druh' : 'Druh školenia' ?></td>
     <td class="bv"><?= $h($training['training_type_label'] ?? '') ?></td>
   </tr>
   <tr>
@@ -182,14 +191,8 @@ if (!empty($trainer['certification_number'])) {
     <td class="bl">Prevádzka</td>
     <td class="bv"><?= $h($facility['name']) ?></td>
     <td class="bl">Časový rozsah</td>
-    <td class="bv"><?= (int) ($training['duration_min'] ?? 0) ?> minút</td>
+    <td class="bv"><?= $totalMin ?> minút</td>
   </tr>
-  <?php if ($type === 'hliadka_opah'): ?>
-  <tr>
-    <td class="bl">Názov akcie</td>
-    <td colspan="3"><?= $h($training['topics'] ?? null) ?></td>
-  </tr>
-  <?php endif ?>
   <tr>
     <td class="bl">Školenie vykonal</td>
     <td colspan="3"><?= $trainerLine ?></td>

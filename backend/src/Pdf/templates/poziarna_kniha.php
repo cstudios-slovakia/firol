@@ -12,35 +12,36 @@
  * @var array  $items
  * @var array  $stats
  */
-$h = static fn (?string $v): string => htmlspecialchars((string) ($v ?? '—'), ENT_QUOTES, 'UTF-8');
+$h = static fn(?string $v): string => htmlspecialchars((string) ($v ?? '—'), ENT_QUOTES, 'UTF-8');
 $brandColor = $brand['color'] ?? '#E8433A';
 
 $formatDate = static function (?string $iso): string {
-    if (!$iso) return '—';
-    $ts = strtotime($iso);
-    return $ts ? date('j. n. Y', $ts) : $iso;
+  if (!$iso)
+    return '—';
+  $ts = strtotime($iso);
+  return $ts ? date('j. n. Y', $ts) : $iso;
 };
 
 $formatPeriodicity = static function (int $m): string {
-    $w = $m === 1 ? 'mesiac' : ($m <= 4 ? 'mesiace' : 'mesiacov');
-    $s = "$m $w";
-    if ($m >= 24 && $m % 12 === 0) {
-        $y = intdiv($m, 12);
-        $yw = $y === 1 ? 'rok' : ($y <= 4 ? 'roky' : 'rokov');
-        $s .= " ($y $yw)";
-    }
-    return $s;
+  $w = $m === 1 ? 'mesiac' : ($m <= 4 ? 'mesiace' : 'mesiacov');
+  $s = "$m $w";
+  if ($m >= 24 && $m % 12 === 0) {
+    $y = intdiv($m, 12);
+    $yw = $y === 1 ? 'rok' : ($y <= 4 ? 'roky' : 'rokov');
+    $s .= " ($y $yw)";
+  }
+  return $s;
 };
 
 $inspectorLine = $h($inspector['fullname']);
 if (!empty($inspector['certification_number'])) {
-    $inspectorLine .= ' | č. opr.: ' . $h($inspector['certification_number']);
+  $inspectorLine .= ' | č. opr.: ' . $h($inspector['certification_number']);
 }
 
 $addrSrc = $facility['address'] ?: $company['address'] ?: '';
 $city = '';
 if (preg_match('/\d{3}\s\d{2}\s+(.+)$/u', $addrSrc, $m)) {
-    $city = trim($m[1]);
+  $city = trim($m[1]);
 }
 $miesto = ($city ? $city . ', ' : '') . $formatDate($inspection['executed_on'] ?? null);
 
@@ -50,33 +51,33 @@ $result = (string) ($record['result'] ?? '');
 $workspaces = (string) ($record['workspaces'] ?? '');
 $notes = (string) ($record['notes'] ?? '');
 $activityLabels = [
-    'visual_check'                => 'Vizuálna kontrola priestorov spoločnosti',
-    'php_check'                   => 'Kontrola stavu, označenia a dostupnosti PHP',
-    'hydranty_check'              => 'Kontrola stavu, označenia a dostupnosti požiarnych hydrantov',
-    'escape_routes_check'         => 'Kontrola stavu, označenia a voľnosti únikových ciest',
-    'pu_check'                    => 'Kontrola akcieschopnosti požiarnych uzáverov',
-    'training_initial'            => 'Vykonané vstupné školenie z predpisov OPP',
-    'training_repeated'           => 'Vykonané opakované školenie vedúcich a ostatných zamestnancov',
-    'electrical_equipment_check'  => 'Kontrola stavu používaných elektrických zariadení',
-    'technical_equipment_check'   => 'Kontrola stavu používaných technických zariadení',
-    'electrical_appliances_check' => 'Kontrola stavu používaných elektrických spotrebičov',
-    'documentation_check'         => 'Kontrola aktuálnosti dokumentácie požiarnej ochrany',
-    'employee_list_check'         => 'Kontrola aktuálneho zoznamu zamestnancov a ich školení',
-    'fire_drill'                  => 'Vykonaný cvičný požiarny poplach',
+  'visual_check' => 'Vizuálna kontrola priestorov spoločnosti',
+  'php_check' => 'Kontrola stavu, označenia a dostupnosti PHP',
+  'hydranty_check' => 'Kontrola stavu, označenia a dostupnosti požiarnych hydrantov',
+  'escape_routes_check' => 'Kontrola stavu, označenia a voľnosti únikových ciest',
+  'pu_check' => 'Kontrola akcieschopnosti požiarnych uzáverov',
+  'training_initial' => 'Vykonané vstupné školenie z predpisov OPP',
+  'training_repeated' => 'Vykonané opakované školenie vedúcich a ostatných zamestnancov',
+  'electrical_equipment_check' => 'Kontrola stavu používaných elektrických zariadení',
+  'technical_equipment_check' => 'Kontrola stavu používaných technických zariadení',
+  'electrical_appliances_check' => 'Kontrola stavu používaných elektrických spotrebičov',
+  'documentation_check' => 'Kontrola aktuálnosti dokumentácie požiarnej ochrany',
+  'employee_list_check' => 'Kontrola aktuálneho zoznamu zamestnancov a ich školení',
+  'fire_drill' => 'Vykonaný cvičný požiarny poplach',
 ];
 
 $checkedActivities = [];
 foreach ($activeSlugs as $slug) {
-    if (isset($activityLabels[$slug])) {
-        $checkedActivities[] = $activityLabels[$slug];
-    }
+  if (isset($activityLabels[$slug])) {
+    $checkedActivities[] = $activityLabels[$slug];
+  }
 }
 // Custom activities (new field); backward compat with old activities_other string
 $customActivitiesArr = isset($record['custom_activities']) && is_array($record['custom_activities'])
-    ? $record['custom_activities']
-    : (isset($record['activities_other']) && $record['activities_other'] ? [(string) $record['activities_other']] : []);
+  ? $record['custom_activities']
+  : (isset($record['activities_other']) && $record['activities_other'] ? [(string) $record['activities_other']] : []);
 foreach ($customActivitiesArr as $ca) {
-    $checkedActivities[] = (string) $ca;
+  $checkedActivities[] = (string) $ca;
 }
 
 // New shape: `defects` is a list of {description, deadline?} — each row
@@ -84,65 +85,271 @@ foreach ($customActivitiesArr as $ca) {
 // `defect_deadline` plus free-text `notes`; we split notes line-by-line
 // and reuse the single deadline so old PDFs still render predictably.
 $legacyDeadline = isset($record['defect_deadline']) && is_string($record['defect_deadline'])
-    ? $record['defect_deadline']
-    : null;
+  ? $record['defect_deadline']
+  : null;
 
 $defectRows = [];
 if (isset($record['defects']) && is_array($record['defects']) && $record['defects']) {
-    foreach ($record['defects'] as $d) {
-        if (!is_array($d)) continue;
-        $desc = isset($d['description']) && is_string($d['description']) ? trim($d['description']) : '';
-        if ($desc === '') continue;
-        $dl = isset($d['deadline']) && is_string($d['deadline']) ? $d['deadline'] : null;
-        $defectRows[] = ['description' => $desc, 'deadline' => $dl];
-    }
+  foreach ($record['defects'] as $d) {
+    if (!is_array($d))
+      continue;
+    $desc = isset($d['description']) && is_string($d['description']) ? trim($d['description']) : '';
+    if ($desc === '')
+      continue;
+    $dl = isset($d['deadline']) && is_string($d['deadline']) ? $d['deadline'] : null;
+    $defectRows[] = ['description' => $desc, 'deadline' => $dl];
+  }
 } elseif ($result === 'zistene_nedostatky') {
-    foreach (array_filter(array_map('trim', explode("\n", $notes))) as $line) {
-        $defectRows[] = ['description' => $line, 'deadline' => $legacyDeadline];
-    }
-    if (!$defectRows && $notes !== '') {
-        $defectRows[] = ['description' => $notes, 'deadline' => $legacyDeadline];
-    }
+  foreach (array_filter(array_map('trim', explode("\n", $notes))) as $line) {
+    $defectRows[] = ['description' => $line, 'deadline' => $legacyDeadline];
+  }
+  if (!$defectRows && $notes !== '') {
+    $defectRows[] = ['description' => $notes, 'deadline' => $legacyDeadline];
+  }
 }
 
 $contactLine = $facility['contact_person'] ?? '';
 ?>
 <style>
-  body { font-family: dejavusans, sans-serif; color: #1a1a1f; font-size: 10pt; }
-  .hdr { border-collapse: collapse; width: 100%; }
-  .hdr td { vertical-align: middle; padding: 3pt 0; }
-  .hdr-inner { border-collapse: collapse; }
-  .hdr-inner td { vertical-align: middle; padding: 0; }
-  .logo-img { max-height: 36pt; max-width: 80pt; }
-  .logo-box { border: 1pt solid #bbb; color: #999; font-size: 7pt; text-align: center; padding: 5pt 6pt; width: 36pt; }
-  .hdr-company { font-size: 12.5pt; font-weight: bold; }
-  .hdr-sub { font-size: 8.5pt; color: #555; }
-  .hdr-right { text-align: right; }
-  .hdr-title { font-size: 12.5pt; font-weight: bold; color: <?= $h($brandColor) ?>; }
-  .hdr-meta { font-size: 9pt; color: #555; }
-  h2 { background: <?= $h($brandColor) ?>; color: #fff; font-size: 9pt; font-weight: bold; margin: 8pt 0 0; text-transform: uppercase; letter-spacing: .3pt; padding: 3pt 6pt; }
-  .bi { border-collapse: collapse; width: 100%; font-size: 9pt; }
-  .bi td { padding: 3pt 6pt; border: 1pt solid #dde0e6; vertical-align: top; }
-  .bl { background: #f7f7f9; font-weight: bold; color: #6b6b75; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; white-space: nowrap; width: 14%; }
-  .bv { width: 36%; }
-  .legal-box { margin: 4pt 0; padding: 5pt 8pt; background: #eef5ff; border: 1pt solid #c5d8f5; font-size: 8.5pt; color: #1a3a6b; }
-  .workspaces-line { margin-top: 5pt; font-size: 9pt; }
-  table.activities { border-collapse: collapse; width: 100%; font-size: 9pt; margin-top: 4pt; }
-  table.activities td { padding: 3pt 6pt; border: 1pt solid #e5e5ea; vertical-align: top; }
-  table.activities td.chk { width: 20pt; text-align: center; color: #2e7d32; font-weight: bold; font-size: 11pt; }
-  table.defects { border-collapse: collapse; width: 100%; font-size: 9pt; margin-top: 4pt; }
-  table.defects th { background: #f3f3f6; color: #2a2a32; padding: 4pt 5pt; border: 1pt solid #d6d6dc; text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; }
-  table.defects td { padding: 4pt 5pt; border: 1pt solid #e5e5ea; vertical-align: top; }
-  table.zaver { border-collapse: collapse; width: 100%; font-size: 9pt; margin-top: 4pt; }
-  table.zaver td { padding: 4pt 8pt; border: 1pt solid #e5e5ea; vertical-align: top; }
-  table.zaver td.zlbl { background: #f7f7f9; font-weight: bold; color: #6b6b75; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; white-space: nowrap; width: 22%; }
-  .sig-tbl { border-collapse: collapse; width: 100%; margin-top: 12pt; font-size: 9pt; }
-  .sig-tbl th { background: #f3f3f6; padding: 4pt 6pt; border: 1pt solid #d6d6dc; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; font-weight: bold; color: #2a2a32; }
-  .sig-tbl td { border: 1pt solid #e5e5ea; padding: 6pt; vertical-align: top; }
-  .sig-row td { height: 50pt; vertical-align: bottom; text-align: center; }
-  .sig-img { max-height: 38pt; max-width: 150pt; }
-  .sig-line { border-top: 1pt solid #2a2a32; margin-top: 4pt; padding-top: 3pt; font-size: 8pt; color: #6b6b75; }
-  .footer { border-top: 1pt solid #e5e5ea; margin-top: 12pt; padding-top: 4pt; font-size: 8pt; color: #6b6b75; }
+  body {
+    font-family: dejavusans, sans-serif;
+    color: #1a1a1f;
+    font-size: 10pt;
+  }
+
+  .hdr {
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  .hdr td {
+    vertical-align: middle;
+    padding: 3pt 0;
+  }
+
+  .hdr-inner {
+    border-collapse: collapse;
+  }
+
+  .hdr-inner td {
+    vertical-align: middle;
+    padding: 0;
+  }
+
+  .logo-img {
+    max-height: 36pt;
+    max-width: 80pt;
+  }
+
+  .logo-box {
+    border: 1pt solid #bbb;
+    color: #999;
+    font-size: 7pt;
+    text-align: center;
+    padding: 5pt 6pt;
+    width: 36pt;
+  }
+
+  .hdr-company {
+    font-size: 12.5pt;
+    font-weight: bold;
+  }
+
+  .hdr-sub {
+    font-size: 8.5pt;
+    color: #555;
+  }
+
+  .hdr-right {
+    text-align: right;
+  }
+
+  .hdr-title {
+    font-size: 12.5pt;
+    font-weight: bold;
+    color:
+      <?= $h($brandColor) ?>
+    ;
+  }
+
+  .hdr-meta {
+    font-size: 9pt;
+    color: #555;
+  }
+
+  h2 {
+    background:
+      <?= $h($brandColor) ?>
+    ;
+    color: #fff;
+    font-size: 9pt;
+    font-weight: bold;
+    margin: 8pt 0 0;
+    text-transform: uppercase;
+    letter-spacing: .3pt;
+    padding: 3pt 6pt;
+  }
+
+  .bi {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 9pt;
+  }
+
+  .bi td {
+    padding: 3pt 6pt;
+    border: 1pt solid #dde0e6;
+    vertical-align: top;
+  }
+
+  .bl {
+    background: #f7f7f9;
+    font-weight: bold;
+    color: #6b6b75;
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: .3pt;
+    white-space: nowrap;
+    width: 14%;
+  }
+
+  .bv {
+    width: 36%;
+  }
+
+  .legal-box {
+    margin: 4pt 0;
+    padding: 5pt 8pt;
+    background: #eef5ff;
+    border: 1pt solid #c5d8f5;
+    font-size: 8.5pt;
+    color: #1a3a6b;
+  }
+
+  .workspaces-line {
+    margin-top: 5pt;
+    font-size: 9pt;
+  }
+
+  table.activities {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 9pt;
+    margin-top: 4pt;
+  }
+
+  table.activities td {
+    padding: 3pt 6pt;
+    border: 1pt solid #e5e5ea;
+    vertical-align: top;
+  }
+
+  table.activities td.chk {
+    width: 20pt;
+    text-align: center;
+    color: #2e7d32;
+    font-weight: bold;
+    font-size: 11pt;
+  }
+
+  table.defects {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 9pt;
+    margin-top: 4pt;
+  }
+
+  table.defects th {
+    background: #f3f3f6;
+    color: #2a2a32;
+    padding: 4pt 5pt;
+    border: 1pt solid #d6d6dc;
+    text-align: left;
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: .3pt;
+  }
+
+  table.defects td {
+    padding: 4pt 5pt;
+    border: 1pt solid #e5e5ea;
+    vertical-align: top;
+  }
+
+  table.zaver {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 9pt;
+    margin-top: 4pt;
+  }
+
+  table.zaver td {
+    padding: 4pt 8pt;
+    border: 1pt solid #e5e5ea;
+    vertical-align: top;
+  }
+
+  table.zaver td.zlbl {
+    background: #f7f7f9;
+    font-weight: bold;
+    color: #6b6b75;
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: .3pt;
+    white-space: nowrap;
+    width: 22%;
+  }
+
+  .sig-tbl {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 12pt;
+    font-size: 9pt;
+  }
+
+  .sig-tbl th {
+    background: #f3f3f6;
+    padding: 4pt 6pt;
+    border: 1pt solid #d6d6dc;
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: .3pt;
+    font-weight: bold;
+    color: #2a2a32;
+  }
+
+  .sig-tbl td {
+    border: 1pt solid #e5e5ea;
+    padding: 6pt;
+    vertical-align: top;
+  }
+
+  .sig-row td {
+    height: 50pt;
+    vertical-align: bottom;
+    text-align: center;
+  }
+
+  .sig-img {
+    max-height: 38pt;
+    max-width: 150pt;
+  }
+
+  .sig-line {
+    border-top: 1pt solid #2a2a32;
+    margin-top: 4pt;
+    padding-top: 3pt;
+    font-size: 8pt;
+    color: #6b6b75;
+  }
+
+  .footer {
+    border-top: 1pt solid #e5e5ea;
+    margin-top: 12pt;
+    padding-top: 4pt;
+    font-size: 8pt;
+    color: #6b6b75;
+  }
 </style>
 
 <table class="hdr">
@@ -197,43 +404,44 @@ $contactLine = $facility['contact_person'] ?? '';
 </table>
 
 <h2>Úvodný záznam</h2>
-<div class="legal-box">Vykonaná preventívna protipožiarna prehliadka všetkých pracovísk v pôsobnosti spoločnosti v zmysle zákona NRSR č. 314/2001 Z. z. v platnom znení a vyhlášky MV SR č. 121/2002 Z. z. v platnom znení.</div>
+<div class="legal-box">Vykonaná preventívna protipožiarna prehliadka všetkých pracovísk v pôsobnosti spoločnosti v
+  zmysle zákona č. 314/2001 Z. z. v platnom znení a vyhlášky MV SR č. 121/2002 Z. z. v platnom znení.</div>
 <?php if ($workspaces): ?>
-<div class="workspaces-line">Bola vykonaná vizuálna prehliadka pracovísk: <?= $h($workspaces) ?></div>
+  <div class="workspaces-line">Bola vykonaná vizuálna prehliadka pracovísk: <?= $h($workspaces) ?></div>
 <?php endif ?>
 
 <?php if ($checkedActivities): ?>
-<h2>Vykonané činnosti</h2>
-<table class="activities">
-  <?php foreach ($checkedActivities as $label): ?>
-  <tr>
-    <td class="chk">&#10004;</td>
-    <td><?= $h($label) ?></td>
-  </tr>
-  <?php endforeach ?>
-</table>
+  <h2>Vykonané činnosti</h2>
+  <table class="activities">
+    <?php foreach ($checkedActivities as $label): ?>
+      <tr>
+        <td class="chk">&#10004;</td>
+        <td><?= $h($label) ?></td>
+      </tr>
+    <?php endforeach ?>
+  </table>
 <?php endif ?>
 
 <?php if ($result === 'zistene_nedostatky' && $defectRows): ?>
-<h2>Zistené nedostatky</h2>
-<table class="defects">
-  <thead>
-    <tr>
-      <th style="width:4%">Č.</th>
-      <th style="width:72%">Popis nedostatku</th>
-      <th style="width:24%">Termín odstránenia</th>
-    </tr>
-  </thead>
-  <tbody>
-    <?php foreach ($defectRows as $i => $row): ?>
-    <tr>
-      <td><?= $i + 1 ?></td>
-      <td><?= $h($row['description']) ?></td>
-      <td><?= $row['deadline'] ? $h($formatDate($row['deadline'])) : '—' ?></td>
-    </tr>
-    <?php endforeach ?>
-  </tbody>
-</table>
+  <h2>Zistené nedostatky</h2>
+  <table class="defects">
+    <thead>
+      <tr>
+        <th style="width:4%">Č.</th>
+        <th style="width:72%">Popis nedostatku</th>
+        <th style="width:24%">Termín odstránenia</th>
+      </tr>
+    </thead>
+    <tbody>
+      <?php foreach ($defectRows as $i => $row): ?>
+        <tr>
+          <td><?= $i + 1 ?></td>
+          <td><?= $h($row['description']) ?></td>
+          <td><?= $row['deadline'] ? $h($formatDate($row['deadline'])) : '—' ?></td>
+        </tr>
+      <?php endforeach ?>
+    </tbody>
+  </table>
 <?php endif ?>
 
 <h2>Záver</h2>
@@ -256,7 +464,9 @@ $contactLine = $facility['contact_person'] ?? '';
     <th width="24%">Miesto a dátum</th>
   </tr>
   <tr>
-    <td><?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?><br><span style="font-size:8pt; color:#555;">č. oprávnenia: <?= $h($inspector['certification_number']) ?></span><?php endif ?></td>
+    <td><?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?><br><span
+          style="font-size:8pt; color:#555;">č. oprávnenia:
+          <?= $h($inspector['certification_number']) ?></span><?php endif ?></td>
     <td>Štatutárny zástupca / zodpovedná osoba</td>
     <td><?= $h($miesto) ?></td>
   </tr>
@@ -275,6 +485,7 @@ $contactLine = $facility['contact_person'] ?? '';
 </table>
 
 <div class="footer">
-  Vypracoval: <?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?> | č. oprávnenia: <?= $h($inspector['certification_number']) ?><?php endif ?>
+  Vypracoval: <?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?> | č.
+    oprávnenia: <?= $h($inspector['certification_number']) ?><?php endif ?>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Strana 1
 </div>

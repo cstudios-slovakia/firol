@@ -1,15 +1,16 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+// SIGNATURE DISABLED — import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Briefcase, Building2, CalendarDays, CheckCircle2, Clock,
-  Download, Edit2, FileText, GraduationCap, NotebookPen, Plus, Trash2, User, Users,
+  Download, Edit2, FileText, GraduationCap, Plus, Trash2, User, Users,
   Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
   TRAINING_TYPE_LABELS,
   Trainings,
-  traineeSignatureUrl,
+  // SIGNATURE DISABLED — traineeSignatureUrl,
   trainingDocumentDownloadUrl,
   type Trainee,
   type TrainingDetail,
@@ -25,7 +26,7 @@ import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Spinner } from '@/components/ui/Spinner';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
-import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
+// SIGNATURE DISABLED — import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 
 export function TrainingDetailPage() {
@@ -86,7 +87,8 @@ export function TrainingDetailPage() {
     }
   }
 
-  async function handleAdd(payload: { fullname: string; position: string; signature: Blob }) {
+  // SIGNATURE DISABLED — async function handleAdd(payload: { fullname: string; position: string; signature: Blob }) {
+  async function handleAdd(payload: { fullname: string; position: string }) {
     setAdding(true);
     setError(null);
     try {
@@ -95,7 +97,7 @@ export function TrainingDetailPage() {
         {
           fullname: payload.fullname,
           position: payload.position || null,
-          signature: payload.signature,
+          // SIGNATURE DISABLED — signature: payload.signature,
         },
         csrfToken,
       );
@@ -232,11 +234,6 @@ export function TrainingDetailPage() {
               <span className="ml-2 text-xs text-ink-500">{t.trainer_certification_number}</span>
             )}
           </DetailRow>
-          {t.topics && (
-            <DetailRow icon={<NotebookPen className="size-4" />} label="Témy">
-              <span className="whitespace-pre-wrap">{t.topics}</span>
-            </DetailRow>
-          )}
         </dl>
       </Card>
 
@@ -418,19 +415,21 @@ function AddTraineeForm({
   submitting,
 }: {
   onCancel: () => void;
-  onSubmit: (payload: { fullname: string; position: string; signature: Blob }) => Promise<void>;
+  // SIGNATURE DISABLED — onSubmit: (payload: { fullname: string; position: string; signature: Blob }) => Promise<void>;
+  onSubmit: (payload: { fullname: string; position: string }) => Promise<void>;
   submitting: boolean;
 }) {
-  const padRef = useRef<SignaturePadHandle>(null);
+  // SIGNATURE DISABLED — const padRef = useRef<SignaturePadHandle>(null);
   const [fullname, setFullname] = useState('');
   const [position, setPosition] = useState('');
-  const [empty, setEmpty] = useState(true);
+  // SIGNATURE DISABLED — const [empty, setEmpty] = useState(true);
   const [fullnameError, setFullnameError] = useState<string | null>(null);
-  const [signatureError, setSignatureError] = useState<string | null>(null);
+  // SIGNATURE DISABLED — const [signatureError, setSignatureError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
   function handleCancel() {
-    const hasData = !!fullname.trim() || !!position.trim() || !empty;
+    // SIGNATURE DISABLED — const hasData = !!fullname.trim() || !!position.trim() || !empty;
+    const hasData = !!fullname.trim() || !!position.trim();
     if (hasData && !window.confirm('Formulár obsahuje neuložené údaje. Naozaj zavrieť bez uloženia?')) {
       return;
     }
@@ -439,16 +438,17 @@ function AddTraineeForm({
 
   async function handle(e: FormEvent) {
     e.preventDefault();
-    const blob = await padRef.current?.toBlob();
+    // SIGNATURE DISABLED — const blob = await padRef.current?.toBlob();
     let hasError = false;
     if (!fullname.trim()) { setFullnameError('Doplň meno a priezvisko účastníka.'); hasError = true; }
-    if (!blob) { setSignatureError('Účastník sa musí podpísať na obrazovku.'); hasError = true; }
+    // SIGNATURE DISABLED — if (!blob) { setSignatureError('Účastník sa musí podpísať na obrazovku.'); hasError = true; }
     if (hasError) return;
     setFullnameError(null);
-    setSignatureError(null);
+    // SIGNATURE DISABLED — setSignatureError(null);
     setApiError(null);
     try {
-      await onSubmit({ fullname: fullname.trim(), position: position.trim(), signature: blob! });
+      // SIGNATURE DISABLED — await onSubmit({ fullname: fullname.trim(), position: position.trim(), signature: blob! });
+      await onSubmit({ fullname: fullname.trim(), position: position.trim() });
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Účastníka sa nepodarilo pridať.';
       setApiError(message);
@@ -475,9 +475,11 @@ function AddTraineeForm({
           </Field>
         </div>
 
+        {/* SIGNATURE DISABLED — on-screen pad; restore by uncommenting and re-enabling all SIGNATURE DISABLED markers
         <Field label="Podpis" required error={signatureError} hint={signatureError ? undefined : 'Podpíšte sa prstom alebo myšou. Rovnaký podpis pôjde na PDF.'}>
           {() => <SignaturePad ref={padRef} heightPx={180} onEmptyChange={(isEmpty) => { setEmpty(isEmpty); if (!isEmpty && signatureError) setSignatureError(null); }} />}
         </Field>
+        */}
 
         {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
@@ -489,12 +491,12 @@ function AddTraineeForm({
           <Button type="button" variant="ghost" onClick={handleCancel}>
             Zrušiť
           </Button>
+          {/* SIGNATURE DISABLED — when restoring, replace disabled with: disabled={empty || !fullname.trim()} and add: title={empty ? 'Najprv sa podpíšte' : ''} */}
           <Button
             type="submit"
             loading={submitting}
             leftIcon={<CheckCircle2 className="size-4" />}
-            disabled={empty || !fullname.trim()}
-            title={empty ? 'Najprv sa podpíšte' : ''}
+            disabled={!fullname.trim()}
           >
             Uložiť účastníka
           </Button>
@@ -534,6 +536,7 @@ function TraineeRow({
           </p>
         )}
       </div>
+      {/* SIGNATURE DISABLED — signature preview box; restore together with all other SIGNATURE DISABLED markers
       <div className="flex h-12 w-32 shrink-0 items-center justify-center rounded-xl border border-ink-100 bg-white p-1">
         {trainee.has_signature ? (
           <img
@@ -545,6 +548,7 @@ function TraineeRow({
           <span className="text-[10px] text-ink-400">bez podpisu</span>
         )}
       </div>
+      */}
       {canEdit && (
         <button
           type="button"
