@@ -146,6 +146,9 @@
     appearance: none;
     min-width: 0;
     max-width: 100%;
+    /* Required so the ::-webkit-calendar-picker-indicator overlay below
+       is positioned relative to the input itself, not the viewport. */
+    position: relative;
   }
   /* Inside the inner pseudo-element wrapper, the placeholder/value text can still
      blow out the width on iOS — clip the inner field so it cannot push the box. */

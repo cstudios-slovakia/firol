@@ -35,7 +35,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
     return (
       <div className="relative w-full min-w-0">
         {leftIcon && (
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">
+          <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-ink-400">
             {leftIcon}
           </span>
         )}
@@ -53,12 +53,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           {...rest}
         />
         {rightSlot && (
-          <span className="absolute right-1 top-1/2 -translate-y-1/2">
+          <span className="absolute right-1 top-1/2 z-10 -translate-y-1/2">
             {rightSlot}
           </span>
         )}
         {suffix && (
-          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-ink-400">
+          <span className="pointer-events-none absolute right-3 top-1/2 z-10 -translate-y-1/2 text-sm text-ink-400">
             {suffix}
           </span>
         )}

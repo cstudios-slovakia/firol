@@ -228,7 +228,7 @@ export function InspectionDetailPage() {
           disabled={!isDraft || savingDate}
           onChange={(e) => setLocalDate(e.target.value)}
           aria-label="Dátum kontroly"
-          className="h-11 w-full rounded-xl border border-status-warn/40 bg-white px-3 text-sm font-medium text-ink-900 transition-colors hover:border-status-warn focus:border-status-warn focus:outline-none focus:ring-2 focus:ring-status-warn/30 disabled:bg-ink-50 disabled:text-ink-500"
+          className="h-11 w-full min-w-0 appearance-none rounded-xl border border-status-warn/40 bg-white px-3 text-sm font-medium text-ink-900 transition-colors hover:border-status-warn focus:border-status-warn focus:outline-none focus:ring-2 focus:ring-status-warn/30 disabled:bg-ink-50 disabled:text-ink-500"
         />
         {isDraft && localDate && localDate !== savedDate && (
           <Button

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  AtSign, Building2, CalendarDays, Check, ChevronLeft, ChevronRight, Copy, CreditCard,
-  FileSignature, GraduationCap, Hash, ImagePlus, MailPlus, Palette, Phone, Plus,
-  RotateCcw, Shield, ShieldCheck, ShieldOff, Trash2, UploadCloud, User, UserCheck,
-  UsersRound,
+  AlertTriangle, AtSign, Building2, CalendarDays, Check, ChevronLeft, ChevronRight,
+  Copy, CreditCard, FileSignature, GraduationCap, Hash, ImagePlus, MailPlus, Palette,
+  Phone, Plus, RotateCcw, Shield, ShieldCheck, ShieldOff, Trash2, UploadCloud, User,
+  UserCheck, UsersRound,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { AccountApi, type Account } from '@/api/account';
@@ -1259,11 +1259,23 @@ function TeamSection() {
 
 type CertCardColor = 'firol' | 'violet' | 'blue';
 
-const CERT_CARD_STYLES: Record<CertCardColor, { border: string; bg: string; iconBg: string; iconColor: string; dot: string }> = {
-  firol:  { border: 'border-firol-200',  bg: 'bg-firol-50/40',  iconBg: 'bg-firol-100',  iconColor: 'text-firol-600',  dot: 'bg-firol-400' },
-  violet: { border: 'border-violet-200', bg: 'bg-violet-50/40', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', dot: 'bg-violet-400' },
-  blue:   { border: 'border-blue-200',   bg: 'bg-blue-50/40',   iconBg: 'bg-blue-100',   iconColor: 'text-blue-600',   dot: 'bg-blue-400' },
+const CERT_CARD_STYLES: Record<CertCardColor, { border: string; bg: string; iconBg: string; iconColor: string }> = {
+  firol:  { border: 'border-firol-200',  bg: 'bg-firol-50/40',  iconBg: 'bg-firol-100',  iconColor: 'text-firol-600' },
+  violet: { border: 'border-violet-200', bg: 'bg-violet-50/40', iconBg: 'bg-violet-100', iconColor: 'text-violet-600' },
+  blue:   { border: 'border-blue-200',   bg: 'bg-blue-50/40',   iconBg: 'bg-blue-100',   iconColor: 'text-blue-600' },
 };
+
+function certDaysLeft(validTo: string): number | null {
+  if (!validTo) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  // Parse as local date — "YYYY-MM-DD" without time is treated as UTC by the
+  // Date constructor, which causes off-by-one errors in timezones ahead of UTC.
+  const [y, m, d] = validTo.split('-').map(Number);
+  const expiry = new Date(y, m - 1, d);
+  return Math.ceil((expiry.getTime() - today.getTime()) / 86_400_000);
+}
+
 
 function CertCard({
   color,
@@ -1289,6 +1301,10 @@ function CertCard({
   onValidToChange: (v: string) => void;
 }) {
   const s = CERT_CARD_STYLES[color];
+  const days = certDaysLeft(validTo);
+  const isExpired = days !== null && days < 0;
+  const isExpiringSoon = days !== null && days >= 0 && days <= 30;
+
   return (
     <div className={cn('rounded-2xl border p-4 flex flex-col gap-3', s.border, s.bg)}>
       <div className="flex items-start gap-2.5">
@@ -1337,6 +1353,19 @@ function CertCard({
           )}
         </Field>
       </div>
+
+      {isExpired && (
+        <p className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-status-bad)]">
+          <AlertTriangle className="size-3.5 shrink-0" />
+          Neplatné
+        </p>
+      )}
+      {isExpiringSoon && (
+        <p className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-status-warn)]">
+          <AlertTriangle className="size-3.5 shrink-0" />
+          Blíži sa koniec platnosti
+        </p>
+      )}
     </div>
   );
 }
