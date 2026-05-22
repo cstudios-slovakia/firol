@@ -328,55 +328,57 @@ export function FacilityDetailPage() {
                         type="button"
                         onClick={() => setActiveTab("inspections")}
                         className={cn(
-                            "relative flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium transition-colors whitespace-nowrap",
+                            "relative flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium transition-all duration-150 whitespace-nowrap",
                             activeTab === "inspections"
                                 ? "text-firol-600"
                                 : "text-ink-500 hover:text-ink-800",
                         )}
                     >
-                        <ClipboardList className="size-4" />
+                        <ClipboardList className={cn("size-4 transition-transform duration-150", activeTab === "inspections" && "scale-110")} />
                         Kontroly
                         {inspections !== null && (
                             <span className={cn(
-                                "ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                                "ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold transition-colors duration-150",
                                 activeTab === "inspections" ? "bg-firol-100 text-firol-700" : "bg-ink-100 text-ink-500",
                             )}>
                                 {inspections.length}
                             </span>
                         )}
-                        {activeTab === "inspections" && (
-                            <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-firol-500" />
-                        )}
+                        <span className={cn(
+                            "absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-firol-500 transition-[transform,opacity] duration-200 origin-left",
+                            activeTab === "inspections" ? "opacity-100 scale-x-100" : "opacity-0 scale-x-0",
+                        )} />
                     </button>
                     <button
                         type="button"
                         onClick={() => setActiveTab("trainings")}
                         className={cn(
-                            "relative flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium transition-colors whitespace-nowrap",
+                            "relative flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium transition-all duration-150 whitespace-nowrap",
                             activeTab === "trainings"
                                 ? "text-firol-600"
                                 : "text-ink-500 hover:text-ink-800",
                         )}
                     >
-                        <GraduationCap className="size-4" />
+                        <GraduationCap className={cn("size-4 transition-transform duration-150", activeTab === "trainings" && "scale-110")} />
                         Školenia
                         {trainings !== null && (
                             <span className={cn(
-                                "ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                                "ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold transition-colors duration-150",
                                 activeTab === "trainings" ? "bg-firol-100 text-firol-700" : "bg-ink-100 text-ink-500",
                             )}>
                                 {trainings.length}
                             </span>
                         )}
-                        {activeTab === "trainings" && (
-                            <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-firol-500" />
-                        )}
+                        <span className={cn(
+                            "absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-firol-500 transition-[transform,opacity] duration-200 origin-left",
+                            activeTab === "trainings" ? "opacity-100 scale-x-100" : "opacity-0 scale-x-0",
+                        )} />
                     </button>
                 </nav>
             </div>
 
             {/* Inspection history */}
-            {activeTab === "inspections" && <section>
+            {activeTab === "inspections" && <section key="inspections" className="animate-fade-up">
                 <header className="mb-3 flex items-center justify-between">
                     <h2 className="sr-only">História kontrol</h2>
                     <Link
@@ -533,7 +535,7 @@ export function FacilityDetailPage() {
             </section>}
 
             {/* Training history */}
-            {activeTab === "trainings" && <section>
+            {activeTab === "trainings" && <section key="trainings" className="animate-fade-up">
                 <header className="mb-3 flex items-center justify-between">
                     <h2 className="sr-only">História školení</h2>
                     <Link

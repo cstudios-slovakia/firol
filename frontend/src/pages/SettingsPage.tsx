@@ -113,15 +113,19 @@ export function SettingsLayout() {
               to={tab.to}
               className={({ isActive }) =>
                 cn(
-                  'flex shrink-0 items-center gap-2 px-3.5 py-2.5 text-sm font-medium rounded-t-xl border-b-2 -mb-px transition-colors',
+                  'flex shrink-0 items-center gap-2 px-3.5 py-2.5 text-sm font-medium rounded-t-xl border-b-2 -mb-px transition-all duration-150',
                   isActive
                     ? 'border-firol-500 text-firol-700 bg-firol-50/60'
                     : 'border-transparent text-ink-500 hover:text-ink-800 hover:bg-ink-50',
                 )
               }
             >
-              <tab.icon className="size-4 shrink-0" />
-              <span>{tab.label}</span>
+              {({ isActive }) => (
+                <>
+                  <tab.icon className={cn('size-4 shrink-0 transition-transform duration-150', isActive && 'scale-110')} />
+                  <span>{tab.label}</span>
+                </>
+              )}
             </NavLink>
           ))}
           {isAdmin && (
@@ -129,15 +133,19 @@ export function SettingsLayout() {
               to="/admin"
               className={({ isActive }) =>
                 cn(
-                  'flex shrink-0 items-center gap-2 px-3.5 py-2.5 text-sm font-medium rounded-t-xl border-b-2 -mb-px transition-colors',
+                  'flex shrink-0 items-center gap-2 px-3.5 py-2.5 text-sm font-medium rounded-t-xl border-b-2 -mb-px transition-all duration-150',
                   isActive
                     ? 'border-rose-500 text-rose-700 bg-rose-50/60'
                     : 'border-transparent text-ink-500 hover:text-ink-800 hover:bg-ink-50',
                 )
               }
             >
-              <Shield className="size-4 shrink-0" />
-              <span>Admin</span>
+              {({ isActive }) => (
+                <>
+                  <Shield className={cn('size-4 shrink-0 transition-transform duration-150', isActive && 'scale-110')} />
+                  <span>Admin</span>
+                </>
+              )}
             </NavLink>
           )}
         </nav>
@@ -147,7 +155,9 @@ export function SettingsLayout() {
         />
       </div>
 
-      <Outlet />
+      <div key={location.pathname} className="animate-fade-up">
+        <Outlet />
+      </div>
     </div>
   );
 }
@@ -169,11 +179,12 @@ export function SettingsIndexPage() {
 
   return (
     <div className="flex flex-col gap-2 sm:hidden">
-      {items.map((item) => (
+      {items.map((item, i) => (
         <Link
           key={item.to}
           to={item.to}
-          className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-colors hover:bg-ink-50 active:bg-ink-100"
+          className="group animate-fade-up flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-[background-color,transform] duration-150 hover:bg-ink-50 hover:-translate-y-px active:bg-ink-100 active:translate-y-0"
+          style={{ animationDelay: `${i * 45}ms` }}
         >
           <span className={cn('grid size-11 shrink-0 place-items-center rounded-2xl', item.bg)}>
             <item.icon className={cn('size-5', item.color)} />
@@ -182,7 +193,7 @@ export function SettingsIndexPage() {
             <p className="text-sm font-semibold text-ink-900">{item.label}</p>
             <p className="mt-0.5 text-xs text-ink-500">{item.description}</p>
           </div>
-          <ChevronRight className="size-4 shrink-0 text-ink-300" />
+          <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform duration-150 group-hover:translate-x-0.5" />
         </Link>
       ))}
     </div>

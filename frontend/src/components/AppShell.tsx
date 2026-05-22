@@ -1,10 +1,9 @@
-import { Link, Outlet, NavLink, useNavigate } from "react-router-dom";
+import { Link, Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
     AlertTriangle,
     Building2,
     ClipboardList,
     CreditCard,
-    Flame,
     GraduationCap,
     LayoutDashboard,
     LogOut,
@@ -94,6 +93,7 @@ type Tab = {
 
 export function AppShell() {
     const { logout } = useAuth();
+    const location = useLocation();
 
     const topBarRef = useRef<HTMLDivElement>(null);
     const [topBarH, setTopBarH] = useState(65);
@@ -121,9 +121,11 @@ export function AppShell() {
                             aria-label="Domov"
                             className="group flex items-center gap-2.5 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
                         >
-                            <span className="grid size-9 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)] transition-transform group-hover:scale-105">
-                                <Flame className="size-4" />
-                            </span>
+                            <img
+                                src="/icons/firol-icon-only.png"
+                                alt="Firol"
+                                className="size-9 transition-transform group-hover:scale-105"
+                            />
                             <span className="font-semibold tracking-tight text-ink-900 transition-colors group-hover:text-firol-700">
                                 Firol
                             </span>
@@ -147,7 +149,9 @@ export function AppShell() {
             <div className="mx-auto relative flex max-w-6xl gap-6 px-4">
                 <SideNav topOffset={topBarH} />
                 <main className="min-w-0 flex-1 py-5 sm:py-8">
-                    <Outlet />
+                    <div key={location.pathname} className="animate-fade-up">
+                        <Outlet />
+                    </div>
                 </main>
             </div>
 
@@ -342,17 +346,21 @@ function SideNav({ topOffset }: { topOffset: number }) {
                 end={tab.to === "/"}
                 className={({ isActive }) =>
                     cn(
-                        "flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-sm font-medium transition-colors",
+                        "flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-150",
                         isActive
                             ? cn("text-ink-900", tab.activeBg)
                             : "text-ink-600 hover:bg-ink-50 hover:text-ink-900",
                     )
                 }
             >
-                {() => (
+                {({ isActive }) => (
                     <>
                         <tab.icon
-                            className={cn("size-4 shrink-0", tab.activeColor)}
+                            className={cn(
+                                "size-4 shrink-0 transition-transform duration-150",
+                                isActive && "scale-110",
+                                tab.activeColor,
+                            )}
                         />
                         <span>{tab.label}</span>
                     </>
@@ -404,7 +412,7 @@ function BottomTabBar() {
                             end={tab.to === "/"}
                             className={({ isActive }) =>
                                 cn(
-                                    "flex flex-col items-center gap-0.5 rounded-2xl py-2 text-[11px] font-medium transition-colors",
+                                    "flex flex-col items-center gap-0.5 rounded-2xl py-2 text-[11px] font-medium transition-all duration-150",
                                     isActive
                                         ? cn(tab.activeColor, tab.activeBg)
                                         : "text-ink-400 hover:text-ink-600",
@@ -415,9 +423,9 @@ function BottomTabBar() {
                                 <>
                                     <tab.icon
                                         className={cn(
-                                            "size-5",
+                                            "size-5 transition-transform duration-150",
                                             tab.activeColor,
-                                            isActive && "stroke-[2.25px]",
+                                            isActive && "scale-110 stroke-[2.25px]",
                                         )}
                                     />
                                     <span>{tab.label}</span>

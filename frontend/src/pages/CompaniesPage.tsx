@@ -144,7 +144,7 @@ function CompanyCard({ company, showAccount }: { company: CompanyListItem; showA
 
   return (
     <Link to={`/companies/${company.id}`} className="block group">
-      <Card className="px-4 py-3.5 transition-shadow group-hover:shadow-[var(--shadow-lift)]">
+      <Card className="px-4 py-3.5 transition-[box-shadow,transform] duration-150 group-hover:-translate-y-px group-hover:shadow-[var(--shadow-lift)]">
         <div className="flex items-center gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-600">
             <Building2 className="size-5" />

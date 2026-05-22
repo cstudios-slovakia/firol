@@ -8,7 +8,7 @@ export function Card({ elevated = true, className, ...rest }: CardProps) {
   return (
     <div
       className={cn(
-        'rounded-[var(--radius-card)] bg-white border border-ink-100',
+        'rounded-[var(--radius-card)] bg-white border border-ink-100 transition-shadow duration-200',
         elevated ? 'shadow-[var(--shadow-lift)]' : 'shadow-[var(--shadow-soft)]',
         className,
       )}

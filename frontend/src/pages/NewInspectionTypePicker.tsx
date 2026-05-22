@@ -129,8 +129,10 @@ export function NewInspectionTypePicker() {
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {TYPES.map((meta) => (
-          <TypeCard key={meta.type} meta={meta} href={stepOnePathFor(meta.type)} />
+        {TYPES.map((meta, i) => (
+          <div key={meta.type} className="animate-fade-up" style={{ animationDelay: `${i * 40}ms` }}>
+            <TypeCard meta={meta} href={stepOnePathFor(meta.type)} />
+          </div>
         ))}
       </div>
     </div>
@@ -169,7 +171,7 @@ function TypeCard({ meta, href }: { meta: TypeMeta; href: string }) {
       className="group block rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
       title={fullLabel}
     >
-      <Card className="flex items-start gap-3 px-4 py-4 transition-shadow group-hover:shadow-md">
+      <Card className="flex items-center gap-3 px-4 py-4 transition-[box-shadow,transform] duration-150 group-hover:-translate-y-px group-hover:shadow-md">
         <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
           {meta.icon}
         </div>
@@ -178,7 +180,7 @@ function TypeCard({ meta, href }: { meta: TypeMeta; href: string }) {
           <p className="mt-0.5 line-clamp-2 text-xs text-ink-500">{meta.description}</p>
           <p className="mt-1 text-[11px] text-ink-400">{meta.intervalLabel}</p>
         </div>
-        <ChevronRight className="size-4 shrink-0 text-ink-300 group-hover:text-firol-500" />
+        <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-firol-500" />
       </Card>
     </Link>
   );

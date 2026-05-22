@@ -135,8 +135,32 @@
     75%        { transform: translate(2.5%, -3.5%)scale(1.04) rotate(2deg);  }
   }
 
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0);    }
+  }
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  @keyframes scale-in {
+    from { opacity: 0; transform: scale(0.93); }
+    to   { opacity: 1; transform: scale(1);    }
+  }
+
   /* iOS Safari sizes date/time inputs to their intrinsic content width and ignores
      parent constraints, causing horizontal overflow. Force them to honor box width. */
+}
+
+@layer utilities {
+  .animate-fade-up  { animation: fade-up  0.22s ease-out both; }
+  .animate-fade-in  { animation: fade-in  0.18s ease-out both; }
+  .animate-scale-in { animation: scale-in 0.18s ease-out both; }
+}
+
+@layer base {
   input[type="date"],
   input[type="time"],
   input[type="datetime-local"],

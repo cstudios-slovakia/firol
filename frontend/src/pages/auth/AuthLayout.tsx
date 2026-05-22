@@ -1,4 +1,4 @@
-import { CheckCircle2, FileText, Flame, Shield } from 'lucide-react';
+import { CheckCircle2, FileText, Shield } from 'lucide-react';
 import { AuroraBackground } from '@/components/AuroraBackground';
 
 const HERO_FEATURES = [
@@ -36,9 +36,11 @@ export function AuthLayout({
           <div className="relative z-10 flex flex-col gap-10">
             {/* brand */}
             <div className="flex items-center gap-3">
-              <div className="grid size-11 place-items-center rounded-2xl bg-white/20 shadow-lg backdrop-blur-sm">
-                <Flame className="size-5 text-white" />
-              </div>
+              <img
+                src="/icons/firol-icon-only.png"
+                alt="Firol"
+                className="size-11"
+              />
               <span className="text-xl font-bold tracking-tight text-white">Firol</span>
             </div>
 
@@ -76,11 +78,11 @@ export function AuthLayout({
               </header>
 
               {children}
-            </div>
 
-            {footer && (
-              <footer className="pt-8 text-center text-base text-ink-600">{footer}</footer>
-            )}
+              {footer && (
+                <footer className="mt-10 text-center text-base text-ink-600">{footer}</footer>
+              )}
+            </div>
           </div>
         </div>
 

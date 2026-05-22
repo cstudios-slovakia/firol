@@ -73,21 +73,27 @@ export function DashboardPage() {
             </div>
 
             <div className="flex flex-col gap-4">
-                <InspectionsWidget
-                    items={inspections.slice(0, 4)}
-                    total={inspections.length}
-                    loaded={loaded}
-                />
-                <CompaniesWidget
-                    items={companies.slice(0, 4)}
-                    total={companies.length}
-                    loaded={loaded}
-                />
-                <TrainingsWidget
-                    items={trainings.slice(0, 4)}
-                    total={trainings.length}
-                    loaded={loaded}
-                />
+                <div className="animate-fade-up" style={{ animationDelay: '80ms' }}>
+                    <InspectionsWidget
+                        items={inspections.slice(0, 4)}
+                        total={inspections.length}
+                        loaded={loaded}
+                    />
+                </div>
+                <div className="animate-fade-up" style={{ animationDelay: '160ms' }}>
+                    <CompaniesWidget
+                        items={companies.slice(0, 4)}
+                        total={companies.length}
+                        loaded={loaded}
+                    />
+                </div>
+                <div className="animate-fade-up" style={{ animationDelay: '240ms' }}>
+                    <TrainingsWidget
+                        items={trainings.slice(0, 4)}
+                        total={trainings.length}
+                        loaded={loaded}
+                    />
+                </div>
             </div>
         </div>
     );

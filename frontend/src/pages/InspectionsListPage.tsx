@@ -192,9 +192,9 @@ export function InspectionsListPage() {
                             type="button"
                             onClick={() => setTypeFilter("")}
                             className={cn(
-                                "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                                "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-all duration-150",
                                 typeFilter === ""
-                                    ? "bg-firol-500 text-white"
+                                    ? "bg-firol-500 text-white scale-[1.04]"
                                     : "bg-ink-100 text-ink-600 hover:bg-ink-200",
                             )}
                         >
@@ -208,9 +208,9 @@ export function InspectionsListPage() {
                                     setTypeFilter(typeFilter === val ? "" : val)
                                 }
                                 className={cn(
-                                    "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                                    "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-all duration-150",
                                     typeFilter === val
-                                        ? "bg-firol-500 text-white"
+                                        ? "bg-firol-500 text-white scale-[1.04]"
                                         : "bg-ink-100 text-ink-600 hover:bg-ink-200",
                                 )}
                             >
