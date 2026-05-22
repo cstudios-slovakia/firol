@@ -149,6 +149,10 @@ export function SettingsLayout() {
       <div key={location.pathname} className="animate-fade-up">
         <Outlet />
       </div>
+
+      <p className="hidden sm:block text-center text-[11px] text-ink-300 tabular-nums pt-2">
+        Firol {__APP_VERSION__}
+      </p>
     </div>
   );
 }
@@ -210,6 +214,10 @@ export function SettingsIndexPage() {
           <ChevronRight className="size-4 shrink-0 text-firol-400 transition-transform duration-150 group-hover:translate-x-0.5" />
         </button>
       </div>
+
+      <p className="mt-6 text-center text-[11px] text-ink-300 tabular-nums">
+        Firol {__APP_VERSION__}
+      </p>
 
       {feedbackOpen && (
         <FeedbackDialog

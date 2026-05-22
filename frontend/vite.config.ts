@@ -3,6 +3,17 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
+import { execSync } from 'child_process';
+
+function getBuildNumber(): string {
+  try {
+    return execSync('git rev-list --count HEAD', { encoding: 'utf8' }).trim();
+  } catch {
+    return '0';
+  }
+}
+
+const APP_VERSION = `1.0.${getBuildNumber()} beta`;
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -80,6 +91,9 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
   },
   build: {
     outDir: 'dist',
