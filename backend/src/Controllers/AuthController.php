@@ -70,7 +70,7 @@ final class AuthController
             // the account picks up the global setting at registration time
             // (later changes to the default don't retroactively touch
             // existing accounts — admins override per-account if needed).
-            $defaultIncluded = self::settingInt($pdo, 'default_included_technicians', 3);
+            $defaultIncluded = self::settingInt($pdo, 'default_included_technicians', 2);
             $insertAccount = $pdo->prepare(
                 'INSERT INTO accounts (invoice_company_name, subscription_end_date, main_user_id, billing_period, included_technicians)
                  VALUES (?, ?, ?, ?, ?)'

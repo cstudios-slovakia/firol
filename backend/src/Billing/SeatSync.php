@@ -106,7 +106,7 @@ final class SeatSync
         );
         $stmt->execute();
         $val = $stmt->fetchColumn();
-        return $val !== false ? (int) $val : 500;
+        return $val !== false ? (int) $val : 1000;
     }
 
     public static function defaultIncludedTechnicians(): int
@@ -117,7 +117,7 @@ final class SeatSync
         );
         $stmt->execute();
         $val = $stmt->fetchColumn();
-        return $val !== false ? max(1, (int) $val) : 3;
+        return $val !== false ? max(1, (int) $val) : 2;
     }
 
     public static function maxSelfServiceTechnicians(): int

@@ -128,7 +128,7 @@ final class AdminPanelController
                 'stripe_status'         => $a['stripe_status'],
                 'billing_period'        => $a['billing_period'],
                 'created_at'            => $a['created_at'],
-                'included_technicians'  => (int) ($a['included_technicians'] ?? 3),
+                'included_technicians'  => (int) ($a['included_technicians'] ?? 2),
                 'extra_technicians'     => (int) ($a['extra_technicians'] ?? 0),
                 'users'                 => $usersByAccount[$id] ?? [],
             ];

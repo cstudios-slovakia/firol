@@ -239,7 +239,7 @@ final class AccountController
             'stripe_cancel_at_period_end' => !empty($row['stripe_cancel_at_period_end']),
             // Seat / technician licensing — surfaced so the UI can show
             // "X of N seats used" and gate the invite flow client-side.
-            'included_technicians'           => (int) ($row['included_technicians'] ?? 3),
+            'included_technicians'           => (int) ($row['included_technicians'] ?? 2),
             'extra_technicians'              => (int) ($row['extra_technicians'] ?? 0),
             'active_technicians'             => SeatSync::countActiveTechnicians($accountId),
             'max_self_service_technicians'   => SeatSync::maxSelfServiceTechnicians(),

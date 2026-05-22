@@ -29,8 +29,8 @@ final class PublicSettingsController
 
         $defaults = [
             'trial_days'                       => 14,
-            'default_included_technicians'     => 3,
-            'price_per_extra_technician_cents' => 500,
+            'default_included_technicians'     => 2,
+            'price_per_extra_technician_cents' => 1000,
             'max_self_service_technicians'     => 20,
         ];
         foreach ($stmt->fetchAll() as $row) {
