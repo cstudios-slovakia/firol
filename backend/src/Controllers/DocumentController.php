@@ -754,12 +754,14 @@ final class DocumentController
                        c.address AS company_address,
                        t.facility_id, f.name AS facility_name, f.address AS facility_address,
                        t.trainer_id, tr.fullname AS trainer_name,
-                       tr.certification_number AS trainer_certification_number,
-                       tr.signature_path     AS trainer_signature_path
+                       ip.cert_general   AS trainer_certification_number,
+                       ip.signature_path AS trainer_signature_path
                 FROM   trainings t
                 JOIN   companies  c  ON c.id = t.company_id
                 LEFT JOIN facilities f  ON f.id = t.facility_id
-                LEFT JOIN trainers   tr ON tr.id = t.trainer_id
+                LEFT JOIN users      tr ON tr.id = t.trainer_id
+                LEFT JOIN inspector_profiles ip
+                       ON ip.user_id = t.trainer_id AND ip.account_id = t.account_id
                 WHERE  t.id = ? AND t.archived_at IS NULL';
         $params = [$trainingId];
         if ($accountId !== null) {

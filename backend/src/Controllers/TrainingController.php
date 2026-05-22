@@ -42,7 +42,7 @@ final class TrainingController
                 FROM   trainings t
                 JOIN   companies  c  ON c.id = t.company_id
                 LEFT JOIN facilities f  ON f.id = t.facility_id
-                LEFT JOIN trainers   tr ON tr.id = t.trainer_id
+                LEFT JOIN users      tr ON tr.id = t.trainer_id
                 WHERE  t.archived_at IS NULL';
         $params = [];
         if (!$isAdmin) {
@@ -168,14 +168,12 @@ final class TrainingController
 
         if ($trainerId !== null) {
             if ($isAdmin) {
-                $tc = Db::pdo()->prepare(
-                    'SELECT 1 FROM trainers WHERE id = ? AND archived_at IS NULL'
-                );
+                $tc = Db::pdo()->prepare('SELECT 1 FROM users WHERE id = ?');
                 $tc->execute([$trainerId]);
             } else {
                 $tc = Db::pdo()->prepare(
-                    'SELECT 1 FROM trainers
-                     WHERE id = ? AND account_id = ? AND archived_at IS NULL'
+                    'SELECT 1 FROM account_users
+                     WHERE user_id = ? AND account_id = ? AND is_active = 1'
                 );
                 $tc->execute([$trainerId, $accountId]);
             }
@@ -219,14 +217,12 @@ final class TrainingController
         }
         if ($trainerId !== null) {
             if ($isAdmin) {
-                $tc = Db::pdo()->prepare(
-                    'SELECT 1 FROM trainers WHERE id = ? AND archived_at IS NULL'
-                );
+                $tc = Db::pdo()->prepare('SELECT 1 FROM users WHERE id = ?');
                 $tc->execute([$trainerId]);
             } else {
                 $tc = Db::pdo()->prepare(
-                    'SELECT 1 FROM trainers
-                     WHERE id = ? AND account_id = ? AND archived_at IS NULL'
+                    'SELECT 1 FROM account_users
+                     WHERE user_id = ? AND account_id = ? AND is_active = 1'
                 );
                 $tc->execute([$trainerId, $accountId]);
             }
@@ -281,12 +277,14 @@ final class TrainingController
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
                        t.facility_id, f.name AS facility_name,
                        t.trainer_id, tr.fullname AS trainer_name,
-                       tr.certification_number AS trainer_certification_number,
+                       ip.cert_general AS trainer_certification_number,
                        (SELECT COUNT(*) FROM trainees WHERE training_id = t.id) AS trainees_count
                 FROM   trainings t
                 JOIN   companies   c  ON c.id = t.company_id
                 LEFT JOIN facilities f  ON f.id = t.facility_id
-                LEFT JOIN trainers   tr ON tr.id = t.trainer_id
+                LEFT JOIN users      tr ON tr.id = t.trainer_id
+                LEFT JOIN inspector_profiles ip
+                       ON ip.user_id = t.trainer_id AND ip.account_id = t.account_id
                 WHERE  t.id = ? AND t.archived_at IS NULL';
         $params = [$id];
         if ($accountId !== null) {

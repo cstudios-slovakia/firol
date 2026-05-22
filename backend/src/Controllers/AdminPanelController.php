@@ -243,7 +243,7 @@ final class AdminPanelController
 
         // FK cascades handle account_users, companies, facilities,
         // inspections, items, documents, sequences, inspector_profiles,
-        // trainers, trainings, trainees and invoices.
+        // trainings, trainees and invoices.
         $pdo->prepare('DELETE FROM accounts WHERE id = ?')->execute([$id]);
 
         // Delete users that had no other account membership.

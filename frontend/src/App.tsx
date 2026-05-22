@@ -26,7 +26,6 @@ import {
   SettingsIndexPage,
   InspectorProfilePage,
   BrandingPage,
-  TrainersPage,
   TeamPage,
 } from '@/pages/SettingsPage';
 import { BillingPage } from '@/pages/BillingPage';
@@ -98,7 +97,6 @@ export default function App() {
           <Route index element={<SettingsIndexPage />} />
           <Route path="profil" element={<InspectorProfilePage />} />
           <Route path="branding" element={<BrandingPage />} />
-          <Route path="skolitellia" element={<TrainersPage />} />
           <Route path="technici" element={<TeamPage />} />
         </Route>
         <Route path="/billing" element={<BillingPage />} />

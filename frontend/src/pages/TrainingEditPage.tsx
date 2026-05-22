@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Building2, CalendarDays, Save, User, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
-import { Trainers, type Trainer } from '@/api/trainers';
+import { Team, type TeamMember } from '@/api/team';
 import {
   TRAINING_TYPE_LABELS,
   Trainings,
@@ -27,7 +27,7 @@ export function TrainingEditPage() {
   const toast = useToast();
 
   const [training, setTraining] = useState<Training | null>(null);
-  const [trainers, setTrainers] = useState<Trainer[] | null>(null);
+  const [members, setMembers] = useState<TeamMember[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,12 +38,12 @@ export function TrainingEditPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([Trainings.show(id), Trainers.list()])
-      .then(([detail, trs]) => {
+    Promise.all([Trainings.show(id), Team.list()])
+      .then(([detail, tm]) => {
         if (cancelled) return;
         const t = detail.training;
         setTraining(t);
-        setTrainers(trs.items);
+        setMembers(tm.items.filter((m) => m.is_active));
         setDate(t.date ?? '');
         setTrainerId(t.trainer_id);
         setLoading(false);
@@ -55,13 +55,6 @@ export function TrainingEditPage() {
       });
     return () => { cancelled = true; };
   }, [id]);
-
-  const trainerWarning = useMemo(() => {
-    if (trainerId === null || !trainers) return null;
-    const t = trainers.find((x) => x.id === trainerId);
-    if (!t || t.has_signature) return null;
-    return `Školiteľ „${t.fullname}" zatiaľ nemá nahraný podpis. Bez neho sa nedá vystaviť PDF protokol.`;
-  }, [trainerId, trainers]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -110,7 +103,7 @@ export function TrainingEditPage() {
     );
   }
 
-  const noTrainers = trainers !== null && trainers.length === 0;
+  const noMembers = members !== null && members.length === 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -158,26 +151,25 @@ export function TrainingEditPage() {
           <Field
             label="Školiteľ"
             hint={
-              noTrainers
-                ? 'Nemáš ešte nikoho v zozname školiteľov.'
-                : trainerWarning ?? 'Vyber zo zoznamu školiteľov.'
+              noMembers
+                ? 'V tíme zatiaľ nie je žiadny aktívny technik.'
+                : 'Vyber z členov tímu. Podpis a oprávnenie sa berú z jeho profilu.'
             }
-            error={trainerWarning ?? undefined}
           >
             {(p) => (
               <Select
                 id={p.id}
                 value={trainerId !== null ? String(trainerId) : ''}
                 onChange={(v) => setTrainerId(v ? Number(v) : null)}
-                disabled={trainers === null || noTrainers}
+                disabled={members === null || noMembers}
                 placeholder="— bez školiteľa —"
                 leftIcon={<User className="size-4" />}
                 options={[
                   { value: '', label: '— bez školiteľa —' },
-                  ...(trainers ?? []).map((t) => ({
-                    value: String(t.id),
-                    label: t.fullname,
-                    description: t.certification_number ?? undefined,
+                  ...(members ?? []).map((m) => ({
+                    value: String(m.id),
+                    label: m.fullname,
+                    description: m.email,
                   })),
                 ]}
               />

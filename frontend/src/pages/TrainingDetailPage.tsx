@@ -319,7 +319,7 @@ function cannotGenerateHint(
 ): string | null {
   if (!isDraft) return null;
   if (!t.date) return 'Doplň dátum školenia.';
-  if (t.trainer_id === null) return 'Vyber školiteľa v Nastaveniach a priraď ho školeniu.';
+  if (t.trainer_id === null) return 'Priraď školiteľa zo zoznamu technikov.';
   if (trainees.length === 0) return 'Pridaj aspoň jedného účastníka.';
   return null;
 }

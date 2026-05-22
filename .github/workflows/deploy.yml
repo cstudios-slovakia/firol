@@ -50,7 +50,6 @@ jobs:
             mkdir -p $ROOT/backend/storage/signatures \
                      $ROOT/backend/storage/documents \
                      $ROOT/backend/storage/accounts \
-                     $ROOT/backend/storage/trainers \
                      $ROOT/backend/storage/trainings \
                      $ROOT/backend/storage/mpdf-tmp
 

@@ -37,3 +37,7 @@ opravy-pdf/
 
 # Deploy artefakty (zostavujú sa v CI)
 deploy/
+
+# Local working files (audits, notes, plans, scratch) — not for production
+AUDIT.md
+

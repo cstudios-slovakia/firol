@@ -28,7 +28,6 @@ use Firol\Controllers\InspectionItemController;
 use Firol\Controllers\InspectorProfileController;
 use Firol\Controllers\TeamController;
 use Firol\Controllers\TraineeController;
-use Firol\Controllers\TrainerController;
 use Firol\Controllers\TrainingController;
 use Firol\Controllers\MeController;
 use Firol\Controllers\PublicSettingsController;
@@ -117,14 +116,6 @@ $router->get('/api/me/inspector-profile',            [InspectorProfileController
 $router->patch('/api/me/inspector-profile',          [InspectorProfileController::class, 'update']);
 $router->post('/api/me/inspector-profile/signature', [InspectorProfileController::class, 'uploadSignature']);
 $router->get('/api/me/inspector-profile/signature',  [InspectorProfileController::class, 'downloadSignature']);
-
-$router->get('/api/trainers',                       [TrainerController::class, 'index']);
-$router->post('/api/trainers',                      [TrainerController::class, 'store']);
-$router->get('/api/trainers/{id}',                  [TrainerController::class, 'show']);
-$router->patch('/api/trainers/{id}',                [TrainerController::class, 'update']);
-$router->delete('/api/trainers/{id}',               [TrainerController::class, 'archive']);
-$router->post('/api/trainers/{id}/signature',       [TrainerController::class, 'uploadSignature']);
-$router->get('/api/trainers/{id}/signature',        [TrainerController::class, 'downloadSignature']);
 
 $router->get('/api/trainings',                      [TrainingController::class, 'index']);
 $router->post('/api/trainings',                     [TrainingController::class, 'store']);

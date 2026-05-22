@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, GraduationCap, Plus,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type CompanyListItem, type FacilityListItem } from '@/api/companies';
-import { Trainers, type Trainer } from '@/api/trainers';
+import { Team, type TeamMember } from '@/api/team';
 import {
   TRAINING_TYPES,
   TRAINING_TYPE_LABELS,
@@ -23,7 +23,6 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { NewCompanyDialog } from '@/components/NewCompanyDialog';
 import { NewFacilityDialog } from '@/components/NewFacilityDialog';
-import { NewTrainerDialog } from '@/components/NewTrainerDialog';
 import { cn } from '@/lib/cn';
 
 export function NewTrainingPage() {
@@ -35,10 +34,11 @@ export function NewTrainingPage() {
   const presetCompanyId = numericParam(searchParams.get('company_id'));
   const presetFacilityId = numericParam(searchParams.get('facility_id'));
 
+  const { user } = useAuth();
   const [type, setType] = useState<TrainingType>('vstupne');
   const [companies, setCompanies] = useState<CompanyListItem[] | null>(null);
   const [facilities, setFacilities] = useState<FacilityListItem[]>([]);
-  const [trainers, setTrainers] = useState<Trainer[] | null>(null);
+  const [members, setMembers] = useState<TeamMember[] | null>(null);
   const [companyId, setCompanyId] = useState<number | null>(presetCompanyId);
   const [facilityId, setFacilityId] = useState<number | null>(presetFacilityId);
   const [trainerId, setTrainerId] = useState<number | null>(null);
@@ -49,20 +49,23 @@ export function NewTrainingPage() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [newCompanyOpen, setNewCompanyOpen] = useState(false);
   const [newFacilityOpen, setNewFacilityOpen] = useState(false);
-  const [newTrainerOpen, setNewTrainerOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([Companies.list(), Trainers.list()])
-      .then(([cs, trs]) => {
+    Promise.all([Companies.list(), Team.list()])
+      .then(([cs, tm]) => {
         if (cancelled) return;
         setCompanies(cs.items);
-        setTrainers(trs.items);
+        const active = tm.items.filter((m) => m.is_active);
+        setMembers(active);
         if (presetCompanyId === null && cs.items.length === 1) {
           setCompanyId(cs.items[0].id);
         }
-        if (trs.items.length === 1) {
-          setTrainerId(trs.items[0].id);
+        // Pre-select the logged-in user as trainer when possible.
+        if (user && active.some((m) => m.id === user.id)) {
+          setTrainerId(user.id);
+        } else if (active.length === 1) {
+          setTrainerId(active[0].id);
         }
       })
       .catch((err: unknown) => {
@@ -72,7 +75,7 @@ export function NewTrainingPage() {
     return () => {
       cancelled = true;
     };
-  }, [presetCompanyId]);
+  }, [presetCompanyId, user]);
 
   useEffect(() => {
     if (companyId === null) {
@@ -102,22 +105,6 @@ export function NewTrainingPage() {
       cancelled = true;
     };
   }, [companyId, presetFacilityId]);
-
-  const trainerWithoutSignatureWarning = useMemo((): ReactNode | null => {
-    if (trainerId === null || !trainers) return null;
-    const t = trainers.find((x) => x.id === trainerId);
-    if (!t || t.has_signature) return null;
-    return (
-      <>
-        Školiteľ „{t.fullname}" zatiaľ nemá nahraný podpis. Bez neho sa nedá vystaviť PDF
-        protokol —{' '}
-        <Link to="/settings#skolitellia" className="underline underline-offset-2 hover:text-status-bad/80">
-          nahrať podpis
-        </Link>
-        .
-      </>
-    );
-  }, [trainerId, trainers]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -297,39 +284,23 @@ export function NewTrainingPage() {
 
           <Field
             label="Školiteľ"
-            hint={trainerWithoutSignatureWarning ?? 'Vyber zo zoznamu školiteľov.'}
-            error={trainerWithoutSignatureWarning ? trainerWithoutSignatureWarning : undefined}
+            hint="Vyber z členov tímu. Podpis a číslo oprávnenia sa berú z jeho profilu."
           >
             {(p) => (
               <Select
                 id={p.id}
                 value={trainerId !== null ? String(trainerId) : ''}
                 onChange={(v) => setTrainerId(v ? Number(v) : null)}
-                disabled={trainers === null}
+                disabled={members === null}
                 placeholder="— bez školiteľa —"
                 options={[
                   { value: '', label: '— bez školiteľa —' },
-                  ...(trainers ?? []).map((t) => ({
-                    value: String(t.id),
-                    label: t.fullname,
-                    description: t.certification_number ?? undefined,
+                  ...(members ?? []).map((m) => ({
+                    value: String(m.id),
+                    label: m.fullname,
+                    description: m.email,
                   })),
                 ]}
-                headerSlot={({ closeDropdown }) => (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      closeDropdown();
-                      setNewTrainerOpen(true);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
-                  >
-                    <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
-                      <Plus className="size-3.5" />
-                    </span>
-                    Pridať nového školiteľa
-                  </button>
-                )}
               />
             )}
           </Field>
@@ -409,18 +380,6 @@ export function NewTrainingPage() {
         />
       )}
 
-      <NewTrainerDialog
-        open={newTrainerOpen}
-        onClose={() => setNewTrainerOpen(false)}
-        onCreated={(t) => {
-          setTrainers((prev) => {
-            const next = prev ? [...prev, t] : [t];
-            next.sort((a, b) => a.fullname.localeCompare(b.fullname));
-            return next;
-          });
-          setTrainerId(t.id);
-        }}
-      />
     </div>
   );
 }
