@@ -1,9 +1,22 @@
-Options -MultiViews
 RewriteEngine On
 
-# Serve existing files and directories directly.
+# PHP error logging — hosting's default error_log destination is not
+# readable for our user, so route errors into our own storage tree.
+# (.user.ini is ignored by this FPM pool, but .htaccess php_value works.)
+php_flag  log_errors On
+php_value error_log  /usr/home/awgefy/public_html/app.poapp.sk/backend/storage/php_errors.log
+php_value memory_limit 256M
+# mPDF parses the full HTML through PCRE; Hetzner's default
+# pcre.backtrack_limit (100K) is too low once the page embeds a
+# base64-encoded logo + signature, so bump it.
+php_value pcre.backtrack_limit 5000000
+
+# API → PHP entry point
+
+RewriteRule ^api(/.\*)?$ api.php [L,QSA]
+
+# SPA fallback — všetko ostatné, čo nie je súbor/adresár, na index.html
+
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-
-# Route everything else through the SPA entry point.
 RewriteRule ^ index.html [L]
