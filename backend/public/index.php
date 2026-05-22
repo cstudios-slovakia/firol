@@ -23,6 +23,7 @@ use Firol\Controllers\BillingController;
 use Firol\Controllers\CompanyController;
 use Firol\Controllers\FacilityController;
 use Firol\Controllers\DocumentController;
+use Firol\Controllers\FeedbackController;
 use Firol\Controllers\InspectionController;
 use Firol\Controllers\InspectionItemController;
 use Firol\Controllers\InspectorProfileController;
@@ -72,6 +73,10 @@ $router->delete('/api/account/users/{id}',[TeamController::class, 'destroy']);
 
 $router->get('/api/admin/settings', [AdminController::class, 'settings']);
 $router->patch('/api/admin/settings', [AdminController::class, 'updateSettings']);
+
+$router->post('/api/feedback',              [FeedbackController::class, 'store']);
+$router->get('/api/admin/feedback',         [FeedbackController::class, 'index']);
+$router->delete('/api/admin/feedback/{id}', [FeedbackController::class, 'destroy']);
 
 $router->get('/api/admin/accounts',         [AdminPanelController::class, 'listAccounts']);
 $router->patch('/api/admin/accounts/{id}',  [AdminPanelController::class, 'updateAccount']);
@@ -147,7 +152,7 @@ $method = $request->method();
 $path   = rtrim($request->path(), '/') ?: '/';
 $isMutation = !in_array($method, ['GET', 'HEAD'], true);
 $isWhitelisted = (bool) preg_match(
-    '#^/api/(auth/|me/switch-account|billing/|admin/)#',
+    '#^/api/(auth/|me/switch-account|billing/|admin/|feedback)#',
     $path,
 );
 if ($isMutation && !$isWhitelisted) {

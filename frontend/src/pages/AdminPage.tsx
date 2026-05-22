@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  AtSign, Building2, CalendarDays, ChevronDown, ChevronRight, Hash, Loader2,
-  Pencil, Phone, Search, Settings as SettingsIcon, Shield, ShieldCheck, ShieldOff,
+  AtSign, Bug, Building2, CalendarDays, ChevronDown, ChevronRight, Hash, Lightbulb, Link as LinkIcon, Loader2,
+  MessageSquarePlus, Pencil, Phone, Search, Settings as SettingsIcon, Shield, ShieldCheck, ShieldOff,
   Trash2, User, Users,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -10,6 +10,7 @@ import {
   Admin, AdminPanel,
   type AdminAccount, type AdminAccountsPage, type AdminUser, type SystemSettings,
 } from '@/api/admin';
+import { Feedback, type FeedbackSubmission } from '@/api/feedback';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -46,9 +47,152 @@ export function AdminPage() {
       </header>
 
       <AccountsSection />
+      <FeedbackSection />
       <AdminSettingsSection />
     </div>
   );
+}
+
+function FeedbackSection() {
+  const { csrfToken } = useAuth();
+  const toast = useToast();
+  const [items, setItems] = useState<FeedbackSubmission[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Feedback.list()
+      .then((res) => { if (!cancelled) setItems(res.items); })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať spätnú väzbu.');
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function onDelete(s: FeedbackSubmission) {
+    if (!window.confirm('Naozaj zmazať túto spätnú väzbu? Akcia je nezvratná.')) return;
+    setBusyId(s.id);
+    try {
+      await Feedback.remove(s.id, csrfToken);
+      setItems((prev) => prev ? prev.filter((x) => x.id !== s.id) : prev);
+      toast.success('Zmazané');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Zmazanie zlyhalo.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (items === null) {
+    if (error) {
+      return (
+        <Card className="px-5 py-4">
+          <p className="text-sm text-status-bad">{error}</p>
+        </Card>
+      );
+    }
+    return <CardBlockSkeleton rows={3} />;
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/60 to-transparent px-5 py-4">
+        <div className="grid size-11 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
+          <MessageSquarePlus className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold text-ink-900">Spätná väzba od používateľov</h2>
+          <p className="text-xs text-ink-500">
+            {items.length === 0
+              ? 'Zatiaľ neprišla žiadna spätná väzba.'
+              : `${items.length} ${items.length === 1 ? 'správa' : items.length < 5 ? 'správy' : 'správ'} od používateľov.`}
+          </p>
+        </div>
+      </div>
+
+      {items.length > 0 && (
+        <ul className="flex flex-col gap-2 px-3 py-3">
+          {items.map((s) => (
+            <FeedbackRow
+              key={s.id}
+              item={s}
+              busy={busyId === s.id}
+              onDelete={() => onDelete(s)}
+            />
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function FeedbackRow({
+  item, busy, onDelete,
+}: {
+  item: FeedbackSubmission;
+  busy: boolean;
+  onDelete: () => void;
+}) {
+  const isBug = item.kind === 'bug';
+  const toneIconBg = isBug ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600';
+
+  return (
+    <li className="rounded-2xl border border-ink-100 bg-white">
+      <div className="flex items-start gap-3 px-3 py-3">
+        <span className={cnLocal('grid size-9 shrink-0 place-items-center rounded-xl', toneIconBg)}>
+          {isBug ? <Bug className="size-4" /> : <Lightbulb className="size-4" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
+            <Badge tone={isBug ? 'warn' : 'neutral'}>
+              {isBug ? 'Chyba' : 'Návrh funkcie'}
+            </Badge>
+            <span className="font-semibold text-ink-800">
+              {item.submitter_name ?? 'Neznámy používateľ'}
+            </span>
+            {item.submitter_email && (
+              <>
+                <span className="text-ink-300">·</span>
+                <span className="truncate">{item.submitter_email}</span>
+              </>
+            )}
+            {item.account_name && (
+              <>
+                <span className="text-ink-300">·</span>
+                <span className="truncate">{item.account_name}</span>
+              </>
+            )}
+            <span className="text-ink-300">·</span>
+            <span>{item.created_at}</span>
+          </p>
+          <p className="mt-2 whitespace-pre-wrap break-words text-sm text-ink-900">
+            {item.message}
+          </p>
+          {item.source_url && (
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-ink-500">
+              <LinkIcon className="size-3.5 shrink-0" />
+              <span className="break-all">{item.source_url}</span>
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={busy}
+          title="Zmazať"
+          className="grid size-9 shrink-0 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function cnLocal(...parts: Array<string | false | null | undefined>): string {
+  return parts.filter(Boolean).join(' ');
 }
 
 function AccountsSection() {

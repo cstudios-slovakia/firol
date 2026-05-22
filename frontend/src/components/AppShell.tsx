@@ -18,6 +18,7 @@ import { useToast } from "@/lib/toast";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { OfflineIndicator } from "./OfflineIndicator";
 import { AuroraBackground } from "./AuroraBackground";
+import { FeedbackFloater } from "./FeedbackFloater";
 import { cn } from "@/lib/cn";
 
 const TOP_TABS = [
@@ -156,6 +157,7 @@ export function AppShell() {
             </div>
 
             <BottomTabBar />
+            <FeedbackFloater />
         </div>
     );
 }

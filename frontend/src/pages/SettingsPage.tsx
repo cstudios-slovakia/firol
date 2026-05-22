@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, AtSign, Building2, CalendarDays, Check, ChevronLeft, ChevronRight,
-  Copy, CreditCard, FileSignature, Hash, ImagePlus, MailPlus, Palette,
+  Copy, CreditCard, FileSignature, Hash, ImagePlus, MailPlus, MessageSquarePlus, Palette,
   Phone, RotateCcw, Shield, ShieldCheck, ShieldOff, Trash2, UploadCloud, User,
   UserCheck, UsersRound,
 } from 'lucide-react';
@@ -20,6 +20,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { CardBlockSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { Badge } from '@/components/ui/Badge';
 import { SignaturePickerModal } from '@/components/SignaturePickerModal';
+import { FeedbackDialog } from '@/components/FeedbackFloater';
 import { cn } from '@/lib/cn';
 
 // ─── Tab definitions ─────────────────────────────────────────────────────────
@@ -157,6 +158,8 @@ export function SettingsLayout() {
 export function SettingsIndexPage() {
   const { isAdmin } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 640px)');
@@ -186,6 +189,34 @@ export function SettingsIndexPage() {
           <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform duration-150 group-hover:translate-x-0.5" />
         </Link>
       ))}
+
+      {/* Feedback entry — visually separated, lives at the bottom. */}
+      <div className="mt-4 border-t border-dashed border-ink-200 pt-4">
+        <button
+          type="button"
+          onClick={() => setFeedbackOpen(true)}
+          className="group animate-fade-up flex w-full items-center gap-3.5 rounded-2xl border border-firol-200 bg-firol-50/60 px-4 py-3.5 text-left transition-[background-color,transform] duration-150 hover:bg-firol-50 hover:-translate-y-px active:translate-y-0"
+          style={{ animationDelay: `${items.length * 45}ms` }}
+        >
+          <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-100 text-firol-600">
+            <MessageSquarePlus className="size-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-firol-800">Nahlásiť chybu / nápad</p>
+            <p className="mt-0.5 text-xs text-firol-700/70">
+              Daj nám vedieť, čo nefunguje alebo čo by ti pomohlo.
+            </p>
+          </div>
+          <ChevronRight className="size-4 shrink-0 text-firol-400 transition-transform duration-150 group-hover:translate-x-0.5" />
+        </button>
+      </div>
+
+      {feedbackOpen && (
+        <FeedbackDialog
+          onClose={() => setFeedbackOpen(false)}
+          sourceUrl={window.location.origin + location.pathname + location.search}
+        />
+      )}
     </div>
   );
 }
