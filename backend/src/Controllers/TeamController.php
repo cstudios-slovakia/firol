@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Firol\Controllers;
 
 use Firol\Auth\Csrf;
-use Firol\Auth\Password;
 use Firol\Auth\Tenant;
 use Firol\Billing\SeatSync;
 use Firol\Db;
@@ -60,10 +59,11 @@ final class TeamController
     }
 
     /**
-     * Invite a technician by email. If the email already exists in the
-     * users table we just attach that user — they keep their existing
-     * password. Otherwise we create a stub user with an unusable password
-     * hash and issue a password-reset token so they can set one.
+     * Send an invitation to a technician. Only an `account_invites` row
+     * is created here — neither `users` nor `account_users` is touched.
+     * The invitee confirms via the link in the email, which calls
+     * {@see InviteController::accept} to create the user (if needed) and
+     * attach them to the account.
      */
     public static function invite(Request $req): void
     {
@@ -83,9 +83,9 @@ final class TeamController
         }
         $email = strtolower(trim($email));
 
-        // Hard cap: above max_self_service_technicians the account has to
-        // contact us for a custom quote — refuse the invite cleanly so the
-        // UI can render the "contact us" hint instead of a generic error.
+        // Seat cap is checked here for early feedback, but the real
+        // enforcement happens at accept time — pending invites do not
+        // hold seats.
         $maxSelfService = SeatSync::maxSelfServiceTechnicians();
         $activeNow      = SeatSync::countActiveTechnicians($accountId);
         if ($activeNow + 1 > $maxSelfService) {
@@ -97,79 +97,46 @@ final class TeamController
         }
 
         $pdo = Db::pdo();
-        $pdo->beginTransaction();
-        try {
-            $stmt = $pdo->prepare('SELECT id FROM users WHERE email = ?');
-            $stmt->execute([$email]);
-            $userId = $stmt->fetchColumn();
 
-            $invitedNew = false;
-            if ($userId === false) {
-                // Random 64-char password the invitee can never guess —
-                // they must go through the reset link to set their own.
-                $stub = bin2hex(random_bytes(32));
-                $pdo->prepare(
-                    'INSERT INTO users (fullname, email, phone, password_hash) VALUES (?, ?, ?, ?)'
-                )->execute([trim($fullname), $email, $phone, Password::hash($stub)]);
-                $userId = (int) $pdo->lastInsertId();
-                $invitedNew = true;
-            } else {
-                $userId = (int) $userId;
-            }
-
-            // Re-attach gracefully: if the user was previously deactivated
-            // on this account, flip them back to active instead of
-            // refusing the invite.
-            $linkStmt = $pdo->prepare(
-                'SELECT is_active FROM account_users WHERE account_id = ? AND user_id = ?'
-            );
-            $linkStmt->execute([$accountId, $userId]);
-            $existing = $linkStmt->fetchColumn();
-
-            if ($existing === false) {
-                $pdo->prepare(
-                    'INSERT INTO account_users (account_id, user_id, role, is_active)
-                     VALUES (?, ?, ?, 1)'
-                )->execute([$accountId, $userId, 'technician']);
-            } elseif ((int) $existing === 1) {
-                $pdo->rollBack();
-                Response::error('User already on this account', 409);
-            } else {
-                $pdo->prepare(
-                    'UPDATE account_users SET is_active = 1
-                     WHERE  account_id = ? AND user_id = ?'
-                )->execute([$accountId, $userId]);
-            }
-
-            // Issue an invite token only when the user is fresh — an
-            // existing user already knows their password.
-            $token = null;
-            if ($invitedNew) {
-                $token   = bin2hex(random_bytes(32));
-                $expires = (new \DateTimeImmutable('+7 days'))->format('Y-m-d H:i:s');
-                $pdo->prepare(
-                    'INSERT INTO password_resets (token, user_id, expires_at) VALUES (?, ?, ?)'
-                )->execute([$token, $userId, $expires]);
-            }
-
-            $pdo->commit();
-        } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            throw $e;
+        // Refuse a duplicate invite to someone who is already actively on
+        // the account.
+        $check = $pdo->prepare(
+            'SELECT 1 FROM account_users au
+             JOIN   users u ON u.id = au.user_id
+             WHERE  au.account_id = ? AND u.email = ? AND au.is_active = 1'
+        );
+        $check->execute([$accountId, $email]);
+        if ($check->fetchColumn() !== false) {
+            Response::error('Tento používateľ je už členom tímu.', 409);
         }
 
-        // Roster changed — push the new seat count to Stripe (proration
-        // happens automatically). No-op during the local trial; once the
-        // subscription exists we'll see the prorated charge on the next
-        // invoice.
-        SeatSync::recompute($accountId);
+        // If there's already an open invite for the same email on this
+        // account, replace it with a fresh token rather than stacking
+        // multiple pendings.
+        $pdo->prepare(
+            "UPDATE account_invites
+             SET    cancelled_at = NOW()
+             WHERE  account_id = ? AND email = ?
+             AND    accepted_at IS NULL AND declined_at IS NULL AND cancelled_at IS NULL"
+        )->execute([$accountId, $email]);
 
-        // Notify the invitee. Fresh users get the password-reset flow;
-        // already-registered users get a lighter "you were added to X"
-        // message that just links to /login — they keep their existing
-        // password and the account switcher will pick up the new tenant.
+        $token   = bin2hex(random_bytes(32));
+        $expires = (new \DateTimeImmutable('+7 days'))->format('Y-m-d H:i:s');
+
+        $pdo->prepare(
+            'INSERT INTO account_invites (account_id, email, fullname, phone, token, invited_by_user_id, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $accountId,
+            $email,
+            trim($fullname),
+            $phone,
+            $token,
+            Tenant::currentUserId(),
+            $expires,
+        ]);
+        $inviteId = (int) $pdo->lastInsertId();
+
         $ctx = $pdo->prepare(
             'SELECT u.fullname AS inviter_name, a.invoice_company_name AS account_name
              FROM   users u, accounts a
@@ -178,35 +145,94 @@ final class TeamController
         $ctx->execute([Tenant::currentUserId(), $accountId]);
         $row = $ctx->fetch() ?: ['inviter_name' => 'Kolega', 'account_name' => 'Firol'];
 
-        if ($token !== null) {
-            \Firol\Mail\Mailer::send(
-                \Firol\Mail\Templates\InviteEmail::build(
-                    $email,
-                    (string) $row['inviter_name'],
-                    (string) $row['account_name'],
-                    $token,
-                )
-            );
-        } else {
-            \Firol\Mail\Mailer::send(
-                \Firol\Mail\Templates\TeamAttachEmail::build(
-                    $email,
-                    (string) $row['inviter_name'],
-                    (string) $row['account_name'],
-                )
-            );
-        }
+        \Firol\Mail\Mailer::send(
+            \Firol\Mail\Templates\InviteEmail::build(
+                $email,
+                (string) $row['inviter_name'],
+                (string) $row['account_name'],
+                $token,
+            )
+        );
 
         Response::json([
-            'item' => self::loadMember($accountId, (int) $userId),
+            'invite' => self::loadInvite($accountId, $inviteId),
             // Token still surfaced so the inviter can copy the link
             // manually if the email bounces or the user can't find it.
             'invite_token' => $token,
-            // true → fresh user, password-reset email sent.
-            // false → existing user re-attached, "you were added" email sent;
-            // their stored fullname/phone is kept, the inviter's typed values are ignored.
-            'invited_new' => $invitedNew,
         ], 201);
+    }
+
+    /**
+     * Pending invites for the active account. Accepted/declined/cancelled
+     * rows are filtered out — they're history, not actionable.
+     */
+    public static function indexInvites(Request $req): void
+    {
+        $accountId = Tenant::currentAccountId();
+        $stmt = Db::pdo()->prepare(
+            "SELECT id, email, fullname, phone, expires_at, created_at
+             FROM   account_invites
+             WHERE  account_id = ?
+               AND  accepted_at IS NULL
+               AND  declined_at IS NULL
+               AND  cancelled_at IS NULL
+               AND  expires_at > NOW()
+             ORDER  BY created_at DESC"
+        );
+        $stmt->execute([$accountId]);
+        $rows = $stmt->fetchAll();
+
+        $items = array_map(static fn(array $r) => [
+            'id'         => (int) $r['id'],
+            'email'      => (string) $r['email'],
+            'fullname'   => (string) $r['fullname'],
+            'phone'      => $r['phone'],
+            'expires_at' => $r['expires_at'],
+            'created_at' => $r['created_at'],
+        ], $rows);
+
+        Response::json(['items' => $items]);
+    }
+
+    /** @param array<string, string> $params */
+    public static function cancelInvite(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        self::requireMainUser();
+        $accountId = Tenant::currentAccountId();
+        $inviteId  = (int) ($params['id'] ?? 0);
+
+        Db::pdo()->prepare(
+            "UPDATE account_invites
+             SET    cancelled_at = NOW()
+             WHERE  id = ? AND account_id = ?
+               AND  accepted_at IS NULL AND declined_at IS NULL AND cancelled_at IS NULL"
+        )->execute([$inviteId, $accountId]);
+
+        Response::noContent();
+    }
+
+    /** @return array<string, mixed>|null */
+    private static function loadInvite(int $accountId, int $inviteId): ?array
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT id, email, fullname, phone, expires_at, created_at
+             FROM   account_invites
+             WHERE  id = ? AND account_id = ?'
+        );
+        $stmt->execute([$inviteId, $accountId]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            return null;
+        }
+        return [
+            'id'         => (int) $row['id'],
+            'email'      => (string) $row['email'],
+            'fullname'   => (string) $row['fullname'],
+            'phone'      => $row['phone'],
+            'expires_at' => $row['expires_at'],
+            'created_at' => $row['created_at'],
+        ];
     }
 
     /** @param array<string, string> $params */

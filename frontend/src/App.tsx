@@ -6,6 +6,7 @@ import { RegisterPage } from '@/pages/auth/RegisterPage';
 import { OnboardingBillingPage } from '@/pages/auth/OnboardingBillingPage';
 import { PasswordResetRequestPage } from '@/pages/auth/PasswordResetRequestPage';
 import { PasswordResetConfirmPage } from '@/pages/auth/PasswordResetConfirmPage';
+import { InviteAcceptPage } from '@/pages/auth/InviteAcceptPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { CompaniesPage } from '@/pages/CompaniesPage';
 import { CompanyDetailPage } from '@/pages/CompanyDetailPage';
@@ -52,6 +53,7 @@ export default function App() {
       />
       <Route path="/password-reset" element={<PasswordResetRequestPage />} />
       <Route path="/password-reset/confirm" element={<PasswordResetConfirmPage />} />
+      <Route path="/invite/accept" element={<InviteAcceptPage />} />
 
       <Route
         path="/onboarding/billing"

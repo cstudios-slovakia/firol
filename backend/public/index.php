@@ -27,6 +27,7 @@ use Firol\Controllers\FeedbackController;
 use Firol\Controllers\InspectionController;
 use Firol\Controllers\InspectionItemController;
 use Firol\Controllers\InspectorProfileController;
+use Firol\Controllers\InviteController;
 use Firol\Controllers\TeamController;
 use Firol\Controllers\TraineeController;
 use Firol\Controllers\TrainingController;
@@ -70,6 +71,16 @@ $router->get('/api/account/users',        [TeamController::class, 'index']);
 $router->post('/api/account/users',       [TeamController::class, 'invite']);
 $router->patch('/api/account/users/{id}', [TeamController::class, 'update']);
 $router->delete('/api/account/users/{id}',[TeamController::class, 'destroy']);
+
+$router->get('/api/account/invites',           [TeamController::class, 'indexInvites']);
+$router->delete('/api/account/invites/{id}',   [TeamController::class, 'cancelInvite']);
+
+// Public invite-acceptance endpoints — token possession is the proof
+// of intent. Existing-user accept additionally requires a matching
+// session (enforced inside the controller).
+$router->get('/api/invites/{token}',           [InviteController::class, 'show']);
+$router->post('/api/invites/{token}/accept',   [InviteController::class, 'accept']);
+$router->post('/api/invites/{token}/decline',  [InviteController::class, 'decline']);
 
 $router->get('/api/admin/settings', [AdminController::class, 'settings']);
 $router->patch('/api/admin/settings', [AdminController::class, 'updateSettings']);
@@ -152,7 +163,7 @@ $method = $request->method();
 $path   = rtrim($request->path(), '/') ?: '/';
 $isMutation = !in_array($method, ['GET', 'HEAD'], true);
 $isWhitelisted = (bool) preg_match(
-    '#^/api/(auth/|me/switch-account|billing/|admin/|feedback)#',
+    '#^/api/(auth/|me/switch-account|billing/|admin/|feedback|invites/)#',
     $path,
 );
 if ($isMutation && !$isWhitelisted) {

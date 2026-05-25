@@ -11,6 +11,15 @@ export type TeamMember = {
   created_at: string;
 };
 
+export type PendingInvite = {
+  id: number;
+  email: string;
+  fullname: string;
+  phone: string | null;
+  expires_at: string;
+  created_at: string;
+};
+
 export type InvitePayload = {
   fullname: string;
   email: string;
@@ -20,7 +29,7 @@ export type InvitePayload = {
 export const Team = {
   list: () => api<{ items: TeamMember[] }>('/api/account/users'),
   invite: (body: InvitePayload, csrfToken: string | null) =>
-    api<{ item: TeamMember; invite_token: string | null; invited_new: boolean }>('/api/account/users', {
+    api<{ invite: PendingInvite; invite_token: string | null }>('/api/account/users', {
       method: 'POST',
       body,
       csrfToken,
@@ -33,4 +42,39 @@ export const Team = {
     }),
   remove: (id: number, csrfToken: string | null) =>
     api<void>(`/api/account/users/${id}`, { method: 'DELETE', csrfToken }),
+
+  listInvites: () => api<{ items: PendingInvite[] }>('/api/account/invites'),
+  cancelInvite: (id: number, csrfToken: string | null) =>
+    api<void>(`/api/account/invites/${id}`, { method: 'DELETE', csrfToken }),
+};
+
+export type InvitePreview = {
+  invite: {
+    email: string;
+    fullname: string;
+    phone: string | null;
+    account_name: string;
+    inviter_name: string;
+    expires_at: string;
+  };
+  user_exists: boolean;
+  session_email: string | null;
+  session_user_id: number | null;
+};
+
+export type AcceptInvitePayload = {
+  password?: string;
+  fullname?: string;
+  phone?: string | null;
+};
+
+export const Invites = {
+  preview: (token: string) => api<InvitePreview>(`/api/invites/${encodeURIComponent(token)}`),
+  accept: (token: string, body: AcceptInvitePayload) =>
+    api<unknown>(`/api/invites/${encodeURIComponent(token)}/accept`, {
+      method: 'POST',
+      body,
+    }),
+  decline: (token: string) =>
+    api<void>(`/api/invites/${encodeURIComponent(token)}/decline`, { method: 'POST' }),
 };

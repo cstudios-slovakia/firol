@@ -1,4 +1,4 @@
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { Spinner } from '@/components/ui/Spinner';
 
@@ -21,6 +21,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
 
 export function RedirectIfAuthed({ children }: { children: React.ReactNode }) {
   const { status } = useAuth();
+  const [searchParams] = useSearchParams();
   if (status === 'loading') {
     return (
       <div className="bg-app flex min-h-screen items-center justify-center">
@@ -28,7 +29,13 @@ export function RedirectIfAuthed({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-  if (status === 'authed') return <Navigate to="/" replace />;
+  if (status === 'authed') {
+    // Honour ?next= so an authed user landing on /login?next=/invite/accept...
+    // bounces straight to the destination instead of the dashboard.
+    const rawNext = searchParams.get('next');
+    const next = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/';
+    return <Navigate to={next} replace />;
+  }
   return <>{children}</>;
 }
 

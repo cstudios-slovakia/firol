@@ -9,7 +9,7 @@ import {
 import { useAuth } from '@/auth/AuthContext';
 import { AccountApi, type Account } from '@/api/account';
 import { InspectorProfileApi, type InspectorProfile } from '@/api/inspectorProfile';
-import { Team, type TeamMember } from '@/api/team';
+import { Team, type TeamMember, type PendingInvite } from '@/api/team';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -775,9 +775,11 @@ function TeamSection() {
   const isMain = user !== null && activeAccount !== null && activeAccount.main_user_id === user.id;
 
   const [members, setMembers] = useState<TeamMember[] | null>(null);
+  const [invites, setInvites] = useState<PendingInvite[] | null>(null);
   const [seatInfo, setSeatInfo] = useState<Account | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [busyInviteId, setBusyInviteId] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
 
   const [showInvite, setShowInvite] = useState(false);
@@ -792,6 +794,10 @@ function TeamSection() {
     AccountApi.show().then((res) => setSeatInfo(res.account)).catch(() => {});
   }
 
+  function reloadInvites() {
+    Team.listInvites().then((res) => setInvites(res.items)).catch(() => {});
+  }
+
   useEffect(() => {
     let cancelled = false;
     Team.list()
@@ -801,6 +807,7 @@ function TeamSection() {
         setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať tím.');
       });
     reloadSeats();
+    reloadInvites();
     return () => { cancelled = true; };
   }, []);
 
@@ -829,16 +836,12 @@ function TeamSection() {
         },
         csrfToken,
       );
-      setMembers((prev) => prev ? [...prev, res.item] : [res.item]);
-      reloadSeats();
-      if (res.invited_new) {
-        toast.success('Pozvánka vytvorená');
-      } else {
-        // Existing user — their stored name was kept; the inviter's typed name was ignored.
-        toast.success(`${res.item.fullname} (${res.item.email}) už mal/a účet v Firol — pridali sme ho/ju do tímu a poslali notifikáciu.`);
-      }
+      reloadInvites();
+      toast.success('Pozvánka odoslaná. Technik sa pridá do tímu po jej potvrdení.');
       if (res.invite_token) {
-        const link = `${window.location.origin}/password-reset/confirm?token=${res.invite_token}`;
+        // Fallback link — let the inviter copy & forward if the email
+        // bounces or the technician can't find it.
+        const link = `${window.location.origin}/invite/accept?token=${res.invite_token}`;
         setInviteLink(link);
         setLinkCopied(false);
       } else {
@@ -886,6 +889,22 @@ function TeamSection() {
       toast.error(msg);
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function onCancelInvite(invite: PendingInvite) {
+    if (!window.confirm(`Naozaj zrušiť pozvánku pre ${invite.email}? Odkaz prestane platiť.`)) return;
+    setBusyInviteId(invite.id);
+    try {
+      await Team.cancelInvite(invite.id, csrfToken);
+      setInvites((prev) => prev ? prev.filter((x) => x.id !== invite.id) : prev);
+      toast.success('Pozvánka zrušená');
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Zrušenie zlyhalo.';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setBusyInviteId(null);
     }
   }
 
@@ -1007,11 +1026,10 @@ function TeamSection() {
         {inviteLink && (
           <div className="mb-4 rounded-2xl border border-firol-200 bg-firol-50/60 p-3">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-firol-700">
-              Pozvánkový odkaz
+              Záložný odkaz na potvrdenie
             </p>
             <p className="mb-2 text-xs text-ink-600">
-              Skopíruj odkaz a pošli ho technikovi — platí 7 dní. Po jeho otvorení si nastaví heslo.
-              (Automatické odosielanie e-mailov pribudne neskôr.)
+              Pozvánka bola odoslaná emailom. Ak nedorazí, pošli technikovi tento odkaz — platí 7 dní.
             </p>
             <div className="flex gap-2">
               <Input value={inviteLink} readOnly className="font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
@@ -1024,6 +1042,42 @@ function TeamSection() {
                 {linkCopied ? 'Skopírované' : 'Kopírovať'}
               </Button>
             </div>
+          </div>
+        )}
+
+        {invites !== null && invites.length > 0 && (
+          <div className="mb-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-500">
+              Čakajúce pozvánky ({invites.length})
+            </p>
+            <ul className="flex flex-col gap-2">
+              {invites.map((inv) => (
+                <li key={inv.id} className="flex items-center gap-3 rounded-2xl border border-dashed border-amber-200 bg-amber-50/40 px-3 py-2.5">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-amber-100 text-amber-700">
+                    <MailPlus className="size-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-ink-900">{inv.fullname}</p>
+                    <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-ink-500">
+                      <span className="truncate">{inv.email}</span>
+                      <span className="text-ink-300">·</span>
+                      <Badge tone="warn">Čaká na potvrdenie</Badge>
+                    </p>
+                  </div>
+                  {isMain && (
+                    <button
+                      type="button"
+                      onClick={() => onCancelInvite(inv)}
+                      disabled={busyInviteId === inv.id}
+                      title="Zrušiť pozvánku"
+                      className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad disabled:opacity-50"
+                    >
+                      {busyInviteId === inv.id ? <Spinner size="sm" /> : <Trash2 className="size-4" />}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
