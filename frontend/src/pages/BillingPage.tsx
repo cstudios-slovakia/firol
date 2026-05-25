@@ -570,6 +570,7 @@ function InvoiceDetailsSection({
   const { csrfToken } = useAuth();
   const toast = useToast();
   const [saving, setSaving] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{ street?: string; postal?: string; city?: string; ico?: string }>({});
 
   const [street, setStreet]     = useState('');
   const [postal, setPostal]     = useState('');
@@ -593,6 +594,13 @@ function InvoiceDetailsSection({
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    const errs: typeof fieldErrors = {};
+    if (!street.trim())  errs.street = 'Vyplň ulicu a číslo.';
+    if (!postal.trim())  errs.postal = 'Vyplň PSČ.';
+    if (!city.trim())    errs.city   = 'Vyplň mesto.';
+    if (!ico.trim())     errs.ico    = 'Vyplň IČO.';
+    if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
+    setFieldErrors({});
     setSaving(true);
     try {
       const res = await AccountApi.update({
@@ -640,18 +648,25 @@ function InvoiceDetailsSection({
       </div>
 
       <form onSubmit={onSubmit} className="flex flex-col gap-3 px-5 py-5">
-        <Field label="Ulica a číslo">
+        <Field label="Ulica a číslo" required error={fieldErrors.street}>
           {(p) => (
-            <Input {...p} value={street} onChange={(e) => setStreet(e.target.value)}
+            <Input {...p} value={street}
+                   onChange={(e) => { setStreet(e.target.value); if (fieldErrors.street) setFieldErrors((prev) => ({ ...prev, street: undefined })); }}
                    leftIcon={<MapPin className="size-4" />} />
           )}
         </Field>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label="PSČ">
-            {(p) => <Input {...p} value={postal} onChange={(e) => setPostal(e.target.value)} />}
+          <Field label="PSČ" required error={fieldErrors.postal}>
+            {(p) => (
+              <Input {...p} value={postal}
+                     onChange={(e) => { setPostal(e.target.value); if (fieldErrors.postal) setFieldErrors((prev) => ({ ...prev, postal: undefined })); }} />
+            )}
           </Field>
-          <Field label="Mesto" className="sm:col-span-2">
-            {(p) => <Input {...p} value={city} onChange={(e) => setCity(e.target.value)} />}
+          <Field label="Mesto" required error={fieldErrors.city} className="sm:col-span-2">
+            {(p) => (
+              <Input {...p} value={city}
+                     onChange={(e) => { setCity(e.target.value); if (fieldErrors.city) setFieldErrors((prev) => ({ ...prev, city: undefined })); }} />
+            )}
           </Field>
         </div>
         <Field label="Krajina">
@@ -659,9 +674,10 @@ function InvoiceDetailsSection({
         </Field>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label="IČO">
+          <Field label="IČO" required error={fieldErrors.ico}>
             {(p) => (
-              <Input {...p} value={ico} onChange={(e) => setIco(e.target.value)}
+              <Input {...p} value={ico}
+                     onChange={(e) => { setIco(e.target.value); if (fieldErrors.ico) setFieldErrors((prev) => ({ ...prev, ico: undefined })); }}
                      leftIcon={<Hash className="size-4" />} />
             )}
           </Field>
@@ -672,6 +688,12 @@ function InvoiceDetailsSection({
             {(p) => <Input {...p} value={icDph} onChange={(e) => setIcDph(e.target.value)} />}
           </Field>
         </div>
+
+        {Object.keys(fieldErrors).length > 0 && (
+          <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
+            Formulár obsahuje nevyplnené povinné polia.
+          </p>
+        )}
 
         <div className="flex justify-end pt-1">
           <Button type="submit" loading={saving} leftIcon={<Receipt className="size-4" />}>

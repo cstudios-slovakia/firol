@@ -20,7 +20,7 @@ export type InvitePayload = {
 export const Team = {
   list: () => api<{ items: TeamMember[] }>('/api/account/users'),
   invite: (body: InvitePayload, csrfToken: string | null) =>
-    api<{ item: TeamMember; invite_token: string | null }>('/api/account/users', {
+    api<{ item: TeamMember; invite_token: string | null; invited_new: boolean }>('/api/account/users', {
       method: 'POST',
       body,
       csrfToken,

@@ -831,7 +831,12 @@ function TeamSection() {
       );
       setMembers((prev) => prev ? [...prev, res.item] : [res.item]);
       reloadSeats();
-      toast.success('Pozvánka vytvorená');
+      if (res.invited_new) {
+        toast.success('Pozvánka vytvorená');
+      } else {
+        // Existing user — their stored name was kept; the inviter's typed name was ignored.
+        toast.success(`${res.item.fullname} (${res.item.email}) už mal/a účet v Firol — pridali sme ho/ju do tímu a poslali notifikáciu.`);
+      }
       if (res.invite_token) {
         const link = `${window.location.origin}/password-reset/confirm?token=${res.invite_token}`;
         setInviteLink(link);

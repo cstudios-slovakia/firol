@@ -166,21 +166,33 @@ final class TeamController
         // invoice.
         SeatSync::recompute($accountId);
 
-        if ($token !== null) {
-            $ctx = $pdo->prepare(
-                'SELECT u.fullname AS inviter_name, a.invoice_company_name AS account_name
-                 FROM   users u, accounts a
-                 WHERE  u.id = ? AND a.id = ?'
-            );
-            $ctx->execute([Tenant::currentUserId(), $accountId]);
-            $row = $ctx->fetch() ?: ['inviter_name' => 'Kolega', 'account_name' => 'Firol'];
+        // Notify the invitee. Fresh users get the password-reset flow;
+        // already-registered users get a lighter "you were added to X"
+        // message that just links to /login — they keep their existing
+        // password and the account switcher will pick up the new tenant.
+        $ctx = $pdo->prepare(
+            'SELECT u.fullname AS inviter_name, a.invoice_company_name AS account_name
+             FROM   users u, accounts a
+             WHERE  u.id = ? AND a.id = ?'
+        );
+        $ctx->execute([Tenant::currentUserId(), $accountId]);
+        $row = $ctx->fetch() ?: ['inviter_name' => 'Kolega', 'account_name' => 'Firol'];
 
+        if ($token !== null) {
             \Firol\Mail\Mailer::send(
                 \Firol\Mail\Templates\InviteEmail::build(
                     $email,
                     (string) $row['inviter_name'],
                     (string) $row['account_name'],
                     $token,
+                )
+            );
+        } else {
+            \Firol\Mail\Mailer::send(
+                \Firol\Mail\Templates\TeamAttachEmail::build(
+                    $email,
+                    (string) $row['inviter_name'],
+                    (string) $row['account_name'],
                 )
             );
         }
@@ -190,6 +202,10 @@ final class TeamController
             // Token still surfaced so the inviter can copy the link
             // manually if the email bounces or the user can't find it.
             'invite_token' => $token,
+            // true → fresh user, password-reset email sent.
+            // false → existing user re-attached, "you were added" email sent;
+            // their stored fullname/phone is kept, the inviter's typed values are ignored.
+            'invited_new' => $invitedNew,
         ], 201);
     }
 
