@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
+import { Mail } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { PasswordInput } from '@/components/ui/PasswordInput';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { ApiError } from '@/lib/api';
@@ -20,7 +21,6 @@ export function LoginPage() {
   const nextPath = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -79,24 +79,10 @@ export function LoginPage() {
 
           <Field label="Heslo" required error={fieldErrors.password}>
             {(p) => (
-              <Input
+              <PasswordInput
                 {...p}
-                type={showPassword ? 'text' : 'password'}
                 autoComplete="current-password"
                 required
-                leftIcon={<Lock className="size-4" />}
-                rightSlot={
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? 'Skryť heslo' : 'Zobraziť heslo'}
-                    title={showPassword ? 'Skryť heslo' : 'Zobraziť heslo'}
-                    tabIndex={-1}
-                    className="grid size-9 place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-700"
-                  >
-                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
-                }
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); if (fieldErrors.password) setFieldErrors((prev) => ({ ...prev, password: undefined })); }}
                 placeholder="••••••••"

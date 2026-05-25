@@ -1,8 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Lock } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
+import { PasswordInput } from '@/components/ui/PasswordInput';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { api, ApiError } from '@/lib/api';
@@ -67,13 +66,11 @@ export function PasswordResetConfirmPage() {
           <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
             <Field label="Nové heslo" hint={passwordError ? undefined : 'Minimálne 8 znakov'} required error={passwordError}>
               {(p) => (
-                <Input
+                <PasswordInput
                   {...p}
-                  type="password"
                   autoComplete="new-password"
                   required
                   minLength={8}
-                  leftIcon={<Lock className="size-4" />}
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); if (passwordError) setPasswordError(null); }}
                   placeholder="••••••••"

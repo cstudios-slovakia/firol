@@ -1,8 +1,9 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Lock, Mail, Phone, User, X } from 'lucide-react';
+import { Mail, Phone, User, X } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { PasswordInput } from '@/components/ui/PasswordInput';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { ApiError } from '@/lib/api';
@@ -223,6 +224,8 @@ export function InviteAcceptPage() {
               {(p) => (
                 <Input
                   {...p}
+                  type="email"
+                  autoComplete="username"
                   value={inv.email}
                   readOnly
                   leftIcon={<Mail className="size-4" />}
@@ -259,13 +262,11 @@ export function InviteAcceptPage() {
 
             <Field label="Heslo" hint="Minimálne 8 znakov" required error={fieldErrors.password}>
               {(p) => (
-                <Input
+                <PasswordInput
                   {...p}
-                  type="password"
                   autoComplete="new-password"
                   required
                   minLength={8}
-                  leftIcon={<Lock className="size-4" />}
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); if (fieldErrors.password) setFieldErrors((prev) => ({ ...prev, password: undefined })); }}
                   placeholder="••••••••"
@@ -275,13 +276,11 @@ export function InviteAcceptPage() {
 
             <Field label="Potvrdenie hesla" required error={fieldErrors.passwordConfirm}>
               {(p) => (
-                <Input
+                <PasswordInput
                   {...p}
-                  type="password"
                   autoComplete="new-password"
                   required
                   minLength={8}
-                  leftIcon={<Lock className="size-4" />}
                   value={passwordConfirm}
                   onChange={(e) => { setPasswordConfirm(e.target.value); if (fieldErrors.passwordConfirm) setFieldErrors((prev) => ({ ...prev, passwordConfirm: undefined })); }}
                   placeholder="••••••••"

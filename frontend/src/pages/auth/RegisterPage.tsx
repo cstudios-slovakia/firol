@@ -1,8 +1,9 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Building2, Eye, EyeOff, Lock, Mail, Phone, Sparkles, User } from 'lucide-react';
+import { Building2, Mail, Phone, Sparkles, User } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { PasswordInput } from '@/components/ui/PasswordInput';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { ApiError, buildUrl } from '@/lib/api';
@@ -19,7 +20,6 @@ export function RegisterPage() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [plan, setPlan] = useState<RegistrationPlan>('trial');
 
@@ -141,18 +141,10 @@ export function RegisterPage() {
 
           <Field label="Heslo" hint={fieldErrors.password ? undefined : 'Minimálne 8 znakov'} required error={fieldErrors.password}>
             {(p) => (
-              <Input
+              <PasswordInput
                 {...p}
-                type={showPassword ? 'text' : 'password'}
                 autoComplete="new-password"
                 required
-                leftIcon={<Lock className="size-4" />}
-                rightSlot={
-                  <PasswordToggle
-                    visible={showPassword}
-                    onClick={() => setShowPassword((v) => !v)}
-                  />
-                }
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); if (fieldErrors.password) setFieldErrors((prev) => ({ ...prev, password: undefined })); }}
                 placeholder="••••••••"
@@ -168,18 +160,10 @@ export function RegisterPage() {
             error={fieldErrors.passwordConfirm ?? (passwordMismatch ? 'Heslá sa nezhodujú.' : undefined)}
           >
             {(p) => (
-              <Input
+              <PasswordInput
                 {...p}
-                type={showPassword ? 'text' : 'password'}
                 autoComplete="new-password"
                 required
-                leftIcon={<Lock className="size-4" />}
-                rightSlot={
-                  <PasswordToggle
-                    visible={showPassword}
-                    onClick={() => setShowPassword((v) => !v)}
-                  />
-                }
                 value={passwordConfirm}
                 onChange={(e) => { setPasswordConfirm(e.target.value); if (fieldErrors.passwordConfirm) setFieldErrors((prev) => ({ ...prev, passwordConfirm: undefined })); }}
                 placeholder="••••••••"
@@ -261,29 +245,6 @@ export function RegisterPage() {
         </form>
       </Card>
     </AuthLayout>
-  );
-}
-
-function PasswordToggle({
-  visible,
-  onClick,
-}: {
-  visible: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={visible ? 'Skryť heslo' : 'Zobraziť heslo'}
-      title={visible ? 'Skryť heslo' : 'Zobraziť heslo'}
-      // tabIndex=-1 keeps the field focus order natural (label → input →
-      // next field) instead of stopping on the toggle in between.
-      tabIndex={-1}
-      className="grid size-9 place-items-center rounded-xl text-ink-400 transition-colors hover:bg-ink-100 hover:text-ink-700"
-    >
-      {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-    </button>
   );
 }
 
