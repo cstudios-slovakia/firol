@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
-import { ApiError } from '@/lib/api';
+import { ApiError, buildUrl } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useAuth, type RegistrationPlan } from '@/auth/AuthContext';
 import { AuthLayout } from './AuthLayout';
@@ -23,13 +23,13 @@ export function RegisterPage() {
   const [companyName, setCompanyName] = useState('');
   const [plan, setPlan] = useState<RegistrationPlan>('trial');
 
-  const [trialDays, setTrialDays] = useState(14);
+  const [trialDays, setTrialDays] = useState<number | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{ fullname?: string; email?: string; password?: string; passwordConfirm?: string; companyName?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetch('/api/public/settings')
+    fetch(buildUrl('/api/public/settings'))
       .then((r) => r.json())
       .then((data) => { if (typeof data.trial_days === 'number') setTrialDays(data.trial_days); })
       .catch(() => {});
@@ -66,8 +66,7 @@ export function RegisterPage() {
         invoice_company_name: companyName,
         billing_period: plan,
       });
-      // Trial users go straight into the app — they have 14 days before
-      // the read-only gate kicks in. Paid-plan users land on a dedicated
+      // Trial users go straight into the app. Paid-plan users land on a dedicated
       // billing-details page that gates access to the app until they
       // complete checkout on Stripe.
       if (plan === 'trial') {
@@ -215,7 +214,7 @@ export function RegisterPage() {
                 active={plan === 'trial'}
                 onClick={() => setPlan('trial')}
                 label="Skúšobná verzia"
-                price={`${trialDays} dní zdarma`}
+                price={trialDays !== null ? `${trialDays} dní zdarma` : '— dní zdarma'}
                 badge="Štart"
                 icon={<Sparkles className="size-3.5" />}
               />
@@ -235,7 +234,7 @@ export function RegisterPage() {
             </div>
             <p className="text-xs text-ink-400">
               {plan === 'trial'
-                ? `Skúšobné obdobie ${trialDays} dní bez platby. Predplatné si vyberieš neskôr v nastaveniach.`
+                ? `Skúšobné obdobie ${trialDays ?? '—'} dní bez platby. Predplatné si vyberieš neskôr v nastaveniach.`
                 : 'V ďalšom kroku doplníš fakturačné údaje a presmerujeme ťa na bezpečnú platbu cez Stripe.'}
             </p>
           </div>

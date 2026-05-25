@@ -13,7 +13,7 @@ php_value pcre.backtrack_limit 5000000
 
 # API → PHP entry point
 
-RewriteRule ^api(/.\*)?$ api.php [L,QSA]
+RewriteRule ^api(/.*)?$ api.php [L,QSA]
 
 # SPA fallback — všetko ostatné, čo nie je súbor/adresár, na index.html
 
