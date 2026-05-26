@@ -2,7 +2,7 @@ import { forwardRef } from 'react';
 import { cn } from '@/lib/cn';
 import { Spinner } from './Spinner';
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-outline';
 type Size = 'sm' | 'md' | 'lg';
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -22,6 +22,8 @@ const variants: Record<Variant, string> = {
     'bg-transparent text-ink-600 hover:bg-ink-100 active:bg-ink-200',
   danger:
     'bg-status-bad text-white hover:brightness-110 active:brightness-95',
+  'danger-outline':
+    'bg-white text-status-bad border border-status-bad/40 hover:border-status-bad/70 hover:bg-status-bad/5 active:bg-status-bad/10',
 };
 
 const sizes: Record<Size, string> = {

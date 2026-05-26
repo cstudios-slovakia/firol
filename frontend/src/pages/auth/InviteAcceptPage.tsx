@@ -203,13 +203,13 @@ export function InviteAcceptPage() {
                 Prijať pozvánku
               </Button>
               <Button
-                variant="ghost"
+                variant="danger-outline"
                 onClick={onDecline}
                 loading={declining}
                 disabled={submitting}
+                leftIcon={<X className="size-4" />}
                 className="sm:flex-1"
               >
-                <X className="mr-1 size-4" />
                 Odmietnuť
               </Button>
             </div>
@@ -300,13 +300,13 @@ export function InviteAcceptPage() {
               </Button>
               <Button
                 type="button"
-                variant="ghost"
+                variant="danger-outline"
                 onClick={onDecline}
                 loading={declining}
                 disabled={submitting}
+                leftIcon={<X className="size-4" />}
                 className="sm:flex-1"
               >
-                <X className="mr-1 size-4" />
                 Odmietnuť
               </Button>
             </div>
