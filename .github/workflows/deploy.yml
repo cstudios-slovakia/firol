@@ -24,7 +24,12 @@ jobs:
 
             cd $ROOT
             git clean -f backend/composer.lock
-            git pull origin main
+            # Reset, not pull — a history rewrite on the remote would
+            # otherwise stop the deploy with "divergent branches". The
+            # server is never a source of truth for code; whatever is on
+            # origin/main wins.
+            git fetch origin main
+            git reset --hard origin/main
 
             # Build frontend — output lands in frontend/dist/, which is
             # the actual document root for app.poapp.sk. The PHP
