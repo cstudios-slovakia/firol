@@ -40,3 +40,7 @@ deploy/
 # Local working files (audits, notes, plans, scratch) — not for production
 AUDIT.md
 
+# Project context for AI assistants — kept local so the repo doesn't
+# advertise tooling. Live copy stays on developer machines.
+CLAUDE.md
+

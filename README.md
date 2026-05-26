@@ -30,7 +30,6 @@ firol/
 │   └── nginx/default.conf
 ├── docs/                 Module specifications, handoff materials
 ├── docker-compose.yml
-├── CLAUDE.md             Project context (design system, modules, principles)
 └── connection.example.md SSH/DB config template (sanitized)
 ```
 
