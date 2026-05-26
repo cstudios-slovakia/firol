@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle, AtSign, Building2, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight,
+  AlertTriangle, AtSign, Building2, CalendarDays, Check, ChevronLeft, ChevronRight,
   Copy, CreditCard, FileSignature, Hash, ImagePlus, MailPlus, MessageSquarePlus, Palette,
   Phone, RotateCcw, Shield, ShieldCheck, ShieldOff, Trash2, UploadCloud, User,
   UserCheck, UsersRound,
@@ -10,6 +10,7 @@ import { useAuth } from '@/auth/AuthContext';
 import { AccountApi, type Account } from '@/api/account';
 import { InspectorProfileApi, type InspectorProfile } from '@/api/inspectorProfile';
 import { Team, type TeamMember, type PendingInvite, type TeamDefaultKind } from '@/api/team';
+import { Select, type SelectOption } from '@/components/ui/Select';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -1360,23 +1361,26 @@ function DefaultPicker({
   const eligible = members.filter((m) => m.is_active && m[certKey]);
   const currentId = members.find(kind === 'php' ? (m) => m.is_default_php : (m) => m.is_default_oprava)?.id ?? null;
 
+  const options: SelectOption[] = [
+    { value: '', label: '— žiadny' },
+    ...eligible.map((m) => ({
+      value: String(m.id),
+      label: m.fullname,
+      description: (kind === 'php' ? m.cert_php : m.cert_oprava) ?? undefined,
+    })),
+  ];
+
   return (
     <div className="flex flex-col gap-1.5">
       <label className="text-sm font-medium text-ink-800">{label}</label>
-      <div className="relative">
-        <select
-          value={currentId ?? ''}
-          onChange={(e) => onSet(e.target.value ? Number(e.target.value) : null)}
-          disabled={busy || eligible.length === 0}
-          className="w-full appearance-none rounded-xl border border-ink-200 bg-white py-2 pl-3 pr-8 text-sm text-ink-900 transition-colors focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-400/20 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <option value="">— žiadny</option>
-          {eligible.map((m) => (
-            <option key={m.id} value={m.id}>{m.fullname}</option>
-          ))}
-        </select>
-        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-400" />
-      </div>
+      <Select
+        value={currentId !== null ? String(currentId) : ''}
+        onChange={(v) => onSet(v ? Number(v) : null)}
+        options={options}
+        disabled={busy || eligible.length === 0}
+        emptyLabel="— žiadny"
+        placeholder="— žiadny"
+      />
       {eligible.length === 0 && (
         <p className="text-xs text-ink-400">Žiadny technik nemá vyplnené oprávnenie.</p>
       )}
