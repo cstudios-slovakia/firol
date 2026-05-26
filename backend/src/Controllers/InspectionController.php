@@ -22,24 +22,24 @@ final class InspectionController
      * @var array<string, list<int>>
      */
     private const TYPE_PERIODICITIES = [
-        'php'                => [12, 24],
-        'hydranty'           => [12],
-        'oprava_ts_php'      => [60],
-        'poziarna_kniha'     => [3, 6],
-        'pu_akcieschopnost'  => [3],
-        'pu_udrzba'          => [12],
+        'php' => [12, 24],
+        'hydranty' => [12],
+        'oprava_ts_php' => [60],
+        'poziarna_kniha' => [3, 6],
+        'pu_akcieschopnost' => [3],
+        'pu_udrzba' => [12],
         'nudzove_osvetlenie' => [12],
-        'ts_hadic'           => [60],
+        'ts_hadic' => [60],
     ];
 
     public static function index(Request $req): void
     {
         $accountId = Tenant::currentAccountId();
-        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
 
-        $companyId  = self::queryInt($req, 'company_id');
+        $companyId = self::queryInt($req, 'company_id');
         $facilityId = self::queryInt($req, 'facility_id');
-        $type       = $req->query('type');
+        $type = $req->query('type');
 
         $sql = 'SELECT i.id, i.type, i.periodicity_months, i.executed_on,
                        i.status, i.notes, i.created_at,
@@ -85,8 +85,8 @@ final class InspectionController
     public static function show(Request $req, array $params): void
     {
         $accountId = Tenant::currentAccountId();
-        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
-        $id        = (int) $params['id'];
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $id = (int) $params['id'];
 
         $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
 
@@ -100,9 +100,9 @@ final class InspectionController
         $rawItems = $itemsStmt->fetchAll();
         $items = array_map(static function (array $r): array {
             return [
-                'id'         => (int) $r['id'],
-                'position'   => (int) $r['position'],
-                'fields'     => json_decode((string) $r['fields'], true) ?? [],
+                'id' => (int) $r['id'],
+                'position' => (int) $r['position'],
+                'fields' => json_decode((string) $r['fields'], true) ?? [],
                 'created_at' => $r['created_at'],
                 'updated_at' => $r['updated_at'],
             ];
@@ -110,7 +110,7 @@ final class InspectionController
 
         Response::json([
             'inspection' => self::shapeRow($row),
-            'items'      => $items,
+            'items' => $items,
         ]);
     }
 
@@ -118,21 +118,22 @@ final class InspectionController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
-        $userId    = Tenant::currentUserId();
-        $isAdmin   = Admin::isAdmin($userId);
+        $userId = Tenant::currentUserId();
+        $isAdmin = Admin::isAdmin($userId);
 
-        $type              = $req->jsonString('type');
+        $type = $req->jsonString('type');
         $periodicityMonths = $req->jsonInt('periodicity_months');
-        $executedOn        = $req->jsonString('executed_on');
-        $companyId         = $req->jsonInt('company_id');
-        $facilityId        = $req->jsonInt('facility_id');
-        $inspectorUserId   = $req->jsonInt('inspector_user_id') ?? $userId;
-        $notes             = $req->jsonString('notes');
+        $executedOn = $req->jsonString('executed_on');
+        $companyId = $req->jsonInt('company_id');
+        $facilityId = $req->jsonInt('facility_id');
+        $inspectorUserId = $req->jsonInt('inspector_user_id') ?? $userId;
+        $notes = $req->jsonString('notes');
 
         if ($type === null || !isset(self::TYPE_PERIODICITIES[$type])) {
             Response::error('Invalid inspection type', 422);
         }
-        if ($periodicityMonths === null
+        if (
+            $periodicityMonths === null
             || !in_array($periodicityMonths, self::TYPE_PERIODICITIES[$type], true)
         ) {
             Response::error('Invalid periodicity for this type', 422);
@@ -203,14 +204,20 @@ final class InspectionController
              VALUES (?, ?, ?, ?, ?, ?, ?, "draft", ?)'
         );
         $stmt->execute([
-            $accountId, $companyId, $facilityId, $type, $periodicityMonths,
-            $executedOn, $inspectorUserId, $notes,
+            $accountId,
+            $companyId,
+            $facilityId,
+            $type,
+            $periodicityMonths,
+            $executedOn,
+            $inspectorUserId,
+            $notes,
         ]);
         $id = (int) Db::pdo()->lastInsertId();
 
         Response::json([
             'inspection' => self::shapeRow(self::loadOrFail($accountId, $id)),
-            'items'      => [],
+            'items' => [],
         ], 201);
     }
 
@@ -218,14 +225,14 @@ final class InspectionController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
-        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
-        $id        = (int) $params['id'];
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $id = (int) $params['id'];
 
         $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $row['account_id'] : $accountId;
 
         $executedOn = $req->jsonString('executed_on');
-        $notes      = $req->jsonString('notes');
+        $notes = $req->jsonString('notes');
         $periodicityMonths = $req->jsonInt('periodicity_months');
 
         if ($executedOn !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $executedOn)) {
@@ -255,8 +262,8 @@ final class InspectionController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
-        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
-        $id        = (int) $params['id'];
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $id = (int) $params['id'];
 
         $existing = self::loadOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
@@ -278,8 +285,8 @@ final class InspectionController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
-        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
-        $sourceId  = (int) $params['id'];
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $sourceId = (int) $params['id'];
 
         $source = self::loadOrFail($isAdmin ? null : $accountId, $sourceId);
         // Repeat lives in the same account as the source — admins repeating
@@ -313,14 +320,14 @@ final class InspectionController
                      executed_on, inspector_user_id, status, notes)
                  VALUES (?, ?, ?, ?, ?, NULL, ?, "draft", ?)'
             )->execute([
-                $accountId,
-                $source['company_id'],
-                $source['facility_id'],
-                $source['type'],
-                $source['periodicity_months'],
-                $source['inspector_user_id'],
-                $source['notes'],
-            ]);
+                        $accountId,
+                        $source['company_id'],
+                        $source['facility_id'],
+                        $source['type'],
+                        $source['periodicity_months'],
+                        $source['inspector_user_id'],
+                        $source['notes'],
+                    ]);
             $newId = (int) $pdo->lastInsertId();
 
             // Cloning items in a single INSERT … SELECT keeps positions in
@@ -351,9 +358,9 @@ final class InspectionController
         $itemsStmt->execute([$newId]);
         $items = array_map(static function (array $r): array {
             return [
-                'id'         => (int) $r['id'],
-                'position'   => (int) $r['position'],
-                'fields'     => json_decode((string) $r['fields'], true) ?? [],
+                'id' => (int) $r['id'],
+                'position' => (int) $r['position'],
+                'fields' => json_decode((string) $r['fields'], true) ?? [],
                 'created_at' => $r['created_at'],
                 'updated_at' => $r['updated_at'],
             ];
@@ -361,8 +368,8 @@ final class InspectionController
 
         Response::json([
             'inspection' => self::shapeRow($fresh),
-            'items'      => $items,
-            'source_id'  => $sourceId,
+            'items' => $items,
+            'source_id' => $sourceId,
         ], 201);
     }
 
@@ -387,8 +394,8 @@ final class InspectionController
         $has = static fn($v) => is_string($v) && trim($v) !== '';
 
         if ($type === 'php' || $type === 'oprava_ts_php') {
-            $certKey    = $type === 'php' ? 'cert_php'             : 'cert_oprava';
-            $defaultCol = $type === 'php' ? 'default_php_user_id'  : 'default_oprava_user_id';
+            $certKey = $type === 'php' ? 'cert_php' : 'cert_oprava';
+            $defaultCol = $type === 'php' ? 'default_php_user_id' : 'default_oprava_user_id';
             if ($has($own[$certKey] ?? null)) {
                 return;
             }
@@ -406,7 +413,7 @@ final class InspectionController
             }
             $label = $type === 'php' ? 'Kontrola PHP' : 'Oprava / plnenie / TS PHP';
             Response::error(
-                'Pre ' . $label . ' potrebuješ vlastné číslo oprávnenia, alebo nech account admin nastaví defaultného technika so zadaným číslom.',
+                'Pre ' . $label . ' potrebuješ vlastné číslo oprávnenia, alebo nech správca účtu nastaví predvoleného technika so zadaným číslom.',
                 422,
                 ['code' => 'cert_missing', 'cert' => $certKey],
             );
@@ -460,16 +467,16 @@ final class InspectionController
      */
     private static function shapeRow(array $row): array
     {
-        $row['id']                 = (int) $row['id'];
-        $row['company_id']         = (int) $row['company_id'];
-        $row['facility_id']        = (int) $row['facility_id'];
-        $row['inspector_user_id']  = (int) $row['inspector_user_id'];
+        $row['id'] = (int) $row['id'];
+        $row['company_id'] = (int) $row['company_id'];
+        $row['facility_id'] = (int) $row['facility_id'];
+        $row['inspector_user_id'] = (int) $row['inspector_user_id'];
         $row['periodicity_months'] = (int) $row['periodicity_months'];
         $row['effective_inspector_user_id'] = isset($row['effective_inspector_user_id'])
             ? (int) $row['effective_inspector_user_id']
             : null;
-        $row['effective_inspector_name']    = $row['effective_inspector_name'] ?? null;
-        $row['effective_cert_number']       = $row['effective_cert_number']    ?? null;
+        $row['effective_inspector_name'] = $row['effective_inspector_name'] ?? null;
+        $row['effective_cert_number'] = $row['effective_cert_number'] ?? null;
         unset($row['account_id']);
         return $row;
     }
