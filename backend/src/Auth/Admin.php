@@ -47,6 +47,10 @@ final class Admin
             return true;
         }
 
+        // env-seed bootstrap explicitly only ever *adds*. Removing an
+        // email from ADMIN_EMAIL does NOT auto-demote — admins promoted
+        // through the UI also have is_admin = 1, and we can't distinguish
+        // those from a former env seed. Demote via the admin UI instead.
         return $isAdminDb;
     }
 

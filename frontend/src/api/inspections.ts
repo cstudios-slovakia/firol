@@ -52,6 +52,11 @@ export type InspectionListItem = {
   facility_name: string;
   inspector_user_id: number;
   inspector_name: string;
+  // When the executor borrowed a cert (PHP / Oprava) — frozen at PDF time.
+  // Display sites should prefer effective_inspector_name when present.
+  effective_inspector_user_id: number | null;
+  effective_inspector_name: string | null;
+  effective_cert_number: string | null;
 };
 
 export type Inspection = InspectionListItem & {

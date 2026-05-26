@@ -16,7 +16,7 @@ Status legend: ⬜ todo · 🟡 in progress · ✅ done · ⏸ blocked / waiting
 - ✅ Docker compose: PHP-FPM 8.5, nginx :8080, MariaDB :3306
 - ✅ Vite + React 19 + TS + Tailwind v4 + `cn()` + Lucide
 - ✅ Composer + PSR-4 `Firol\` namespace, vlucas/phpdotenv
-- ✅ GitHub Actions deploy to Websupport (firol.cstudios.ninja)
+- ✅ GitHub Actions deploy (initially to Websupport at firol.cstudios.ninja; later migrated to `app.poapp.sk`)
 - ✅ /api/health endpoint reachable in dev (Vite proxy) and prod
   (`/api.php?path=/api/health` — webroot is `frontend/dist/`,
   PHP entry copied there from `frontend/public/api.php`)
@@ -31,7 +31,7 @@ The whole app depends on this. Everything has `account_id`.
   - `users`, `accounts`, `account_users`, `password_resets`, `system_settings`
 - Notes: dev image temporarily on PHP 8.4 (8.5 docker had a broken
   `docker-php-ext-install` pipeline). Composer constraint relaxed to ^8.4.
-  Prod (Websupport) still runs 8.5. DB healthcheck added to compose so
+  Prod still runs PHP 8.5. DB healthcheck added to compose so
   migrations run after MariaDB initialises.
 
 ### 1b — Auth backbone (PHP) ✅

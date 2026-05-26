@@ -97,6 +97,10 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // 'hidden' generates source maps without the //# sourceMappingURL
+    // pointer in the emitted JS, so error trackers (Sentry et al.) can
+    // still upload them but they aren't directly fetchable from the
+    // public bundle.
+    sourcemap: 'hidden',
   },
 });

@@ -18,7 +18,6 @@ import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Spinner } from '@/components/ui/Spinner';
 import { CardBlockSkeleton } from '@/components/ui/Skeleton';
 
 /**
@@ -918,5 +917,3 @@ export function RequireAdmin({ children }: { children: React.ReactNode }) {
   if (!isAdmin) return null;
   return <>{children}</>;
 }
-
-void Spinner;

@@ -53,8 +53,6 @@ export type ApiOptions = {
   csrfToken?: string | null;
   /** Force "vyžaduje pripojenie" semantics — never queue this mutation. */
   requireOnline?: boolean;
-  /** Skip the read cache for this GET (still writes through on success). */
-  bypassCache?: boolean;
   /** Human-readable label shown in the pending-changes UI. */
   label?: string;
 };
@@ -128,13 +126,6 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
     // Successful mutation likely invalidates the list view at the resource root.
     invalidatePrefix(resourceRoot(path)).catch(() => undefined);
   }
-
-  // For cached GETs the caller may want to render stale data first when
-  // offline; the bypassCache hint just disables the inbound cache lookup
-  // path that runs *before* fetch. The lookup actually happens above only
-  // on network failure, so this hint is a no-op today but documented for
-  // future SWR-style behaviour.
-  void opts.bypassCache;
 
   return parsed as T;
 }

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Audit\AuditLog;
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
+use Firol\Billing\SeatSync;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
@@ -118,7 +120,11 @@ final class AdminPanelController
             ];
         }
 
-        $items = array_map(static function (array $a) use ($usersByAccount): array {
+        // Default for any legacy NULL row falls back to the current admin
+        // setting (default_included_technicians) so the panel never shows a
+        // stale literal that drifts away from what new accounts get.
+        $defaultIncluded = SeatSync::defaultIncludedTechnicians();
+        $items = array_map(static function (array $a) use ($usersByAccount, $defaultIncluded): array {
             $id = (int) $a['id'];
             return [
                 'id'                    => $id,
@@ -128,7 +134,7 @@ final class AdminPanelController
                 'stripe_status'         => $a['stripe_status'],
                 'billing_period'        => $a['billing_period'],
                 'created_at'            => $a['created_at'],
-                'included_technicians'  => (int) ($a['included_technicians'] ?? 2),
+                'included_technicians'  => (int) ($a['included_technicians'] ?? $defaultIncluded),
                 'extra_technicians'     => (int) ($a['extra_technicians'] ?? 0),
                 'users'                 => $usersByAccount[$id] ?? [],
             ];
@@ -191,6 +197,13 @@ final class AdminPanelController
 
         if ($sets === []) Response::error('Nothing to update', 422);
 
+        // Snapshot the row before mutation so the audit log can show diff.
+        $beforeStmt = Db::pdo()->prepare(
+            'SELECT invoice_company_name, subscription_end_date, included_technicians FROM accounts WHERE id = ?'
+        );
+        $beforeStmt->execute([$id]);
+        $before = $beforeStmt->fetch() ?: null;
+
         $bind[] = $id;
         $stmt = Db::pdo()->prepare(
             'UPDATE accounts SET ' . implode(', ', $sets) . ' WHERE id = ?'
@@ -202,6 +215,13 @@ final class AdminPanelController
             $exists->execute([$id]);
             if ($exists->fetchColumn() === false) Response::error('Account not found', 404);
         }
+
+        $afterStmt = Db::pdo()->prepare(
+            'SELECT invoice_company_name, subscription_end_date, included_technicians FROM accounts WHERE id = ?'
+        );
+        $afterStmt->execute([$id]);
+        $after = $afterStmt->fetch() ?: null;
+        AuditLog::record('account.update', 'accounts', $id, $before ?: null, $after ?: null);
 
         if ($syncSeats) {
             \Firol\Billing\SeatSync::recompute($id);
@@ -241,10 +261,15 @@ final class AdminPanelController
         $exclusiveStmt->execute([$id, $id]);
         $userIds = $exclusiveStmt->fetchAll(\PDO::FETCH_COLUMN);
 
+        $snap = $pdo->prepare('SELECT invoice_company_name FROM accounts WHERE id = ?');
+        $snap->execute([$id]);
+        $snapRow = $snap->fetch() ?: null;
+
         // FK cascades handle account_users, companies, facilities,
         // inspections, items, documents, sequences, inspector_profiles,
         // trainings, trainees and invoices.
         $pdo->prepare('DELETE FROM accounts WHERE id = ?')->execute([$id]);
+        AuditLog::record('account.delete', 'accounts', $id, $snapRow ?: null, null);
 
         // Delete users that had no other account membership.
         if ($userIds !== []) {
@@ -310,6 +335,10 @@ final class AdminPanelController
 
         if ($sets === []) Response::error('Nothing to update', 422);
 
+        $beforeStmt = Db::pdo()->prepare('SELECT fullname, email, phone, is_admin FROM users WHERE id = ?');
+        $beforeStmt->execute([$id]);
+        $before = $beforeStmt->fetch() ?: null;
+
         $bind[] = $id;
         try {
             Db::pdo()->prepare(
@@ -321,6 +350,11 @@ final class AdminPanelController
             }
             throw $e;
         }
+
+        $afterStmt = Db::pdo()->prepare('SELECT fullname, email, phone, is_admin FROM users WHERE id = ?');
+        $afterStmt->execute([$id]);
+        $after = $afterStmt->fetch() ?: null;
+        AuditLog::record('user.update', 'users', $id, $before ?: null, $after ?: null);
 
         Response::json(['ok' => true]);
     }
@@ -349,7 +383,13 @@ final class AdminPanelController
             );
         }
 
+        $snap = Db::pdo()->prepare('SELECT fullname, email FROM users WHERE id = ?');
+        $snap->execute([$id]);
+        $snapRow = $snap->fetch() ?: null;
+
         Db::pdo()->prepare('DELETE FROM users WHERE id = ?')->execute([$id]);
+        AuditLog::record('user.delete', 'users', $id, $snapRow ?: null, null);
+
         Response::noContent();
     }
 }

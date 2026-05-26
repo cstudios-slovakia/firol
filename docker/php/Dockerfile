@@ -1,8 +1,8 @@
 FROM php:8.4-fpm
-# Note: dev image uses PHP 8.4, prod (Websupport) is 8.5. We don't depend
-# on any 8.5-only language features yet, so this is compatible. The 8.5
-# Docker image had a broken docker-php-ext-install pipeline at the time
-# of this writing — switch back when fixed.
+# Note: dev image uses PHP 8.4, prod runs PHP 8.5. We don't depend on any
+# 8.5-only language features yet, so this is compatible. The 8.5 Docker
+# image had a broken docker-php-ext-install pipeline at the time of this
+# writing — switch back when fixed.
 
 # Extensions needed across phases:
 #   pdo_mysql + opcache — core

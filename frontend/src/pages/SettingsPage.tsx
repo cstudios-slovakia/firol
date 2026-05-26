@@ -3,13 +3,13 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import {
   AlertTriangle, AtSign, Building2, CalendarDays, Check, ChevronLeft, ChevronRight,
   Copy, CreditCard, FileSignature, Hash, ImagePlus, MailPlus, MessageSquarePlus, Palette,
-  Phone, RotateCcw, Shield, ShieldCheck, ShieldOff, Trash2, UploadCloud, User,
+  Phone, RotateCcw, Shield, ShieldCheck, ShieldOff, Star, Trash2, UploadCloud, User,
   UserCheck, UsersRound,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { AccountApi, type Account } from '@/api/account';
 import { InspectorProfileApi, type InspectorProfile } from '@/api/inspectorProfile';
-import { Team, type TeamMember, type PendingInvite } from '@/api/team';
+import { Team, type TeamMember, type PendingInvite, type TeamDefaultKind } from '@/api/team';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -780,6 +780,7 @@ function TeamSection() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [busyInviteId, setBusyInviteId] = useState<number | null>(null);
+  const [busyDefault, setBusyDefault] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
   const [showInvite, setShowInvite] = useState(false);
@@ -908,6 +909,32 @@ function TeamSection() {
     }
   }
 
+  function reloadMembers() {
+    Team.list().then((res) => setMembers(res.items)).catch(() => {});
+  }
+
+  async function onSetDefault(kind: TeamDefaultKind, m: TeamMember) {
+    const isCurrent = kind === 'php' ? m.is_default_php : m.is_default_oprava;
+    // Clicking the active default clears it; clicking another tech swaps.
+    const target: number | null = isCurrent ? null : m.id;
+    setBusyDefault(`${kind}:${m.id}`);
+    try {
+      await Team.setDefault(kind, target, csrfToken);
+      reloadMembers();
+      toast.success(
+        target === null
+          ? 'Default technik zrušený'
+          : `${m.fullname} je teraz default pre ${kind === 'php' ? 'Kontrola PHP' : 'Oprava / plnenie / TS PHP'}`,
+      );
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Nastavenie sa nepodarilo.';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setBusyDefault(null);
+    }
+  }
+
   async function copyLink() {
     if (!inviteLink) return;
     try {
@@ -933,12 +960,14 @@ function TeamSection() {
                 Ľudia, ktorí majú prístup do tejto firmy. Spravovať môže len hlavný používateľ.
               </p>
             </div>
-            {isMain && !atCap && (
+            {isMain && (
               <Button
                 type="button"
                 variant="secondary"
                 leftIcon={<MailPlus className="size-4" />}
                 onClick={() => { setShowInvite((v) => !v); setInviteLink(null); setInviteFieldErrors({}); }}
+                disabled={atCap}
+                title={atCap ? `Limit ${max} technikov dosiahnutý — kontaktuj nás pre individuálnu ponuku.` : undefined}
                 className="self-start shrink-0"
               >
                 {showInvite ? 'Zrušiť' : 'Pozvať technika'}
@@ -1089,55 +1118,86 @@ function TeamSection() {
               const isSelf = user !== null && m.id === user.id;
               const canMutate = isMain && !m.is_main && !isSelf;
               return (
-                <li key={m.id} className="flex items-center gap-3 rounded-2xl border border-ink-100 px-3 py-2.5">
-                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-firol-50 text-firol-600">
-                    <User className="size-4" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-ink-900">
-                      {m.fullname}
-                      {isSelf && <span className="ml-1.5 text-xs font-normal text-ink-400">(ty)</span>}
-                    </p>
-                    <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-ink-500">
-                      <span className="truncate">{m.email}</span>
-                      <span className="text-ink-300">·</span>
-                      {m.is_main ? (
-                        <Badge tone="ok">Hlavný</Badge>
-                      ) : m.is_active ? (
-                        <Badge tone="neutral">Technik</Badge>
-                      ) : (
-                        <Badge tone="warn">Neaktívny</Badge>
-                      )}
-                    </p>
-                  </div>
-                  {canMutate && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => onToggleActive(m)}
-                        disabled={busyId === m.id}
-                        title={m.is_active ? 'Deaktivovať' : 'Aktivovať'}
-                        className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700 disabled:opacity-50"
-                      >
-                        {busyId === m.id ? (
-                          <Spinner size="sm" />
+                <li key={m.id} className="flex flex-col gap-2.5 rounded-2xl border border-ink-100 px-3 py-2.5">
+                  <div className="flex items-center gap-3">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-firol-50 text-firol-600">
+                      <User className="size-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-ink-900">
+                        {m.fullname}
+                        {isSelf && <span className="ml-1.5 text-xs font-normal text-ink-400">(ty)</span>}
+                      </p>
+                      <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-ink-500">
+                        <span className="truncate">{m.email}</span>
+                        <span className="text-ink-300">·</span>
+                        {m.is_main ? (
+                          <Badge tone="ok">Hlavný</Badge>
                         ) : m.is_active ? (
-                          <ShieldOff className="size-4" />
+                          <Badge tone="neutral">Technik</Badge>
                         ) : (
-                          <UserCheck className="size-4" />
+                          <Badge tone="warn">Neaktívny</Badge>
                         )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onRemove(m)}
-                        disabled={busyId === m.id}
-                        title="Odstrániť z tímu"
-                        className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad disabled:opacity-50"
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
-                    </>
-                  )}
+                      </p>
+                    </div>
+                    {canMutate && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => onToggleActive(m)}
+                          disabled={busyId === m.id}
+                          title={m.is_active ? 'Deaktivovať' : 'Aktivovať'}
+                          className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700 disabled:opacity-50"
+                        >
+                          {busyId === m.id ? (
+                            <Spinner size="sm" />
+                          ) : m.is_active ? (
+                            <ShieldOff className="size-4" />
+                          ) : (
+                            <UserCheck className="size-4" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onRemove(m)}
+                          disabled={busyId === m.id}
+                          title="Odstrániť z tímu"
+                          className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad disabled:opacity-50"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="grid gap-2 grid-cols-1 sm:grid-cols-3">
+                    <CertSummaryBlock
+                      color="firol"
+                      title="Kontrola PHP"
+                      certNumber={m.cert_php}
+                      validTo={m.valid_to_php}
+                      isDefault={m.is_default_php}
+                      canSetDefault={isMain && m.is_active && !!m.cert_php}
+                      onSetDefault={() => onSetDefault('php', m)}
+                      busy={busyDefault === `php:${m.id}`}
+                    />
+                    <CertSummaryBlock
+                      color="violet"
+                      title="Oprava / plnenie / TS PHP"
+                      certNumber={m.cert_oprava}
+                      validTo={m.valid_to_oprava}
+                      isDefault={m.is_default_oprava}
+                      canSetDefault={isMain && m.is_active && !!m.cert_oprava}
+                      onSetDefault={() => onSetDefault('oprava', m)}
+                      busy={busyDefault === `oprava:${m.id}`}
+                    />
+                    <CertSummaryBlock
+                      color="blue"
+                      title="Technik PO"
+                      certNumber={m.cert_general}
+                      validTo={m.valid_to_general}
+                    />
+                  </div>
                 </li>
               );
             })}
@@ -1263,6 +1323,98 @@ function CertCard({
         <p className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-status-warn)]">
           <AlertTriangle className="size-3.5 shrink-0" />
           Blíži sa koniec platnosti
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Compact read-only cert tile used in the team roster — shows the same
+ * three certificate kinds as the editable CertCard but without inputs.
+ * On the two borrowable kinds (PHP, Oprava) the main user can toggle a
+ * star to mark this technician as the account default; the star is
+ * disabled when the technician has no cert number to lend.
+ */
+function CertSummaryBlock({
+  color,
+  title,
+  certNumber,
+  validTo,
+  isDefault,
+  canSetDefault,
+  onSetDefault,
+  busy,
+}: {
+  color: CertCardColor;
+  title: string;
+  certNumber: string | null;
+  validTo: string | null;
+  isDefault?: boolean;
+  canSetDefault?: boolean;
+  onSetDefault?: () => void;
+  busy?: boolean;
+}) {
+  const s = CERT_CARD_STYLES[color];
+  const days = certDaysLeft(validTo ?? '');
+  const isExpired = days !== null && days < 0;
+  const isExpiringSoon = days !== null && days >= 0 && days <= 30;
+
+  return (
+    <div className={cn('flex flex-col gap-1 rounded-xl border px-2.5 py-2', s.border, s.bg)}>
+      <div className="flex items-center gap-1.5">
+        <div className={cn('grid size-6 shrink-0 place-items-center rounded-lg', s.iconBg)}>
+          <Hash className={cn('size-3', s.iconColor)} />
+        </div>
+        <p className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wide text-ink-700">
+          {title}
+        </p>
+        {onSetDefault && (
+          <button
+            type="button"
+            onClick={onSetDefault}
+            disabled={(!canSetDefault && !isDefault) || busy}
+            title={
+              isDefault
+                ? 'Tento technik je default — kliknutím zrušíš'
+                : canSetDefault
+                ? 'Nastaviť ako default pre tento typ kontroly'
+                : 'Technik nemá vyplnené číslo oprávnenia'
+            }
+            className={cn(
+              'grid size-6 place-items-center rounded-md transition-colors',
+              isDefault
+                ? 'bg-amber-100 text-amber-600 hover:bg-amber-200'
+                : 'text-ink-300 hover:bg-ink-100 hover:text-amber-500',
+              'disabled:opacity-40 disabled:cursor-not-allowed',
+            )}
+          >
+            {busy ? (
+              <Spinner size="sm" />
+            ) : (
+              <Star className={cn('size-3.5', isDefault && 'fill-current')} />
+            )}
+          </button>
+        )}
+      </div>
+
+      <p className={cn('truncate font-mono text-xs', certNumber ? 'text-ink-900' : 'text-ink-300')}>
+        {certNumber ?? '—'}
+      </p>
+
+      {certNumber && validTo && (
+        <p
+          className={cn(
+            'flex items-center gap-1 text-[10px]',
+            isExpired
+              ? 'text-[var(--color-status-bad)]'
+              : isExpiringSoon
+              ? 'text-[var(--color-status-warn)]'
+              : 'text-ink-400',
+          )}
+        >
+          {(isExpired || isExpiringSoon) && <AlertTriangle className="size-3 shrink-0" />}
+          do {validTo}
         </p>
       )}
     </div>

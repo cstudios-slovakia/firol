@@ -9,7 +9,7 @@ inspection output is signed and numbered PDF protocols.
 - **Frontend**: React 19 + Vite + TypeScript + Tailwind CSS v4.
 - **Styling helper**: `cn()` combining `clsx` and `tailwind-merge`.
 - **Icons**: Lucide React.
-- **Hosting**: Websupport (shared, PHP 8.5 supported).
+- **Hosting**: production server (nginx/Apache + PHP-FPM 8.5 + MariaDB) — deploy target is `app.poapp.sk`.
 
 ## Repo
 - GitHub: `git@github.com:cstudios-slovakia/firol.git`
@@ -21,8 +21,11 @@ inspection output is signed and numbered PDF protocols.
 3. `cd backend && composer install` — PHP dependencies.
 
 ## Deploy
-GitHub Actions (`.github/workflows/deploy.yml`) on push to `main`:
-build frontend → composer install → SCP only artifacts to Websupport.
+GitHub Actions (`.github/workflows/deploy.yml`) on push to `main` SSHs into
+the production server, runs `git pull`, rebuilds the frontend
+(`npm ci && npm run build` → `frontend/dist/` becomes the docroot),
+runs `composer install --no-dev`, applies pending DB migrations
+(`backend/db/migrate.php`) and ensures the `backend/storage/*` tree exists.
 
 ## Design philosophy (from .claude/ui_design_and_implementation.md)
 
@@ -66,6 +69,7 @@ Common flow: select company/facility → enter data item by item
 - Inspection dates are always entered manually, NEVER today's date automatically.
 - Slovak for UI strings and domain terms.
 - All documentation and code comments in English.
+- Never add `Co-Authored-By: Claude …` trailers, `🤖 Generated with` markers, or any other AI-assistant attribution to commit messages, PR descriptions, or code comments.
 
 ## Source of truth — NO HALLUCINATION
 - App functionality, fields, screens, copy, intervals, PDF layouts and any

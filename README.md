@@ -10,7 +10,7 @@ Current status: **environment scaffold**. Application not yet written.
 - **Backend:** plain PHP 8.5 (PSR-4 autoloading via Composer, namespace `Firol\`)
 - **DB:** MariaDB 11
 - **Frontend:** React 19 + Vite + TypeScript + Tailwind CSS v4 + Lucide React
-- **Hosting:** Websupport (shared)
+- **Hosting:** production server hosting `app.poapp.sk`
 
 ## Repo structure
 
@@ -61,15 +61,17 @@ After startup:
 
 ## Deploy
 
-GitHub Actions (`.github/workflows/deploy.yml`) on push to `main`:
-builds frontend (`npm run build`), runs `composer install --no-dev`,
-assembles deploy bundle and SCPs it to Websupport at `cstudios.ninja/sub/firol`.
+GitHub Actions (`.github/workflows/deploy.yml`) on push to `main` SSHs into
+the production server (`app.poapp.sk`), runs `git pull`, rebuilds the
+frontend (`npm ci && npm run build`), runs `composer install --no-dev`,
+applies any pending DB migrations and ensures the `backend/storage/`
+tree exists.
 
 ### GitHub Secrets required for deploy workflow
-- `SSH_HOST` = shell.r5.websupport.sk
-- `SSH_PORT` = 29607
-- `SSH_USER` = Websupport UID
-- `SSH_PASSWORD` = Websupport password (or migrate to `SSH_PRIVATE_KEY`)
+- `PROD_SSH_HOST`
+- `PROD_SSH_PORT`
+- `PROD_SSH_USER`
+- `PROD_SSH_PASSWORD` (or migrate to `PROD_SSH_PRIVATE_KEY`)
 
 ## Scripts
 

@@ -39,26 +39,43 @@ final class SeatSync
     public static function recompute(int $accountId): void
     {
         $pdo = Db::pdo();
-        $stmt = $pdo->prepare(
-            'SELECT id, included_technicians, extra_technicians,
-                    stripe_subscription_id, stripe_extra_subscription_item_id,
-                    billing_period, stripe_status
-             FROM   accounts WHERE id = ?'
-        );
-        $stmt->execute([$accountId]);
-        $account = $stmt->fetch();
-        if (!$account) {
-            return;
+
+        // Wrap the read+write under a per-account lock so two concurrent
+        // recomputes (e.g. webhook firing while a user-initiated change
+        // also kicks off) don't both push diverging quantities to Stripe.
+        // SELECT … FOR UPDATE blocks the second caller until the first
+        // commits, at which point its own SELECT sees the fresh state.
+        $alreadyInTx = $pdo->inTransaction();
+        if (!$alreadyInTx) {
+            $pdo->beginTransaction();
         }
 
-        $active   = self::countActiveTechnicians($accountId);
-        $included = (int) $account['included_technicians'];
-        $target   = max(0, $active - $included);
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT id, included_technicians, extra_technicians,
+                        stripe_subscription_id, stripe_extra_subscription_item_id,
+                        billing_period, stripe_status
+                 FROM   accounts WHERE id = ? FOR UPDATE'
+            );
+            $stmt->execute([$accountId]);
+            $account = $stmt->fetch();
+            if (!$account) {
+                if (!$alreadyInTx) $pdo->commit();
+                return;
+            }
 
-        // Persist the desired quantity eagerly so the UI reflects it even
-        // before Stripe acks.
-        $pdo->prepare('UPDATE accounts SET extra_technicians = ? WHERE id = ?')
-            ->execute([$target, $accountId]);
+            $active   = self::countActiveTechnicians($accountId);
+            $included = (int) $account['included_technicians'];
+            $target   = max(0, $active - $included);
+
+            $pdo->prepare('UPDATE accounts SET extra_technicians = ? WHERE id = ?')
+                ->execute([$target, $accountId]);
+
+            if (!$alreadyInTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if (!$alreadyInTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
 
         $subId = (string) ($account['stripe_subscription_id'] ?? '');
         if ($subId === '') {
@@ -67,12 +84,23 @@ final class SeatSync
             return;
         }
 
+        // Refuse to sync when we have a live subscription but no recorded
+        // billing_period — the resulting price_data would be wrong and the
+        // extra-seat item would diverge from the base plan's cadence. The
+        // next subscription webhook will fill in billing_period and a
+        // follow-up recompute will run then.
+        $period = (string) ($account['billing_period'] ?? '');
+        if ($period !== 'monthly' && $period !== 'yearly') {
+            error_log("[seat-sync] account=$accountId skipped: billing_period not set");
+            return;
+        }
+
         try {
             self::applyToStripe(
                 $subId,
                 (string) ($account['stripe_extra_subscription_item_id'] ?? ''),
                 $target,
-                (string) ($account['billing_period'] ?? 'monthly'),
+                $period,
                 $accountId,
             );
         } catch (\Throwable $e) {

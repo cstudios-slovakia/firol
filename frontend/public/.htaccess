@@ -1,5 +1,21 @@
 RewriteEngine On
 
+# Security headers — apply to every response. Add Strict-Transport-Security
+# only via the real production server config (it's HTTPS-only and shouldn't
+# leak from a dev environment served on http).
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "DENY"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    # CSP — start strict, relax as the app actually needs it. 'unsafe-inline'
+    # for style-src is here only because Tailwind v4 injects a few inline
+    # styles via the runtime; revisit when removing that dependency.
+    Header set Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+    # HSTS — only meaningful over HTTPS; the production server reverse-proxy
+    # / CDN should add this too, this is a belt-and-braces fallback.
+    Header set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+</IfModule>
+
 # PHP error logging — hosting's default error_log destination is not
 # readable for our user, so route errors into our own storage tree.
 # (.user.ini is ignored by this FPM pool, but .htaccess php_value works.)

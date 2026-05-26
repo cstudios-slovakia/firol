@@ -45,11 +45,15 @@ final class InspectionController
                        i.status, i.notes, i.created_at,
                        i.company_id, c.name AS company_name,
                        i.facility_id, f.name AS facility_name,
-                       i.inspector_user_id, u.fullname AS inspector_name
+                       i.inspector_user_id, u.fullname AS inspector_name,
+                       i.effective_inspector_user_id,
+                       eu.fullname AS effective_inspector_name,
+                       i.effective_cert_number
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
                 JOIN   facilities  f ON f.id = i.facility_id
                 JOIN   users       u ON u.id = i.inspector_user_id
+                LEFT JOIN users    eu ON eu.id = i.effective_inspector_user_id
                 WHERE  i.archived_at IS NULL';
         $params = [];
         if (!$isAdmin) {
@@ -185,6 +189,13 @@ final class InspectionController
             }
         }
 
+        // Block creation when the executing technician has no own cert AND
+        // no usable fallback. Admins are exempt (they manage other accounts'
+        // data without their own profile).
+        if (!$isAdmin) {
+            self::assertCanInspect($accountId, $inspectorUserId, $type);
+        }
+
         $stmt = Db::pdo()->prepare(
             'INSERT INTO inspections
                 (account_id, company_id, facility_id, type, periodicity_months,
@@ -279,6 +290,17 @@ final class InspectionController
             Response::error('Opakovať možno len ukončenú kontrolu (s vystaveným PDF).', 422);
         }
 
+        // Same cert guard as fresh creation — if the original inspector
+        // lost their cert and no fallback is set, refuse to clone now
+        // rather than at PDF time.
+        if (!$isAdmin) {
+            self::assertCanInspect(
+                $accountId,
+                (int) $source['inspector_user_id'],
+                (string) $source['type'],
+            );
+        }
+
         $pdo = Db::pdo();
         $pdo->beginTransaction();
 
@@ -344,6 +366,62 @@ final class InspectionController
         ], 201);
     }
 
+    /**
+     * Refuse to create an inspection the executor can't legitimately
+     * sign. Technik PO types (everything except php and oprava_ts_php)
+     * require the executor's own cert_general — no borrowing. For PHP /
+     * Oprava the executor may borrow the account-default technician's
+     * cert; only when neither own nor default cert is available do we
+     * block. Errors carry a `code` so the UI can show a useful hint.
+     */
+    private static function assertCanInspect(int $accountId, int $inspectorUserId, string $type): void
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT cert_php, cert_oprava, cert_general
+             FROM   inspector_profiles
+             WHERE  user_id = ? AND account_id = ?'
+        );
+        $stmt->execute([$inspectorUserId, $accountId]);
+        $own = $stmt->fetch() ?: ['cert_php' => null, 'cert_oprava' => null, 'cert_general' => null];
+
+        $has = static fn($v) => is_string($v) && trim($v) !== '';
+
+        if ($type === 'php' || $type === 'oprava_ts_php') {
+            $certKey    = $type === 'php' ? 'cert_php'             : 'cert_oprava';
+            $defaultCol = $type === 'php' ? 'default_php_user_id'  : 'default_oprava_user_id';
+            if ($has($own[$certKey] ?? null)) {
+                return;
+            }
+            $defaultStmt = Db::pdo()->prepare(
+                'SELECT ip.' . $certKey . '
+                 FROM   accounts a
+                 LEFT JOIN inspector_profiles ip
+                        ON ip.user_id = a.' . $defaultCol . ' AND ip.account_id = a.id
+                 WHERE  a.id = ?'
+            );
+            $defaultStmt->execute([$accountId]);
+            $defaultCert = $defaultStmt->fetchColumn();
+            if ($has($defaultCert)) {
+                return;
+            }
+            $label = $type === 'php' ? 'Kontrola PHP' : 'Oprava / plnenie / TS PHP';
+            Response::error(
+                'Pre ' . $label . ' potrebuješ vlastné číslo oprávnenia, alebo nech account admin nastaví defaultného technika so zadaným číslom.',
+                422,
+                ['code' => 'cert_missing', 'cert' => $certKey],
+            );
+        }
+
+        // All other types print cert_general (Technik PO). No fallback.
+        if (!$has($own['cert_general'] ?? null)) {
+            Response::error(
+                'Tento typ kontroly vyžaduje platné číslo oprávnenia Technik PO. Doplň ho v Profile revízneho technika.',
+                422,
+                ['code' => 'cert_missing', 'cert' => 'cert_general'],
+            );
+        }
+    }
+
     /** @return array<string, mixed> */
     private static function loadOrFail(?int $accountId, int $id): array
     {
@@ -352,11 +430,15 @@ final class InspectionController
                        i.created_at, i.updated_at,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
                        i.facility_id, f.name AS facility_name,
-                       i.inspector_user_id, u.fullname AS inspector_name
+                       i.inspector_user_id, u.fullname AS inspector_name,
+                       i.effective_inspector_user_id,
+                       eu.fullname AS effective_inspector_name,
+                       i.effective_cert_number
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
                 JOIN   facilities  f ON f.id = i.facility_id
                 JOIN   users       u ON u.id = i.inspector_user_id
+                LEFT JOIN users    eu ON eu.id = i.effective_inspector_user_id
                 WHERE  i.id = ? AND i.archived_at IS NULL';
         $params = [$id];
         if ($accountId !== null) {
@@ -383,6 +465,11 @@ final class InspectionController
         $row['facility_id']        = (int) $row['facility_id'];
         $row['inspector_user_id']  = (int) $row['inspector_user_id'];
         $row['periodicity_months'] = (int) $row['periodicity_months'];
+        $row['effective_inspector_user_id'] = isset($row['effective_inspector_user_id'])
+            ? (int) $row['effective_inspector_user_id']
+            : null;
+        $row['effective_inspector_name']    = $row['effective_inspector_name'] ?? null;
+        $row['effective_cert_number']       = $row['effective_cert_number']    ?? null;
         unset($row['account_id']);
         return $row;
     }

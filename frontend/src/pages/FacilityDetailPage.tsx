@@ -74,6 +74,7 @@ export function FacilityDetailPage() {
             return (
                 INSPECTION_TYPE_LABELS[it.type].toLowerCase().includes(q) ||
                 it.inspector_name.toLowerCase().includes(q) ||
+                (it.effective_inspector_name?.toLowerCase().includes(q) ?? false) ||
                 (it.executed_on ?? "").includes(q)
             );
         });
@@ -487,7 +488,7 @@ export function FacilityDetailPage() {
                                                     <span className="mx-1.5 text-ink-300">·</span>
                                                     {ins.periodicity_months} mes.
                                                     <span className="mx-1.5 text-ink-300">·</span>
-                                                    {ins.inspector_name}
+                                                    {ins.effective_inspector_name ?? ins.inspector_name}
                                                 </p>
                                             </div>
                                         </Link>

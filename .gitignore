@@ -21,11 +21,10 @@ vendor/
 .env.local
 .env.*.local
 
-# Cowork / Claude scratch
-.claude/cache/
-.claude/local/
-.claude/worktrees/
-.claude/settings.local.json
+# AI assistant scratch + config — never tracked, the directory may
+# contain machine-specific paths and design notes that don't belong
+# in version control.
+.claude/
 
 # Veľké materiály k handoffu (referenčné, nie v repe)
 firol.pdf

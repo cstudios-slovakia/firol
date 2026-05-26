@@ -71,6 +71,7 @@ $router->get('/api/account/users',        [TeamController::class, 'index']);
 $router->post('/api/account/users',       [TeamController::class, 'invite']);
 $router->patch('/api/account/users/{id}', [TeamController::class, 'update']);
 $router->delete('/api/account/users/{id}',[TeamController::class, 'destroy']);
+$router->post('/api/account/team-defaults', [TeamController::class, 'setDefault']);
 
 $router->get('/api/account/invites',           [TeamController::class, 'indexInvites']);
 $router->delete('/api/account/invites/{id}',   [TeamController::class, 'cancelInvite']);

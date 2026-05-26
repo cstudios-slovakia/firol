@@ -81,6 +81,7 @@ export function InspectionsListPage() {
                 it.company_name.toLowerCase().includes(q) ||
                 it.facility_name.toLowerCase().includes(q) ||
                 it.inspector_name.toLowerCase().includes(q) ||
+                (it.effective_inspector_name?.toLowerCase().includes(q) ?? false) ||
                 INSPECTION_TYPE_LABELS[it.type].toLowerCase().includes(q)
             );
         });
@@ -465,7 +466,7 @@ function InspectionRow({
                         <span className="mx-1.5 text-ink-300">·</span>
                         {it.periodicity_months} mes.
                         <span className="mx-1.5 text-ink-300">·</span>
-                        {it.inspector_name}
+                        {it.effective_inspector_name ?? it.inspector_name}
                     </p>
 
                     {/* Mobile actions — second row */}

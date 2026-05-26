@@ -6,6 +6,7 @@ namespace Firol\Controllers;
 
 use Firol\Auth\Csrf;
 use Firol\Auth\Password;
+use Firol\Auth\RateLimit;
 use Firol\Auth\Session;
 use Firol\Db;
 use Firol\Http\Request;
@@ -124,6 +125,13 @@ final class AuthController
             Response::error('Email and password required', 422);
         }
 
+        // Rate-limit by IP + email separately so a single attacker IP can't
+        // burn through every account, and a single victim email can't be
+        // brute-forced from many IPs.
+        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+        RateLimit::hit('login:ip:' . $ip);
+        RateLimit::hit('login:email:' . strtolower(trim($email)));
+
         $pdo  = Db::pdo();
         $stmt = $pdo->prepare('SELECT id, password_hash FROM users WHERE email = ?');
         $stmt->execute([$email]);
@@ -132,6 +140,10 @@ final class AuthController
         if (!$user || !Password::verify($password, (string) $user['password_hash'])) {
             Response::error('Invalid email or password', 401);
         }
+
+        // Drop both counters now that we know the credentials matched.
+        RateLimit::clear('login:ip:' . $ip);
+        RateLimit::clear('login:email:' . strtolower(trim($email)));
 
         $userId = (int) $user['id'];
 

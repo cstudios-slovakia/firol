@@ -103,9 +103,22 @@ final class InvoiceIssuer
             // PublicHtmlUrl is iDoklad's unauthenticated download link.
             // It's only populated for non-draft invoices — in draft mode
             // we leave the column NULL and the UI falls back to Stripe.
-            $publicUrl = isset($created['PublicHtmlUrl']) && is_string($created['PublicHtmlUrl'])
+            $publicUrl = isset($created['PublicHtmlUrl']) && is_string($created['PublicHtmlUrl']) && $created['PublicHtmlUrl'] !== ''
                 ? $created['PublicHtmlUrl']
                 : null;
+            // Sometimes the POST response omits PublicHtmlUrl even for issued
+            // invoices — re-fetch the detail once to recover it. Failure is
+            // non-fatal: the UI falls back to the Stripe receipt.
+            if ($publicUrl === null && !IDokladClient::isDraftMode() && isset($created['Id'])) {
+                try {
+                    $detail = $client->get('IssuedInvoices/' . (int) $created['Id']);
+                    if (isset($detail['PublicHtmlUrl']) && is_string($detail['PublicHtmlUrl']) && $detail['PublicHtmlUrl'] !== '') {
+                        $publicUrl = $detail['PublicHtmlUrl'];
+                    }
+                } catch (\Throwable $e) {
+                    error_log('[idoklad.refetch-url] ' . $e->getMessage());
+                }
+            }
 
             $pdo->prepare(
                 'UPDATE invoices

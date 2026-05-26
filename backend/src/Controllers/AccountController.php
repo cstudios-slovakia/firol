@@ -175,10 +175,22 @@ final class AccountController
         $row = $stmt->fetch();
 
         $rel = is_array($row) ? ($row['logo_path'] ?? null) : null;
-        if (!$rel) {
+        if (!is_string($rel) || $rel === '') {
             Response::error('No logo on file', 404);
         }
-        $abs = Storage::root() . '/' . $rel;
+        // Guard against a stored logo_path containing path-traversal segments.
+        // Only the canonical layout (accounts/<id>/logo.png|jpg) is acceptable —
+        // anything else (../, absolute paths, …) is treated as tampered data.
+        if (!preg_match('#^accounts/\d+/logo\.(png|jpg)$#', $rel)) {
+            error_log('[downloadLogo] suspicious logo_path on account ' . (int) $accountId . ': ' . $rel);
+            Response::error('No logo on file', 404);
+        }
+        $abs  = Storage::root() . '/' . $rel;
+        $root = realpath(Storage::root());
+        $real = realpath($abs);
+        if ($root === false || $real === false || !str_starts_with($real, $root . DIRECTORY_SEPARATOR)) {
+            Response::error('No logo on file', 404);
+        }
         if (!is_file($abs)) {
             Response::error('No logo on file', 404);
         }
@@ -200,7 +212,8 @@ final class AccountController
                     logo_path, theme_color, subscription_end_date,
                     stripe_status, stripe_subscription_id, billing_period, stripe_customer_id,
                     stripe_cancel_at_period_end,
-                    included_technicians, extra_technicians
+                    included_technicians, extra_technicians,
+                    main_user_id, default_php_user_id, default_oprava_user_id
              FROM   accounts WHERE id = ?'
         );
         $stmt->execute([$accountId]);
@@ -239,6 +252,9 @@ final class AccountController
             'stripe_cancel_at_period_end' => !empty($row['stripe_cancel_at_period_end']),
             // Seat / technician licensing — surfaced so the UI can show
             // "X of N seats used" and gate the invite flow client-side.
+            'main_user_id'                   => isset($row['main_user_id']) ? (int) $row['main_user_id'] : null,
+            'default_php_user_id'            => isset($row['default_php_user_id']) ? (int) $row['default_php_user_id'] : null,
+            'default_oprava_user_id'         => isset($row['default_oprava_user_id']) ? (int) $row['default_oprava_user_id'] : null,
             'included_technicians'           => (int) ($row['included_technicians'] ?? 2),
             'extra_technicians'              => (int) ($row['extra_technicians'] ?? 0),
             'active_technicians'             => SeatSync::countActiveTechnicians($accountId),

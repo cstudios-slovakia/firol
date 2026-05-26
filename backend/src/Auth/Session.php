@@ -41,6 +41,11 @@ final class Session
     public static function setUserId(int $id): void
     {
         self::start();
+        // Rotate the session ID whenever a user is bound to the session
+        // (login / register / password reset confirm). Defeats session
+        // fixation: an attacker who guesses/sets a pre-auth ID can't reuse
+        // it once we issue a fresh one on successful authentication.
+        session_regenerate_id(true);
         $_SESSION['user_id'] = $id;
     }
 

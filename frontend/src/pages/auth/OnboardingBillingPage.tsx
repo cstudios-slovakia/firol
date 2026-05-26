@@ -24,7 +24,10 @@ export function OnboardingBillingPage() {
   const navigate = useNavigate();
 
   const activeAccount = accounts.find((a) => a.id === activeAccountId) ?? null;
-  const plan: BillingPeriod = (activeAccount?.billing_period as BillingPeriod | null) ?? 'yearly';
+  // No fallback here — until the account row has loaded with an explicit
+  // billing_period, we render a spinner instead of guessing a plan. Otherwise
+  // a user who chose monthly at registration would briefly see yearly prices.
+  const plan: BillingPeriod | null = (activeAccount?.billing_period as BillingPeriod | null) ?? null;
 
   const [account, setAccount] = useState<Account | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,6 +68,10 @@ export function OnboardingBillingPage() {
       toast.error('Vyplň ulicu, PSČ, mesto a IČO.');
       return;
     }
+    if (plan === null) {
+      toast.error('Predplatné sa ešte načítava, skús to o chvíľu.');
+      return;
+    }
     setBusy(true);
     try {
       await AccountApi.update({
@@ -91,11 +98,13 @@ export function OnboardingBillingPage() {
     navigate('/login');
   }
 
-  const priceLabel = plan === 'yearly' ? '199 € / rok' : '19 € / mesiac';
-  const planLabel  = plan === 'yearly' ? 'Ročné predplatné' : 'Mesačné predplatné';
-  const planHint   = plan === 'yearly'
-    ? 'Ekvivalent ~16,60 € / mesiac, ušetríš 2 mesiace oproti mesačnému.'
-    : 'Účtuje sa každý mesiac, môžeš kedykoľvek zrušiť cez Stripe portál.';
+  const priceLabel = plan === null ? '—' : plan === 'yearly' ? '199 € / rok' : '19 € / mesiac';
+  const planLabel  = plan === null ? 'Načítavam plán…' : plan === 'yearly' ? 'Ročné predplatné' : 'Mesačné predplatné';
+  const planHint   = plan === null
+    ? ''
+    : plan === 'yearly'
+      ? 'Ekvivalent ~16,60 € / mesiac, ušetríš 2 mesiace oproti mesačnému.'
+      : 'Účtuje sa každý mesiac, môžeš kedykoľvek zrušiť cez Stripe portál.';
 
   return (
     <AuthLayout
@@ -130,7 +139,7 @@ export function OnboardingBillingPage() {
           </div>
         </div>
 
-        {loading || !account ? (
+        {loading || !account || plan === null ? (
           <div className="flex justify-center py-10 text-ink-400">
             <Spinner />
           </div>

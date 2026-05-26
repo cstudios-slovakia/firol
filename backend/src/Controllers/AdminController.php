@@ -22,7 +22,11 @@ final class AdminController
 {
     /** Settings the admin UI is allowed to read/write, with their validators. */
     private const ALLOWED = [
-        'trial_days'                       => ['type' => 'int', 'min' => 0, 'max' => 365],
+        // 0 disables trials entirely; otherwise minimum is 3 days because
+        // Stripe Checkout requires `trial_end` to be ≥ 48 h in the future,
+        // and BillingController::trialEndUnix silently drops the trial when
+        // the remaining window is shorter than that.
+        'trial_days'                       => ['type' => 'int', 'min' => 0, 'max' => 365, 'forbid_range' => [1, 2]],
         'price_monthly_eur'                => ['type' => 'int', 'min' => 0, 'max' => 9999],
         'price_yearly_eur'                 => ['type' => 'int', 'min' => 0, 'max' => 99999],
         // Default number of technician seats (incl. the account admin) included
@@ -65,6 +69,9 @@ final class AdminController
                 $intVal = (int) $value;
                 if ($intVal < $rule['min'] || $intVal > $rule['max']) {
                     Response::error("$key out of range ({$rule['min']}–{$rule['max']})", 422);
+                }
+                if (isset($rule['forbid_range']) && in_array($intVal, $rule['forbid_range'], true)) {
+                    Response::error("$key: trial dní musí byť 0 alebo aspoň 3 (Stripe vyžaduje minimálne 48 h)", 422);
                 }
                 $stmt->execute([$key, (string) $intVal]);
             }

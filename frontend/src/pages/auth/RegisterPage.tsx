@@ -24,6 +24,8 @@ export function RegisterPage() {
   const [plan, setPlan] = useState<RegistrationPlan>('trial');
 
   const [trialDays, setTrialDays] = useState<number | null>(null);
+  const [priceMonthly, setPriceMonthly] = useState<number | null>(null);
+  const [priceYearly, setPriceYearly] = useState<number | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{ fullname?: string; email?: string; password?: string; passwordConfirm?: string; companyName?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -31,7 +33,11 @@ export function RegisterPage() {
   useEffect(() => {
     fetch(buildUrl('/api/public/settings'))
       .then((r) => r.json())
-      .then((data) => { if (typeof data.trial_days === 'number') setTrialDays(data.trial_days); })
+      .then((data) => {
+        if (typeof data.trial_days === 'number') setTrialDays(data.trial_days);
+        if (typeof data.price_monthly_eur === 'number') setPriceMonthly(data.price_monthly_eur);
+        if (typeof data.price_yearly_eur === 'number') setPriceYearly(data.price_yearly_eur);
+      })
       .catch(() => {});
   }, []);
 
@@ -206,14 +212,14 @@ export function RegisterPage() {
                 active={plan === 'yearly'}
                 onClick={() => setPlan('yearly')}
                 label="Ročné"
-                price="199 €"
+                price={priceYearly !== null ? `${priceYearly} €` : '— €'}
                 badge="−13 %"
               />
               <PeriodOption
                 active={plan === 'monthly'}
                 onClick={() => setPlan('monthly')}
                 label="Mesačné"
-                price="19 €"
+                price={priceMonthly !== null ? `${priceMonthly} €` : '— €'}
               />
             </div>
             <p className="text-xs text-ink-400">

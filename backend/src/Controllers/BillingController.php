@@ -402,8 +402,27 @@ final class BillingController
             Response::error('Bad request', 400);
         }
 
-        $type = (string) $event->type;
-        $obj  = $event->data->object;
+        $type    = (string) $event->type;
+        $obj     = $event->data->object;
+        $eventId = (string) ($event->id ?? '');
+
+        // Idempotency: Stripe retries on >= 500. Reject already-seen event IDs
+        // before any side effect (DB write, email send) runs. 23000 = duplicate
+        // primary key on stripe_webhook_events.event_id (added in migration 018).
+        if ($eventId !== '') {
+            try {
+                Db::pdo()->prepare(
+                    'INSERT INTO stripe_webhook_events (event_id, event_type) VALUES (?, ?)'
+                )->execute([$eventId, $type]);
+            } catch (\PDOException $e) {
+                if ($e->getCode() === '23000') {
+                    error_log("[billing.webhook] duplicate event $eventId — skipping");
+                    Response::noContent();
+                    return;
+                }
+                throw $e;
+            }
+        }
 
         switch ($type) {
             case 'customer.subscription.created':

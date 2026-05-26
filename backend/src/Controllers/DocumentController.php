@@ -102,17 +102,33 @@ final class DocumentController
             ]);
             $documentId = (int) $pdo->lastInsertId();
 
+            // Freeze the inspector identity + cert that ended up on the
+            // PDF, so admin/list views show the borrowed cert exactly as
+            // printed even if the default technician changes later.
             $pdo->prepare(
-                'UPDATE inspections SET status = "finalized" WHERE id = ? AND account_id = ?'
-            )->execute([$inspectionId, $accountId]);
+                'UPDATE inspections
+                 SET    status = "finalized",
+                        effective_inspector_user_id = ?,
+                        effective_cert_number       = ?
+                 WHERE  id = ? AND account_id = ?'
+            )->execute([
+                $payload['_effective_inspector_user_id'] ?? null,
+                $payload['_effective_cert_number']       ?? null,
+                $inspectionId,
+                $accountId,
+            ]);
 
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
             // Best-effort cleanup of an orphaned PDF if the rollback
-            // happened after file_put_contents.
+            // happened after file_put_contents. If unlink fails (file
+            // locked / permissions) the file leaks — log it loudly so
+            // ops can run a cleanup pass instead of silently piling up.
             if (isset($absPath) && is_file($absPath)) {
-                @unlink($absPath);
+                if (!@unlink($absPath)) {
+                    error_log('[generate-pdf] orphan PDF cleanup failed: ' . $absPath);
+                }
             }
             error_log('[generate-pdf] ' . $e::class . ': ' . $e->getMessage());
             Response::error('PDF generation failed.', 500);
@@ -296,7 +312,9 @@ final class DocumentController
         } catch (\Throwable $e) {
             $pdo->rollBack();
             if (isset($absPath) && is_file($absPath)) {
-                @unlink($absPath);
+                if (!@unlink($absPath)) {
+                    error_log('[generate-pdf-training] orphan PDF cleanup failed: ' . $absPath);
+                }
             }
             error_log('[generate-pdf-training] ' . $e::class . ': ' . $e->getMessage());
             Response::error('PDF sa nepodarilo vygenerovať.', 500);
@@ -466,25 +484,21 @@ final class DocumentController
         array $items,
     ): array {
         $inspectorUserId = (int) $inspection['inspector_user_id'];
+        $insType         = (string) $inspection['type'];
 
-        $userStmt = Db::pdo()->prepare(
-            'SELECT fullname FROM users WHERE id = ?'
+        // Resolve effective inspector (who appears in the inspector block on
+        // the PDF). For PHP / Oprava the executor can borrow the cert+name
+        // of the account-default technician when they have no own number.
+        // Technik PO types never fall back — store guard runs upstream.
+        [$effectiveUserId, $profile] = self::resolveEffectiveInspector(
+            $accountId,
+            $inspectorUserId,
+            $insType,
         );
-        $userStmt->execute([$inspectorUserId]);
+
+        $userStmt = Db::pdo()->prepare('SELECT fullname FROM users WHERE id = ?');
+        $userStmt->execute([$effectiveUserId]);
         $userRow = $userStmt->fetch();
-
-        $profStmt = Db::pdo()->prepare(
-            'SELECT signature_path, cert_php, cert_oprava, cert_general,
-                    certification_number,
-                    valid_from_php, valid_to_php,
-                    valid_from_oprava, valid_to_oprava,
-                    valid_from_general, valid_to_general,
-                    valid_from, valid_to
-             FROM   inspector_profiles
-             WHERE  user_id = ? AND account_id = ?'
-        );
-        $profStmt->execute([$inspectorUserId, $accountId]);
-        $profile = $profStmt->fetch() ?: [];
 
         $signatureUri = self::signatureToDataUri($profile['signature_path'] ?? null);
 
@@ -495,6 +509,8 @@ final class DocumentController
         $accRow = $accStmt->fetch() ?: [];
 
         $stats = self::computeStats((string) $inspection['type'], $items);
+
+        $certNumber = self::certForType($insType, $profile);
 
         return [
             'brand' => self::buildBrand($accRow),
@@ -516,16 +532,80 @@ final class DocumentController
             ],
             'inspector' => [
                 'fullname'             => $userRow['fullname'] ?? '—',
-                'certification_number' => self::certForType(
-                    (string) $inspection['type'],
-                    $profile,
-                ),
-                ...self::validityForType((string) $inspection['type'], $profile),
+                'certification_number' => $certNumber,
+                ...self::validityForType($insType, $profile),
                 'signature_data_uri'   => $signatureUri,
             ],
             'items' => $items,
             'stats' => $stats,
+            // Internal — written back as a snapshot onto the inspection
+            // row, never reaches the PDF templates.
+            '_effective_inspector_user_id' => $effectiveUserId,
+            '_effective_cert_number'       => $certNumber,
         ];
+    }
+
+    /**
+     * Resolve which inspector identity ends up on the protocol.
+     *
+     * Borrowing rules:
+     *   - php / oprava_ts_php: if the executing technician's own
+     *     cert_php / cert_oprava is blank, fall back to the
+     *     account-default technician (accounts.default_php_user_id /
+     *     default_oprava_user_id). The borrowed identity replaces the
+     *     executor in the inspector block (name + cert + signature).
+     *   - All other types print cert_general (Technik PO) and never
+     *     fall back; InspectionController::store guarantees the executor
+     *     has an own cert_general for those types.
+     *
+     * @return array{0:int,1:array<string,mixed>}  [effective_user_id, profile_row]
+     */
+    private static function resolveEffectiveInspector(
+        int $accountId,
+        int $executorUserId,
+        string $insType,
+    ): array {
+        $loadProfile = static function (int $uid) use ($accountId): array {
+            $stmt = Db::pdo()->prepare(
+                'SELECT signature_path, cert_php, cert_oprava, cert_general,
+                        certification_number,
+                        valid_from_php, valid_to_php,
+                        valid_from_oprava, valid_to_oprava,
+                        valid_from_general, valid_to_general,
+                        valid_from, valid_to
+                 FROM   inspector_profiles
+                 WHERE  user_id = ? AND account_id = ?'
+            );
+            $stmt->execute([$uid, $accountId]);
+            return $stmt->fetch() ?: [];
+        };
+
+        $executorProfile = $loadProfile($executorUserId);
+
+        if ($insType !== 'php' && $insType !== 'oprava_ts_php') {
+            return [$executorUserId, $executorProfile];
+        }
+
+        $certKey = $insType === 'php' ? 'cert_php' : 'cert_oprava';
+        $own     = $executorProfile[$certKey] ?? null;
+        if (is_string($own) && trim($own) !== '') {
+            return [$executorUserId, $executorProfile];
+        }
+
+        $defaultCol = $insType === 'php' ? 'default_php_user_id' : 'default_oprava_user_id';
+        $stmt = Db::pdo()->prepare('SELECT ' . $defaultCol . ' FROM accounts WHERE id = ?');
+        $stmt->execute([$accountId]);
+        $defaultUserId = $stmt->fetchColumn();
+        if (!$defaultUserId) {
+            return [$executorUserId, $executorProfile];
+        }
+        $defaultUserId = (int) $defaultUserId;
+        $defaultProfile = $loadProfile($defaultUserId);
+        $defaultCert    = $defaultProfile[$certKey] ?? null;
+        if (!is_string($defaultCert) || trim($defaultCert) === '') {
+            return [$executorUserId, $executorProfile];
+        }
+        return [$defaultUserId, $defaultProfile];
     }
 
     /**

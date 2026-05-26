@@ -22,9 +22,6 @@ jobs:
             set -e
             ROOT=/usr/home/awgefy/public_html/app.poapp.sk
 
-            # # --- staging (firol.cstudios.ninja) ---
-            # ROOT=~/cstudios.ninja/sub/firol
-
             cd $ROOT
             git clean -f backend/composer.lock
             git pull origin main
@@ -58,3 +55,21 @@ jobs:
             # to remove because the real docroot is frontend/dist/.
             rm -f  $ROOT/index.php $ROOT/index.html $ROOT/test.php
             rm -rf $ROOT/assets $ROOT/vendor $ROOT/src
+
+      # Smoke-test the freshly deployed app from the GitHub runner. Fails
+      # the workflow if /api/health doesn't return 200 — a stronger signal
+      # than "ssh command succeeded" because it exercises the actual
+      # docroot + PHP-FPM + DB chain.
+      - name: Post-deploy healthcheck
+        run: |
+          set -e
+          for i in 1 2 3 4 5; do
+            if curl -fsS --max-time 10 https://app.poapp.sk/api.php?path=/api/health > /dev/null; then
+              echo "Healthcheck OK"
+              exit 0
+            fi
+            echo "Healthcheck attempt $i failed, retrying in 5s…"
+            sleep 5
+          done
+          echo "Healthcheck failed after 5 attempts"
+          exit 1

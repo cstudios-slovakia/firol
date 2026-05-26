@@ -113,7 +113,6 @@ final class Mailer
 
     public static function appBaseUrl(): string
     {
-        $url = trim((string) ($_ENV['APP_BASE_URL'] ?? ''));
-        return $url !== '' ? rtrim($url, '/') : 'http://localhost:5173';
+        return \Firol\Http\Url::appBase();
     }
 }

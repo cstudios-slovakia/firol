@@ -3,7 +3,7 @@
 /*
  * Production entry point for the PHP backend.
  *
- * Web root for firol.cstudios.ninja is frontend/dist/. Files placed in
+ * The web root in production is frontend/dist/. Files placed in
  * frontend/public/ are auto-copied to dist/ by Vite during build, so this
  * file ends up at <docroot>/api.php on the server.
  *

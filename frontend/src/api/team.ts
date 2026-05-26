@@ -8,8 +8,21 @@ export type TeamMember = {
   role: string;
   is_active: boolean;
   is_main: boolean;
+  is_default_php: boolean;
+  is_default_oprava: boolean;
+  cert_php: string | null;
+  cert_oprava: string | null;
+  cert_general: string | null;
+  valid_from_php: string | null;
+  valid_to_php: string | null;
+  valid_from_oprava: string | null;
+  valid_to_oprava: string | null;
+  valid_from_general: string | null;
+  valid_to_general: string | null;
   created_at: string;
 };
+
+export type TeamDefaultKind = 'php' | 'oprava';
 
 export type PendingInvite = {
   id: number;
@@ -46,6 +59,12 @@ export const Team = {
   listInvites: () => api<{ items: PendingInvite[] }>('/api/account/invites'),
   cancelInvite: (id: number, csrfToken: string | null) =>
     api<void>(`/api/account/invites/${id}`, { method: 'DELETE', csrfToken }),
+
+  setDefault: (kind: TeamDefaultKind, userId: number | null, csrfToken: string | null) =>
+    api<{ ok: true; kind: TeamDefaultKind; user_id: number | null }>(
+      '/api/account/team-defaults',
+      { method: 'POST', body: { kind, user_id: userId }, csrfToken },
+    ),
 };
 
 export type InvitePreview = {

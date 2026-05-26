@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
-import { useAuth, type Account } from '@/auth/AuthContext';
+import { useAuth, type Account, type User } from '@/auth/AuthContext';
 import { cn } from '@/lib/cn';
 
 /**
@@ -9,7 +9,7 @@ import { cn } from '@/lib/cn';
  * active one; switch hits POST /api/me/switch-account and re-fetches /me.
  */
 export function AccountSwitcher() {
-  const { accounts, activeAccountId, switchAccount } = useAuth();
+  const { accounts, activeAccountId, switchAccount, user } = useAuth();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -25,7 +25,7 @@ export function AccountSwitcher() {
   }, [open]);
 
   if (accounts.length <= 1) {
-    return accounts[0] ? <CurrentLabel account={accounts[0]} /> : null;
+    return accounts[0] ? <CurrentLabel account={accounts[0]} user={user} /> : null;
   }
 
   const active = accounts.find((a) => a.id === activeAccountId) ?? accounts[0];
@@ -50,10 +50,10 @@ export function AccountSwitcher() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={busy}
-        className="flex items-center gap-2 rounded-2xl border border-ink-200 bg-white px-3 py-1.5 text-sm font-medium text-ink-700 hover:border-ink-300 disabled:opacity-60"
+        className="flex items-center gap-2 rounded-2xl border border-ink-200 bg-white px-3 py-1.5 text-left hover:border-ink-300 disabled:opacity-60"
       >
-        <span className="truncate max-w-[10rem]">{active.invoice_company_name}</span>
-        <ChevronDown className="size-4 text-ink-400" />
+        <UserAccountInfo name={user?.fullname ?? null} companyName={active.invoice_company_name} />
+        <ChevronDown className="size-4 shrink-0 text-ink-400" />
       </button>
 
       {open && (
@@ -83,10 +83,25 @@ export function AccountSwitcher() {
   );
 }
 
-function CurrentLabel({ account }: { account: Account }) {
+function UserAccountInfo({ name, companyName }: { name: string | null; companyName: string | null | undefined }) {
   return (
-    <div className="rounded-2xl border border-transparent px-3 py-1.5 text-sm font-medium text-ink-700">
-      {account.invoice_company_name}
+    <div className="flex flex-col items-start gap-0.5 max-w-[12rem]">
+      {name && (
+        <span className="truncate text-sm font-medium text-ink-800 leading-none">{name}</span>
+      )}
+      {companyName && (
+        <span className="truncate rounded-md bg-firol-50 px-1.5 py-px text-[11px] font-medium text-firol-700 leading-none border border-firol-100">
+          {companyName}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function CurrentLabel({ account, user }: { account: Account; user: User | null }) {
+  return (
+    <div className="rounded-2xl border border-transparent px-3 py-1.5">
+      <UserAccountInfo name={user?.fullname ?? null} companyName={account.invoice_company_name} />
     </div>
   );
 }

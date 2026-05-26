@@ -34,10 +34,18 @@ final class TeamController
         $stmt = Db::pdo()->prepare(
             'SELECT u.id, u.fullname, u.email, u.phone,
                     au.role, au.is_active, au.created_at,
-                    a.main_user_id = u.id AS is_main
+                    a.main_user_id = u.id AS is_main,
+                    a.default_php_user_id    = u.id AS is_default_php,
+                    a.default_oprava_user_id = u.id AS is_default_oprava,
+                    ip.cert_php, ip.cert_oprava, ip.cert_general,
+                    ip.valid_from_php,    ip.valid_to_php,
+                    ip.valid_from_oprava, ip.valid_to_oprava,
+                    ip.valid_from_general, ip.valid_to_general
              FROM   account_users au
-             JOIN   users    u ON u.id = au.user_id
-             JOIN   accounts a ON a.id = au.account_id
+             JOIN   users    u  ON u.id = au.user_id
+             JOIN   accounts a  ON a.id = au.account_id
+             LEFT JOIN inspector_profiles ip
+                    ON ip.user_id = u.id AND ip.account_id = au.account_id
              WHERE  au.account_id = ?
              ORDER  BY a.main_user_id = u.id DESC, au.is_active DESC, u.fullname ASC'
         );
@@ -52,10 +60,69 @@ final class TeamController
             'role'       => (string) $r['role'],
             'is_active'  => (bool) $r['is_active'],
             'is_main'    => (bool) $r['is_main'],
+            'is_default_php'    => (bool) $r['is_default_php'],
+            'is_default_oprava' => (bool) $r['is_default_oprava'],
+            'cert_php'           => $r['cert_php']     ?: null,
+            'cert_oprava'        => $r['cert_oprava']  ?: null,
+            'cert_general'       => $r['cert_general'] ?: null,
+            'valid_from_php'     => $r['valid_from_php']     ?: null,
+            'valid_to_php'       => $r['valid_to_php']       ?: null,
+            'valid_from_oprava'  => $r['valid_from_oprava']  ?: null,
+            'valid_to_oprava'    => $r['valid_to_oprava']    ?: null,
+            'valid_from_general' => $r['valid_from_general'] ?: null,
+            'valid_to_general'   => $r['valid_to_general']   ?: null,
             'created_at' => $r['created_at'],
         ], $rows);
 
         Response::json(['items' => $items]);
+    }
+
+    /**
+     * Main user picks the account-wide fallback technician for the two
+     * borrowable cert kinds. Pass {kind: "php"|"oprava", user_id: int|null}
+     * — `null` clears the slot.
+     */
+    public static function setDefault(Request $req): void
+    {
+        Csrf::require($req);
+        self::requireMainUser();
+        $accountId = Tenant::currentAccountId();
+
+        $kind   = $req->jsonString('kind');
+        $userId = $req->json()['user_id'] ?? null;
+
+        if ($kind !== 'php' && $kind !== 'oprava') {
+            Response::error('Invalid kind (expected "php" or "oprava")', 422);
+        }
+        if ($userId !== null && !is_int($userId)) {
+            Response::error('user_id must be an integer or null', 422);
+        }
+        $column   = $kind === 'php' ? 'default_php_user_id' : 'default_oprava_user_id';
+        $certCol  = $kind === 'php' ? 'cert_php'             : 'cert_oprava';
+
+        if ($userId !== null) {
+            // Target must be an active technician on this account AND must
+            // actually carry the cert we're delegating, otherwise the
+            // fallback would resolve to an empty string at PDF time.
+            $check = Db::pdo()->prepare(
+                'SELECT 1
+                 FROM   account_users au
+                 JOIN   inspector_profiles ip
+                        ON ip.user_id = au.user_id AND ip.account_id = au.account_id
+                 WHERE  au.account_id = ? AND au.user_id = ? AND au.is_active = 1
+                   AND  ip.' . $certCol . ' IS NOT NULL AND ip.' . $certCol . ' <> ""'
+            );
+            $check->execute([$accountId, $userId]);
+            if ($check->fetchColumn() === false) {
+                Response::error('Vybraný technik nemá vyplnené číslo oprávnenia, nemôže byť defaultný.', 422);
+            }
+        }
+
+        Db::pdo()->prepare(
+            'UPDATE accounts SET ' . $column . ' = ? WHERE id = ?'
+        )->execute([$userId, $accountId]);
+
+        Response::json(['ok' => true, 'kind' => $kind, 'user_id' => $userId]);
     }
 
     /**
