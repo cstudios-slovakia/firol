@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle, AtSign, Building2, CalendarDays, Check, ChevronLeft, ChevronRight,
+  AlertTriangle, AtSign, Building2, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight,
   Copy, CreditCard, FileSignature, Hash, ImagePlus, MailPlus, MessageSquarePlus, Palette,
-  Phone, RotateCcw, Shield, ShieldCheck, ShieldOff, Star, Trash2, UploadCloud, User,
+  Phone, RotateCcw, Shield, ShieldCheck, ShieldOff, Trash2, UploadCloud, User,
   UserCheck, UsersRound,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
@@ -780,7 +780,7 @@ function TeamSection() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [busyInviteId, setBusyInviteId] = useState<number | null>(null);
-  const [busyDefault, setBusyDefault] = useState<string | null>(null);
+  const [busyDefault, setBusyDefault] = useState<TeamDefaultKind | null>(null);
   const [adding, setAdding] = useState(false);
 
   const [showInvite, setShowInvite] = useState(false);
@@ -913,19 +913,12 @@ function TeamSection() {
     Team.list().then((res) => setMembers(res.items)).catch(() => {});
   }
 
-  async function onSetDefault(kind: TeamDefaultKind, m: TeamMember) {
-    const isCurrent = kind === 'php' ? m.is_default_php : m.is_default_oprava;
-    // Clicking the active default clears it; clicking another tech swaps.
-    const target: number | null = isCurrent ? null : m.id;
-    setBusyDefault(`${kind}:${m.id}`);
+  async function onSetDefault(kind: TeamDefaultKind, userId: number | null) {
+    setBusyDefault(kind);
     try {
-      await Team.setDefault(kind, target, csrfToken);
+      await Team.setDefault(kind, userId, csrfToken);
       reloadMembers();
-      toast.success(
-        target === null
-          ? 'Default technik zrušený'
-          : `${m.fullname} je teraz default pre ${kind === 'php' ? 'Kontrola PHP' : 'Oprava / plnenie / TS PHP'}`,
-      );
+      toast.success(userId === null ? 'Predvolený technik zrušený' : 'Predvolený technik nastavený');
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Nastavenie sa nepodarilo.';
       setError(msg);
@@ -1110,6 +1103,33 @@ function TeamSection() {
           </div>
         )}
 
+        {isMain && members !== null && (
+          <div className="mb-4 rounded-2xl border border-ink-100 bg-ink-50/40 px-4 py-3">
+            <p className="mb-2.5 text-xs font-semibold uppercase tracking-wider text-ink-500">
+              Predvolený technik
+            </p>
+            <p className="mb-3 text-xs text-ink-500">
+              Ak technik nemá vlastné oprávnenie, pri kontrole sa použije číslo predvoleného technika.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <DefaultPicker
+                label="Kontrola PHP"
+                kind="php"
+                members={members}
+                busy={busyDefault === 'php'}
+                onSet={(userId) => onSetDefault('php', userId)}
+              />
+              <DefaultPicker
+                label="Oprava / plnenie / TS PHP"
+                kind="oprava"
+                members={members}
+                busy={busyDefault === 'oprava'}
+                onSet={(userId) => onSetDefault('oprava', userId)}
+              />
+            </div>
+          </div>
+        )}
+
         {members === null ? (
           <SkeletonList count={2} />
         ) : (
@@ -1177,9 +1197,6 @@ function TeamSection() {
                       certNumber={m.cert_php}
                       validTo={m.valid_to_php}
                       isDefault={m.is_default_php}
-                      canSetDefault={isMain && m.is_active && !!m.cert_php}
-                      onSetDefault={() => onSetDefault('php', m)}
-                      busy={busyDefault === `php:${m.id}`}
                     />
                     <CertSummaryBlock
                       color="violet"
@@ -1187,9 +1204,6 @@ function TeamSection() {
                       certNumber={m.cert_oprava}
                       validTo={m.valid_to_oprava}
                       isDefault={m.is_default_oprava}
-                      canSetDefault={isMain && m.is_active && !!m.cert_oprava}
-                      onSetDefault={() => onSetDefault('oprava', m)}
-                      busy={busyDefault === `oprava:${m.id}`}
                     />
                     <CertSummaryBlock
                       color="blue"
@@ -1329,31 +1343,59 @@ function CertCard({
   );
 }
 
-/**
- * Compact read-only cert tile used in the team roster — shows the same
- * three certificate kinds as the editable CertCard but without inputs.
- * On the two borrowable kinds (PHP, Oprava) the main user can toggle a
- * star to mark this technician as the account default; the star is
- * disabled when the technician has no cert number to lend.
- */
+function DefaultPicker({
+  label,
+  kind,
+  members,
+  busy,
+  onSet,
+}: {
+  label: string;
+  kind: TeamDefaultKind;
+  members: TeamMember[];
+  busy: boolean;
+  onSet: (userId: number | null) => void;
+}) {
+  const certKey = kind === 'php' ? 'cert_php' : 'cert_oprava';
+  const eligible = members.filter((m) => m.is_active && m[certKey]);
+  const currentId = members.find(kind === 'php' ? (m) => m.is_default_php : (m) => m.is_default_oprava)?.id ?? null;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-sm font-medium text-ink-800">{label}</label>
+      <div className="relative">
+        <select
+          value={currentId ?? ''}
+          onChange={(e) => onSet(e.target.value ? Number(e.target.value) : null)}
+          disabled={busy || eligible.length === 0}
+          className="w-full appearance-none rounded-xl border border-ink-200 bg-white py-2 pl-3 pr-8 text-sm text-ink-900 transition-colors focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-400/20 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <option value="">— žiadny</option>
+          {eligible.map((m) => (
+            <option key={m.id} value={m.id}>{m.fullname}</option>
+          ))}
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-400" />
+      </div>
+      {eligible.length === 0 && (
+        <p className="text-xs text-ink-400">Žiadny technik nemá vyplnené oprávnenie.</p>
+      )}
+    </div>
+  );
+}
+
 function CertSummaryBlock({
   color,
   title,
   certNumber,
   validTo,
   isDefault,
-  canSetDefault,
-  onSetDefault,
-  busy,
 }: {
   color: CertCardColor;
   title: string;
   certNumber: string | null;
   validTo: string | null;
   isDefault?: boolean;
-  canSetDefault?: boolean;
-  onSetDefault?: () => void;
-  busy?: boolean;
 }) {
   const s = CERT_CARD_STYLES[color];
   const days = certDaysLeft(validTo ?? '');
@@ -1369,32 +1411,10 @@ function CertSummaryBlock({
         <p className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wide text-ink-700">
           {title}
         </p>
-        {onSetDefault && (
-          <button
-            type="button"
-            onClick={onSetDefault}
-            disabled={(!canSetDefault && !isDefault) || busy}
-            title={
-              isDefault
-                ? 'Tento technik je default — kliknutím zrušíš'
-                : canSetDefault
-                ? 'Nastaviť ako default pre tento typ kontroly'
-                : 'Technik nemá vyplnené číslo oprávnenia'
-            }
-            className={cn(
-              'grid size-6 place-items-center rounded-md transition-colors',
-              isDefault
-                ? 'bg-amber-100 text-amber-600 hover:bg-amber-200'
-                : 'text-ink-300 hover:bg-ink-100 hover:text-amber-500',
-              'disabled:opacity-40 disabled:cursor-not-allowed',
-            )}
-          >
-            {busy ? (
-              <Spinner size="sm" />
-            ) : (
-              <Star className={cn('size-3.5', isDefault && 'fill-current')} />
-            )}
-          </button>
+        {isDefault && (
+          <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+            default
+          </span>
         )}
       </div>
 
