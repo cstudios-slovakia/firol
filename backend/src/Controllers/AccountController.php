@@ -253,6 +253,8 @@ final class AccountController
             // Seat / technician licensing — surfaced so the UI can show
             // "X of N seats used" and gate the invite flow client-side.
             'main_user_id'                   => isset($row['main_user_id']) ? (int) $row['main_user_id'] : null,
+            'admin_owned'                    => isset($row['main_user_id'])
+                                                  && \Firol\Auth\Admin::isAdmin((int) $row['main_user_id']),
             'default_php_user_id'            => isset($row['default_php_user_id']) ? (int) $row['default_php_user_id'] : null,
             'default_oprava_user_id'         => isset($row['default_oprava_user_id']) ? (int) $row['default_oprava_user_id'] : null,
             'included_technicians'           => (int) ($row['included_technicians'] ?? 2),

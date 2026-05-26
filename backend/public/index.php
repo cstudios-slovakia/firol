@@ -174,17 +174,23 @@ if ($isMutation && !$isWhitelisted) {
     // never go through Stripe and shouldn't be hit by the 402 guard.
     $isAppAdmin = $sessionUserId !== null && \Firol\Auth\Admin::isAdmin($sessionUserId);
     if ($sessionUserId !== null && $sessionAccountId !== null && !$isAppAdmin) {
-        $stmt = Db::pdo()->prepare(
-            'SELECT subscription_end_date FROM accounts WHERE id = ?'
-        );
-        $stmt->execute([$sessionAccountId]);
-        $endDate = $stmt->fetchColumn();
-        if (is_string($endDate) && strtotime($endDate) < strtotime('today')) {
-            Response::error(
-                'Predplatné vypršalo. Účet je v režime len na čítanie.',
-                402,
-                ['subscription_end_date' => $endDate],
+        // Admin-owned accounts (main_user is an app admin) get free,
+        // unrestricted access for *everyone* on the account — technicians
+        // invited by an admin inherit the same paid-like behavior.
+        $isAdminOwned = \Firol\Auth\Admin::accountIsAdminOwned($sessionAccountId);
+        if (!$isAdminOwned) {
+            $stmt = Db::pdo()->prepare(
+                'SELECT subscription_end_date FROM accounts WHERE id = ?'
             );
+            $stmt->execute([$sessionAccountId]);
+            $endDate = $stmt->fetchColumn();
+            if (is_string($endDate) && strtotime($endDate) < strtotime('today')) {
+                Response::error(
+                    'Predplatné vypršalo. Účet je v režime len na čítanie.',
+                    402,
+                    ['subscription_end_date' => $endDate],
+                );
+            }
         }
     }
 }

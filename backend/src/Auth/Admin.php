@@ -25,6 +25,25 @@ use Firol\Http\Response;
  */
 final class Admin
 {
+    /**
+     * Whether the given account is "owned" by an app admin — i.e. its
+     * `main_user_id` is an app admin. These accounts behave as if they
+     * had a paid subscription: no read-only mode, no expiry banner, and
+     * every technician invited onto the account inherits that free
+     * access. Used by the Phase 6a dispatcher gate and by the snapshot
+     * shapers so the frontend can hide the expiry/trial banners.
+     */
+    public static function accountIsAdminOwned(int $accountId): bool
+    {
+        $stmt = Db::pdo()->prepare('SELECT main_user_id FROM accounts WHERE id = ?');
+        $stmt->execute([$accountId]);
+        $mainUserId = $stmt->fetchColumn();
+        if ($mainUserId === false || $mainUserId === null) {
+            return false;
+        }
+        return self::isAdmin((int) $mainUserId);
+    }
+
     public static function isAdmin(int $userId): bool
     {
         $stmt = Db::pdo()->prepare('SELECT email, is_admin FROM users WHERE id = ?');

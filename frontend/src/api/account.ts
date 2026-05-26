@@ -25,6 +25,7 @@ export type Account = {
   max_self_service_technicians: number;
   price_per_extra_technician_cents: number;
   main_user_id: number | null;
+  admin_owned: boolean;
   default_php_user_id: number | null;
   default_oprava_user_id: number | null;
 };

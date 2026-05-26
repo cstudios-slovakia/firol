@@ -42,6 +42,7 @@ export type Account = {
   stripe_customer_id: string | null;
   has_billing_details: boolean;
   subscription_state: SubscriptionState;
+  admin_owned: boolean;
 };
 
 type Snapshot = {

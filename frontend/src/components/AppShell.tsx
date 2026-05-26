@@ -175,8 +175,12 @@ function SubscriptionBanner() {
 
     const account = accounts.find((a) => a.id === activeAccountId);
     if (!account) return null;
-    // App admins get free, full access — no expiry banner.
+    // App admins get free, full access — no expiry banner. Admin-owned
+    // accounts (main_user_id is an app admin) extend that exemption to
+    // every technician on the account, so no one on the team sees a
+    // paywall for an account that's effectively free.
     if (isAdmin) return null;
+    if (account.admin_owned) return null;
 
     const endStr = account.subscription_end_date;
     const today = new Date();
@@ -257,6 +261,7 @@ function TrialBanner() {
     const account = accounts.find((a) => a.id === activeAccountId);
     if (!account) return null;
     if (isAdmin) return null;
+    if (account.admin_owned) return null;
 
     const state = account.subscription_state;
     if (state !== "none" && state !== "trial_paid") return null;

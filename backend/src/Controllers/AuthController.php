@@ -304,6 +304,10 @@ final class AuthController
             };
             // Don't leak the raw subscription id — UI doesn't need it.
             $a['stripe_cancel_at_period_end'] = (bool) ($a['stripe_cancel_at_period_end'] ?? false);
+            // Admin-owned accounts behave as fully paid for every member.
+            // Surface the flag so the UI can hide the trial/expiry banners
+            // even when subscription_end_date is in the past.
+            $a['admin_owned'] = \Firol\Auth\Admin::isAdmin((int) ($a['main_user_id'] ?? 0));
             unset($a['stripe_subscription_id']);
             return $a;
         }, $accountsRaw);
