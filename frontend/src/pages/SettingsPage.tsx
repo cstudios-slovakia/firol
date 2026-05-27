@@ -66,6 +66,7 @@ const SECTION_TABS = [
     { to: "/settings/profil", label: "Profil technika", icon: ShieldCheck },
     { to: "/settings/branding", label: "Branding PDF", icon: Palette },
     { to: "/settings/technici", label: "Technici", icon: UsersRound },
+    { to: "/settings/import", label: "Import z Excelu", icon: FileSpreadsheet },
 ] as const;
 
 const MENU_ITEMS = [
@@ -103,7 +104,7 @@ const MENU_ITEMS = [
         bg: "bg-orange-50",
     },
     {
-        to: "/import",
+        to: "/settings/import",
         label: "Import z Excelu",
         description:
             "Hromadný import firiem, kontrol a školení zo vzorovej Excel šablóny.",
