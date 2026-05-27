@@ -103,11 +103,22 @@ function ImportSection({ section }: { section: SectionDef }) {
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
 
-  function onDownload() {
-    ImportApi.downloadTemplate(section.kind);
+  async function onDownload() {
+    setDownloading(true);
+    setNetworkError(null);
+    try {
+      await ImportApi.downloadTemplate(section.kind);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Stiahnutie šablóny zlyhalo.';
+      setNetworkError(msg);
+      toast.error(msg);
+    } finally {
+      setDownloading(false);
+    }
   }
 
   async function onPick(file: File | undefined) {
@@ -160,6 +171,7 @@ function ImportSection({ section }: { section: SectionDef }) {
             variant="secondary"
             leftIcon={<Download className="size-4" />}
             onClick={onDownload}
+            loading={downloading}
             className="sm:flex-1"
           >
             Stiahnuť vzorový .xlsx

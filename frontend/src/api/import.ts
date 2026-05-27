@@ -1,5 +1,16 @@
 import { api, ApiError, buildUrl } from '@/lib/api';
 
+async function parseError(res: Response): Promise<ApiError> {
+  const text = await res.text().catch(() => '');
+  let body: unknown = text;
+  try { body = JSON.parse(text); } catch { /* keep as text */ }
+  const message =
+    body && typeof body === 'object' && body !== null && 'error' in body
+      ? String((body as { error: unknown }).error)
+      : `HTTP ${res.status}`;
+  return new ApiError(res.status, message, body);
+}
+
 export type ImportKind = 'companies' | 'inspections' | 'trainings';
 
 export type ImportError = { sheet: string; row: number; message: string };
@@ -17,18 +28,30 @@ const KIND_FILENAME: Record<ImportKind, string> = {
 
 export const ImportApi = {
   /**
-   * Downloads the .xlsx template for the given kind. We can't use fetch +
-   * <a download> trick across the proxy reliably, so we trigger a normal
-   * navigation through a hidden anchor — the browser handles save dialog
-   * and Content-Disposition picks up the filename.
+   * Downloads the .xlsx template via fetch+blob so the request goes through
+   * the same auth/cookie path as the rest of the API (a plain <a download>
+   * sometimes ends up without the session, depending on browser policy and
+   * how the URL is rewritten through /api.php?path=). Errors from the server
+   * (401, 500, …) are surfaced as ApiError instead of an opaque
+   * "download failed" message in the browser shelf.
    */
-  downloadTemplate(kind: ImportKind): void {
+  async downloadTemplate(kind: ImportKind): Promise<void> {
+    const res = await fetch(buildUrl(`/api/import/${kind}/template`), {
+      method: 'GET',
+      credentials: 'include',
+    });
+    if (!res.ok) throw await parseError(res);
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = buildUrl(`/api/import/${kind}/template`);
+    a.href = url;
     a.download = KIND_FILENAME[kind];
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    // Revoke after the click handler returns to the event loop.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   },
 
   async upload(
