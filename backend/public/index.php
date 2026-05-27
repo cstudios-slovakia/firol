@@ -24,6 +24,7 @@ use Firol\Controllers\CompanyController;
 use Firol\Controllers\FacilityController;
 use Firol\Controllers\DocumentController;
 use Firol\Controllers\FeedbackController;
+use Firol\Controllers\ImportController;
 use Firol\Controllers\InspectionController;
 use Firol\Controllers\InspectionItemController;
 use Firol\Controllers\InspectorProfileController;
@@ -144,6 +145,13 @@ $router->delete('/api/trainings/{id}/trainees/{trainee_id}', [TraineeController:
 $router->get('/api/trainees/{id}/signature',        [TraineeController::class, 'downloadSignature']);
 $router->post('/api/trainings/{id}/generate-pdf',   [DocumentController::class, 'generateForTraining']);
 $router->get('/api/trainings/{id}/documents',       [DocumentController::class, 'indexForTraining']);
+
+$router->get('/api/import/companies/template',   [ImportController::class, 'companiesTemplate']);
+$router->get('/api/import/inspections/template', [ImportController::class, 'inspectionsTemplate']);
+$router->get('/api/import/trainings/template',   [ImportController::class, 'trainingsTemplate']);
+$router->post('/api/import/companies',           [ImportController::class, 'importCompanies']);
+$router->post('/api/import/inspections',         [ImportController::class, 'importInspections']);
+$router->post('/api/import/trainings',           [ImportController::class, 'importTrainings']);
 
 /*
  * Phase 6a — read-only mode for expired subscriptions.

@@ -10,6 +10,7 @@ import {
     AlertTriangle,
     AtSign,
     Building2,
+    FileSpreadsheet,
     CalendarDays,
     Check,
     ChevronLeft,
@@ -100,6 +101,15 @@ const MENU_ITEMS = [
         icon: UsersRound,
         color: "text-orange-600",
         bg: "bg-orange-50",
+    },
+    {
+        to: "/import",
+        label: "Import z Excelu",
+        description:
+            "Hromadný import firiem, kontrol a školení zo vzorovej Excel šablóny.",
+        icon: FileSpreadsheet,
+        color: "text-emerald-600",
+        bg: "bg-emerald-50",
     },
 ] as const;
 

@@ -30,6 +30,7 @@ import {
   TeamPage,
 } from '@/pages/SettingsPage';
 import { BillingPage } from '@/pages/BillingPage';
+import { ImportPage } from '@/pages/ImportPage';
 import { AdminPage, RequireAdmin } from '@/pages/AdminPage';
 
 export default function App() {
@@ -102,6 +103,7 @@ export default function App() {
           <Route path="technici" element={<TeamPage />} />
         </Route>
         <Route path="/billing" element={<BillingPage />} />
+        <Route path="/import" element={<ImportPage />} />
         <Route
           path="/admin"
           element={

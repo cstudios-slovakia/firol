@@ -1,0 +1,852 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Firol\Controllers;
+
+use Firol\Auth\Csrf;
+use Firol\Auth\Tenant;
+use Firol\Db;
+use Firol\Http\Request;
+use Firol\Http\Response;
+use Firol\Import\Schema;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Throwable;
+
+/**
+ * Excel-based bulk import of companies (+facilities), trainings
+ * (+trainees) and inspections (+items). Templates are generated from
+ * the same {@see Schema} the upload parser reads, so headers can never
+ * drift between download and upload.
+ *
+ * Each import endpoint runs inside a single transaction: any validation
+ * error aborts the whole sheet group so the user retries with a clean
+ * file rather than chasing half-applied state.
+ */
+final class ImportController
+{
+    private const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+    // ─── Template downloads ──────────────────────────────────────────
+
+    public static function companiesTemplate(Request $req): void
+    {
+        self::sendTemplate('Firol-import-firmy.xlsx', Schema::companies());
+    }
+
+    public static function trainingsTemplate(Request $req): void
+    {
+        self::sendTemplate('Firol-import-skolenia.xlsx', Schema::trainings());
+    }
+
+    public static function inspectionsTemplate(Request $req): void
+    {
+        self::sendTemplate('Firol-import-kontroly.xlsx', Schema::inspections());
+    }
+
+    /**
+     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string}>}> $sheets
+     */
+    private static function sendTemplate(string $filename, array $sheets): void
+    {
+        // Ensure we have an authenticated tenant context; templates are
+        // per-tenant only in the sense that downloads require login.
+        Tenant::currentUserId();
+
+        $spreadsheet = new Spreadsheet();
+        $spreadsheet->removeSheetByIndex(0);
+
+        $sheetIndex = 0;
+        foreach ($sheets as $sheetCode => $sheet) {
+            $ws = $spreadsheet->createSheet($sheetIndex++);
+            // Sheet names are user-visible in Excel and must not contain
+            // ":\\/?*[]" — our schema codes are all ASCII-safe.
+            $ws->setTitle(substr($sheetCode, 0, 31));
+
+            foreach ($sheet['columns'] as $colIdx => $col) {
+                $cell = $ws->getCellByColumnAndRow($colIdx + 1, 1);
+                $cell->setValue($col['header']);
+                $ws->getStyleByColumnAndRow($colIdx + 1, 1)->applyFromArray([
+                    'font' => ['bold' => true],
+                    'fill' => [
+                        'fillType'   => Fill::FILL_SOLID,
+                        'startColor' => ['rgb' => 'F1F5F9'],
+                    ],
+                    'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT],
+                ]);
+                $ws->getColumnDimensionByColumn($colIdx + 1)->setWidth(22);
+
+                if (!empty($col['hint'])) {
+                    $hintCell = $ws->getCellByColumnAndRow($colIdx + 1, 2);
+                    $hintCell->setValueExplicit(
+                        $col['hint'],
+                        \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING,
+                    );
+                    $ws->getStyleByColumnAndRow($colIdx + 1, 2)->applyFromArray([
+                        'font' => ['italic' => true, 'color' => ['rgb' => '94A3B8']],
+                    ]);
+                }
+            }
+
+            $ws->freezePane('A2');
+        }
+
+        // First sheet active by default.
+        $spreadsheet->setActiveSheetIndex(0);
+
+        // Stream the workbook to stdout.
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+
+        $writer = new Xlsx($spreadsheet);
+        $writer->save('php://output');
+        exit;
+    }
+
+    // ─── Imports ─────────────────────────────────────────────────────
+
+    public static function importCompanies(Request $req): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+
+        $rowsBySheet = self::readUpload(Schema::companies());
+
+        $errors = [];
+        $createdCompanies = 0;
+        $createdFacilities = 0;
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            // Build a name → id map so the Prevadzky sheet can link by
+            // company IČO. The map is seeded from existing companies in
+            // the tenant and extended as we insert new ones.
+            $companyIdByIco = self::loadCompanyMap($accountId);
+
+            $insertCompany = $pdo->prepare(
+                'INSERT INTO companies (account_id, name, ico, address, contact)
+                 VALUES (?, ?, ?, ?, ?)'
+            );
+            foreach ($rowsBySheet['Firmy'] as $idx => $row) {
+                $rowNum = $idx + 2; // header + 0-based offset
+                $name    = self::str($row, 'name');
+                $ico     = self::ico($row, 'ico');
+                $address = self::str($row, 'address');
+                $contact = self::str($row, 'contact');
+
+                if ($name === null) {
+                    $errors[] = ['sheet' => 'Firmy', 'row' => $rowNum, 'message' => 'Chýba názov firmy.'];
+                    continue;
+                }
+                if ($ico !== null && isset($companyIdByIco[$ico])) {
+                    // Skip silently — re-uploading a sheet with an existing
+                    // IČO should be idempotent on the company itself.
+                    continue;
+                }
+
+                $insertCompany->execute([$accountId, $name, $ico, $address, $contact]);
+                $newId = (int) $pdo->lastInsertId();
+                $createdCompanies++;
+                if ($ico !== null) {
+                    $companyIdByIco[$ico] = $newId;
+                }
+            }
+
+            $insertFacility = $pdo->prepare(
+                'INSERT INTO facilities (account_id, company_id, name, address, contact_person, notes)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            );
+            foreach ($rowsBySheet['Prevadzky'] as $idx => $row) {
+                $rowNum = $idx + 2;
+                $ico = self::ico($row, 'company_ico');
+                $name = self::str($row, 'name');
+                if ($ico === null) {
+                    $errors[] = ['sheet' => 'Prevadzky', 'row' => $rowNum, 'message' => 'Chýba IČO firmy.'];
+                    continue;
+                }
+                if ($name === null) {
+                    $errors[] = ['sheet' => 'Prevadzky', 'row' => $rowNum, 'message' => 'Chýba názov prevádzky.'];
+                    continue;
+                }
+                $companyId = $companyIdByIco[$ico] ?? null;
+                if ($companyId === null) {
+                    $errors[] = ['sheet' => 'Prevadzky', 'row' => $rowNum, 'message' => "Firma s IČO $ico neexistuje."];
+                    continue;
+                }
+                $insertFacility->execute([
+                    $accountId,
+                    $companyId,
+                    $name,
+                    self::str($row, 'address'),
+                    self::str($row, 'contact_person'),
+                    self::str($row, 'notes'),
+                ]);
+                $createdFacilities++;
+            }
+
+            if ($errors !== []) {
+                $pdo->rollBack();
+                Response::json(['errors' => $errors, 'created' => null], 422);
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('[import.companies] ' . $e->getMessage());
+            Response::error('Import zlyhal: ' . $e->getMessage(), 500);
+        }
+
+        Response::json([
+            'created' => [
+                'companies'  => $createdCompanies,
+                'facilities' => $createdFacilities,
+            ],
+            'errors' => [],
+        ]);
+    }
+
+    public static function importTrainings(Request $req): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $currentUserId = Tenant::currentUserId();
+
+        $rowsBySheet = self::readUpload(Schema::trainings());
+
+        $errors = [];
+        $createdTrainings = 0;
+        $createdTrainees = 0;
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            $companyIdByIco = self::loadCompanyMap($accountId);
+            $facilityIdByKey = self::loadFacilityMap($accountId);
+            $userIdByEmail = self::loadAccountUserMap($accountId);
+
+            // Maps user "# riadok" → newly-inserted training id, so the
+            // Ucastnici sheet can link rows by the human row number.
+            $trainingIdByRowNo = [];
+
+            $insertTraining = $pdo->prepare(
+                'INSERT INTO trainings
+                    (account_id, company_id, facility_id, type, date,
+                     trainer_id, topics, duration_min, status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, "draft")'
+            );
+
+            foreach ($rowsBySheet['Skolenia'] as $idx => $row) {
+                $rowNum = $idx + 2;
+                $rowNo = self::intOrNull($row, 'row_no');
+                $ico = self::ico($row, 'company_ico');
+                $type = self::str($row, 'type');
+                $date = self::str($row, 'date');
+                if ($rowNo === null) {
+                    $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Chýba # riadok.'];
+                    continue;
+                }
+                if ($ico === null) {
+                    $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Chýba IČO firmy.'];
+                    continue;
+                }
+                if ($type === null || !in_array($type, Schema::TRAINING_TYPES, true)) {
+                    $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Neplatný typ školenia.'];
+                    continue;
+                }
+                if ($date === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                    $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Neplatný dátum (formát YYYY-MM-DD).'];
+                    continue;
+                }
+                $companyId = $companyIdByIco[$ico] ?? null;
+                if ($companyId === null) {
+                    $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => "Firma s IČO $ico neexistuje."];
+                    continue;
+                }
+                $facilityId = null;
+                $facilityName = self::str($row, 'facility_name');
+                if ($facilityName !== null) {
+                    $facilityId = $facilityIdByKey[$companyId . '|' . mb_strtolower($facilityName)] ?? null;
+                    if ($facilityId === null) {
+                        $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => "Prevádzka „$facilityName” neexistuje pre firmu IČO $ico."];
+                        continue;
+                    }
+                }
+                $trainerId = null;
+                $trainerEmail = self::str($row, 'trainer_email');
+                if ($trainerEmail !== null) {
+                    $trainerId = $userIdByEmail[mb_strtolower($trainerEmail)] ?? null;
+                    if ($trainerId === null) {
+                        $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => "Lektor s e-mailom $trainerEmail nie je člen tímu."];
+                        continue;
+                    }
+                }
+
+                $insertTraining->execute([
+                    $accountId, $companyId, $facilityId, $type, $date,
+                    $trainerId,
+                    self::str($row, 'topics'),
+                    self::intOrNull($row, 'duration_min'),
+                ]);
+                $trainingIdByRowNo[$rowNo] = (int) $pdo->lastInsertId();
+                $createdTrainings++;
+            }
+
+            $insertTrainee = $pdo->prepare(
+                'INSERT INTO trainees (training_id, fullname, position)
+                 VALUES (?, ?, ?)'
+            );
+            foreach ($rowsBySheet['Ucastnici'] as $idx => $row) {
+                $rowNum = $idx + 2;
+                $trainingRowNo = self::intOrNull($row, 'training_row_no');
+                $fullname = self::str($row, 'fullname');
+                if ($trainingRowNo === null || $fullname === null) {
+                    $errors[] = ['sheet' => 'Ucastnici', 'row' => $rowNum, 'message' => 'Chýba # riadok školenia alebo meno.'];
+                    continue;
+                }
+                $trainingId = $trainingIdByRowNo[$trainingRowNo] ?? null;
+                if ($trainingId === null) {
+                    $errors[] = ['sheet' => 'Ucastnici', 'row' => $rowNum, 'message' => "Školenie s # $trainingRowNo neexistuje v sheete Školenia."];
+                    continue;
+                }
+                $insertTrainee->execute([$trainingId, $fullname, self::str($row, 'position')]);
+                $createdTrainees++;
+            }
+
+            if ($errors !== []) {
+                $pdo->rollBack();
+                Response::json(['errors' => $errors, 'created' => null], 422);
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('[import.trainings] ' . $e->getMessage());
+            Response::error('Import zlyhal: ' . $e->getMessage(), 500);
+        }
+
+        // Suppress unused warning — kept for future scoping.
+        unset($currentUserId);
+
+        Response::json([
+            'created' => [
+                'trainings' => $createdTrainings,
+                'trainees'  => $createdTrainees,
+            ],
+            'errors' => [],
+        ]);
+    }
+
+    public static function importInspections(Request $req): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $currentUserId = Tenant::currentUserId();
+
+        $rowsBySheet = self::readUpload(Schema::inspections());
+
+        $errors = [];
+        $createdInspections = 0;
+        $createdItems = 0;
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            $companyIdByIco = self::loadCompanyMap($accountId);
+            $facilityIdByKey = self::loadFacilityMap($accountId);
+            $userIdByEmail = self::loadAccountUserMap($accountId);
+
+            /** @var array<int, array{id:int,type:string}> $inspectionByRowNo */
+            $inspectionByRowNo = [];
+
+            $insertInspection = $pdo->prepare(
+                'INSERT INTO inspections
+                    (account_id, company_id, facility_id, type, periodicity_months,
+                     executed_on, inspector_user_id, status, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, "draft", ?)'
+            );
+
+            foreach ($rowsBySheet['Kontroly'] as $idx => $row) {
+                $rowNum = $idx + 2;
+                $rowNo = self::intOrNull($row, 'row_no');
+                $ico = self::ico($row, 'company_ico');
+                $facilityName = self::str($row, 'facility_name');
+                $type = self::str($row, 'type');
+                $periodicity = self::intOrNull($row, 'periodicity_months');
+                $executedOn = self::str($row, 'executed_on');
+
+                if ($rowNo === null) {
+                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Chýba # riadok.'];
+                    continue;
+                }
+                if ($ico === null || $facilityName === null || $type === null) {
+                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Chýba IČO firmy / prevádzka / typ.'];
+                    continue;
+                }
+                $allowed = Schema::INSPECTION_PERIODICITIES[$type] ?? null;
+                if ($allowed === null) {
+                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Neznámy typ kontroly: $type."];
+                    continue;
+                }
+                if ($periodicity === null || !in_array($periodicity, $allowed, true)) {
+                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Neplatná periodicita pre typ $type (povolené: " . implode(',', $allowed) . ')'];
+                    continue;
+                }
+                if ($executedOn === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $executedOn)) {
+                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Neplatný dátum (YYYY-MM-DD).'];
+                    continue;
+                }
+                $companyId = $companyIdByIco[$ico] ?? null;
+                if ($companyId === null) {
+                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Firma s IČO $ico neexistuje."];
+                    continue;
+                }
+                $facilityId = $facilityIdByKey[$companyId . '|' . mb_strtolower($facilityName)] ?? null;
+                if ($facilityId === null) {
+                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Prevádzka „$facilityName” neexistuje pre firmu IČO $ico."];
+                    continue;
+                }
+
+                $inspectorId = $currentUserId;
+                $inspectorEmail = self::str($row, 'inspector_email');
+                if ($inspectorEmail !== null) {
+                    $inspectorId = $userIdByEmail[mb_strtolower($inspectorEmail)] ?? null;
+                    if ($inspectorId === null) {
+                        $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Technik s e-mailom $inspectorEmail nie je člen tímu."];
+                        continue;
+                    }
+                }
+
+                $insertInspection->execute([
+                    $accountId, $companyId, $facilityId, $type, $periodicity,
+                    $executedOn, $inspectorId, self::str($row, 'notes'),
+                ]);
+                $newId = (int) $pdo->lastInsertId();
+                $inspectionByRowNo[$rowNo] = ['id' => $newId, 'type' => $type];
+                $createdInspections++;
+            }
+
+            // Item sheets — each maps to one inspection type. We resolve
+            // the parent by # kontrola which must reference a row in the
+            // Kontroly sheet whose type matches the item sheet.
+            $itemSheets = [
+                'Polozky_php'                => 'php',
+                'Polozky_hydranty'           => 'hydranty',
+                'Polozky_oprava_ts_php'      => 'oprava_ts_php',
+                'Polozky_poziarna_kniha'     => 'poziarna_kniha',
+                'Polozky_pu_akcieschopnost'  => 'pu_akcieschopnost',
+                'Polozky_pu_udrzba'          => 'pu_udrzba',
+                'Polozky_nudzove_osvetlenie' => 'nudzove_osvetlenie',
+                'Polozky_ts_hadic'           => 'ts_hadic',
+            ];
+
+            $insertItem = $pdo->prepare(
+                'INSERT INTO inspection_items (inspection_id, position, fields)
+                 SELECT ?, COALESCE(MAX(position), 0) + 1, ?
+                 FROM   inspection_items WHERE inspection_id = ?'
+            );
+
+            foreach ($itemSheets as $sheetCode => $expectedType) {
+                foreach ($rowsBySheet[$sheetCode] ?? [] as $idx => $row) {
+                    $rowNum = $idx + 2;
+                    $parentRowNo = self::intOrNull($row, 'row_no');
+                    if ($parentRowNo === null) {
+                        $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => 'Chýba # kontrola.'];
+                        continue;
+                    }
+                    $parent = $inspectionByRowNo[$parentRowNo] ?? null;
+                    if ($parent === null) {
+                        $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => "Kontrola # $parentRowNo neexistuje v sheete Kontroly."];
+                        continue;
+                    }
+                    if ($parent['type'] !== $expectedType) {
+                        $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => "Kontrola # $parentRowNo má typ {$parent['type']}, nie $expectedType."];
+                        continue;
+                    }
+                    $fields = self::buildItemFields($expectedType, $row, $sheetCode, $rowNum, $errors);
+                    if ($fields === null) {
+                        continue;
+                    }
+                    $json = json_encode($fields, JSON_UNESCAPED_UNICODE);
+                    if ($json === false) {
+                        $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => 'Položku sa nepodarilo serializovať.'];
+                        continue;
+                    }
+                    $insertItem->execute([$parent['id'], $json, $parent['id']]);
+                    $createdItems++;
+                }
+            }
+
+            if ($errors !== []) {
+                $pdo->rollBack();
+                Response::json(['errors' => $errors, 'created' => null], 422);
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('[import.inspections] ' . $e->getMessage());
+            Response::error('Import zlyhal: ' . $e->getMessage(), 500);
+        }
+
+        Response::json([
+            'created' => [
+                'inspections' => $createdInspections,
+                'items'       => $createdItems,
+            ],
+            'errors' => [],
+        ]);
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────
+
+    /**
+     * Reads the uploaded xlsx, maps each known sheet to a list of rows
+     * keyed by schema field name. Sheets missing from the upload are
+     * returned as empty arrays so callers can iterate without null checks.
+     *
+     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string}>}> $schema
+     * @return array<string, list<array<string, string>>>
+     */
+    private static function readUpload(array $schema): array
+    {
+        $file = $_FILES['file'] ?? null;
+        if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            Response::error('Nahraj .xlsx súbor.', 422);
+        }
+        if (($file['size'] ?? 0) > self::MAX_UPLOAD_BYTES) {
+            Response::error('Súbor je príliš veľký (max 5 MB).', 422);
+        }
+        $tmp = (string) ($file['tmp_name'] ?? '');
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            Response::error('Nahrávanie zlyhalo.', 422);
+        }
+
+        try {
+            $reader = IOFactory::createReaderForFile($tmp);
+            $reader->setReadDataOnly(true);
+            $spreadsheet = $reader->load($tmp);
+        } catch (Throwable $e) {
+            Response::error('Súbor sa nepodarilo načítať: ' . $e->getMessage(), 422);
+        }
+
+        $byKey = [];
+        foreach ($schema as $sheetCode => $sheet) {
+            $byKey[$sheetCode] = [];
+            $sheetTitle = substr($sheetCode, 0, 31);
+            $ws = $spreadsheet->getSheetByName($sheetTitle);
+            if ($ws === null) {
+                continue;
+            }
+            $columns = $sheet['columns'];
+            $colCount = count($columns);
+            $highestRow = $ws->getHighestDataRow();
+            for ($r = 2; $r <= $highestRow; $r++) {
+                $assoc = [];
+                $anyValue = false;
+                for ($c = 1; $c <= $colCount; $c++) {
+                    $value = $ws->getCellByColumnAndRow($c, $r)->getValue();
+                    if ($value instanceof \DateTimeInterface) {
+                        $value = $value->format('Y-m-d');
+                    } elseif (is_float($value) && $columns[$c - 1]['key'] !== 'q' && $columns[$c - 1]['key'] !== 'hs' && $columns[$c - 1]['key'] !== 'hd' && $columns[$c - 1]['key'] !== 'working_pressure' && $columns[$c - 1]['key'] !== 'test_pressure' && $columns[$c - 1]['key'] !== 'length') {
+                        // Excel stores all numbers as floats. Re-flatten
+                        // to int for fields that aren't decimal by nature.
+                        if (floor($value) === $value) {
+                            $value = (int) $value;
+                        }
+                    }
+                    $str = $value === null ? '' : (string) $value;
+                    $str = trim($str);
+                    if ($str !== '') {
+                        $anyValue = true;
+                    }
+                    $assoc[$columns[$c - 1]['key']] = $str;
+                }
+                if (!$anyValue) {
+                    continue;
+                }
+                $byKey[$sheetCode][] = $assoc;
+            }
+        }
+        return $byKey;
+    }
+
+    /** @return array<string,int> ICO → company id */
+    private static function loadCompanyMap(int $accountId): array
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT id, ico FROM companies
+             WHERE account_id = ? AND archived_at IS NULL AND ico IS NOT NULL'
+        );
+        $stmt->execute([$accountId]);
+        $out = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $out[(string) $r['ico']] = (int) $r['id'];
+        }
+        return $out;
+    }
+
+    /** @return array<string,int> "company_id|lower(name)" → facility id */
+    private static function loadFacilityMap(int $accountId): array
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT id, company_id, name FROM facilities
+             WHERE account_id = ? AND archived_at IS NULL'
+        );
+        $stmt->execute([$accountId]);
+        $out = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $key = $r['company_id'] . '|' . mb_strtolower((string) $r['name']);
+            $out[$key] = (int) $r['id'];
+        }
+        return $out;
+    }
+
+    /** @return array<string,int> lower(email) → user id, active members only */
+    private static function loadAccountUserMap(int $accountId): array
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT u.id, u.email FROM users u
+             JOIN account_users au ON au.user_id = u.id
+             WHERE au.account_id = ? AND au.is_active = 1'
+        );
+        $stmt->execute([$accountId]);
+        $out = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $out[mb_strtolower((string) $r['email'])] = (int) $r['id'];
+        }
+        return $out;
+    }
+
+    /** @param array<string,string> $row */
+    private static function str(array $row, string $key): ?string
+    {
+        $v = $row[$key] ?? '';
+        $v = trim($v);
+        return $v === '' ? null : $v;
+    }
+
+    /** @param array<string,string> $row */
+    private static function ico(array $row, string $key): ?string
+    {
+        $v = self::str($row, $key);
+        if ($v === null) return null;
+        $v = preg_replace('/\s+/', '', $v) ?? '';
+        return $v === '' ? null : $v;
+    }
+
+    /** @param array<string,string> $row */
+    private static function intOrNull(array $row, string $key): ?int
+    {
+        $v = self::str($row, $key);
+        if ($v === null) return null;
+        if (!preg_match('/^-?\d+$/', $v)) return null;
+        return (int) $v;
+    }
+
+    /** @param array<string,string> $row */
+    private static function floatOrNull(array $row, string $key): ?float
+    {
+        $v = self::str($row, $key);
+        if ($v === null) return null;
+        $v = str_replace(',', '.', $v);
+        if (!is_numeric($v)) return null;
+        return (float) $v;
+    }
+
+    /**
+     * Builds the JSON-encodable per-item payload for the given inspection
+     * type. Returns null and appends to $errors when the row is malformed.
+     *
+     * @param array<string,string> $row
+     * @param list<array{sheet:string,row:int,message:string}> $errors
+     * @return array<string,mixed>|null
+     */
+    private static function buildItemFields(string $type, array $row, string $sheet, int $rowNum, array &$errors): ?array
+    {
+        switch ($type) {
+            case 'php': {
+                $status = self::str($row, 'status');
+                if ($status === null || !in_array($status, ['A','TS','O','V'], true)) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatný stav (A/TS/O/V).'];
+                    return null;
+                }
+                $year = self::intOrNull($row, 'year');
+                if ($year === null) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatný rok výroby.'];
+                    return null;
+                }
+                return [
+                    'manufacturer' => self::str($row, 'manufacturer') ?? '',
+                    'type'         => self::str($row, 'type') ?? '',
+                    'serial'       => self::str($row, 'serial') ?? '',
+                    'year'         => $year,
+                    'location'     => self::str($row, 'location') ?? '',
+                    'status'       => $status,
+                    'notes'        => self::str($row, 'notes'),
+                ];
+            }
+            case 'hydranty': {
+                $kind = self::str($row, 'type');
+                if ($kind === null || !in_array($kind, ['DN25','DN33','DN52','C52','other'], true)) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatný typ (DN25/DN33/DN52/C52/other).'];
+                    return null;
+                }
+                $result = self::str($row, 'result');
+                if ($result === null || !in_array($result, ['vyhovuje','nevyhovuje'], true)) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatný výsledok.'];
+                    return null;
+                }
+                return [
+                    'type'       => $kind,
+                    'type_other' => self::str($row, 'type_other'),
+                    'location'   => self::str($row, 'location') ?? '',
+                    'hose_count' => self::intOrNull($row, 'hose_count') ?? 0,
+                    'hs'         => self::floatOrNull($row, 'hs') ?? 0.0,
+                    'hd'         => self::floatOrNull($row, 'hd') ?? 0.0,
+                    'q'          => self::floatOrNull($row, 'q') ?? 0.0,
+                    'defects'    => self::str($row, 'defects'),
+                    'result'     => $result,
+                ];
+            }
+            case 'oprava_ts_php': {
+                $year = self::intOrNull($row, 'year');
+                if ($year === null) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatný rok výroby.'];
+                    return null;
+                }
+                $actionsRaw = self::str($row, 'actions') ?? '';
+                $actions = array_values(array_filter(array_map('trim', explode(',', $actionsRaw)), fn($a) => $a !== ''));
+                foreach ($actions as $a) {
+                    if (!in_array($a, ['tlakova_skuska','oprava','plnenie'], true)) {
+                        $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => "Neznáma akcia „$a”."];
+                        return null;
+                    }
+                }
+                if ($actions === []) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Aspoň jedna akcia je povinná.'];
+                    return null;
+                }
+                return [
+                    'manufacturer' => self::str($row, 'manufacturer') ?? '',
+                    'type'         => self::str($row, 'type') ?? '',
+                    'serial'       => self::str($row, 'serial') ?? '',
+                    'year'         => $year,
+                    'location'     => self::str($row, 'location') ?? '',
+                    'actions'      => $actions,
+                    'notes'        => self::str($row, 'notes'),
+                ];
+            }
+            case 'poziarna_kniha': {
+                $result = self::str($row, 'result');
+                if ($result === null || !in_array($result, ['bez_nedostatkov','zistene_nedostatky'], true)) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatný výsledok.'];
+                    return null;
+                }
+                $activitiesRaw = self::str($row, 'activities') ?? '';
+                $activities = array_values(array_filter(array_map('trim', explode(',', $activitiesRaw)), fn($a) => $a !== ''));
+                $customRaw = self::str($row, 'custom_activities') ?? '';
+                $custom = $customRaw === '' ? [] : array_values(array_filter(array_map('trim', explode('|', $customRaw)), fn($a) => $a !== ''));
+                $defects = [];
+                $defDesc = self::str($row, 'defect_description');
+                if ($defDesc !== null) {
+                    $defects[] = [
+                        'description' => $defDesc,
+                        'deadline'    => self::str($row, 'defect_deadline'),
+                    ];
+                }
+                return [
+                    'workspaces'        => self::str($row, 'workspaces') ?? '',
+                    'activities'        => $activities,
+                    'custom_activities' => $custom,
+                    'result'            => $result,
+                    'defects'           => $defects,
+                    'notes'             => self::str($row, 'notes'),
+                ];
+            }
+            case 'pu_akcieschopnost':
+            case 'pu_udrzba': {
+                $kind = self::str($row, 'kind');
+                if ($kind === null || !in_array($kind, ['dvere','okno','klapka'], true)) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatný druh (dvere/okno/klapka).'];
+                    return null;
+                }
+                $result = self::str($row, 'result');
+                if ($result === null || !in_array($result, ['vyhovuje','nevyhovuje'], true)) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatný výsledok.'];
+                    return null;
+                }
+                $out = [
+                    'kind'         => $kind,
+                    'identifier'   => self::str($row, 'identifier') ?? '',
+                    'manufacturer' => self::str($row, 'manufacturer') ?? '',
+                    'location'     => self::str($row, 'location') ?? '',
+                    'result'       => $result,
+                    'notes'        => self::str($row, 'notes'),
+                ];
+                if ($type === 'pu_udrzba') {
+                    $out['maintenance_work'] = self::str($row, 'maintenance_work') ?? '';
+                }
+                return $out;
+            }
+            case 'nudzove_osvetlenie': {
+                $result = self::str($row, 'result');
+                if ($result === null || !in_array($result, ['vyhovuje','nevyhovuje'], true)) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatný výsledok.'];
+                    return null;
+                }
+                $duration = self::intOrNull($row, 'duration_min');
+                if ($duration === null) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatné trvanie (min).'];
+                    return null;
+                }
+                return [
+                    'evid_number'    => self::str($row, 'evid_number') ?? '',
+                    'floor'          => self::str($row, 'floor') ?? '',
+                    'luminaire_type' => self::str($row, 'luminaire_type') ?? '',
+                    'manufacturer'   => self::str($row, 'manufacturer') ?? '',
+                    'location'       => self::str($row, 'location') ?? '',
+                    'duration_min'   => $duration,
+                    'result'         => $result,
+                    'notes'          => self::str($row, 'notes'),
+                ];
+            }
+            case 'ts_hadic': {
+                $result = self::str($row, 'result');
+                if ($result === null || !in_array($result, ['vyhovuje','nevyhovuje'], true)) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatný výsledok.'];
+                    return null;
+                }
+                $year = self::intOrNull($row, 'year_of_manufacture');
+                if ($year === null) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatný rok výroby.'];
+                    return null;
+                }
+                return [
+                    'hose_type'           => self::str($row, 'hose_type') ?? '',
+                    'location'            => self::str($row, 'location') ?? '',
+                    'manufacturer'        => self::str($row, 'manufacturer') ?? '',
+                    'working_pressure'    => self::floatOrNull($row, 'working_pressure') ?? 0.0,
+                    'test_pressure'       => self::floatOrNull($row, 'test_pressure') ?? 0.0,
+                    'length'              => self::floatOrNull($row, 'length') ?? 0.0,
+                    'year_of_manufacture' => $year,
+                    'result'              => $result,
+                    'notes'               => self::str($row, 'notes'),
+                ];
+            }
+        }
+        $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => "Neznámy typ kontroly: $type."];
+        return null;
+    }
+}
