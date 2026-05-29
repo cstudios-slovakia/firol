@@ -15,6 +15,7 @@ use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Throwable;
@@ -59,104 +60,7 @@ final class ImportController
         // per-tenant only in the sense that downloads require login.
         Tenant::currentUserId();
 
-        $spreadsheet = new Spreadsheet();
-        $spreadsheet->removeSheetByIndex(0);
-
-        $sheetIndex = 0;
-        foreach ($sheets as $sheetCode => $sheet) {
-            $ws = $spreadsheet->createSheet($sheetIndex++);
-            // Sheet names are user-visible in Excel and must not contain
-            // ":\\/?*[]" — our schema codes are all ASCII-safe.
-            $ws->setTitle(substr($sheetCode, 0, 31));
-
-            foreach ($sheet['columns'] as $colIdx => $col) {
-                $col1 = $colIdx + 1;
-                $ws->getCell([$col1, 1])->setValue($col['header']);
-                $ws->getStyle([$col1, 1, $col1, 1])->applyFromArray([
-                    'font' => ['bold' => true],
-                    'fill' => [
-                        'fillType'   => Fill::FILL_SOLID,
-                        'startColor' => ['rgb' => 'F1F5F9'],
-                    ],
-                    'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT],
-                ]);
-                $ws->getColumnDimensionByColumn($col1)->setWidth(22);
-
-                if (!empty($col['hint'])) {
-                    $ws->getCell([$col1, 2])->setValueExplicit(
-                        $col['hint'],
-                        \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING,
-                    );
-                    $ws->getStyle([$col1, 2, $col1, 2])->applyFromArray([
-                        'font' => ['italic' => true, 'color' => ['rgb' => '94A3B8']],
-                    ]);
-                }
-
-                // Apply Excel dropdown validation for single-value enum columns.
-                if (!empty($col['options'])) {
-                    $colLetter = Coordinate::stringFromColumnIndex($col1);
-                    $sqref     = "{$colLetter}2:{$colLetter}1001";
-                    $v = $ws->getCell("{$colLetter}2")->getDataValidation();
-                    $v->setType(DataValidation::TYPE_LIST);
-                    $v->setErrorStyle(DataValidation::STYLE_STOP);
-                    $v->setAllowBlank(true);
-                    $v->setShowDropDown(false); // false = show dropdown arrow
-                    $v->setShowErrorMessage(true);
-                    $v->setErrorTitle('Neplatná hodnota');
-                    $v->setError('Vyber hodnotu zo zoznamu.');
-                    $v->setFormula1('"' . implode(',', $col['options']) . '"');
-                    $v->setSqref($sqref);
-                }
-            }
-
-            // Legend block for multi-value columns (comma-separated slugs).
-            // Placed at row 102 so up to 100 data rows fit above it.
-            $colCount  = count($sheet['columns']);
-            $lastColLetter = Coordinate::stringFromColumnIndex($colCount);
-            $legendRow = 102;
-            $hasLegend = false;
-
-            foreach ($sheet['columns'] as $col) {
-                if (empty($col['multi_options'])) {
-                    continue;
-                }
-                if (!$hasLegend) {
-                    $ws->getCell("A{$legendRow}")->setValue('NÁPOVEDA — povolené hodnoty (oddeľte čiarkou)');
-                    $ws->mergeCells("A{$legendRow}:{$lastColLetter}{$legendRow}");
-                    $ws->getStyle("A{$legendRow}")->applyFromArray([
-                        'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
-                        'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '475569']],
-                        'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT],
-                    ]);
-                    $legendRow++;
-                    $hasLegend = true;
-                }
-
-                $ws->getCell("A{$legendRow}")->setValue($col['header']);
-                $ws->mergeCells("A{$legendRow}:{$lastColLetter}{$legendRow}");
-                $ws->getStyle("A{$legendRow}")->applyFromArray([
-                    'font' => ['bold' => true],
-                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2E8F0']],
-                    'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT],
-                ]);
-                $legendRow++;
-
-                foreach ($col['multi_options'] as $opt) {
-                    $ws->getCell("A{$legendRow}")->setValue($opt['value']);
-                    $ws->getCell("B{$legendRow}")->setValue($opt['label']);
-                    $ws->getStyle("A{$legendRow}")->applyFromArray([
-                        'font' => ['bold' => true, 'color' => ['rgb' => '1E40AF']],
-                    ]);
-                    $legendRow++;
-                }
-                $legendRow++; // blank separator between groups
-            }
-
-            $ws->freezePane('A2');
-        }
-
-        // First sheet active by default.
-        $spreadsheet->setActiveSheetIndex(0);
+        $spreadsheet = self::buildWorkbook($sheets);
 
         // Stream the workbook to stdout.
         while (ob_get_level() > 0) {
@@ -169,6 +73,208 @@ final class ImportController
         $writer = new Xlsx($spreadsheet);
         $writer->save('php://output');
         exit;
+    }
+
+    /**
+     * Builds the in-memory template workbook (instructions tab + one data
+     * sheet per schema entry, with dropdowns and click-prompts). Kept
+     * separate from {@see sendTemplate} so it can be exercised without the
+     * HTTP/streaming layer.
+     *
+     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}> $sheets
+     */
+    private static function buildWorkbook(array $sheets): Spreadsheet
+    {
+        $spreadsheet = new Spreadsheet();
+        $spreadsheet->removeSheetByIndex(0);
+
+        // Sheet 0 is a human-readable reference of every column and its
+        // allowed values. It lives on its own tab so it can never be
+        // overwritten by data entry or scrolled out of existence.
+        self::buildInstructionsSheet($spreadsheet, $sheets);
+
+        $sheetIndex = 1; // 0 is the "Pokyny" reference sheet
+        foreach ($sheets as $sheetCode => $sheet) {
+            $ws = $spreadsheet->createSheet($sheetIndex++);
+            // Sheet names are user-visible in Excel and must not contain
+            // ":\\/?*[]" — our schema codes are all ASCII-safe.
+            $ws->setTitle(substr($sheetCode, 0, 31));
+
+            foreach ($sheet['columns'] as $colIdx => $col) {
+                $col1      = $colIdx + 1;
+                $colLetter = Coordinate::stringFromColumnIndex($col1);
+
+                // Row 1 — column header. Data starts directly at row 2 so
+                // the user is never tempted to overwrite an example/help row.
+                $ws->getCell([$col1, 1])->setValue($col['header']);
+                $ws->getStyle([$col1, 1, $col1, 1])->applyFromArray([
+                    'font' => ['bold' => true],
+                    'fill' => [
+                        'fillType'   => Fill::FILL_SOLID,
+                        'startColor' => ['rgb' => 'F1F5F9'],
+                    ],
+                    'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT],
+                ]);
+                $ws->getColumnDimensionByColumn($col1)->setWidth(26);
+
+                $range = "{$colLetter}2:{$colLetter}1001";
+
+                if (!empty($col['options'])) {
+                    // Single-value enum → real dropdown + click-prompt + hard
+                    // reject of anything off-list.
+                    $dv = $ws->getCell("{$colLetter}2")->getDataValidation();
+                    $dv->setType(DataValidation::TYPE_LIST);
+                    $dv->setErrorStyle(DataValidation::STYLE_STOP);
+                    $dv->setAllowBlank(true);
+                    // PhpSpreadsheet inverts this attribute on write — true
+                    // is what actually renders the in-cell dropdown arrow.
+                    $dv->setShowDropDown(true);
+                    $dv->setShowInputMessage(true);
+                    $dv->setShowErrorMessage(true);
+                    $dv->setPromptTitle('Vyber zo zoznamu');
+                    $dv->setPrompt('Povolené hodnoty: ' . implode(', ', $col['options']));
+                    $dv->setErrorTitle('Neplatná hodnota');
+                    $dv->setError('Vyber jednu z hodnôt zo zoznamu (šípka vpravo v bunke).');
+                    $dv->setFormula1('"' . implode(',', $col['options']) . '"');
+                    $dv->setSqref($range);
+                } elseif (!empty($col['multi_options'])) {
+                    // Multi-value → no native multi-select in Excel, so guide
+                    // with a persistent click-prompt and the Pokyny tab.
+                    $slugs = array_column($col['multi_options'], 'value');
+                    $dv = $ws->getCell("{$colLetter}2")->getDataValidation();
+                    $dv->setType(DataValidation::TYPE_NONE);
+                    $dv->setShowInputMessage(true);
+                    $dv->setPromptTitle('Viac hodnôt — oddeľ čiarkou');
+                    // Prompt text is capped by Excel (~255 chars); keep it
+                    // short for long lists and defer to the Pokyny sheet.
+                    $prompt = count($slugs) <= 4
+                        ? 'Povolené hodnoty (oddeľ čiarkou): ' . implode(', ', $slugs)
+                        : 'Zadaj jednu alebo viac hodnôt oddelených čiarkou. Úplný zoznam povolených hodnôt nájdeš na hárku „Pokyny".';
+                    $dv->setPrompt($prompt);
+                    $dv->setSqref($range);
+                }
+            }
+
+            $ws->freezePane('A2');
+        }
+
+        // Open on the instructions tab so the user reads it first.
+        $spreadsheet->setActiveSheetIndex(0);
+
+        return $spreadsheet;
+    }
+
+    /**
+     * Renders the always-visible "Pokyny" reference tab: for every data
+     * sheet it lists each column, whether it is required, the kind of
+     * input expected and — crucially — the exact set of allowed values
+     * for dropdown and multi-value columns. This is the canonical place
+     * the user can look up valid inputs; it cannot be hidden or erased by
+     * filling in the data sheets.
+     *
+     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}> $sheets
+     */
+    private static function buildInstructionsSheet(Spreadsheet $spreadsheet, array $sheets): void
+    {
+        $ws = $spreadsheet->createSheet(0);
+        $ws->setTitle('Pokyny');
+        $ws->getColumnDimensionByColumn(1)->setWidth(34); // Stĺpec
+        $ws->getColumnDimensionByColumn(2)->setWidth(12); // Povinné
+        $ws->getColumnDimensionByColumn(3)->setWidth(26); // Typ vstupu
+        $ws->getColumnDimensionByColumn(4)->setWidth(70); // Povolené hodnoty
+
+        $r = 1;
+        $ws->getCell("A{$r}")->setValue('Pokyny pre vyplnenie a import');
+        $ws->mergeCells("A{$r}:D{$r}");
+        $ws->getStyle("A{$r}")->applyFromArray([
+            'font' => ['bold' => true, 'size' => 16, 'color' => ['rgb' => '0F172A']],
+        ]);
+        $ws->getRowDimension($r)->setRowHeight(24);
+        $r += 2;
+
+        $intro = [
+            'Prvý riadok každého hárka je hlavička — needituj ho. Dáta zadávaj od druhého riadka.',
+            'Stĺpce označené hviezdičkou (*) sú povinné.',
+            'Stĺpce typu „Výber zo zoznamu“: klikni na bunku a vyber hodnotu zo šípky vpravo. Iná hodnota sa odmietne.',
+            'Stĺpce typu „Viac hodnôt“: zadaj povolené hodnoty oddelené čiarkou (napr. tlakova_skuska,plnenie).',
+            'Dátumy zadávaj vo formáte RRRR-MM-DD (napr. 2026-01-15).',
+        ];
+        foreach ($intro as $line) {
+            $ws->getCell("A{$r}")->setValue('•  ' . $line);
+            $ws->mergeCells("A{$r}:D{$r}");
+            $ws->getStyle("A{$r}")->applyFromArray([
+                'font'      => ['color' => ['rgb' => '334155']],
+                'alignment' => ['wrapText' => true, 'vertical' => Alignment::VERTICAL_TOP],
+            ]);
+            $r++;
+        }
+        $r++;
+
+        foreach ($sheets as $sheet) {
+            // Sheet banner.
+            $ws->getCell("A{$r}")->setValue('Hárok: ' . $sheet['title']);
+            $ws->mergeCells("A{$r}:D{$r}");
+            $ws->getStyle("A{$r}")->applyFromArray([
+                'font' => ['bold' => true, 'size' => 12, 'color' => ['rgb' => 'FFFFFF']],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1E40AF']],
+            ]);
+            $ws->getRowDimension($r)->setRowHeight(20);
+            $r++;
+
+            // Column table header.
+            $headers = ['Stĺpec', 'Povinné', 'Typ vstupu', 'Povolené hodnoty / formát'];
+            foreach ($headers as $i => $h) {
+                $cell = Coordinate::stringFromColumnIndex($i + 1) . $r;
+                $ws->getCell($cell)->setValue($h);
+                $ws->getStyle($cell)->applyFromArray([
+                    'font' => ['bold' => true],
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2E8F0']],
+                ]);
+            }
+            $r++;
+
+            foreach ($sheet['columns'] as $col) {
+                $required = str_ends_with(rtrim($col['header']), '*') ? 'áno' : '—';
+                $name     = trim(preg_replace('/\s*\*\s*$/u', '', $col['header']) ?? $col['header']);
+
+                if (!empty($col['options'])) {
+                    $type    = 'Výber zo zoznamu';
+                    $allowed = implode(', ', $col['options']);
+                    $lines   = 1;
+                } elseif (!empty($col['multi_options'])) {
+                    $type  = 'Viac hodnôt (oddeľ čiarkou)';
+                    $parts = [];
+                    foreach ($col['multi_options'] as $opt) {
+                        $parts[] = $opt['value'] . '  —  ' . $opt['label'];
+                    }
+                    $allowed = implode("\n", $parts);
+                    $lines   = count($parts);
+                } else {
+                    $type    = 'Voľný text';
+                    $allowed = !empty($col['hint']) ? 'napr. ' . $col['hint'] : '';
+                    $lines   = 1;
+                }
+
+                $ws->getCell("A{$r}")->setValue($name);
+                $ws->getCell("B{$r}")->setValue($required);
+                $ws->getCell("C{$r}")->setValue($type);
+                $ws->getCell("D{$r}")->setValueExplicit(
+                    $allowed,
+                    \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING,
+                );
+                $ws->getStyle("A{$r}:D{$r}")->applyFromArray([
+                    'alignment' => ['wrapText' => true, 'vertical' => Alignment::VERTICAL_TOP],
+                    'borders'   => ['bottom' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'E2E8F0']]],
+                ]);
+                if ($lines > 1) {
+                    $ws->getRowDimension($r)->setRowHeight(14 * $lines + 2);
+                }
+                $r++;
+            }
+            $r += 2; // spacing before next sheet
+        }
+
+        $ws->freezePane('A2');
     }
 
     // ─── Imports ─────────────────────────────────────────────────────
