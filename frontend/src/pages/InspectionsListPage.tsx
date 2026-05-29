@@ -20,6 +20,7 @@ import {
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/auth/AuthContext";
+import { useIsReadOnly } from "@/auth/useIsReadOnly";
 import { useToast } from "@/lib/toast";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -41,6 +42,7 @@ const TYPE_CHIPS: [InspectionType, string][] = [
 
 export function InspectionsListPage() {
     const { csrfToken } = useAuth();
+    const isReadOnly = useIsReadOnly();
     const toast = useToast();
     const navigate = useNavigate();
 
@@ -166,13 +168,15 @@ export function InspectionsListPage() {
                         Všetky vykonané kontroly a rozpracované koncepty.
                     </p>
                 </div>
-                <Link
-                    to="/inspections/new"
-                    className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
-                >
-                    <Plus className="size-4" />
-                    Nová kontrola
-                </Link>
+                {!isReadOnly && (
+                    <Link
+                        to="/inspections/new"
+                        className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+                    >
+                        <Plus className="size-4" />
+                        Nová kontrola
+                    </Link>
+                )}
             </header>
 
             {items && items.length > 0 && (
@@ -274,7 +278,7 @@ export function InspectionsListPage() {
                             <ul className="flex flex-col gap-2">
                                 {grouped.overdue.map((it) => (
                                     <li key={it.id}>
-                                        <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} />
+                                        <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
                                     </li>
                                 ))}
                             </ul>
@@ -291,7 +295,7 @@ export function InspectionsListPage() {
                             <ul className="flex flex-col gap-2">
                                 {grouped.soon.map((it) => (
                                     <li key={it.id}>
-                                        <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} />
+                                        <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
                                     </li>
                                 ))}
                             </ul>
@@ -308,7 +312,7 @@ export function InspectionsListPage() {
                             <ul className="flex flex-col gap-2">
                                 {grouped.valid.map((it) => (
                                     <li key={it.id}>
-                                        <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} />
+                                        <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
                                     </li>
                                 ))}
                             </ul>
@@ -388,16 +392,18 @@ function InspectionRow({
     onDelete,
     onRepeat,
     repeatingId,
+    isReadOnly,
 }: {
     it: InspectionListItem;
     onDelete: (id: number) => void;
     onRepeat: (id: number) => void;
     repeatingId: number | null;
+    isReadOnly: boolean;
 }) {
     const days = daysUntilNext(it.executed_on, it.periodicity_months);
     const isRepeating = repeatingId === it.id;
 
-    const actions = (
+    const actions = isReadOnly ? null : (
         <>
             {it.status === "finalized" && (
                 <button

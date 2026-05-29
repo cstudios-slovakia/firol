@@ -87,7 +87,7 @@ export default defineConfig({
     // Vite dev server proxuje /api požiadavky na PHP backend (nginx v Dockeri).
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'http://127.0.0.1:8080',
         changeOrigin: true,
       },
     },

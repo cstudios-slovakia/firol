@@ -19,6 +19,7 @@ import {
     Warehouse,
 } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
+import { useIsReadOnly } from "@/auth/useIsReadOnly";
 import { useToast } from "@/lib/toast";
 import { Facilities, type Facility } from "@/api/facilities";
 import {
@@ -49,6 +50,7 @@ export function FacilityDetailPage() {
 
     const navigate = useNavigate();
     const { csrfToken } = useAuth();
+    const isReadOnly = useIsReadOnly();
     const toast = useToast();
     const [facility, setFacility] = useState<Facility | null>(null);
     const [inspections, setInspections] = useState<InspectionListItem[] | null>(null);
@@ -239,23 +241,25 @@ export function FacilityDetailPage() {
                                 </Link>
                             )}
                         </div>
-                        <div className="flex items-center gap-3">
-                            <Link
-                                to={`/facilities/${facility.id}/edit`}
-                                aria-label="Upraviť"
-                                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
-                            >
-                                <Edit2 className="size-4" />
-                            </Link>
-                            <button
-                                type="button"
-                                aria-label="Archivovať"
-                                onClick={onArchive}
-                                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-                            >
-                                <Trash2 className="size-4" />
-                            </button>
-                        </div>
+                        {!isReadOnly && (
+                            <div className="flex items-center gap-3">
+                                <Link
+                                    to={`/facilities/${facility.id}/edit`}
+                                    aria-label="Upraviť"
+                                    className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
+                                >
+                                    <Edit2 className="size-4" />
+                                </Link>
+                                <button
+                                    type="button"
+                                    aria-label="Archivovať"
+                                    onClick={onArchive}
+                                    className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
+                                >
+                                    <Trash2 className="size-4" />
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -293,34 +297,36 @@ export function FacilityDetailPage() {
             </Card>
 
             {/* Action card menu */}
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <Link
-                    to={`/inspections/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
-                    className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-colors hover:bg-ink-50 active:bg-ink-100"
-                >
-                    <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-50">
-                        <ClipboardList className="size-5 text-firol-600" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-ink-900">Nová kontrola</p>
-                        <p className="mt-0.5 text-xs text-ink-500">Vybrať typ a spustiť protokol</p>
-                    </div>
-                    <ChevronRight className="size-4 shrink-0 text-ink-300" />
-                </Link>
-                <Link
-                    to={`/trainings/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
-                    className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-colors hover:bg-ink-50 active:bg-ink-100"
-                >
-                    <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-emerald-50">
-                        <GraduationCap className="size-5 text-emerald-600" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-ink-900">Nové školenie</p>
-                        <p className="mt-0.5 text-xs text-ink-500">Evidencia školení PO pre prevádzku</p>
-                    </div>
-                    <ChevronRight className="size-4 shrink-0 text-ink-300" />
-                </Link>
-            </div>
+            {!isReadOnly && (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Link
+                        to={`/inspections/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
+                        className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-colors hover:bg-ink-50 active:bg-ink-100"
+                    >
+                        <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-50">
+                            <ClipboardList className="size-5 text-firol-600" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-ink-900">Nová kontrola</p>
+                            <p className="mt-0.5 text-xs text-ink-500">Vybrať typ a spustiť protokol</p>
+                        </div>
+                        <ChevronRight className="size-4 shrink-0 text-ink-300" />
+                    </Link>
+                    <Link
+                        to={`/trainings/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
+                        className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-colors hover:bg-ink-50 active:bg-ink-100"
+                    >
+                        <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-emerald-50">
+                            <GraduationCap className="size-5 text-emerald-600" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-ink-900">Nové školenie</p>
+                            <p className="mt-0.5 text-xs text-ink-500">Evidencia školení PO pre prevádzku</p>
+                        </div>
+                        <ChevronRight className="size-4 shrink-0 text-ink-300" />
+                    </Link>
+                </div>
+            )}
 
             {/* Tab bar */}
             <div className="relative border-b border-ink-100">
@@ -382,13 +388,15 @@ export function FacilityDetailPage() {
             {activeTab === "inspections" && <section key="inspections" className="animate-fade-up">
                 <header className="mb-3 flex items-center justify-between">
                     <h2 className="sr-only">História kontrol</h2>
-                    <Link
-                        to={`/inspections/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
-                        className="ml-auto inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
-                    >
-                        <Plus className="size-3.5" />
-                        Nová kontrola
-                    </Link>
+                    {!isReadOnly && (
+                        <Link
+                            to={`/inspections/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
+                            className="ml-auto inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+                        >
+                            <Plus className="size-3.5" />
+                            Nová kontrola
+                        </Link>
+                    )}
                 </header>
 
                 {inspections && inspections.length > 0 && (
@@ -492,41 +500,43 @@ export function FacilityDetailPage() {
                                                 </p>
                                             </div>
                                         </Link>
-                                        <div className="flex shrink-0 items-center gap-2">
-                                            {canRepeat && (
+                                        {!isReadOnly && (
+                                            <div className="flex shrink-0 items-center gap-2">
+                                                {canRepeat && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleRepeat(ins.id)}
+                                                        disabled={repeatingId !== null}
+                                                        title="Opakovať kontrolu"
+                                                        aria-label="Opakovať"
+                                                        className="grid size-8 place-items-center rounded-xl text-blue-500 transition-colors hover:bg-blue-50 disabled:opacity-50"
+                                                    >
+                                                        {repeatingId === ins.id ? (
+                                                            <Spinner size="sm" />
+                                                        ) : (
+                                                            <Repeat className="size-4" />
+                                                        )}
+                                                    </button>
+                                                )}
+                                                <Link
+                                                    to={`/inspections/${ins.id}`}
+                                                    title="Upraviť"
+                                                    aria-label="Upraviť"
+                                                    className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
+                                                >
+                                                    <Edit2 className="size-4" />
+                                                </Link>
                                                 <button
                                                     type="button"
-                                                    onClick={() => handleRepeat(ins.id)}
-                                                    disabled={repeatingId !== null}
-                                                    title="Opakovať kontrolu"
-                                                    aria-label="Opakovať"
-                                                    className="grid size-8 place-items-center rounded-xl text-blue-500 transition-colors hover:bg-blue-50 disabled:opacity-50"
+                                                    title="Odstrániť"
+                                                    aria-label="Odstrániť"
+                                                    onClick={() => setPendingDeleteId(ins.id)}
+                                                    className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
                                                 >
-                                                    {repeatingId === ins.id ? (
-                                                        <Spinner size="sm" />
-                                                    ) : (
-                                                        <Repeat className="size-4" />
-                                                    )}
+                                                    <Trash2 className="size-4" />
                                                 </button>
-                                            )}
-                                            <Link
-                                                to={`/inspections/${ins.id}`}
-                                                title="Upraviť"
-                                                aria-label="Upraviť"
-                                                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
-                                            >
-                                                <Edit2 className="size-4" />
-                                            </Link>
-                                            <button
-                                                type="button"
-                                                title="Odstrániť"
-                                                aria-label="Odstrániť"
-                                                onClick={() => setPendingDeleteId(ins.id)}
-                                                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-                                            >
-                                                <Trash2 className="size-4" />
-                                            </button>
-                                        </div>
+                                            </div>
+                                        )}
                                     </Card>
                                 </li>
                             );
@@ -539,13 +549,15 @@ export function FacilityDetailPage() {
             {activeTab === "trainings" && <section key="trainings" className="animate-fade-up">
                 <header className="mb-3 flex items-center justify-between">
                     <h2 className="sr-only">História školení</h2>
-                    <Link
-                        to={`/trainings/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
-                        className="ml-auto inline-flex h-8 items-center gap-1 rounded-2xl bg-emerald-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-emerald-600"
-                    >
-                        <Plus className="size-3.5" />
-                        Nové školenie
-                    </Link>
+                    {!isReadOnly && (
+                        <Link
+                            to={`/trainings/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
+                            className="ml-auto inline-flex h-8 items-center gap-1 rounded-2xl bg-emerald-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-emerald-600"
+                        >
+                            <Plus className="size-3.5" />
+                            Nové školenie
+                        </Link>
+                    )}
                 </header>
 
                 {trainings && trainings.length > 0 && (
@@ -661,15 +673,17 @@ export function FacilityDetailPage() {
                                             >
                                                 <Edit2 className="size-4" />
                                             </Link>
-                                            <button
-                                                type="button"
-                                                title="Odstrániť"
-                                                aria-label="Odstrániť"
-                                                onClick={() => setPendingDeleteTrainingId(tr.id)}
-                                                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-                                            >
-                                                <Trash2 className="size-4" />
-                                            </button>
+                                            {!isReadOnly && (
+                                                <button
+                                                    type="button"
+                                                    title="Odstrániť"
+                                                    aria-label="Odstrániť"
+                                                    onClick={() => setPendingDeleteTrainingId(tr.id)}
+                                                    className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
+                                                >
+                                                    <Trash2 className="size-4" />
+                                                </button>
+                                            )}
                                         </div>
                                     </Card>
                                 </li>

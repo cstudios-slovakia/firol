@@ -7,6 +7,7 @@ import {
   Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
+import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import {
   TRAINING_TYPE_LABELS,
   Trainings,
@@ -33,6 +34,7 @@ export function TrainingDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
   const id = Number(idStr);
   const { csrfToken } = useAuth();
+  const isReadOnly = useIsReadOnly();
   const toast = useToast();
 
   const [data, setData] = useState<TrainingDetail | null>(null);
@@ -196,13 +198,15 @@ export function TrainingDetailPage() {
                 </span>
               </div>
             </div>
-            <Link
-              to={`/trainings/${id}/edit`}
-              aria-label="Upraviť"
-              className="grid size-9 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-white hover:text-ink-700"
-            >
-              <Edit2 className="size-4" />
-            </Link>
+            {!isReadOnly && (
+              <Link
+                to={`/trainings/${id}/edit`}
+                aria-label="Upraviť"
+                className="grid size-9 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-white hover:text-ink-700"
+              >
+                <Edit2 className="size-4" />
+              </Link>
+            )}
           </div>
         </div>
 
@@ -242,7 +246,7 @@ export function TrainingDetailPage() {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-500">
             Účastníci ({trainees.length})
           </h2>
-          {isDraft && !showAddForm && (
+          {isDraft && !showAddForm && !isReadOnly && (
             <button
               type="button"
               onClick={() => setShowAddForm(true)}
@@ -254,7 +258,7 @@ export function TrainingDetailPage() {
           )}
         </header>
 
-        {showAddForm && (
+        {showAddForm && !isReadOnly && (
           <AddTraineeForm
             onCancel={() => setShowAddForm(false)}
             onSubmit={handleAdd}
@@ -285,7 +289,7 @@ export function TrainingDetailPage() {
                 <TraineeRow
                   index={idx + 1}
                   trainee={tr}
-                  canEdit={isDraft}
+                  canEdit={isDraft && !isReadOnly}
                   deleting={deletingId === tr.id}
                   onDelete={() => handleDelete(tr.id)}
                 />
@@ -298,6 +302,7 @@ export function TrainingDetailPage() {
       <DocumentsBlock
         documents={documents}
         canGenerate={
+          !isReadOnly &&
           isDraft &&
           trainees.length > 0 &&
           !!t.date &&
@@ -307,6 +312,7 @@ export function TrainingDetailPage() {
         generating={generating}
         onGenerate={handleGeneratePdf}
         finalized={!isDraft}
+        isReadOnly={isReadOnly}
       />
     </div>
   );
@@ -331,6 +337,7 @@ function DocumentsBlock({
   generating,
   onGenerate,
   finalized,
+  isReadOnly,
 }: {
   documents: TrainingDocument[];
   canGenerate: boolean;
@@ -338,8 +345,10 @@ function DocumentsBlock({
   generating: boolean;
   onGenerate: () => void;
   finalized: boolean;
+  isReadOnly: boolean;
 }) {
   if (documents.length === 0) {
+    if (isReadOnly) return null;
     return (
       <Card className="flex flex-col items-center gap-2 px-5 py-6 text-center">
         <div className="grid size-11 place-items-center rounded-2xl bg-firol-50 text-firol-500">

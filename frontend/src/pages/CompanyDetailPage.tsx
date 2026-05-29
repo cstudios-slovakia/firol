@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, Hash, MapPin, Phone, Plus, Trash2, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
+import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyDetail } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
@@ -12,6 +13,7 @@ export function CompanyDetailPage() {
   const id = Number(idStr);
   const navigate = useNavigate();
   const { csrfToken } = useAuth();
+  const isReadOnly = useIsReadOnly();
 
   const [data, setData] = useState<CompanyDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -89,23 +91,25 @@ export function CompanyDetailPage() {
                 {facilities.length} {plural(facilities.length, 'prevádzka', 'prevádzky', 'prevádzok')}
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <Link
-                to={`/companies/${company.id}/edit`}
-                aria-label="Upraviť"
-                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
-              >
-                <Edit2 className="size-4" />
-              </Link>
-              <button
-                type="button"
-                aria-label="Archivovať"
-                onClick={onArchive}
-                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-              >
-                <Trash2 className="size-4" />
-              </button>
-            </div>
+            {!isReadOnly && (
+              <div className="flex items-center gap-3">
+                <Link
+                  to={`/companies/${company.id}/edit`}
+                  aria-label="Upraviť"
+                  className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
+                >
+                  <Edit2 className="size-4" />
+                </Link>
+                <button
+                  type="button"
+                  aria-label="Archivovať"
+                  onClick={onArchive}
+                  className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -124,7 +128,7 @@ export function CompanyDetailPage() {
           )}
         </dl>
 
-        {facilities.length > 0 && (
+        {facilities.length > 0 && !isReadOnly && (
           <div className="border-t border-ink-100 px-5 py-3">
             <Link
               to={`/inspections/new?company_id=${company.id}`}
@@ -140,13 +144,15 @@ export function CompanyDetailPage() {
       <section>
         <header className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-500">Prevádzky</h2>
-          <Link
-            to={`/companies/${company.id}/facilities/new`}
-            className="inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
-          >
-            <Plus className="size-3.5" />
-            Pridať prevádzku
-          </Link>
+          {!isReadOnly && (
+            <Link
+              to={`/companies/${company.id}/facilities/new`}
+              className="inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+            >
+              <Plus className="size-3.5" />
+              Pridať prevádzku
+            </Link>
+          )}
         </header>
 
         {facilities.length === 0 ? (

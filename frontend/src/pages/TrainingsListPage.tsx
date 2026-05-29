@@ -24,6 +24,7 @@ import {
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/auth/AuthContext";
+import { useIsReadOnly } from "@/auth/useIsReadOnly";
 import { useToast } from "@/lib/toast";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -33,6 +34,7 @@ import { SkeletonList } from "@/components/ui/Skeleton";
 
 export function TrainingsListPage() {
     const { csrfToken } = useAuth();
+    const isReadOnly = useIsReadOnly();
     const toast = useToast();
 
     const [items, setItems] = useState<TrainingListItem[] | null>(null);
@@ -118,13 +120,15 @@ export function TrainingsListPage() {
                         Záznamy zo školení s podpismi účastníkov.
                     </p>
                 </div>
-                <Link
-                    to="/trainings/new"
-                    className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
-                >
-                    <Plus className="size-4" />
-                    Nové školenie
-                </Link>
+                {!isReadOnly && (
+                    <Link
+                        to="/trainings/new"
+                        className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+                    >
+                        <Plus className="size-4" />
+                        Nové školenie
+                    </Link>
+                )}
             </header>
 
             {items && items.length > 0 && (
@@ -221,6 +225,7 @@ export function TrainingsListPage() {
                                 <TrainingRow
                                     it={it}
                                     onDelete={setPendingDeleteId}
+                                    isReadOnly={isReadOnly}
                                 />
                             </li>
                         ))}
@@ -270,9 +275,11 @@ export function TrainingsListPage() {
 function TrainingRow({
     it,
     onDelete,
+    isReadOnly,
 }: {
     it: TrainingListItem;
     onDelete: (id: number) => void;
+    isReadOnly: boolean;
 }) {
     return (
         <Card className="px-4 py-3">
@@ -327,23 +334,25 @@ function TrainingRow({
                     </p>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-3">
-                    <Link
-                        to={`/trainings/${it.id}/edit`}
-                        title="Upraviť"
-                        className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
-                    >
-                        <Edit2 className="size-4" />
-                    </Link>
-                    <button
-                        type="button"
-                        title="Odstrániť"
-                        onClick={() => onDelete(it.id)}
-                        className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-                    >
-                        <Trash2 className="size-4" />
-                    </button>
-                </div>
+                {!isReadOnly && (
+                    <div className="flex shrink-0 items-center gap-3">
+                        <Link
+                            to={`/trainings/${it.id}/edit`}
+                            title="Upraviť"
+                            className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
+                        >
+                            <Edit2 className="size-4" />
+                        </Link>
+                        <button
+                            type="button"
+                            title="Odstrániť"
+                            onClick={() => onDelete(it.id)}
+                            className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
+                        >
+                            <Trash2 className="size-4" />
+                        </button>
+                    </div>
+                )}
             </div>
         </Card>
     );

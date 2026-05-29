@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Building2, ChevronRight, Plus, Search, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
+import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyListItem } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
@@ -10,6 +11,7 @@ import { SkeletonList } from '@/components/ui/Skeleton';
 
 export function CompaniesPage() {
   const { isAdmin } = useAuth();
+  const isReadOnly = useIsReadOnly();
   const [items, setItems] = useState<CompanyListItem[]>([]);
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -68,13 +70,15 @@ export function CompaniesPage() {
               : `${items.length} ${plural(items.length, 'firma', 'firmy', 'firiem')} · ${totalFacilities} ${plural(totalFacilities, 'prevádzka', 'prevádzky', 'prevádzok')}`}
           </p>
         </div>
-        <Link
-          to="/companies/new"
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] transition-colors hover:bg-firol-600"
-        >
-          <Plus className="size-4" />
-          Nová firma
-        </Link>
+        {!isReadOnly && (
+          <Link
+            to="/companies/new"
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] transition-colors hover:bg-firol-600"
+          >
+            <Plus className="size-4" />
+            Nová firma
+          </Link>
+        )}
       </header>
 
       <Card className="flex items-center gap-2 px-3 py-2">
