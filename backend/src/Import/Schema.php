@@ -67,8 +67,6 @@ final class Schema
                         'options' => self::TRAINING_TYPES,
                     ],
                     ['header' => 'Dátum (YYYY-MM-DD) *', 'key' => 'date', 'hint' => '2026-01-15'],
-                    ['header' => 'Trvanie (min)', 'key' => 'duration_min', 'hint' => '60'],
-                    ['header' => 'Témy', 'key' => 'topics', 'hint' => 'Základné predpisy OPP, evakuácia.'],
                     ['header' => 'E-mail lektora', 'key' => 'trainer_email', 'hint' => 'lektor@firma.sk'],
                 ],
             ],
@@ -77,7 +75,7 @@ final class Schema
                 'columns' => [
                     ['header' => '# riadok školenia *', 'key' => 'training_row_no', 'hint' => '1'],
                     ['header' => 'Meno a priezvisko *', 'key' => 'fullname', 'hint' => 'Ján Účastník'],
-                    ['header' => 'Pozícia', 'key' => 'position', 'hint' => 'Skladník'],
+                    ['header' => 'Pracovné zaradenie', 'key' => 'position', 'hint' => 'Skladník'],
                 ],
             ],
         ];
@@ -99,9 +97,9 @@ final class Schema
         'vstupne',
         'opakovane',
         'opp_mimo',
-        'zdrzujuca_sa',
-        'hliadka_oph',
-        'hliadka_opah',
+        'zdrzujuce_sa',
+        'priprava_oph',
+        'priprava_opah',
     ];
 
     /** All valid periodicities across all inspection types (for the dropdown). */
