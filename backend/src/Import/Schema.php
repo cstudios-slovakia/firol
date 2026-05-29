@@ -9,15 +9,19 @@ namespace Firol\Import;
  * source of truth shared between template generation (download) and
  * row parsing (upload) so the two sides can never drift.
  *
- * Each sheet definition is a list of [header, key, hint?] tuples.
- * `key` is the field name the controller layer reads with array access.
- * `hint` is an example value rendered as the first data row of the
- * template to help the user understand the expected format.
+ * Each sheet definition is a list of column descriptors:
+ *   header  — visible column heading
+ *   key     — field name the controller reads with array access
+ *   hint    — example value rendered in the first data row
+ *   options — for single-value enum fields: generates an Excel dropdown
+ *   multi_options — for multi-value fields (comma-separated): generates
+ *                   a legend block below the data area; each entry is
+ *                   ['value' => slug, 'label' => Slovak description]
  */
 final class Schema
 {
     /**
-     * @return array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string}>}>
+     * @return array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}>
      */
     public static function companies(): array
     {
@@ -45,7 +49,7 @@ final class Schema
     }
 
     /**
-     * @return array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string}>}>
+     * @return array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}>
      */
     public static function trainings(): array
     {
@@ -56,7 +60,12 @@ final class Schema
                     ['header' => '# riadok *',        'key' => 'row_no',        'hint' => '1'],
                     ['header' => 'IČO firmy *',       'key' => 'company_ico',   'hint' => '12345678'],
                     ['header' => 'Prevádzka',         'key' => 'facility_name', 'hint' => 'Sklad Žilina'],
-                    ['header' => 'Typ školenia *',    'key' => 'type',          'hint' => 'vstupne'],
+                    [
+                        'header'  => 'Typ školenia *',
+                        'key'     => 'type',
+                        'hint'    => 'vstupne',
+                        'options' => self::TRAINING_TYPES,
+                    ],
                     ['header' => 'Dátum (YYYY-MM-DD) *', 'key' => 'date',       'hint' => '2026-01-15'],
                     ['header' => 'Trvanie (min)',     'key' => 'duration_min',  'hint' => '60'],
                     ['header' => 'Témy',              'key' => 'topics',        'hint' => 'Základné predpisy OPP, evakuácia.'],
@@ -91,11 +100,33 @@ final class Schema
         'zdrzujuca_sa', 'hliadka_oph', 'hliadka_opah',
     ];
 
+    /** All valid periodicities across all inspection types (for the dropdown). */
+    private const ALL_PERIODICITIES = ['3', '6', '12', '24', '60'];
+
+    /** Predefined activity slugs for Požiarna kniha entries. */
+    public const PK_ACTIVITIES = [
+        ['value' => 'visual_check',              'label' => 'Vizuálna kontrola priestorov spoločnosti'],
+        ['value' => 'php_check',                 'label' => 'Kontrola stavu, označenia a dostupnosti PHP'],
+        ['value' => 'hydranty_check',            'label' => 'Kontrola stavu, označenia a dostupnosti požiarnych hydrantov'],
+        ['value' => 'escape_routes_check',       'label' => 'Kontrola stavu, označenia a voľnosti únikových ciest'],
+        ['value' => 'pu_check',                  'label' => 'Kontrola akcieschopnosti požiarnych uzáverov'],
+        ['value' => 'training_initial',          'label' => 'Vykonané vstupné školenie z predpisov OPP'],
+        ['value' => 'training_repeated',         'label' => 'Vykonané opakované školenie vedúcich a ostatných zamestnancov'],
+        ['value' => 'electrical_equipment_check','label' => 'Kontrola stavu používaných elektrických zariadení'],
+        ['value' => 'technical_equipment_check', 'label' => 'Kontrola stavu používaných technických zariadení'],
+        ['value' => 'electrical_appliances_check','label'=> 'Kontrola stavu používaných elektrických spotrebičov'],
+        ['value' => 'documentation_check',       'label' => 'Kontrola aktuálnosti dokumentácie požiarnej ochrany'],
+        ['value' => 'employee_list_check',       'label' => 'Kontrola aktuálneho zoznamu zamestnancov a ich školení'],
+        ['value' => 'fire_drill',                'label' => 'Cvičný požiarny poplach'],
+    ];
+
     /**
-     * @return array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string}>}>
+     * @return array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}>
      */
     public static function inspections(): array
     {
+        $inspectionTypes = array_keys(self::INSPECTION_PERIODICITIES);
+
         $sheets = [
             'Kontroly' => [
                 'title' => 'Kontroly',
@@ -103,8 +134,18 @@ final class Schema
                     ['header' => '# riadok *',        'key' => 'row_no',           'hint' => '1'],
                     ['header' => 'IČO firmy *',       'key' => 'company_ico',      'hint' => '12345678'],
                     ['header' => 'Prevádzka *',       'key' => 'facility_name',    'hint' => 'Sklad Žilina'],
-                    ['header' => 'Typ kontroly *',    'key' => 'type',             'hint' => 'php'],
-                    ['header' => 'Periodicita (mes) *', 'key' => 'periodicity_months', 'hint' => '12'],
+                    [
+                        'header'  => 'Typ kontroly *',
+                        'key'     => 'type',
+                        'hint'    => 'php',
+                        'options' => $inspectionTypes,
+                    ],
+                    [
+                        'header'  => 'Periodicita (mes) *',
+                        'key'     => 'periodicity_months',
+                        'hint'    => '12',
+                        'options' => self::ALL_PERIODICITIES,
+                    ],
                     ['header' => 'Vykonané (YYYY-MM-DD) *', 'key' => 'executed_on', 'hint' => '2026-01-10'],
                     ['header' => 'E-mail technika',   'key' => 'inspector_email',  'hint' => 'technik@firma.sk'],
                     ['header' => 'Poznámka',          'key' => 'notes',            'hint' => ''],
@@ -119,7 +160,12 @@ final class Schema
                     ['header' => 'Výrobné číslo *', 'key' => 'serial',       'hint' => 'GLR-2024-001'],
                     ['header' => 'Rok výroby *',    'key' => 'year',         'hint' => '2024'],
                     ['header' => 'Umiestnenie *',   'key' => 'location',     'hint' => 'Hala A'],
-                    ['header' => 'Stav * (A/TS/O/V)', 'key' => 'status',     'hint' => 'A'],
+                    [
+                        'header'  => 'Stav *',
+                        'key'     => 'status',
+                        'hint'    => 'A',
+                        'options' => ['A', 'TS', 'O', 'V'],
+                    ],
                     ['header' => 'Poznámky',        'key' => 'notes',        'hint' => ''],
                 ],
             ],
@@ -127,7 +173,12 @@ final class Schema
                 'title' => 'Položky — Hydranty',
                 'columns' => [
                     ['header' => '# kontrola *',   'key' => 'row_no',     'hint' => '1'],
-                    ['header' => 'Typ * (DN25/DN33/DN52/C52/other)', 'key' => 'type', 'hint' => 'DN25'],
+                    [
+                        'header'  => 'Typ *',
+                        'key'     => 'type',
+                        'hint'    => 'DN25',
+                        'options' => ['DN25', 'DN33', 'DN52', 'C52', 'other'],
+                    ],
                     ['header' => 'Typ — iný',      'key' => 'type_other', 'hint' => ''],
                     ['header' => 'Umiestnenie *',  'key' => 'location',   'hint' => 'Hala A'],
                     ['header' => 'Počet hadíc *',  'key' => 'hose_count', 'hint' => '1'],
@@ -135,7 +186,12 @@ final class Schema
                     ['header' => 'Hd *',           'key' => 'hd',         'hint' => '0.2'],
                     ['header' => 'Q *',            'key' => 'q',          'hint' => '52'],
                     ['header' => 'Závady',         'key' => 'defects',    'hint' => ''],
-                    ['header' => 'Výsledok * (vyhovuje/nevyhovuje)', 'key' => 'result', 'hint' => 'vyhovuje'],
+                    [
+                        'header'  => 'Výsledok *',
+                        'key'     => 'result',
+                        'hint'    => 'vyhovuje',
+                        'options' => ['vyhovuje', 'nevyhovuje'],
+                    ],
                 ],
             ],
             'Polozky_oprava_ts_php' => [
@@ -147,7 +203,16 @@ final class Schema
                     ['header' => 'Výrobné číslo *', 'key' => 'serial',       'hint' => 'GLR-2020-001'],
                     ['header' => 'Rok výroby *',    'key' => 'year',         'hint' => '2020'],
                     ['header' => 'Umiestnenie *',   'key' => 'location',     'hint' => 'Hala A'],
-                    ['header' => 'Akcie * (čiarkou: tlakova_skuska,oprava,plnenie)', 'key' => 'actions', 'hint' => 'tlakova_skuska,plnenie'],
+                    [
+                        'header'        => 'Akcie * (oddeľ čiarkou)',
+                        'key'           => 'actions',
+                        'hint'          => 'tlakova_skuska,plnenie',
+                        'multi_options' => [
+                            ['value' => 'tlakova_skuska', 'label' => 'Tlaková skúška'],
+                            ['value' => 'oprava',         'label' => 'Oprava'],
+                            ['value' => 'plnenie',        'label' => 'Plnenie'],
+                        ],
+                    ],
                     ['header' => 'Poznámky',        'key' => 'notes',        'hint' => ''],
                 ],
             ],
@@ -156,9 +221,19 @@ final class Schema
                 'columns' => [
                     ['header' => '# kontrola *',  'key' => 'row_no',         'hint' => '1'],
                     ['header' => 'Pracoviská *',  'key' => 'workspaces',     'hint' => 'Hala A, sklad'],
-                    ['header' => 'Aktivity (čiarkou) *', 'key' => 'activities', 'hint' => 'visual_check,php_check'],
-                    ['header' => 'Vlastné aktivity (|)', 'key' => 'custom_activities', 'hint' => ''],
-                    ['header' => 'Výsledok * (bez_nedostatkov/zistene_nedostatky)', 'key' => 'result', 'hint' => 'bez_nedostatkov'],
+                    [
+                        'header'        => 'Aktivity (oddeľ čiarkou) *',
+                        'key'           => 'activities',
+                        'hint'          => 'visual_check,php_check',
+                        'multi_options' => self::PK_ACTIVITIES,
+                    ],
+                    ['header' => 'Vlastné aktivity (oddeľ |)', 'key' => 'custom_activities', 'hint' => ''],
+                    [
+                        'header'  => 'Výsledok *',
+                        'key'     => 'result',
+                        'hint'    => 'bez_nedostatkov',
+                        'options' => ['bez_nedostatkov', 'zistene_nedostatky'],
+                    ],
                     ['header' => 'Závada — popis', 'key' => 'defect_description', 'hint' => ''],
                     ['header' => 'Závada — termín (YYYY-MM-DD)', 'key' => 'defect_deadline', 'hint' => ''],
                     ['header' => 'Poznámky',      'key' => 'notes',          'hint' => ''],
@@ -168,11 +243,21 @@ final class Schema
                 'title' => 'Položky — PU akcieschopnosť',
                 'columns' => [
                     ['header' => '# kontrola *',  'key' => 'row_no',       'hint' => '1'],
-                    ['header' => 'Druh * (dvere/okno/klapka)', 'key' => 'kind', 'hint' => 'dvere'],
+                    [
+                        'header'  => 'Druh *',
+                        'key'     => 'kind',
+                        'hint'    => 'dvere',
+                        'options' => ['dvere', 'okno', 'klapka'],
+                    ],
                     ['header' => 'Označenie *',   'key' => 'identifier',   'hint' => 'PD-01'],
                     ['header' => 'Výrobca *',     'key' => 'manufacturer', 'hint' => 'Hörmann'],
                     ['header' => 'Umiestnenie *', 'key' => 'location',     'hint' => 'Chodba A1'],
-                    ['header' => 'Výsledok * (vyhovuje/nevyhovuje)', 'key' => 'result', 'hint' => 'vyhovuje'],
+                    [
+                        'header'  => 'Výsledok *',
+                        'key'     => 'result',
+                        'hint'    => 'vyhovuje',
+                        'options' => ['vyhovuje', 'nevyhovuje'],
+                    ],
                     ['header' => 'Poznámky',      'key' => 'notes',        'hint' => ''],
                 ],
             ],
@@ -180,12 +265,22 @@ final class Schema
                 'title' => 'Položky — PU údržba',
                 'columns' => [
                     ['header' => '# kontrola *',  'key' => 'row_no',         'hint' => '1'],
-                    ['header' => 'Druh * (dvere/okno/klapka)', 'key' => 'kind', 'hint' => 'dvere'],
+                    [
+                        'header'  => 'Druh *',
+                        'key'     => 'kind',
+                        'hint'    => 'dvere',
+                        'options' => ['dvere', 'okno', 'klapka'],
+                    ],
                     ['header' => 'Označenie *',   'key' => 'identifier',     'hint' => 'PD-01'],
                     ['header' => 'Výrobca *',     'key' => 'manufacturer',   'hint' => 'Hörmann'],
                     ['header' => 'Umiestnenie *', 'key' => 'location',       'hint' => 'Chodba A1'],
                     ['header' => 'Údržba *',      'key' => 'maintenance_work', 'hint' => 'Mazanie pántov, kontrola tesnení'],
-                    ['header' => 'Výsledok * (vyhovuje/nevyhovuje)', 'key' => 'result', 'hint' => 'vyhovuje'],
+                    [
+                        'header'  => 'Výsledok *',
+                        'key'     => 'result',
+                        'hint'    => 'vyhovuje',
+                        'options' => ['vyhovuje', 'nevyhovuje'],
+                    ],
                     ['header' => 'Poznámky',      'key' => 'notes',          'hint' => ''],
                 ],
             ],
@@ -199,7 +294,12 @@ final class Schema
                     ['header' => 'Výrobca *',     'key' => 'manufacturer',   'hint' => 'Philips'],
                     ['header' => 'Umiestnenie *', 'key' => 'location',       'hint' => 'Chodba A1'],
                     ['header' => 'Trvanie (min) *', 'key' => 'duration_min', 'hint' => '60'],
-                    ['header' => 'Výsledok * (vyhovuje/nevyhovuje)', 'key' => 'result', 'hint' => 'vyhovuje'],
+                    [
+                        'header'  => 'Výsledok *',
+                        'key'     => 'result',
+                        'hint'    => 'vyhovuje',
+                        'options' => ['vyhovuje', 'nevyhovuje'],
+                    ],
                     ['header' => 'Poznámky',      'key' => 'notes',          'hint' => ''],
                 ],
             ],
@@ -214,7 +314,12 @@ final class Schema
                     ['header' => 'Skúš. tlak (MPa) *', 'key' => 'test_pressure',    'hint' => '1.2'],
                     ['header' => 'Dĺžka (m) *',      'key' => 'length',           'hint' => '20'],
                     ['header' => 'Rok výroby *',     'key' => 'year_of_manufacture', 'hint' => '2020'],
-                    ['header' => 'Výsledok * (vyhovuje/nevyhovuje)', 'key' => 'result', 'hint' => 'vyhovuje'],
+                    [
+                        'header'  => 'Výsledok *',
+                        'key'     => 'result',
+                        'hint'    => 'vyhovuje',
+                        'options' => ['vyhovuje', 'nevyhovuje'],
+                    ],
                     ['header' => 'Poznámky',         'key' => 'notes',            'hint' => ''],
                 ],
             ],

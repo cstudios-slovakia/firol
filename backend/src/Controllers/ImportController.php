@@ -10,6 +10,8 @@ use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Import\Schema;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
@@ -49,7 +51,7 @@ final class ImportController
     }
 
     /**
-     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string}>}> $sheets
+     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}> $sheets
      */
     private static function sendTemplate(string $filename, array $sheets): void
     {
@@ -68,9 +70,9 @@ final class ImportController
             $ws->setTitle(substr($sheetCode, 0, 31));
 
             foreach ($sheet['columns'] as $colIdx => $col) {
-                $cell = $ws->getCellByColumnAndRow($colIdx + 1, 1);
-                $cell->setValue($col['header']);
-                $ws->getStyleByColumnAndRow($colIdx + 1, 1)->applyFromArray([
+                $col1 = $colIdx + 1;
+                $ws->getCell([$col1, 1])->setValue($col['header']);
+                $ws->getStyle([$col1, 1, $col1, 1])->applyFromArray([
                     'font' => ['bold' => true],
                     'fill' => [
                         'fillType'   => Fill::FILL_SOLID,
@@ -78,18 +80,76 @@ final class ImportController
                     ],
                     'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT],
                 ]);
-                $ws->getColumnDimensionByColumn($colIdx + 1)->setWidth(22);
+                $ws->getColumnDimensionByColumn($col1)->setWidth(22);
 
                 if (!empty($col['hint'])) {
-                    $hintCell = $ws->getCellByColumnAndRow($colIdx + 1, 2);
-                    $hintCell->setValueExplicit(
+                    $ws->getCell([$col1, 2])->setValueExplicit(
                         $col['hint'],
                         \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING,
                     );
-                    $ws->getStyleByColumnAndRow($colIdx + 1, 2)->applyFromArray([
+                    $ws->getStyle([$col1, 2, $col1, 2])->applyFromArray([
                         'font' => ['italic' => true, 'color' => ['rgb' => '94A3B8']],
                     ]);
                 }
+
+                // Apply Excel dropdown validation for single-value enum columns.
+                if (!empty($col['options'])) {
+                    $colLetter = Coordinate::stringFromColumnIndex($col1);
+                    $sqref     = "{$colLetter}2:{$colLetter}1001";
+                    $v = $ws->getCell("{$colLetter}2")->getDataValidation();
+                    $v->setType(DataValidation::TYPE_LIST);
+                    $v->setErrorStyle(DataValidation::STYLE_STOP);
+                    $v->setAllowBlank(true);
+                    $v->setShowDropDown(false); // false = show dropdown arrow
+                    $v->setShowErrorMessage(true);
+                    $v->setErrorTitle('Neplatná hodnota');
+                    $v->setError('Vyber hodnotu zo zoznamu.');
+                    $v->setFormula1('"' . implode(',', $col['options']) . '"');
+                    $v->setSqref($sqref);
+                }
+            }
+
+            // Legend block for multi-value columns (comma-separated slugs).
+            // Placed at row 102 so up to 100 data rows fit above it.
+            $colCount  = count($sheet['columns']);
+            $lastColLetter = Coordinate::stringFromColumnIndex($colCount);
+            $legendRow = 102;
+            $hasLegend = false;
+
+            foreach ($sheet['columns'] as $col) {
+                if (empty($col['multi_options'])) {
+                    continue;
+                }
+                if (!$hasLegend) {
+                    $ws->getCell("A{$legendRow}")->setValue('NÁPOVEDA — povolené hodnoty (oddeľte čiarkou)');
+                    $ws->mergeCells("A{$legendRow}:{$lastColLetter}{$legendRow}");
+                    $ws->getStyle("A{$legendRow}")->applyFromArray([
+                        'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+                        'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '475569']],
+                        'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT],
+                    ]);
+                    $legendRow++;
+                    $hasLegend = true;
+                }
+
+                $ws->getCell("A{$legendRow}")->setValue($col['header']);
+                $ws->mergeCells("A{$legendRow}:{$lastColLetter}{$legendRow}");
+                $ws->getStyle("A{$legendRow}")->applyFromArray([
+                    'font' => ['bold' => true],
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2E8F0']],
+                    'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT],
+                ]);
+                $legendRow++;
+
+                foreach ($col['multi_options'] as $opt) {
+                    $ws->getCell("A{$legendRow}")->setValue($opt['value']);
+                    $ws->getCell("B{$legendRow}")->setValue($opt['label']);
+                    $ws->getStyle("A{$legendRow}")->applyFromArray([
+                        'font' => ['bold' => true, 'color' => ['rgb' => '1E40AF']],
+                    ]);
+                    $legendRow++;
+                }
+                $legendRow++; // blank separator between groups
             }
 
             $ws->freezePane('A2');
