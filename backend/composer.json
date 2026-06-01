@@ -8,6 +8,7 @@
         "ext-json": "*",
         "ext-pdo": "*",
         "ext-pdo_mysql": "*",
+        "ext-zip": "*",
         "mpdf/mpdf": "^8.3",
         "phpmailer/phpmailer": "^6.9",
         "phpoffice/phpspreadsheet": "^3.5",

@@ -7,18 +7,23 @@ FROM php:8.4-fpm
 # Extensions needed across phases:
 #   pdo_mysql + opcache — core
 #   gd + mbstring        — required by mPDF (Phase 3a-3 PDF generation)
+#   zip                  — required by PhpSpreadsheet (Excel import/export);
+#                          .xlsx is a ZIP archive, needs the ZipArchive class
 # Installing one at a time avoids a known alpine-image quirk where
 # parallel install-modules can't find the .so output.
 # gd needs jpeg/png/freetype headers + zlib at build time.
+# zip needs libzip headers at build time.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git unzip \
         libjpeg-dev libpng-dev libfreetype6-dev zlib1g-dev libonig-dev \
+        libzip-dev \
     && docker-php-ext-configure gd --with-jpeg --with-freetype \
     && docker-php-ext-install pdo_mysql \
     && docker-php-ext-install opcache \
     && docker-php-ext-install mbstring \
     && docker-php-ext-install gd \
+    && docker-php-ext-install zip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
