@@ -1,7 +1,7 @@
 import {
   useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
 } from 'react';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, Search } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useDelayedMount } from '@/lib/useDelayedMount';
 
@@ -34,7 +34,13 @@ type SelectProps = {
    * before opening a follow-up modal.
    */
   headerSlot?: (ctx: { closeDropdown: () => void }) => React.ReactNode;
+  /** Adds a search/filter input inside the dropdown. Ignores diacritics. */
+  searchable?: boolean;
 };
+
+function stripDiacritics(s: string) {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
 
 /**
  * Fully custom dropdown — no native <select> involved. Renders a styled
@@ -60,6 +66,7 @@ export function Select({
   className,
   emptyLabel,
   headerSlot,
+  searchable,
   'aria-invalid': ariaInvalid,
 }: SelectProps) {
   const triggerId = useId();
@@ -69,10 +76,13 @@ export function Select({
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
 
   const [open, setOpen] = useState(false);
   const { mounted, entered } = useDelayedMount(open, 160);
   const [activeIndex, setActiveIndex] = useState<number>(-1);
+  const [searchQuery, setSearchQuery] = useState('');
+
   // Type-ahead buffer: a few characters typed in quick succession jump
   // to the first option whose label starts with that prefix.
   const typeaheadRef = useRef<{ buffer: string; timer: number | null }>({
@@ -86,26 +96,55 @@ export function Select({
   );
   const selectedOption = selectedIndex >= 0 ? options[selectedIndex] : null;
 
-  // When opening, focus the currently selected option (or the first
-  // enabled one if there's no selection). When closing, drop the focus.
+  // When searchable, options are filtered by the query (diacritics-insensitive).
+  // Each entry keeps its originalIndex so keys stay stable.
+  const filteredOptions = useMemo(() => {
+    const mapped = options.map((o, i) => ({ option: o, originalIndex: i }));
+    if (!searchable || !searchQuery.trim()) return mapped;
+    const norm = stripDiacritics(searchQuery.trim());
+    return mapped.filter(
+      ({ option }) =>
+        stripDiacritics(option.label).includes(norm) ||
+        (option.description && stripDiacritics(option.description).includes(norm)),
+    );
+  }, [options, searchable, searchQuery]);
+
+  // When opening, focus the currently selected option (or the first enabled one).
+  // When closing, reset search and active index.
   useLayoutEffect(() => {
     if (!open) {
       setActiveIndex(-1);
+      setSearchQuery('');
       return;
     }
-    const start = selectedIndex >= 0
-      ? selectedIndex
-      : options.findIndex((o) => !o.disabled);
+    // filteredOptions == full list here (searchQuery was just reset to '')
+    const filteredSelectedIdx = filteredOptions.findIndex(({ option }) => option.value === value);
+    const start =
+      filteredSelectedIdx >= 0
+        ? filteredSelectedIdx
+        : filteredOptions.findIndex(({ option }) => !option.disabled);
     setActiveIndex(start);
-  }, [open, options, selectedIndex]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
-  // Focus the listbox once it has actually entered so keyboard nav
-  // works immediately. Single-shot: don't re-focus on every render.
+  // When the search query changes, reset active index to the first result.
+  useEffect(() => {
+    if (!open) return;
+    const first = filteredOptions.findIndex(({ option }) => !option.disabled);
+    setActiveIndex(first);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery]);
+
+  // Focus the search input (if searchable) or the listbox once it has entered.
   useEffect(() => {
     if (entered) {
-      listRef.current?.focus();
+      if (searchable) {
+        searchRef.current?.focus();
+      } else {
+        listRef.current?.focus();
+      }
     }
-  }, [entered]);
+  }, [entered, searchable]);
 
   // Click-outside / focus-outside closes the panel.
   useEffect(() => {
@@ -130,21 +169,21 @@ export function Select({
   }, [open, activeIndex]);
 
   function moveActive(delta: number) {
-    if (options.length === 0) return;
-    let next = activeIndex;
-    for (let step = 0; step < options.length; step++) {
-      next = (next + delta + options.length) % options.length;
-      if (!options[next].disabled) {
+    if (filteredOptions.length === 0) return;
+    let next = activeIndex < 0 ? (delta > 0 ? -1 : filteredOptions.length) : activeIndex;
+    for (let step = 0; step < filteredOptions.length; step++) {
+      next = (next + delta + filteredOptions.length) % filteredOptions.length;
+      if (!filteredOptions[next].option.disabled) {
         setActiveIndex(next);
         return;
       }
     }
   }
 
-  function commit(idx: number) {
-    const opt = options[idx];
-    if (!opt || opt.disabled) return;
-    onChange(opt.value);
+  function commit(filteredIdx: number) {
+    const item = filteredOptions[filteredIdx];
+    if (!item || item.option.disabled) return;
+    onChange(item.option.value);
     setOpen(false);
     triggerRef.current?.focus();
   }
@@ -160,7 +199,9 @@ export function Select({
       ta.timer = null;
     }, 600);
 
-    const found = options.findIndex((o) => !o.disabled && o.label.toLowerCase().startsWith(ta.buffer));
+    const found = filteredOptions.findIndex(
+      ({ option }) => !option.disabled && option.label.toLowerCase().startsWith(ta.buffer),
+    );
     if (found >= 0) {
       setActiveIndex(found);
     }
@@ -189,12 +230,12 @@ export function Select({
       moveActive(-1);
     } else if (e.key === 'Home') {
       e.preventDefault();
-      const first = options.findIndex((o) => !o.disabled);
+      const first = filteredOptions.findIndex(({ option }) => !option.disabled);
       if (first >= 0) setActiveIndex(first);
     } else if (e.key === 'End') {
       e.preventDefault();
-      for (let i = options.length - 1; i >= 0; i--) {
-        if (!options[i].disabled) {
+      for (let i = filteredOptions.length - 1; i >= 0; i--) {
+        if (!filteredOptions[i].option.disabled) {
           setActiveIndex(i);
           break;
         }
@@ -209,6 +250,23 @@ export function Select({
       triggerRef.current?.focus();
     } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
       handleTypeahead(e.key);
+    }
+  }
+
+  function onSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveActive(1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveActive(-1);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0) commit(activeIndex);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
     }
   }
 
@@ -273,24 +331,39 @@ export function Select({
             entered ? 'scale-100 opacity-100' : 'scale-95 opacity-0',
           )}
         >
-          {headerSlot && (
-            // Sticky so it stays visible while the user scrolls long lists.
+          {(headerSlot || searchable) && (
             <li
               role="presentation"
-              className="sticky top-0 z-10 -mt-1 mb-1 border-b border-ink-100 bg-white px-1 pb-1 pt-1"
+              className="sticky top-0 z-10 -mt-1 mb-1 border-b border-ink-100 bg-white px-1 pb-1.5 pt-1"
             >
-              {headerSlot({ closeDropdown: () => setOpen(false) })}
+              {headerSlot && headerSlot({ closeDropdown: () => setOpen(false) })}
+              {searchable && (
+                <div className={cn('relative', headerSlot && 'mt-1')}>
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-400" />
+                  <input
+                    ref={searchRef}
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={onSearchKeyDown}
+                    placeholder="Hľadať..."
+                    className="h-8 w-full rounded-lg border border-ink-200 bg-ink-50 pl-7 pr-2 text-sm text-ink-800 placeholder:text-ink-400 focus:border-firol-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-firol-200"
+                  />
+                </div>
+              )}
             </li>
           )}
-          {options.length === 0 && (
-            <li className="px-3 py-2 text-sm text-ink-400">— žiadne možnosti —</li>
+          {filteredOptions.length === 0 && (
+            <li className="px-3 py-2 text-sm text-ink-400">
+              {searchQuery.trim() ? '— žiadne výsledky —' : '— žiadne možnosti —'}
+            </li>
           )}
-          {options.map((opt, idx) => {
+          {filteredOptions.map(({ option: opt, originalIndex }, idx) => {
             const isSelected = opt.value === value;
             const isActive = idx === activeIndex;
             return (
               <li
-                key={`${opt.value}-${idx}`}
+                key={`${opt.value}-${originalIndex}`}
                 id={`${listboxId}-opt-${idx}`}
                 data-index={idx}
                 role="option"

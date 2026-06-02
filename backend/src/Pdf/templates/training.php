@@ -158,8 +158,8 @@ if (!empty($trainer['certification_number'])) {
           </td>
           <td>
             <div class="hdr-company"><?= $h($company['name']) ?></div>
-            <div class="hdr-sub">IČO: <?= $h($company['ico']) ?> | Sídlo: <?= $h($company['address']) ?></div>
-            <div class="hdr-sub">Prevádzka: <?= $h($facility['name']) ?><?= !empty($facility['address']) ? ' | ' . $h($facility['address']) : '' ?></div>
+            <div class="hdr-sub">Prevádzka: <?= $h($facility['name']) ?> | IČO: <?= $h($company['ico']) ?></div>
+            <?php if (!empty($facility['address'])): ?><div class="hdr-sub"><?= $h($facility['address']) ?></div><?php endif ?>
           </td>
         </tr>
       </table>

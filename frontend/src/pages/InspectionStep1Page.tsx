@@ -257,6 +257,7 @@ export function InspectionStep1Page() {
                 onChange={(v) => { setCompanyId(v ? Number(v) : null); if (fieldErrors.company) setFieldErrors((prev) => ({ ...prev, company: undefined })); }}
                 placeholder="— vyber firmu —"
                 leftIcon={<Building2 className="size-4" />}
+                searchable
                 options={(companies ?? []).map((c) => ({
                   value: String(c.id),
                   label: c.name,
@@ -297,6 +298,7 @@ export function InspectionStep1Page() {
                       : '— vyber prevádzku —'
                 }
                 leftIcon={<Warehouse className="size-4" />}
+                searchable
                 options={facilities.map((f) => ({
                   value: String(f.id),
                   label: f.name,

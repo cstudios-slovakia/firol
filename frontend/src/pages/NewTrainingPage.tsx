@@ -214,6 +214,7 @@ export function NewTrainingPage() {
                 onChange={(v) => { setCompanyId(v ? Number(v) : null); if (fieldErrors.company) setFieldErrors((prev) => ({ ...prev, company: undefined })); }}
                 placeholder="— vyber firmu —"
                 leftIcon={<Building2 className="size-4" />}
+                searchable
                 options={companies.map((c) => ({
                   value: String(c.id),
                   label: c.name,
@@ -246,6 +247,7 @@ export function NewTrainingPage() {
                 onChange={(v) => setFacilityId(v ? Number(v) : null)}
                 disabled={companyId === null}
                 placeholder="— bez konkrétnej prevádzky —"
+                searchable
                 options={[
                   { value: '', label: '— bez konkrétnej prevádzky —' },
                   ...facilities.map((f) => ({ value: String(f.id), label: f.name })),
