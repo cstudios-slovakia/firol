@@ -225,7 +225,7 @@ export function TrainingDetailPage() {
             </DetailRow>
           )}
           <DetailRow icon={<CalendarDays className="size-4" />} label="Dátum školenia">
-            {t.date ?? '—'}
+            {t.date ? new Date(t.date + 'T00:00:00').toLocaleDateString('sk-SK') : '—'}
           </DetailRow>
           {t.duration_min !== null && (
             <DetailRow icon={<Clock className="size-4" />} label="Dĺžka">

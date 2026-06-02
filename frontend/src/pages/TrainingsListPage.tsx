@@ -319,7 +319,9 @@ function TrainingRow({
                     </p>
                     <p className="mt-0.5 text-[11px] text-ink-400">
                         <CalendarDays className="-mt-0.5 mr-1 inline size-3" />
-                        {it.date ?? "—"}
+                        {it.date
+                            ? new Date(it.date + "T00:00:00").toLocaleDateString("sk-SK")
+                            : "—"}
                         {it.trainer_name && (
                             <>
                                 <span className="mx-1.5 text-ink-300">·</span>
