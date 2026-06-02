@@ -15,13 +15,13 @@ import {
     Phone,
     Search,
     Settings as SettingsIcon,
-    Shield,
     ShieldCheck,
     ShieldOff,
     Trash2,
     User,
     Users,
 } from "lucide-react";
+import { SectionBack } from "@/pages/SettingsPage";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import {
@@ -54,18 +54,7 @@ import { CardBlockSkeleton } from "@/components/ui/Skeleton";
 export function AdminPage() {
     return (
         <div className="flex flex-col gap-5">
-            <header>
-                <div className="flex items-center gap-2">
-                    <Shield className="size-5 text-firol-600" />
-                    <h1 className="text-xl font-semibold tracking-tight text-ink-900">
-                        Administrácia
-                    </h1>
-                </div>
-                <p className="mt-0.5 text-sm text-ink-500">
-                    Globálna správa všetkých účtov a používateľov. Viditeľné iba
-                    pre adminov aplikácie.
-                </p>
-            </header>
+            <SectionBack label="Admin" />
 
             <AccountsSection />
             <FeedbackSection />
@@ -222,7 +211,7 @@ function FeedbackRow({
                             </>
                         )}
                         <span className="text-ink-300">·</span>
-                        <span>{item.created_at}</span>
+                        <span>{new Date(item.created_at.replace(' ', 'T')).toLocaleString("sk-SK")}</span>
                     </p>
                     <p className="mt-2 whitespace-pre-wrap break-words text-sm text-ink-900">
                         {item.message}
@@ -631,7 +620,7 @@ function AccountRow({
                         {account.subscription_end_date && (
                             <>
                                 <span className="text-ink-300">·</span>
-                                <span>do {account.subscription_end_date}</span>
+                                <span>do {new Date(account.subscription_end_date + "T00:00:00").toLocaleDateString("sk-SK")}</span>
                             </>
                         )}
                         {account.stripe_status &&

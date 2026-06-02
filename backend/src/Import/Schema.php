@@ -100,9 +100,9 @@ final class Schema
         'vstupne',
         'opakovane',
         'opp_mimo',
-        'zdrzujuce_sa',
-        'priprava_oph',
-        'priprava_opah',
+        'zdrzujuca_sa',
+        'hliadka_oph',
+        'hliadka_opah',
     ];
 
     /** All valid periodicities across all inspection types (for the dropdown). */

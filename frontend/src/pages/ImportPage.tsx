@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, Building2, CheckCircle2, ChevronLeft, ClipboardList,
+  AlertTriangle, Building2, CheckCircle2, ClipboardList,
   Download, FileSpreadsheet, GraduationCap, UploadCloud,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
@@ -12,6 +11,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
+import { SectionBack } from '@/pages/SettingsPage';
 
 type SectionDef = {
   kind: ImportKind;
@@ -63,22 +63,7 @@ const SECTIONS: SectionDef[] = [
 export function ImportPage() {
   return (
     <div className="flex flex-col gap-5">
-      <header>
-        <Link
-          to="/settings"
-          className="inline-flex items-center gap-1.5 rounded-xl py-1 text-sm font-medium text-ink-500 transition-colors hover:text-ink-800 sm:hidden"
-        >
-          <ChevronLeft className="size-4" />
-          Nastavenia
-        </Link>
-        <h1 className="text-xl font-semibold tracking-tight text-ink-900">
-          Import z Excelu
-        </h1>
-        <p className="mt-0.5 text-sm text-ink-500">
-          Stiahni si vzorovú šablónu, vyplň ju a nahraj späť. Údaje sa
-          importujú do tvojho účtu.
-        </p>
-      </header>
+      <SectionBack label="Import z Excelu" />
 
       <Card className="px-4 py-3 text-xs text-ink-600">
         <p className="flex items-start gap-2">

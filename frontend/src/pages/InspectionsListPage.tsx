@@ -468,7 +468,9 @@ function InspectionRow({
                     </p>
                     <p className="mt-0.5 text-[11px] text-ink-400">
                         <CalendarDays className="-mt-0.5 mr-1 inline size-3" />
-                        {it.executed_on ?? "—"}
+                        {it.executed_on
+                            ? new Date(it.executed_on + "T00:00:00").toLocaleDateString("sk-SK")
+                            : "—"}
                         <span className="mx-1.5 text-ink-300">·</span>
                         {it.periodicity_months} mes.
                         <span className="mx-1.5 text-ink-300">·</span>

@@ -115,7 +115,7 @@ const MENU_ITEMS = [
 ] as const;
 
 const ADMIN_MENU_ITEM = {
-    to: "/admin",
+    to: "/settings/admin",
     label: "Admin",
     description: "Správa účtov a systémové nastavenia",
     icon: Shield,
@@ -177,7 +177,7 @@ export function SettingsLayout() {
                     ))}
                     {isAdmin && (
                         <NavLink
-                            to="/admin"
+                            to="/settings/admin"
                             className={({ isActive }) =>
                                 cn(
                                     "flex shrink-0 items-center gap-2 px-3.5 py-2.5 text-sm font-medium rounded-t-xl border-b-2 -mb-px transition-all duration-150",
@@ -201,10 +201,6 @@ export function SettingsLayout() {
                         </NavLink>
                     )}
                 </nav>
-                <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-white to-transparent"
-                />
             </div>
 
             <div key={location.pathname} className="animate-fade-up">
@@ -307,7 +303,7 @@ export function SettingsIndexPage() {
 
 // ─── Section back link (mobile only) ─────────────────────────────────────────
 
-function SectionBack({ label }: { label: string }) {
+export function SectionBack({ label }: { label: string }) {
     return (
         <div className="sm:hidden">
             <Link

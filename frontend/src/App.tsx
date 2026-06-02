@@ -102,16 +102,9 @@ export default function App() {
           <Route path="branding" element={<BrandingPage />} />
           <Route path="technici" element={<TeamPage />} />
           <Route path="import" element={<ImportPage />} />
+          <Route path="admin" element={<RequireAdmin><AdminPage /></RequireAdmin>} />
         </Route>
         <Route path="/billing" element={<BillingPage />} />
-        <Route
-          path="/admin"
-          element={
-            <RequireAdmin>
-              <AdminPage />
-            </RequireAdmin>
-          }
-        />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
