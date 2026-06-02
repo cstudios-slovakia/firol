@@ -158,8 +158,8 @@ if (!empty($trainer['certification_number'])) {
           </td>
           <td>
             <div class="hdr-company"><?= $h($company['name']) ?></div>
-            <div class="hdr-sub">Prevádzka: <?= $h($facility['name']) ?> | IČO: <?= $h($company['ico']) ?></div>
-            <div class="hdr-sub"><?= $h($company['address']) ?></div>
+            <div class="hdr-sub">IČO: <?= $h($company['ico']) ?> | Sídlo: <?= $h($company['address']) ?></div>
+            <div class="hdr-sub">Prevádzka: <?= $h($facility['name']) ?><?= !empty($facility['address']) ? ' | ' . $h($facility['address']) : '' ?></div>
           </td>
         </tr>
       </table>
@@ -189,7 +189,7 @@ if (!empty($trainer['certification_number'])) {
   </tr>
   <tr>
     <td class="bl">Prevádzka</td>
-    <td class="bv"><?= $h($facility['name']) ?></td>
+    <td class="bv"><?= $h($facility['name']) ?><?= !empty($facility['address']) ? '<br><span style="font-weight:normal;color:#555;">' . $h($facility['address']) . '</span>' : '' ?></td>
     <td class="bl">Časový rozsah</td>
     <td class="bv"><?= $totalMin ?> minút</td>
   </tr>
@@ -273,7 +273,7 @@ if (!empty($trainer['certification_number'])) {
       <td><?= $idx + 1 ?></td>
       <td><?= $h($tr['fullname']) ?></td>
       <td><?= $h($tr['position'] ?? null) ?></td>
-      <td><?= $formatDate(substr((string) ($tr['signed_at'] ?? ''), 0, 10)) ?></td>
+      <td><?= $formatDate($training['date'] ?? null) ?></td>
       <td class="sig-cell">
         <?php if (!empty($tr['signature_data_uri'])): ?>
           <img class="sig-img" src="<?= $h($tr['signature_data_uri']) ?>" alt="">
