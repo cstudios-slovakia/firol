@@ -18,6 +18,7 @@ use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PDO;
 use Throwable;
 
 /**
@@ -132,7 +133,17 @@ final class ImportController
                     $dv->setShowInputMessage(true);
                     $dv->setShowErrorMessage(true);
                     $dv->setPromptTitle('Vyber zo zoznamu');
-                    $dv->setPrompt('Povolené hodnoty: ' . implode(', ', $col['options']));
+                    if (!empty($col['options_help'])) {
+                        // Annotate each value with the types it applies to.
+                        $parts = [];
+                        foreach ($col['options'] as $opt) {
+                            $note = $col['options_help'][$opt] ?? '';
+                            $parts[] = $note !== '' ? "$opt ($note)" : $opt;
+                        }
+                        $dv->setPrompt('Povolené hodnoty: ' . implode(', ', $parts));
+                    } else {
+                        $dv->setPrompt('Povolené hodnoty: ' . implode(', ', $col['options']));
+                    }
                     $dv->setErrorTitle('Neplatná hodnota');
                     $dv->setError('Vyber jednu z hodnôt zo zoznamu (šípka vpravo v bunke).');
                     $dv->setFormula1('"' . implode(',', $col['options']) . '"');
@@ -238,9 +249,21 @@ final class ImportController
                 $name     = trim(preg_replace('/\s*\*\s*$/u', '', $col['header']) ?? $col['header']);
 
                 if (!empty($col['options'])) {
-                    $type    = 'Výber zo zoznamu';
-                    $allowed = implode(', ', $col['options']);
-                    $lines   = 1;
+                    $type = 'Výber zo zoznamu';
+                    if (!empty($col['options_help'])) {
+                        // One annotated value per line so the type mapping
+                        // for each periodicity is easy to scan.
+                        $parts = [];
+                        foreach ($col['options'] as $opt) {
+                            $note    = $col['options_help'][$opt] ?? '';
+                            $parts[] = $note !== '' ? "$opt  —  $note" : $opt;
+                        }
+                        $allowed = implode("\n", $parts);
+                        $lines   = count($parts);
+                    } else {
+                        $allowed = implode(', ', $col['options']);
+                        $lines   = 1;
+                    }
                 } elseif (!empty($col['multi_options'])) {
                     $type  = 'Viac hodnôt (oddeľ čiarkou)';
                     $parts = [];
@@ -392,6 +415,7 @@ final class ImportController
         $errors = [];
         $createdTrainings = 0;
         $createdTrainees = 0;
+        $createdTrainers = 0;
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
@@ -450,11 +474,17 @@ final class ImportController
                 $trainerId = null;
                 $trainerEmail = self::str($row, 'trainer_email');
                 if ($trainerEmail !== null) {
-                    $trainerId = $userIdByEmail[mb_strtolower($trainerEmail)] ?? null;
-                    if ($trainerId === null) {
-                        $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => "Lektor s e-mailom $trainerEmail nie je člen tímu."];
-                        continue;
-                    }
+                    // Same as inspectors: an unknown trainer email no longer
+                    // fails the import — pre-create a pending placeholder user
+                    // attached to the importing account; they claim it when
+                    // they register.
+                    $trainerId = self::resolveOrCreateMember(
+                        $pdo,
+                        $accountId,
+                        $trainerEmail,
+                        $userIdByEmail,
+                        $createdTrainers,
+                    );
                 }
 
                 $insertTraining->execute([
@@ -508,6 +538,7 @@ final class ImportController
             'created' => [
                 'trainings' => $createdTrainings,
                 'trainees'  => $createdTrainees,
+                'trainers'  => $createdTrainers,
             ],
             'errors' => [],
         ]);
@@ -524,6 +555,7 @@ final class ImportController
         $errors = [];
         $createdInspections = 0;
         $createdItems = 0;
+        $createdTechnicians = 0;
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
@@ -534,6 +566,13 @@ final class ImportController
 
             /** @var array<int, array{id:int,type:string}> $inspectionByRowNo */
             $inspectionByRowNo = [];
+
+            // # riadok values that appear on the Kontroly sheet but failed
+            // validation (so they never made it into $inspectionByRowNo). Lets
+            // the item loop tell "parent is broken — fix it on Kontroly" apart
+            // from "parent number was never entered at all".
+            /** @var array<int, true> $invalidInspectionRowNos */
+            $invalidInspectionRowNos = [];
 
             $insertInspection = $pdo->prepare(
                 'INSERT INTO inspections
@@ -557,40 +596,52 @@ final class ImportController
                 }
                 if ($ico === null || $facilityName === null || $type === null) {
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Chýba IČO firmy / prevádzka / typ.'];
+                    $invalidInspectionRowNos[$rowNo] = true;
                     continue;
                 }
                 $allowed = Schema::INSPECTION_PERIODICITIES[$type] ?? null;
                 if ($allowed === null) {
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Neznámy typ kontroly: $type."];
+                    $invalidInspectionRowNos[$rowNo] = true;
                     continue;
                 }
                 if ($periodicity === null || !in_array($periodicity, $allowed, true)) {
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Neplatná periodicita pre typ $type (povolené: " . implode(',', $allowed) . ')'];
+                    $invalidInspectionRowNos[$rowNo] = true;
                     continue;
                 }
                 if ($executedOn === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $executedOn)) {
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Neplatný dátum (YYYY-MM-DD).'];
+                    $invalidInspectionRowNos[$rowNo] = true;
                     continue;
                 }
                 $companyId = $companyIdByIco[$ico] ?? null;
                 if ($companyId === null) {
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Firma s IČO $ico neexistuje."];
+                    $invalidInspectionRowNos[$rowNo] = true;
                     continue;
                 }
                 $facilityId = $facilityIdByKey[$companyId . '|' . mb_strtolower($facilityName)] ?? null;
                 if ($facilityId === null) {
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Prevádzka „$facilityName” neexistuje pre firmu IČO $ico."];
+                    $invalidInspectionRowNos[$rowNo] = true;
                     continue;
                 }
 
                 $inspectorId = $currentUserId;
                 $inspectorEmail = self::str($row, 'inspector_email');
                 if ($inspectorEmail !== null) {
-                    $inspectorId = $userIdByEmail[mb_strtolower($inspectorEmail)] ?? null;
-                    if ($inspectorId === null) {
-                        $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Technik s e-mailom $inspectorEmail nie je člen tímu."];
-                        continue;
-                    }
+                    // Unknown technician emails no longer fail the import. We
+                    // pre-create a pending placeholder user and attach it to
+                    // the importing account so the inspection is attributed
+                    // straight away; the person claims it when they register.
+                    $inspectorId = self::resolveOrCreateMember(
+                        $pdo,
+                        $accountId,
+                        $inspectorEmail,
+                        $userIdByEmail,
+                        $createdTechnicians,
+                    );
                 }
 
                 $insertInspection->execute([
@@ -632,7 +683,15 @@ final class ImportController
                     }
                     $parent = $inspectionByRowNo[$parentRowNo] ?? null;
                     if ($parent === null) {
-                        $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => "Kontrola # $parentRowNo neexistuje v sheete Kontroly."];
+                        // A parent that exists on the Kontroly sheet but failed
+                        // its own validation is a more useful thing to surface
+                        // than a bare "doesn't exist" — otherwise the user
+                        // chases a phantom missing row instead of the real
+                        // error one sheet over.
+                        $message = isset($invalidInspectionRowNos[$parentRowNo])
+                            ? "Kontrola # $parentRowNo je chybná — oprav ju na hárku Kontroly."
+                            : "Kontrola # $parentRowNo neexistuje v sheete Kontroly.";
+                        $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => $message];
                         continue;
                     }
                     if ($parent['type'] !== $expectedType) {
@@ -670,12 +729,76 @@ final class ImportController
             'created' => [
                 'inspections' => $createdInspections,
                 'items'       => $createdItems,
+                'technicians' => $createdTechnicians,
             ],
             'errors' => [],
         ]);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
+
+    /**
+     * Resolves the user an imported record is attributed to by email — an
+     * inspection's inspector or a training's trainer.
+     *
+     * Active members are served from the pre-loaded $userIdByEmail map. For
+     * any other email we ensure a Firol user exists — reusing a row if the
+     * email already belongs to someone (e.g. a member of another account),
+     * otherwise creating a "pending" placeholder (empty password, cannot log
+     * in) — and attach that user to the importing account as an *inactive*
+     * technician so it stays off the seat count until claimed. When the
+     * person registers under the same email, {@see AuthController::register}
+     * sets their password, flips is_pending off and activates the membership;
+     * the imported records are already attributed to them.
+     *
+     * Mutates $userIdByEmail (so repeated rows resolve to one user) and
+     * increments $createdCount for each newly created placeholder.
+     *
+     * @param array<string,int> $userIdByEmail
+     */
+    private static function resolveOrCreateMember(
+        PDO $pdo,
+        int $accountId,
+        string $email,
+        array &$userIdByEmail,
+        int &$createdCount,
+    ): int {
+        $key = mb_strtolower($email);
+        if (isset($userIdByEmail[$key])) {
+            return $userIdByEmail[$key];
+        }
+
+        $stmt = $pdo->prepare('SELECT id FROM users WHERE email = ?');
+        $stmt->execute([$key]);
+        $existingId = $stmt->fetchColumn();
+
+        if ($existingId !== false) {
+            $userId = (int) $existingId;
+        } else {
+            $pdo->prepare(
+                'INSERT INTO users (fullname, email, password_hash, is_pending)
+                 VALUES (?, ?, "", 1)'
+            )->execute([$email, $key]);
+            $userId = (int) $pdo->lastInsertId();
+            $createdCount++;
+        }
+
+        // Link to the importing account if not already a member. Inactive so
+        // it doesn't consume a paid seat before the person registers.
+        $link = $pdo->prepare(
+            'SELECT 1 FROM account_users WHERE account_id = ? AND user_id = ?'
+        );
+        $link->execute([$accountId, $userId]);
+        if ($link->fetchColumn() === false) {
+            $pdo->prepare(
+                'INSERT INTO account_users (account_id, user_id, role, is_active)
+                 VALUES (?, ?, "technician", 0)'
+            )->execute([$accountId, $userId]);
+        }
+
+        $userIdByEmail[$key] = $userId;
+        return $userId;
+    }
 
     /**
      * Reads the uploaded xlsx, maps each known sheet to a list of rows

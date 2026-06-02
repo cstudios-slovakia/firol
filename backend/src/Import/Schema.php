@@ -14,6 +14,9 @@ namespace Firol\Import;
  *   key     — field name the controller reads with array access
  *   hint    — example value rendered in the first data row
  *   options — for single-value enum fields: generates an Excel dropdown
+ *   options_help — optional value→note map rendered alongside each
+ *                  dropdown option in the Pokyny reference (the raw
+ *                  `options` stay clean so validation still matches)
  *   multi_options — for multi-value fields (comma-separated): generates
  *                   a legend block below the data area; each entry is
  *                   ['value' => slug, 'label' => Slovak description]
@@ -105,6 +108,29 @@ final class Schema
     /** All valid periodicities across all inspection types (for the dropdown). */
     private const ALL_PERIODICITIES = ['3', '6', '12', '24', '60'];
 
+    /**
+     * Reverse of {@see INSPECTION_PERIODICITIES}: for each periodicity value
+     * the list of inspection types that accept it, as a comma-separated note
+     * keyed by the (string) periodicity. Used to annotate the periodicity
+     * dropdown in the import template.
+     *
+     * @return array<string,string>
+     */
+    public static function periodicityHelp(): array
+    {
+        $typesByPeriod = [];
+        foreach (self::INSPECTION_PERIODICITIES as $type => $periods) {
+            foreach ($periods as $p) {
+                $typesByPeriod[(string) $p][] = $type;
+            }
+        }
+        $out = [];
+        foreach (self::ALL_PERIODICITIES as $p) {
+            $out[$p] = implode(', ', $typesByPeriod[$p] ?? []);
+        }
+        return $out;
+    }
+
     /** Predefined activity slugs for Požiarna kniha entries. */
     public const PK_ACTIVITIES = [
         ['value' => 'visual_check', 'label' => 'Vizuálna kontrola priestorov spoločnosti'],
@@ -147,6 +173,10 @@ final class Schema
                         'key' => 'periodicity_months',
                         'hint' => '12',
                         'options' => self::ALL_PERIODICITIES,
+                        // Each periodicity is only valid for some inspection
+                        // types — annotate the option list so the user knows
+                        // which type to pair it with.
+                        'options_help' => self::periodicityHelp(),
                     ],
                     ['header' => 'Vykonané (YYYY-MM-DD) *', 'key' => 'executed_on', 'hint' => '2026-01-10'],
                     ['header' => 'E-mail technika', 'key' => 'inspector_email', 'hint' => 'technik@firma.sk'],

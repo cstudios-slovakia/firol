@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useDelayedMount } from '@/lib/useDelayedMount';
@@ -54,7 +55,7 @@ export function Dialog({
 
   if (!mounted) return null;
 
-  return (
+  return createPortal(
     <div
       className={cn(
         'fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4',
@@ -101,6 +102,7 @@ export function Dialog({
         </header>
         <div className="px-5 py-4">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

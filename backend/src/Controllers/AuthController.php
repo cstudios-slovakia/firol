@@ -39,11 +39,19 @@ final class AuthController
 
         $pdo = Db::pdo();
 
-        // Email must be unique across the whole system.
-        $stmt = $pdo->prepare('SELECT id FROM users WHERE email = ?');
+        // Email must be unique across the whole system — except for "pending"
+        // placeholders pre-created by an inspection import. Those represent a
+        // technician who was attributed work before they had an account; we
+        // let the real person claim the row here instead of rejecting them.
+        $stmt = $pdo->prepare('SELECT id, is_pending FROM users WHERE email = ?');
         $stmt->execute([$email]);
-        if ($stmt->fetchColumn() !== false) {
-            Response::error('Email already registered', 409);
+        $existingUser = $stmt->fetch();
+        $claimUserId  = null;
+        if ($existingUser !== false) {
+            if ((int) $existingUser['is_pending'] !== 1) {
+                Response::error('Email already registered', 409);
+            }
+            $claimUserId = (int) $existingUser['id'];
         }
 
         // Trial path: grant trial_days of free access. Paid path: no trial —
@@ -61,11 +69,23 @@ final class AuthController
 
         $pdo->beginTransaction();
         try {
-            $insertUser = $pdo->prepare(
-                'INSERT INTO users (fullname, email, phone, password_hash) VALUES (?, ?, ?, ?)'
-            );
-            $insertUser->execute([$fullname, $email, $phone, Password::hash($password)]);
-            $userId = (int) $pdo->lastInsertId();
+            if ($claimUserId !== null) {
+                // Claim the import-created placeholder: set the real name,
+                // phone and password and drop the pending flag in place so
+                // every inspection already pointing at this user id stays
+                // attributed to them.
+                $pdo->prepare(
+                    'UPDATE users SET fullname = ?, phone = ?, password_hash = ?, is_pending = 0
+                     WHERE id = ?'
+                )->execute([$fullname, $phone, Password::hash($password), $claimUserId]);
+                $userId = $claimUserId;
+            } else {
+                $insertUser = $pdo->prepare(
+                    'INSERT INTO users (fullname, email, phone, password_hash) VALUES (?, ?, ?, ?)'
+                );
+                $insertUser->execute([$fullname, $email, $phone, Password::hash($password)]);
+                $userId = (int) $pdo->lastInsertId();
+            }
 
             // Seed `included_technicians` from the current admin default so
             // the account picks up the global setting at registration time
@@ -83,10 +103,32 @@ final class AuthController
                 'INSERT INTO account_users (account_id, user_id, role, is_active) VALUES (?, ?, ?, 1)'
             )->execute([$accountId, $userId, 'main']);
 
+            // A claimed placeholder may already be linked (inactive) to the
+            // account(s) that imported their inspections. Activate those links
+            // now so they become a working technician there; collect the ids
+            // to re-sync seat billing once the transaction commits.
+            $reactivatedAccountIds = [];
+            if ($claimUserId !== null) {
+                $sel = $pdo->prepare(
+                    'SELECT account_id FROM account_users WHERE user_id = ? AND is_active = 0'
+                );
+                $sel->execute([$userId]);
+                $reactivatedAccountIds = array_map('intval', $sel->fetchAll(PDO::FETCH_COLUMN));
+                if ($reactivatedAccountIds !== []) {
+                    $pdo->prepare(
+                        'UPDATE account_users SET is_active = 1 WHERE user_id = ? AND is_active = 0'
+                    )->execute([$userId]);
+                }
+            }
+
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
             throw $e;
+        }
+
+        foreach ($reactivatedAccountIds as $reactivatedAccountId) {
+            \Firol\Billing\SeatSync::recompute($reactivatedAccountId);
         }
 
         Session::setUserId($userId);

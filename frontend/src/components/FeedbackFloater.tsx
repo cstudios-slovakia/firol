@@ -52,7 +52,7 @@ function FloatingTab({ onClick }: { onClick: () => void }) {
     // they don't clobber each other.
     <div
       className={cn(
-        'fixed right-0 z-30',
+        'fixed right-0 z-30 pointer-events-none',
         'bottom-24 sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2',
       )}
     >
@@ -66,7 +66,7 @@ function FloatingTab({ onClick }: { onClick: () => void }) {
           // icon stays visible (~40px) when parked off-screen.
           'group flex w-[180px] items-center gap-2 rounded-l-2xl bg-firol-500 text-white',
           'pl-3 pr-3 py-2.5 text-xs font-semibold whitespace-nowrap',
-          'shadow-[var(--shadow-lift)] outline-none will-change-transform',
+          'shadow-[var(--shadow-lift)] outline-none will-change-transform pointer-events-auto',
           'transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]',
           'hover:translate-x-0 focus-visible:translate-x-0',
           'focus-visible:ring-2 focus-visible:ring-firol-300',
