@@ -722,7 +722,7 @@ final class ImportController
                 $assoc = [];
                 $anyValue = false;
                 for ($c = 1; $c <= $colCount; $c++) {
-                    $value = $ws->getCellByColumnAndRow($c, $r)->getValue();
+                    $value = $ws->getCell([$c, $r])->getValue();
                     if ($value instanceof \DateTimeInterface) {
                         $value = $value->format('Y-m-d');
                     } elseif (is_float($value) && $columns[$c - 1]['key'] !== 'q' && $columns[$c - 1]['key'] !== 'hs' && $columns[$c - 1]['key'] !== 'hd' && $columns[$c - 1]['key'] !== 'working_pressure' && $columns[$c - 1]['key'] !== 'test_pressure' && $columns[$c - 1]['key'] !== 'length') {
