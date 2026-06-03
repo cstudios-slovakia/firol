@@ -1,4 +1,4 @@
-import { api, buildUrl } from '@/lib/api';
+import { api, buildUrl, type OptimisticSpec } from '@/lib/api';
 
 export type TrainingType =
   | 'vstupne'
@@ -123,8 +123,8 @@ export const Trainings = {
   list: (filters?: TrainingListFilters) =>
     api<{ items: TrainingListItem[] }>(`/api/trainings${buildQuery(filters)}`),
   show: (id: number) => api<TrainingDetail>(`/api/trainings/${id}`),
-  create: (body: TrainingPayload, csrfToken: string | null) =>
-    api<{ training: Training }>('/api/trainings', { method: 'POST', body, csrfToken }),
+  create: (body: TrainingPayload, csrfToken: string | null, optimistic?: OptimisticSpec) =>
+    api<{ training: Training }>('/api/trainings', { method: 'POST', body, csrfToken, optimistic }),
   update: (id: number, body: TrainingUpdatePayload, csrfToken: string | null) =>
     api<{ training: Training }>(`/api/trainings/${id}`, { method: 'PATCH', body, csrfToken }),
   archive: (id: number, csrfToken: string | null) =>
@@ -156,6 +156,7 @@ export const Trainings = {
     api<TrainingGeneratePdfResponse>(`/api/trainings/${trainingId}/generate-pdf`, {
       method: 'POST',
       csrfToken,
+      requireOnline: true,
     }),
   documents: (trainingId: number) =>
     api<{ items: TrainingDocument[] }>(`/api/trainings/${trainingId}/documents`),

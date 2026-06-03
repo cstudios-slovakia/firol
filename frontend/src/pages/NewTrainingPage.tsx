@@ -14,6 +14,7 @@ import {
   type TrainingType,
 } from '@/api/trainings';
 import { ApiError } from '@/lib/api';
+import { trainingCreateOptimistic } from '@/lib/offlineEntities';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -119,16 +120,25 @@ export function NewTrainingPage() {
     setApiError(null);
     setSubmitting(true);
     try {
-      const res = await Trainings.create(
-        {
-          type,
-          company_id: companyId!,
-          facility_id: facilityId ?? undefined,
-          date,
-          trainer_id: trainerId ?? undefined,
-        },
-        csrfToken,
-      );
+      const payload = {
+        type,
+        company_id: companyId!,
+        facility_id: facilityId ?? undefined,
+        date,
+        trainer_id: trainerId ?? undefined,
+      };
+      const company = (companies ?? []).find((c) => c.id === companyId);
+      const facility = facilities.find((f) => f.id === facilityId);
+      const trainer = (members ?? []).find((m) => m.id === trainerId);
+      const optimistic = trainingCreateOptimistic({
+        payload,
+        company: { id: companyId!, name: company?.name ?? '', ico: company?.ico ?? null },
+        facility: facility ? { id: facility.id, name: facility.name } : null,
+        trainer: trainer
+          ? { id: trainer.id, name: trainer.fullname, certification_number: trainer.cert_general }
+          : null,
+      });
+      const res = await Trainings.create(payload, csrfToken, optimistic);
       toast.success('Školenie vytvorené');
       navigate(`/trainings/${res.training.id}`, { replace: true });
     } catch (err) {

@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, type OptimisticSpec } from '@/lib/api';
 
 export type Facility = {
   id: number;
@@ -19,11 +19,17 @@ export type FacilityPayload = {
 
 export const Facilities = {
   show: (id: number) => api<{ facility: Facility }>(`/api/facilities/${id}`),
-  createUnderCompany: (companyId: number, body: FacilityPayload, csrfToken: string | null) =>
+  createUnderCompany: (
+    companyId: number,
+    body: FacilityPayload,
+    csrfToken: string | null,
+    optimistic?: OptimisticSpec,
+  ) =>
     api<{ facility: Facility }>(`/api/companies/${companyId}/facilities`, {
       method: 'POST',
       body,
       csrfToken,
+      optimistic,
     }),
   update: (id: number, body: FacilityPayload, csrfToken: string | null) =>
     api<{ facility: Facility }>(`/api/facilities/${id}`, { method: 'PATCH', body, csrfToken }),

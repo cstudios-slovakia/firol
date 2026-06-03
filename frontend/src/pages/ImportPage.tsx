@@ -41,22 +41,22 @@ const SECTIONS: SectionDef[] = [
     title: 'Kontroly',
     description:
       'Hlavičky kontrol aj ich položky. Každý typ má vlastný sheet s položkami (Polozky_php, Polozky_hydranty, …).',
-    hint: 'Sheet „Kontroly” — # riadok je tvoje vlastné poradie (1, 2, 3…). Polozky_* odkazujú na toto # cez stĺpec „# kontrola”. E-mail technika, ktorý ešte nemá konto, sa predvytvorí a pridá do tvojho tímu; kontroly sa mu priradia, keď sa zaregistruje.',
+    hint: 'Sheet „Kontroly” — # riadok je tvoje vlastné poradie (1, 2, 3…). Polozky_* odkazujú na toto # cez stĺpec „# kontrola”. Firma sa hľadá podľa IČO — ak ešte neexistuje, vytvorí sa automaticky pod zadaným názvom (IČO má prednosť pred názvom). Prevádzka sa rovnako vytvorí, ak chýba. E-mail technika, ktorý ešte nemá konto, sa predvytvorí a pridá do tvojho tímu; kontroly sa mu priradia, keď sa zaregistruje.',
     Icon: ClipboardList,
     color: 'text-firol-600',
     bg: 'bg-firol-50',
-    createdLabels: { inspections: 'kontrol', items: 'položiek', technicians: 'nových technikov' },
+    createdLabels: { inspections: 'kontrol', items: 'položiek', technicians: 'nových technikov', companies: 'nových firiem', facilities: 'nových prevádzok' },
   },
   {
     kind: 'trainings',
     title: 'Školenia',
     description:
       'Školenia a ich účastníkov. Podpisy účastníkov sa zachytia neskôr v aplikácii — Excel ich neimportuje.',
-    hint: 'Sheet „Skolenia” — # riadok je tvoje vlastné poradie. Sheet „Ucastnici” odkazuje na toto # cez „# riadok školenia”. E-mail lektora, ktorý ešte nemá konto, sa predvytvorí a pridá do tvojho tímu; školenia sa mu priradia, keď sa zaregistruje.',
+    hint: 'Sheet „Skolenia” — # riadok je tvoje vlastné poradie. Sheet „Ucastnici” odkazuje na toto # cez „# riadok školenia”. Firma sa hľadá podľa IČO — ak ešte neexistuje, vytvorí sa automaticky pod zadaným názvom (IČO má prednosť pred názvom). Prevádzka sa rovnako vytvorí, ak chýba. E-mail lektora, ktorý ešte nemá konto, sa predvytvorí a pridá do tvojho tímu; školenia sa mu priradia, keď sa zaregistruje.',
     Icon: GraduationCap,
     color: 'text-violet-600',
     bg: 'bg-violet-50',
-    createdLabels: { trainings: 'školení', trainees: 'účastníkov', trainers: 'nových lektorov' },
+    createdLabels: { trainings: 'školení', trainees: 'účastníkov', trainers: 'nových lektorov', companies: 'nových firiem', facilities: 'nových prevádzok' },
   },
 ];
 

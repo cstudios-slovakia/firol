@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, type OptimisticSpec } from '@/lib/api';
 
 /**
  * Inspection types — locked slugs from docs/Firol base document.
@@ -307,8 +307,12 @@ export const Inspections = {
   list: (filters?: InspectionListFilters) =>
     api<{ items: InspectionListItem[] }>(`/api/inspections${buildQuery(filters)}`),
   show: (id: number) => api<InspectionDetail>(`/api/inspections/${id}`),
-  createDraft: (body: InspectionDraftPayload, csrfToken: string | null) =>
-    api<InspectionDetail>('/api/inspections', { method: 'POST', body, csrfToken }),
+  createDraft: (
+    body: InspectionDraftPayload,
+    csrfToken: string | null,
+    optimistic?: OptimisticSpec,
+  ) =>
+    api<InspectionDetail>('/api/inspections', { method: 'POST', body, csrfToken, optimistic }),
   update: (id: number, body: InspectionUpdatePayload, csrfToken: string | null) =>
     api<{ inspection: Inspection }>(`/api/inspections/${id}`, {
       method: 'PATCH',
@@ -365,11 +369,12 @@ export const Inspections = {
     api<GeneratePdfResponse>(`/api/inspections/${inspectionId}/generate-pdf`, {
       method: 'POST',
       csrfToken,
+      requireOnline: true,
     }),
   repeat: (inspectionId: number, csrfToken: string | null) =>
     api<InspectionDetail & { source_id: number }>(
       `/api/inspections/${inspectionId}/repeat`,
-      { method: 'POST', csrfToken },
+      { method: 'POST', csrfToken, requireOnline: true },
     ),
   documents: (inspectionId: number) =>
     api<{ items: InspectionDocument[] }>(`/api/inspections/${inspectionId}/documents`),

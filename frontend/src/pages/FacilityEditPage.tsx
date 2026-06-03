@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, MapPin, NotebookPen, User, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Facilities } from '@/api/facilities';
+import { facilityCreateOptimistic } from '@/lib/offlineEntities';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -81,7 +82,14 @@ export function FacilityEditPage() {
     };
     try {
       if (mode.kind === 'create') {
-        const res = await Facilities.createUnderCompany(mode.companyId, payload, csrfToken);
+        const optimistic = facilityCreateOptimistic({
+          companyId: mode.companyId,
+          name: payload.name,
+          address: payload.address ?? null,
+          contact_person: payload.contact_person ?? null,
+          notes: payload.notes ?? null,
+        });
+        const res = await Facilities.createUnderCompany(mode.companyId, payload, csrfToken, optimistic);
         toast.success('Prevádzka vytvorená');
         navigate(`/facilities/${res.facility.id}`, { replace: true });
       } else {

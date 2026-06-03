@@ -21,8 +21,32 @@
  */
 import { readCache, writeCache, invalidatePrefix } from './cache';
 import { enqueueMutation, OfflineQueuedError } from './queue';
+import { autoOptimistic } from './offlineEntities';
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? '';
+
+/** A read-modify-write against one IDB cache path, applied at enqueue time. */
+export type CachePatch = {
+  path: string;
+  /** Receives the current cached value (or undefined) and returns the next one. */
+  apply: (current: unknown) => unknown;
+};
+
+/**
+ * Describes how a mutation should behave when it's queued offline: which
+ * caches to patch so the UI reflects the change immediately, what to hand
+ * back to the caller, and — for creates — the temp id to remap on sync.
+ */
+export type OptimisticSpec = {
+  /** Returned to the caller instead of throwing (creates need this for the new id). */
+  returns?: unknown;
+  /** Cache patches applied synchronously when the request is queued. */
+  patches?: CachePatch[];
+  /** Present on creates: temp id + dot-path to the real id in the replayed response. */
+  create?: { clientId: number; idPath: string };
+  /** Friendly label for the pending-changes UI. */
+  label?: string;
+};
 
 // In production VITE_API_BASE_URL is "/api.php?path=" — the path and its
 // own query string must be split so PHP receives them as separate $_GET keys.
@@ -55,6 +79,12 @@ export type ApiOptions = {
   requireOnline?: boolean;
   /** Human-readable label shown in the pending-changes UI. */
   label?: string;
+  /**
+   * Opt-in offline-create behaviour. When the request fails offline the api
+   * seeds the caches described here and resolves with `optimistic.returns`
+   * instead of throwing, so the create flow can continue with a temp id.
+   */
+  optimistic?: OptimisticSpec;
 };
 
 export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {
@@ -91,7 +121,31 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
       if (cached !== undefined) return cached;
       throw networkErr;
     }
-    if (!opts.requireOnline && isQueueable(method, path)) {
+    // Endpoints that genuinely need the server (PDF, billing, …) bail out.
+    if (opts.requireOnline) throw networkErr;
+
+    // An explicit optimistic spec (top-level create) or an auto-derived one
+    // (nested item/trainee write) lets us queue + reflect the change locally.
+    const optimistic = opts.optimistic ?? autoOptimistic(method as 'POST' | 'PATCH' | 'DELETE', path, opts.body);
+    if (optimistic) {
+      for (const patch of optimistic.patches ?? []) {
+        const current = await readCache(patch.path);
+        const next = patch.apply(current);
+        if (next !== undefined) await writeCache(patch.path, next);
+      }
+      const id = await enqueueMutation({
+        method: method as 'POST' | 'PATCH' | 'DELETE',
+        path,
+        body: opts.body,
+        label: opts.label ?? optimistic.label ?? `${method} ${path}`,
+        clientId: optimistic.create?.clientId,
+        idPath: optimistic.create?.idPath,
+      });
+      if (optimistic.returns !== undefined) return optimistic.returns as T;
+      throw new OfflineQueuedError(id);
+    }
+
+    if (isQueueable(method, path)) {
       const id = await enqueueMutation({
         method,
         path,
@@ -153,11 +207,14 @@ function safeJson(text: string): unknown {
  */
 function isQueueable(method: 'POST' | 'PATCH' | 'DELETE', path: string): boolean {
   const pathOnly = path.split('?')[0];
+  // Nested actions that always need the server, even on an existing draft.
+  if (/\/(generate-pdf|repeat)$/i.test(pathOnly)) return false;
+  // Ids may be negative (locally-minted temp ids for not-yet-synced parents).
   if (method === 'PATCH' || method === 'DELETE') {
-    return /^\/api\/[a-z-]+\/\d+(\/.*)?$/i.test(pathOnly);
+    return /^\/api\/[a-z-]+\/-?\d+(\/.*)?$/i.test(pathOnly);
   }
   // POST is queueable only when nested under an existing resource id.
-  return /^\/api\/(inspections|trainings)\/\d+\/.+$/i.test(pathOnly);
+  return /^\/api\/(inspections|trainings)\/-?\d+\/.+$/i.test(pathOnly);
 }
 
 function resourceRoot(path: string): string {

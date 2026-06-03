@@ -13,6 +13,7 @@ import {
   type InspectionType,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
+import { inspectionCreateOptimistic } from '@/lib/offlineEntities';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -166,17 +167,25 @@ export function InspectionStep1Page() {
     setError(null);
     setSubmitting(true);
     try {
-      const res = await Inspections.createDraft(
-        {
-          type,
-          periodicity_months: periodicity,
-          executed_on: executedOn,
-          company_id: companyId!,
-          facility_id: facilityId!,
-          notes: notes.trim() || undefined,
-        },
-        csrfToken,
-      );
+      const payload = {
+        type,
+        periodicity_months: periodicity,
+        executed_on: executedOn,
+        company_id: companyId!,
+        facility_id: facilityId!,
+        notes: notes.trim() || undefined,
+      };
+      const company = (companies ?? []).find((c) => c.id === companyId);
+      const facility = facilities.find((f) => f.id === facilityId);
+      // Optimistic draft so the inspection (and Step 2) work offline; ignored
+      // entirely when the create POST reaches the server.
+      const optimistic = inspectionCreateOptimistic({
+        payload,
+        company: { id: companyId!, name: company?.name ?? '', ico: company?.ico ?? null },
+        facility: { id: facilityId!, name: facility?.name ?? '' },
+        inspector: { id: user?.id ?? 0, name: user?.fullname ?? '' },
+      });
+      const res = await Inspections.createDraft(payload, csrfToken, optimistic);
       // Move straight into Step 2 — adding the first prístroj. The
       // inspection itself is already persisted at this point.
       toast.success('Kontrola vytvorená');

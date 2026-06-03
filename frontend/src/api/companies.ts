@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, type OptimisticSpec } from '@/lib/api';
 
 export type CompanyListItem = {
   id: number;
@@ -55,8 +55,8 @@ export const Companies = {
     return api<{ items: CompanyListItem[] }>(`/api/companies${qs}`);
   },
   show: (id: number) => api<CompanyDetail>(`/api/companies/${id}`),
-  create: (body: CompanyPayload, csrfToken: string | null) =>
-    api<{ company: Company }>('/api/companies', { method: 'POST', body, csrfToken }),
+  create: (body: CompanyPayload, csrfToken: string | null, optimistic?: OptimisticSpec) =>
+    api<{ company: Company }>('/api/companies', { method: 'POST', body, csrfToken, optimistic }),
   update: (id: number, body: CompanyPayload, csrfToken: string | null) =>
     api<{ company: Company }>(`/api/companies/${id}`, { method: 'PATCH', body, csrfToken }),
   archive: (id: number, csrfToken: string | null) =>

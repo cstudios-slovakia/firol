@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { MapPin, NotebookPen, User, Warehouse } from 'lucide-react';
 import { Facilities, type Facility, type FacilityPayload } from '@/api/facilities';
 import { ApiError } from '@/lib/api';
+import { facilityCreateOptimistic } from '@/lib/offlineEntities';
 import { useToast } from '@/lib/toast';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -71,9 +72,16 @@ export function FacilityForm({
       notes: notes.trim() || undefined,
     };
     try {
+      const optimistic = facilityCreateOptimistic({
+        companyId: companyId!,
+        name: payload.name,
+        address: payload.address ?? null,
+        contact_person: payload.contact_person ?? null,
+        notes: payload.notes ?? null,
+      });
       const res = mode === 'edit' && initial
         ? await Facilities.update(initial.id, payload, csrfToken)
-        : await Facilities.createUnderCompany(companyId!, payload, csrfToken);
+        : await Facilities.createUnderCompany(companyId!, payload, csrfToken, optimistic);
       onSaved(res.facility);
       toast.success(mode === 'edit' ? 'Prevádzka uložená' : 'Prevádzka vytvorená');
     } catch (err) {

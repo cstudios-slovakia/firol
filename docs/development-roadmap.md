@@ -454,13 +454,28 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
     Auto-update (`registerType: 'autoUpdate'`) silently swaps the SW
     when a new build is deployed.
 
-  Known v1 limitation: starting a new inspection/training/company
-  while offline still requires a connection because the server mints
-  the parent id. Adding more items, editing dates, capturing trainee
-  signatures, etc. all work offline against an already-created draft.
-  Lifting that restriction (clientId UUIDs + URL rewriting at sync
-  time) is tracked as a possible 7-PWA-e but isn't on the immediate
-  roadmap.
+  - ✅ **7-PWA-e — Offline creation of new entities (temp ids)**:
+    new inspections, trainings, companies and facilities can now be
+    created with no connection. `lib/tempId.ts` mints negative-integer
+    temp ids (server ids are always positive, so the sign partitions
+    "not yet synced" cleanly and every `id: number` type / `Number(param)`
+    route keeps working — no string UUIDs). `lib/offlineEntities.ts`
+    holds per-entity optimistic builders (called by the create screens)
+    plus a generic `autoOptimistic()` for nested item/trainee writes, so
+    the 8 inspection-type forms and the detail pages need zero offline
+    awareness. `lib/api.ts` gained an `optimistic` option: on a failed
+    create POST it seeds the detail + list IDB caches and resolves with
+    the temp entity instead of throwing, so navigation and Step 2 work
+    fully offline. On reconnect `lib/queue.ts` replays the create, reads
+    the server id and **remaps** the temp id everywhere — across the rest
+    of the outbox (paths + JSON bodies) and the cache (keys + data) —
+    then fires `firol:remap`; an `AppShell` hook swaps the temp id in the
+    open URL for the real one. PDF generation, `repeat` and billing stay
+    online-only (`requireOnline`).
+
+  Remaining minor gap: if the user sits on a freshly-synced draft while
+  its still-queued child items drain, the optimistic items can blink out
+  of the cache until the next refetch — server state is always correct.
 - ⬜ Final design pass
 
 ---

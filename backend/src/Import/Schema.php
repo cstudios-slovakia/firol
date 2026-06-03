@@ -61,6 +61,7 @@ final class Schema
                 'title' => 'Školenia',
                 'columns' => [
                     ['header' => '# riadok *', 'key' => 'row_no', 'hint' => '1'],
+                    ['header' => 'Názov firmy *', 'key' => 'company_name', 'hint' => 'Acme s.r.o.'],
                     ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678'],
                     ['header' => 'Prevádzka', 'key' => 'facility_name', 'hint' => 'Sklad Žilina'],
                     [
@@ -160,6 +161,7 @@ final class Schema
                 'title' => 'Kontroly',
                 'columns' => [
                     ['header' => '# riadok *', 'key' => 'row_no', 'hint' => '1'],
+                    ['header' => 'Názov firmy *', 'key' => 'company_name', 'hint' => 'Acme s.r.o.'],
                     ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678'],
                     ['header' => 'Prevádzka *', 'key' => 'facility_name', 'hint' => 'Sklad Žilina'],
                     [

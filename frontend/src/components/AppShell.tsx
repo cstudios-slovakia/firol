@@ -10,7 +10,7 @@ import {
     Settings,
     Sparkles,
 } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
 import { Billing } from "@/api/billing";
 import { ApiError } from "@/lib/api";
@@ -95,6 +95,25 @@ type Tab = {
 export function AppShell() {
     const { logout } = useAuth();
     const location = useLocation();
+    const navigate = useNavigate();
+
+    // When a queued create syncs, queue.ts fires `firol:remap` with the temp
+    // id and the server-issued real id. If the user is sitting on the temp-id
+    // route (e.g. a draft inspection they created offline), swap it for the
+    // real id so subsequent loads hit the persisted record.
+    useEffect(() => {
+        function onRemap(e: Event) {
+            const { tempId, realId } = (e as CustomEvent<{ tempId: number; realId: number }>).detail;
+            const segment = `/${tempId}`;
+            if (location.pathname.includes(segment)) {
+                const next =
+                    location.pathname.replace(segment, `/${realId}`) + location.search;
+                navigate(next, { replace: true });
+            }
+        }
+        window.addEventListener("firol:remap", onRemap);
+        return () => window.removeEventListener("firol:remap", onRemap);
+    }, [location.pathname, location.search, navigate]);
 
     const topBarRef = useRef<HTMLDivElement>(null);
     const [topBarH, setTopBarH] = useState(65);

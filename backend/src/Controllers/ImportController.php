@@ -210,6 +210,24 @@ final class ImportController
             'Stĺpce typu „Viac hodnôt“: zadaj povolené hodnoty oddelené čiarkou (napr. tlakova_skuska,plnenie).',
             'Dátumy zadávaj vo formáte RRRR-MM-DD (napr. 2026-01-15).',
         ];
+
+        // Sheets that reference a company by IČO can create that company (and
+        // its prevádzka) automatically, so the user does not have to import
+        // firmy first. Surface this only on the relevant templates.
+        $hasCompanyRef = false;
+        foreach ($sheets as $sheet) {
+            foreach ($sheet['columns'] as $col) {
+                if ($col['key'] === 'company_ico') {
+                    $hasCompanyRef = true;
+                    break 2;
+                }
+            }
+        }
+        if ($hasCompanyRef) {
+            $intro[] = 'Firma sa hľadá podľa IČO. Ak firma s daným IČO ešte v systéme neexistuje, vytvorí sa automaticky pod zadaným názvom — nemusíš ju importovať vopred.';
+            $intro[] = 'IČO má prednosť pred názvom: ak firma s daným IČO už existuje, použije sa existujúca (aj keď je názov napísaný inak, napr. bez diakritiky) a nevytvorí sa duplicitná.';
+            $intro[] = 'Prevádzka sa hľadá podľa názvu v rámci firmy. Ak ešte neexistuje, vytvorí sa automaticky.';
+        }
         foreach ($intro as $line) {
             $ws->getCell("A{$r}")->setValue('•  ' . $line);
             $ws->mergeCells("A{$r}:D{$r}");
@@ -416,6 +434,8 @@ final class ImportController
         $createdTrainings = 0;
         $createdTrainees = 0;
         $createdTrainers = 0;
+        $createdCompanies = 0;
+        $createdFacilities = 0;
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
@@ -438,6 +458,7 @@ final class ImportController
             foreach ($rowsBySheet['Skolenia'] as $idx => $row) {
                 $rowNum = $idx + 2;
                 $rowNo = self::intOrNull($row, 'row_no');
+                $companyName = self::str($row, 'company_name');
                 $ico = self::ico($row, 'company_ico');
                 $type = self::str($row, 'type');
                 $date = self::str($row, 'date');
@@ -449,6 +470,10 @@ final class ImportController
                     $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Chýba IČO firmy.'];
                     continue;
                 }
+                if ($companyName === null) {
+                    $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Chýba názov firmy.'];
+                    continue;
+                }
                 if ($type === null || !in_array($type, Schema::TRAINING_TYPES, true)) {
                     $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Neplatný typ školenia.'];
                     continue;
@@ -457,19 +482,16 @@ final class ImportController
                     $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Neplatný dátum (formát YYYY-MM-DD).'];
                     continue;
                 }
-                $companyId = $companyIdByIco[$ico] ?? null;
-                if ($companyId === null) {
-                    $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => "Firma s IČO $ico neexistuje."];
-                    continue;
-                }
+                // Match by IČO; create the company when it does not exist yet.
+                $companyId = self::resolveOrCreateCompany(
+                    $pdo, $accountId, $ico, $companyName, $companyIdByIco, $createdCompanies,
+                );
                 $facilityId = null;
                 $facilityName = self::str($row, 'facility_name');
                 if ($facilityName !== null) {
-                    $facilityId = $facilityIdByKey[$companyId . '|' . mb_strtolower($facilityName)] ?? null;
-                    if ($facilityId === null) {
-                        $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => "Prevádzka „$facilityName” neexistuje pre firmu IČO $ico."];
-                        continue;
-                    }
+                    $facilityId = self::resolveOrCreateFacility(
+                        $pdo, $accountId, $companyId, $facilityName, $facilityIdByKey, $createdFacilities,
+                    );
                 }
                 $trainerId = null;
                 $trainerEmail = self::str($row, 'trainer_email');
@@ -536,9 +558,11 @@ final class ImportController
 
         Response::json([
             'created' => [
-                'trainings' => $createdTrainings,
-                'trainees'  => $createdTrainees,
-                'trainers'  => $createdTrainers,
+                'trainings'  => $createdTrainings,
+                'trainees'   => $createdTrainees,
+                'trainers'   => $createdTrainers,
+                'companies'  => $createdCompanies,
+                'facilities' => $createdFacilities,
             ],
             'errors' => [],
         ]);
@@ -556,6 +580,8 @@ final class ImportController
         $createdInspections = 0;
         $createdItems = 0;
         $createdTechnicians = 0;
+        $createdCompanies = 0;
+        $createdFacilities = 0;
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
@@ -584,6 +610,7 @@ final class ImportController
             foreach ($rowsBySheet['Kontroly'] as $idx => $row) {
                 $rowNum = $idx + 2;
                 $rowNo = self::intOrNull($row, 'row_no');
+                $companyName = self::str($row, 'company_name');
                 $ico = self::ico($row, 'company_ico');
                 $facilityName = self::str($row, 'facility_name');
                 $type = self::str($row, 'type');
@@ -594,8 +621,8 @@ final class ImportController
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Chýba # riadok.'];
                     continue;
                 }
-                if ($ico === null || $facilityName === null || $type === null) {
-                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Chýba IČO firmy / prevádzka / typ.'];
+                if ($ico === null || $companyName === null || $facilityName === null || $type === null) {
+                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Chýba názov firmy / IČO firmy / prevádzka / typ.'];
                     $invalidInspectionRowNos[$rowNo] = true;
                     continue;
                 }
@@ -615,18 +642,13 @@ final class ImportController
                     $invalidInspectionRowNos[$rowNo] = true;
                     continue;
                 }
-                $companyId = $companyIdByIco[$ico] ?? null;
-                if ($companyId === null) {
-                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Firma s IČO $ico neexistuje."];
-                    $invalidInspectionRowNos[$rowNo] = true;
-                    continue;
-                }
-                $facilityId = $facilityIdByKey[$companyId . '|' . mb_strtolower($facilityName)] ?? null;
-                if ($facilityId === null) {
-                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Prevádzka „$facilityName” neexistuje pre firmu IČO $ico."];
-                    $invalidInspectionRowNos[$rowNo] = true;
-                    continue;
-                }
+                // Match by IČO; create the company/facility when missing.
+                $companyId = self::resolveOrCreateCompany(
+                    $pdo, $accountId, $ico, $companyName, $companyIdByIco, $createdCompanies,
+                );
+                $facilityId = self::resolveOrCreateFacility(
+                    $pdo, $accountId, $companyId, $facilityName, $facilityIdByKey, $createdFacilities,
+                );
 
                 $inspectorId = $currentUserId;
                 $inspectorEmail = self::str($row, 'inspector_email');
@@ -730,6 +752,8 @@ final class ImportController
                 'inspections' => $createdInspections,
                 'items'       => $createdItems,
                 'technicians' => $createdTechnicians,
+                'companies'   => $createdCompanies,
+                'facilities'  => $createdFacilities,
             ],
             'errors' => [],
         ]);
@@ -798,6 +822,73 @@ final class ImportController
 
         $userIdByEmail[$key] = $userId;
         return $userId;
+    }
+
+    /**
+     * Resolves the company an imported record belongs to by IČO, creating
+     * it on the fly when no company with that IČO exists yet in the tenant.
+     *
+     * IČO is the match key and takes precedence over the name: if a company
+     * with this IČO already exists it is reused regardless of how the name
+     * is spelled in the sheet (e.g. with vs. without diacritics), so an
+     * existing record is never duplicated. The name is only used when a new
+     * company has to be created.
+     *
+     * Mutates $companyIdByIco (so repeated rows resolve to one company) and
+     * increments $createdCount for each newly created company.
+     *
+     * @param array<string,int> $companyIdByIco
+     */
+    private static function resolveOrCreateCompany(
+        PDO $pdo,
+        int $accountId,
+        string $ico,
+        string $name,
+        array &$companyIdByIco,
+        int &$createdCount,
+    ): int {
+        if (isset($companyIdByIco[$ico])) {
+            return $companyIdByIco[$ico];
+        }
+
+        $pdo->prepare(
+            'INSERT INTO companies (account_id, name, ico) VALUES (?, ?, ?)'
+        )->execute([$accountId, $name, $ico]);
+        $id = (int) $pdo->lastInsertId();
+        $companyIdByIco[$ico] = $id;
+        $createdCount++;
+        return $id;
+    }
+
+    /**
+     * Resolves a facility under a given company by name, creating it on the
+     * fly when no facility with that (case-insensitive) name exists yet.
+     *
+     * Mutates $facilityIdByKey (so repeated rows resolve to one facility)
+     * and increments $createdCount for each newly created facility.
+     *
+     * @param array<string,int> $facilityIdByKey "company_id|lower(name)" → id
+     */
+    private static function resolveOrCreateFacility(
+        PDO $pdo,
+        int $accountId,
+        int $companyId,
+        string $name,
+        array &$facilityIdByKey,
+        int &$createdCount,
+    ): int {
+        $key = $companyId . '|' . mb_strtolower($name);
+        if (isset($facilityIdByKey[$key])) {
+            return $facilityIdByKey[$key];
+        }
+
+        $pdo->prepare(
+            'INSERT INTO facilities (account_id, company_id, name) VALUES (?, ?, ?)'
+        )->execute([$accountId, $companyId, $name]);
+        $id = (int) $pdo->lastInsertId();
+        $facilityIdByKey[$key] = $id;
+        $createdCount++;
+        return $id;
     }
 
     /**

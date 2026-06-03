@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Building2, Hash, MapPin, Phone } from 'lucide-react';
 import { Companies, type Company, type CompanyPayload } from '@/api/companies';
 import { ApiError } from '@/lib/api';
+import { companyCreateOptimistic } from '@/lib/offlineEntities';
 import { useToast } from '@/lib/toast';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -61,9 +62,15 @@ export function CompanyForm({
       contact: contact.trim() || undefined,
     };
     try {
+      const optimistic = companyCreateOptimistic({
+        name: payload.name,
+        ico: payload.ico ?? null,
+        address: payload.address ?? null,
+        contact: payload.contact ?? null,
+      });
       const res = mode === 'edit' && initial
         ? await Companies.update(initial.id, payload, csrfToken)
-        : await Companies.create(payload, csrfToken);
+        : await Companies.create(payload, csrfToken, optimistic);
       onSaved(res.company);
       toast.success(mode === 'edit' ? 'Firma uložená' : 'Firma vytvorená');
     } catch (err) {

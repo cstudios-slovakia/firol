@@ -53,6 +53,15 @@ export interface MutationEntry {
   lastError?: string;
   /** HTTP status from the last attempt, when the server responded. */
   lastStatus?: number;
+  /**
+   * Set on create mutations: the negative temp id this request will resolve.
+   * On a successful replay the queue reads the real id from the response
+   * (see `idPath`) and rewrites this temp id across the rest of the outbox
+   * and the IDB cache. Undefined for plain edits/deletes.
+   */
+  clientId?: number;
+  /** Dot-path into the server response that holds the new id, e.g. `inspection.id`. */
+  idPath?: string;
 }
 
 class FirolDb extends Dexie {
