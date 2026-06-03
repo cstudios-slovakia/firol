@@ -73,7 +73,7 @@ type AuthContextValue = {
   activeAccountId: number | null;
   csrfToken: string | null;
   isAdmin: boolean;
-  login(email: string, password: string): Promise<void>;
+  login(email: string, password: string, remember?: boolean): Promise<void>;
   register(payload: RegisterPayload): Promise<string>;
   logout(): Promise<void>;
   switchAccount(accountId: number): Promise<void>;
@@ -114,11 +114,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    const handler = () => apply(null);
+    window.addEventListener('firol:unauthorized', handler);
+    return () => window.removeEventListener('firol:unauthorized', handler);
+  }, [apply]);
+
   const login = useCallback(
-    async (email: string, password: string) => {
+    async (email: string, password: string, remember = false) => {
       const data = await api<Snapshot>('/api/auth/login', {
         method: 'POST',
-        body: { email, password },
+        body: { email, password, remember },
       });
       apply(data);
     },

@@ -116,6 +116,9 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
       parsed && typeof parsed === 'object' && 'error' in parsed
         ? String((parsed as { error: unknown }).error)
         : `HTTP ${res.status}`;
+    if (res.status === 401) {
+      window.dispatchEvent(new Event('firol:unauthorized'));
+    }
     throw new ApiError(res.status, message, parsed);
   }
 

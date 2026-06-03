@@ -43,6 +43,13 @@ use Firol\Http\Router;
 $request = new Request();
 $router  = new Router();
 
+// Before anything reads the session: if it idled out (or the browser was
+// closed) but a valid "remember me" cookie is present, silently re-establish
+// the session so the request proceeds as authenticated. No-op when already
+// authed or when no/invalid remember cookie exists. Must run before any
+// output so it can send Set-Cookie headers.
+\Firol\Auth\RememberToken::resume();
+
 $router->get('/api/health', static function (): void {
     Response::json([
         'status' => 'ok',

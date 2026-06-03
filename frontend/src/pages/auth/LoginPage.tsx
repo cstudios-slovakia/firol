@@ -21,6 +21,7 @@ export function LoginPage() {
   const nextPath = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,7 +39,7 @@ export function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      await login(email, password);
+      await login(email, password, remember);
       navigate(nextPath, { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo, skús to znova.');
@@ -89,6 +90,16 @@ export function LoginPage() {
               />
             )}
           </Field>
+
+          <label className="flex cursor-pointer select-none items-center gap-2.5 text-sm text-ink-600">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="size-4 rounded border-ink-300 text-firol-600 accent-firol-600 focus:ring-firol-500"
+            />
+            Zostať prihlásený
+          </label>
 
           {error && (
             <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">

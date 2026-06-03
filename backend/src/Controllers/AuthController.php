@@ -7,6 +7,7 @@ namespace Firol\Controllers;
 use Firol\Auth\Csrf;
 use Firol\Auth\Password;
 use Firol\Auth\RateLimit;
+use Firol\Auth\RememberToken;
 use Firol\Auth\Session;
 use Firol\Db;
 use Firol\Http\Request;
@@ -162,6 +163,7 @@ final class AuthController
     {
         $email    = $req->jsonString('email');
         $password = $req->jsonString('password');
+        $remember = $req->jsonBool('remember') ?? false;
 
         if ($email === null || $password === null) {
             Response::error('Email and password required', 422);
@@ -204,12 +206,19 @@ final class AuthController
         Session::setUserId($userId);
         Session::setActiveAccountId((int) $accountId);
 
+        // Persistent login: issue a long-lived remember cookie so the user
+        // survives the short session idle-timeout and browser restarts.
+        if ($remember) {
+            RememberToken::issue($userId, (int) $accountId);
+        }
+
         Response::json(self::meSnapshot($pdo, $userId, (int) $accountId));
     }
 
     public static function logout(Request $req): void
     {
         Csrf::require($req);
+        RememberToken::clear();
         Session::destroy();
         Response::noContent();
     }
