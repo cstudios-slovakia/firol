@@ -61,6 +61,15 @@ jobs:
             rm -f  $ROOT/index.php $ROOT/index.html $ROOT/test.php
             rm -rf $ROOT/assets $ROOT/vendor $ROOT/src
 
+            # Ensure the backup script is executable.
+            chmod +x $ROOT/scripts/backup-db.sh
+
+            # Install the nightly DB backup cron job (idempotent — adds the
+            # line only if it is not already present in the crontab).
+            CRON_CMD="0 2 * * * $ROOT/scripts/backup-db.sh >> /usr/home/awgefy/db-backups/backup.log 2>&1"
+            ( crontab -l 2>/dev/null | grep -qF "$ROOT/scripts/backup-db.sh" ) \
+              || ( crontab -l 2>/dev/null; echo "$CRON_CMD" ) | crontab -
+
       # Smoke-test the freshly deployed app from the GitHub runner. Fails
       # the workflow if /api/health doesn't return 200 — a stronger signal
       # than "ssh command succeeded" because it exercises the actual

@@ -28,9 +28,9 @@ import {
   InspectorProfilePage,
   BrandingPage,
   TeamPage,
+  DataPage,
 } from '@/pages/SettingsPage';
 import { BillingPage } from '@/pages/BillingPage';
-import { ImportPage } from '@/pages/ImportPage';
 import { AdminPage, RequireAdmin } from '@/pages/AdminPage';
 
 export default function App() {
@@ -101,7 +101,7 @@ export default function App() {
           <Route path="profil" element={<InspectorProfilePage />} />
           <Route path="branding" element={<BrandingPage />} />
           <Route path="technici" element={<TeamPage />} />
-          <Route path="import" element={<ImportPage />} />
+          <Route path="data" element={<DataPage />} />
           <Route path="admin" element={<RequireAdmin><AdminPage /></RequireAdmin>} />
         </Route>
         <Route path="/billing" element={<BillingPage />} />

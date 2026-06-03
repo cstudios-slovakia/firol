@@ -16,6 +16,7 @@ if (is_file(__DIR__ . '/../.env')) {
 }
 
 use Firol\Controllers\AccountController;
+use Firol\Controllers\DataController;
 use Firol\Controllers\AdminController;
 use Firol\Controllers\AdminPanelController;
 use Firol\Controllers\AuthController;
@@ -152,6 +153,11 @@ $router->delete('/api/trainings/{id}/trainees/{trainee_id}', [TraineeController:
 $router->get('/api/trainees/{id}/signature',        [TraineeController::class, 'downloadSignature']);
 $router->post('/api/trainings/{id}/generate-pdf',   [DocumentController::class, 'generateForTraining']);
 $router->get('/api/trainings/{id}/documents',       [DocumentController::class, 'indexForTraining']);
+
+$router->get('/api/account/export',                [DataController::class, 'exportData']);
+$router->delete('/api/account/data/companies',   [DataController::class, 'purgeCompanies']);
+$router->delete('/api/account/data/inspections', [DataController::class, 'purgeInspections']);
+$router->delete('/api/account/data/trainings',   [DataController::class, 'purgeTrainings']);
 
 $router->get('/api/import/companies/template',   [ImportController::class, 'companiesTemplate']);
 $router->get('/api/import/inspections/template', [ImportController::class, 'inspectionsTemplate']);

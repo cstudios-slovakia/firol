@@ -10,14 +10,19 @@ import {
     AlertTriangle,
     AtSign,
     Building2,
-    FileSpreadsheet,
     CalendarDays,
     Check,
+    CheckCircle2,
     ChevronLeft,
     ChevronRight,
+    ClipboardList,
     Copy,
     CreditCard,
+    Database,
+    Download,
     FileSignature,
+    FileSpreadsheet,
+    GraduationCap,
     Hash,
     ImagePlus,
     MailPlus,
@@ -36,6 +41,9 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
 import { AccountApi, type Account } from "@/api/account";
+import { DataApi } from "@/api/data";
+import { ImportApi, type ImportKind, type ImportResult } from "@/api/import";
+import { BackupReminderModal } from "@/components/BackupReminderModal";
 import {
     InspectorProfileApi,
     type InspectorProfile,
@@ -66,7 +74,7 @@ const SECTION_TABS = [
     { to: "/settings/profil", label: "Profil technika", icon: ShieldCheck },
     { to: "/settings/branding", label: "Branding PDF", icon: Palette },
     { to: "/settings/technici", label: "Technici", icon: UsersRound },
-    { to: "/settings/import", label: "Import z Excelu", icon: FileSpreadsheet },
+    { to: "/settings/data", label: "Správa dát", icon: Database },
 ] as const;
 
 const MENU_ITEMS = [
@@ -104,13 +112,13 @@ const MENU_ITEMS = [
         bg: "bg-orange-50",
     },
     {
-        to: "/settings/import",
-        label: "Import z Excelu",
+        to: "/settings/data",
+        label: "Správa dát",
         description:
-            "Hromadný import firiem, kontrol a školení zo vzorovej Excel šablóny.",
-        icon: FileSpreadsheet,
-        color: "text-emerald-600",
-        bg: "bg-emerald-50",
+            "Export zálohy, hromadné vymazanie firiem, kontrol alebo školení.",
+        icon: Database,
+        color: "text-slate-600",
+        bg: "bg-slate-50",
     },
 ] as const;
 
@@ -1842,6 +1850,510 @@ function CertSummaryBlock({
                     do {validTo}
                 </p>
             )}
+        </div>
+    );
+}
+
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+// ─── Import subsections (embedded in Data Management) ────────────────────────
+
+type ImportSectionDef = {
+    kind: ImportKind;
+    title: string;
+    description: string;
+    hint: string;
+    Icon: typeof Building2;
+    color: string;
+    bg: string;
+    createdLabels: Record<string, string>;
+};
+
+const IMPORT_DEFS: ImportSectionDef[] = [
+    {
+        kind: "companies",
+        title: "Firmy a prevádzky",
+        description: "Importuj firmy aj ich prevádzky naraz. Prevádzky sa naviažu na firmu cez IČO.",
+        hint: 'Sheet „Firmy" — Názov je povinný. Sheet „Prevadzky" — IČO firmy musí existovať (buď v sheete vyššie, alebo už v aplikácii).',
+        Icon: Building2,
+        color: "text-blue-600",
+        bg: "bg-blue-50",
+        createdLabels: { companies: "firiem", facilities: "prevádzok" },
+    },
+    {
+        kind: "inspections",
+        title: "Kontroly",
+        description: "Hlavičky kontrol aj ich položky. Každý typ má vlastný sheet s položkami (Polozky_php, Polozky_hydranty, …).",
+        hint: 'Sheet „Kontroly" — # riadok je tvoje vlastné poradie (1, 2, 3…). Polozky_* odkazujú na toto # cez stĺpec „# kontrola". Firma sa hľadá podľa IČO — ak ešte neexistuje, vytvorí sa automaticky pod zadaným názvom (IČO má prednosť pred názvom). Prevádzka sa rovnako vytvorí, ak chýba. E-mail technika, ktorý ešte nemá konto, sa predvytvorí a pridá do tvojho tímu; kontroly sa mu priradia, keď sa zaregistruje.',
+        Icon: ClipboardList,
+        color: "text-firol-600",
+        bg: "bg-firol-50",
+        createdLabels: { inspections: "kontrol", items: "položiek", technicians: "nových technikov", companies: "nových firiem", facilities: "nových prevádzok" },
+    },
+    {
+        kind: "trainings",
+        title: "Školenia",
+        description: "Školenia a ich účastníkov. Podpisy účastníkov sa zachytia neskôr v aplikácii — Excel ich neimportuje.",
+        hint: 'Sheet „Skolenia" — # riadok je tvoje vlastné poradie. Sheet „Ucastnici" odkazuje na toto # cez „# riadok školenia". Firma sa hľadá podľa IČO — ak ešte neexistuje, vytvorí sa automaticky pod zadaným názvom (IČO má prednosť pred názvom). Prevádzka sa rovnako vytvorí, ak chýba. E-mail lektora, ktorý ešte nemá konto, sa predvytvorí a pridá do tvojho tímu; školenia sa mu priradia, keď sa zaregistruje.',
+        Icon: GraduationCap,
+        color: "text-violet-600",
+        bg: "bg-violet-50",
+        createdLabels: { trainings: "školení", trainees: "účastníkov", trainers: "nových lektorov", companies: "nových firiem", facilities: "nových prevádzok" },
+    },
+];
+
+function ImportSubSection({ section }: { section: ImportSectionDef }) {
+    const { csrfToken } = useAuth();
+    const toast = useToast();
+    const fileRef = useRef<HTMLInputElement>(null);
+    const [uploading, setUploading] = useState(false);
+    const [downloading, setDownloading] = useState(false);
+    const [result, setResult] = useState<ImportResult | null>(null);
+    const [networkError, setNetworkError] = useState<string | null>(null);
+    const [showReminder, setShowReminder] = useState(false);
+
+    async function onDownload() {
+        setDownloading(true);
+        setNetworkError(null);
+        try {
+            await ImportApi.downloadTemplate(section.kind);
+        } catch (err) {
+            const msg = err instanceof ApiError ? err.message : "Stiahnutie šablóny zlyhalo.";
+            setNetworkError(msg);
+            toast.error(msg);
+        } finally {
+            setDownloading(false);
+        }
+    }
+
+    async function onPick(file: File | undefined) {
+        if (!file) return;
+        setUploading(true);
+        setResult(null);
+        setNetworkError(null);
+        try {
+            const res = await ImportApi.upload(section.kind, file, csrfToken);
+            setResult(res);
+            if (res.errors.length > 0) {
+                toast.error(`Import zlyhal — ${res.errors.length} chýb v súbore.`);
+            } else if (res.created) {
+                const summary = Object.entries(res.created)
+                    .map(([k, v]) => `${v} ${section.createdLabels[k] ?? k}`)
+                    .join(", ");
+                toast.success(`Naimportované: ${summary}`);
+            }
+        } catch (err) {
+            const msg = err instanceof ApiError ? err.message : "Nahrávanie zlyhalo.";
+            setNetworkError(msg);
+            toast.error(msg);
+        } finally {
+            setUploading(false);
+            if (fileRef.current) fileRef.current.value = "";
+        }
+    }
+
+    return (
+        <>
+            {showReminder && (
+                <BackupReminderModal
+                    onProceed={() => {
+                        setShowReminder(false);
+                        fileRef.current?.click();
+                    }}
+                    onCancel={() => setShowReminder(false)}
+                />
+            )}
+            <div className="overflow-hidden rounded-2xl border border-ink-100">
+                <div className="flex items-start gap-3 border-b border-ink-100 px-5 py-4">
+                    <div className={cn("grid size-11 shrink-0 place-items-center rounded-2xl", section.bg)}>
+                        <section.Icon className={cn("size-5", section.color)} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                        <h3 className="text-base font-semibold text-ink-900">{section.title}</h3>
+                        <p className="mt-0.5 text-xs text-ink-500">{section.description}</p>
+                    </div>
+                </div>
+
+                <div className="flex flex-col gap-3 px-5 py-4">
+                    <p className="rounded-xl border border-ink-100 bg-ink-50/40 px-3 py-2 text-xs text-ink-600">
+                        <FileSpreadsheet className="-mt-0.5 mr-1 inline size-3.5 text-ink-400" />
+                        {section.hint}
+                    </p>
+
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            leftIcon={<Download className="size-4" />}
+                            onClick={onDownload}
+                            loading={downloading}
+                            className="sm:flex-1"
+                        >
+                            Stiahnuť vzorový .xlsx
+                        </Button>
+                        <input
+                            ref={fileRef}
+                            type="file"
+                            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            className="hidden"
+                            onChange={(e) => onPick(e.target.files?.[0])}
+                        />
+                        <Button
+                            type="button"
+                            leftIcon={<UploadCloud className="size-4" />}
+                            onClick={() => setShowReminder(true)}
+                            loading={uploading}
+                            className="sm:flex-1"
+                        >
+                            Nahrať vyplnený súbor
+                        </Button>
+                    </div>
+
+                    {networkError && (
+                        <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
+                            {networkError}
+                        </div>
+                    )}
+
+                    {result && result.errors.length === 0 && result.created && (
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 text-sm text-emerald-800">
+                            <p className="flex items-center gap-2 font-semibold">
+                                <CheckCircle2 className="size-4" />
+                                Import dokončený
+                            </p>
+                            <ul className="mt-1.5 flex flex-wrap gap-2">
+                                {Object.entries(result.created).map(([k, v]) => (
+                                    <li key={k}>
+                                        <Badge tone="ok">
+                                            {v} {section.createdLabels[k] ?? k}
+                                        </Badge>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {result && result.errors.length > 0 && (
+                        <div className="rounded-xl border border-rose-200 bg-rose-50/40 px-3 py-2.5 text-sm">
+                            <p className="flex items-center gap-2 font-semibold text-rose-800">
+                                <AlertTriangle className="size-4" />
+                                Súbor obsahuje {result.errors.length}{" "}
+                                {result.errors.length === 1 ? "chybu" : "chýb"} — neuložilo sa nič.
+                            </p>
+                            <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto pr-1">
+                                {result.errors.map((e, i) => (
+                                    <li key={i} className="text-xs text-rose-800">
+                                        <span className="font-mono font-semibold">
+                                            {e.sheet} · riadok {e.row}
+                                        </span>{" "}
+                                        — {e.message}
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </>
+    );
+}
+
+// ─── Data Management Page ─────────────────────────────────────────────────────
+
+export function DataPage() {
+    return (
+        <>
+            <SectionBack label="Správa dát" />
+            <DataSection />
+        </>
+    );
+}
+
+const CONFIRM_KEYWORD = "VYMAZAŤ";
+
+function PurgeCard({
+    title,
+    description,
+    detail,
+    onConfirm,
+    busy,
+}: {
+    title: string;
+    description: string;
+    detail: string;
+    onConfirm: () => void;
+    busy: boolean;
+}) {
+    const [showReminder, setShowReminder] = useState(false);
+    const [open, setOpen] = useState(false);
+    const [keyword, setKeyword] = useState("");
+    const valid = keyword.trim() === CONFIRM_KEYWORD;
+
+    function reset() {
+        setOpen(false);
+        setKeyword("");
+    }
+
+    function onDeleteClick() {
+        setShowReminder(true);
+    }
+
+    function onReminderProceed() {
+        setShowReminder(false);
+        setOpen(true);
+    }
+
+    return (
+        <>
+            {showReminder && (
+                <BackupReminderModal
+                    onProceed={onReminderProceed}
+                    onCancel={() => setShowReminder(false)}
+                />
+            )}
+            <div className="rounded-2xl border border-red-200 bg-red-50/40 p-4">
+                <div className="flex items-center gap-3">
+                    <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-red-100 text-red-600">
+                        <Trash2 className="size-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-ink-900">{title}</p>
+                        <p className="mt-0.5 text-xs text-ink-500">{description}</p>
+                        <p className="mt-1 text-[11px] text-red-700/80">{detail}</p>
+                    </div>
+                    {!open && (
+                        <button
+                            type="button"
+                            onClick={onDeleteClick}
+                            disabled={busy}
+                            className="shrink-0 rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+                        >
+                            Vymazať
+                        </button>
+                    )}
+                </div>
+
+                {open && (
+                    <div className="mt-4 flex flex-col gap-3 border-t border-red-200 pt-4">
+                        <p className="text-xs text-ink-700">
+                            Pre potvrdenie napíš{" "}
+                            <span className="font-mono font-bold text-red-700">
+                                {CONFIRM_KEYWORD}
+                            </span>{" "}
+                            do poľa nižšie:
+                        </p>
+                        <input
+                            type="text"
+                            value={keyword}
+                            onChange={(e) => setKeyword(e.target.value)}
+                            placeholder={CONFIRM_KEYWORD}
+                            autoComplete="off"
+                            spellCheck={false}
+                            className="w-full rounded-xl border border-red-200 bg-white px-3 py-2 font-mono text-sm text-ink-900 outline-none focus:border-red-400 focus:ring-2 focus:ring-red-200"
+                        />
+                        <div className="flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={reset}
+                                className="rounded-xl px-3 py-1.5 text-xs font-semibold text-ink-600 transition-colors hover:bg-ink-100"
+                            >
+                                Zrušiť
+                            </button>
+                            <Button
+                                type="button"
+                                disabled={!valid}
+                                loading={busy}
+                                onClick={() => {
+                                    if (valid) {
+                                        onConfirm();
+                                        reset();
+                                    }
+                                }}
+                                className="bg-red-600 hover:bg-red-700 focus-visible:ring-red-300"
+                            >
+                                Potvrdiť vymazanie
+                            </Button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </>
+    );
+}
+
+function DataSection() {
+    const { csrfToken } = useAuth();
+    const toast = useToast();
+    const [busyCompanies, setBusyCompanies] = useState(false);
+    const [busyInspections, setBusyInspections] = useState(false);
+    const [busyTrainings, setBusyTrainings] = useState(false);
+
+    async function purge(
+        action: () => Promise<{ deleted: number }>,
+        setBusy: (v: boolean) => void,
+        label: string,
+    ) {
+        setBusy(true);
+        try {
+            const res = await action();
+            toast.success(
+                `${label}: vymazaných ${res.deleted} záznamov.`,
+            );
+        } catch {
+            toast.error("Vymazanie zlyhalo. Skús to znova.");
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    function downloadExport() {
+        const url = DataApi.exportUrl();
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }
+
+    return (
+        <div className="flex flex-col gap-4">
+            {/* Export */}
+            <Card className="overflow-hidden">
+                <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-slate-50/80 to-transparent px-5 py-4">
+                    <div className="grid size-11 place-items-center rounded-2xl bg-slate-700 text-white shadow-[var(--shadow-glow)]">
+                        <Download className="size-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                        <h2 className="text-base font-semibold text-ink-900">
+                            Export / záloha dát
+                        </h2>
+                        <p className="text-xs text-ink-500">
+                            Stiahni všetky firmy, kontroly a školenia ako JSON
+                            súbor. Vhodné ako osobná záloha pred hromadnými
+                            zmenami.
+                        </p>
+                    </div>
+                </div>
+                <div className="px-5 py-5">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                        <div className="min-w-0 flex-1 text-sm text-ink-600">
+                            <p>
+                                Export obsahuje{" "}
+                                <strong className="text-ink-800">
+                                    firmy, prevádzky, kontroly, školenia
+                                </strong>{" "}
+                                vrátane všetkých položiek a účastníkov. PDF
+                                protokoly nie sú súčasťou exportu — sú
+                                dostupné cez tlačidlo stiahnutia pri každej
+                                kontrole.
+                            </p>
+                            <p className="mt-2 text-xs text-ink-400">
+                                Súbor si ulož na bezpečné miesto (napr. Google
+                                Drive alebo e-mail). Ak omylom zmažeš dáta,
+                                vieme ich z tohto súboru obnoviť.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={downloadExport}
+                            className="flex shrink-0 items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
+                        >
+                            <Download className="size-4" />
+                            Stiahnuť zálohu
+                        </button>
+                    </div>
+                </div>
+            </Card>
+
+            {/* Import z Excelu */}
+            <Card className="overflow-hidden">
+                <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-emerald-50/60 to-transparent px-5 py-4">
+                    <div className="grid size-11 place-items-center rounded-2xl bg-emerald-600 text-white shadow-[var(--shadow-glow)]">
+                        <FileSpreadsheet className="size-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                        <h2 className="text-base font-semibold text-ink-900">
+                            Import z Excelu
+                        </h2>
+                        <p className="text-xs text-ink-500">
+                            Hromadný import firiem, kontrol a školení zo vzorovej Excel šablóny.
+                        </p>
+                    </div>
+                </div>
+                <div className="flex flex-col gap-4 px-5 py-5">
+                    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-ink-700">
+                        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
+                        <span>
+                            Import beží <strong>atomicky</strong> — ak ktorýkoľvek riadok
+                            obsahuje chybu, neuloží sa <em>nič</em>. Oprav riadky podľa
+                            chybového hlásenia a nahraj súbor znova.
+                        </span>
+                    </div>
+                    {IMPORT_DEFS.map((section) => (
+                        <ImportSubSection key={section.kind} section={section} />
+                    ))}
+                </div>
+            </Card>
+
+            {/* Danger zone */}
+            <Card className="overflow-hidden">
+                <div className="flex items-center gap-3 border-b border-red-100 bg-gradient-to-br from-red-50/60 to-transparent px-5 py-4">
+                    <div className="grid size-11 place-items-center rounded-2xl bg-red-500 text-white shadow-[var(--shadow-glow)]">
+                        <AlertTriangle className="size-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                        <h2 className="text-base font-semibold text-ink-900">
+                            Hromadné vymazanie
+                        </h2>
+                        <p className="text-xs text-ink-500">
+                            Nevratné operácie. Pred vymazaním si odporúčame
+                            stiahnuť zálohu.
+                        </p>
+                    </div>
+                </div>
+                <div className="flex flex-col gap-3 px-5 py-5">
+                    <PurgeCard
+                        title="Vymazať všetky firmy"
+                        description="Vymaže všetky firmy a prevádzky vrátane všetkých kontrol, školení a dokumentov."
+                        detail="Toto je totálny reset — zmažú sa aj všetky kontroly a školenia, pretože sú naviazané na firmy."
+                        busy={busyCompanies}
+                        onConfirm={() =>
+                            purge(
+                                () => DataApi.purgeCompanies(csrfToken),
+                                setBusyCompanies,
+                                "Firmy",
+                            )
+                        }
+                    />
+                    <PurgeCard
+                        title="Vymazať všetky kontroly"
+                        description="Vymaže všetky záznamy o kontrolách a ich položky. Firmy a školenia zostanú."
+                        detail="Zmažú sa všetky kontroly bez ohľadu na stav (draft aj finalizované)."
+                        busy={busyInspections}
+                        onConfirm={() =>
+                            purge(
+                                () => DataApi.purgeInspections(csrfToken),
+                                setBusyInspections,
+                                "Kontroly",
+                            )
+                        }
+                    />
+                    <PurgeCard
+                        title="Vymazať všetky školenia"
+                        description="Vymaže všetky školenia a zoznamy účastníkov. Firmy a kontroly zostanú."
+                        detail="Zmažú sa všetky školenia bez ohľadu na stav vrátane podpisov účastníkov."
+                        busy={busyTrainings}
+                        onConfirm={() =>
+                            purge(
+                                () => DataApi.purgeTrainings(csrfToken),
+                                setBusyTrainings,
+                                "Školenia",
+                            )
+                        }
+                    />
+                </div>
+            </Card>
         </div>
     );
 }
