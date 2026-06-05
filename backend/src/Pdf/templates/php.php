@@ -38,12 +38,8 @@ if (!empty($inspector['certification_number'])) {
   $inspectorLine .= ' | č. opr.: ' . $h($inspector['certification_number']);
 }
 
-// City extraction for "Miesto a dátum" in signatures
-$addrSrc = $facility['address'] ?: $company['address'] ?: '';
-$city = '';
-if (preg_match('/\d{3}\s\d{2}\s+(.+)$/u', $addrSrc, $m)) {
-  $city = trim($m[1]);
-}
+// "Miesto" for the signature line: facility city, falling back to company city.
+$city = ($facility['city'] ?? '') ?: ($company['city'] ?? '');
 $miesto = ($city ? $city . ', ' : '') . $formatDate($inspection['executed_on'] ?? null);
 
 $statusColors = ['A' => '#2e7d32', 'TS' => '#b95400', 'O' => '#c4231b', 'V' => '#4a4a52'];

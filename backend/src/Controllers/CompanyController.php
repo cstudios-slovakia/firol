@@ -10,6 +10,7 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Support\Address;
 use PDO;
 
 final class CompanyController
@@ -27,7 +28,7 @@ final class CompanyController
         // tenant via the account_id condition on the parent query.
         // Admins get all companies across all accounts (no tenant filter).
         if ($isAdmin) {
-            $sql = 'SELECT c.id, c.name, c.ico, c.address, c.contact,
+            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact,
                            c.account_id,
                            a.invoice_company_name AS account_name,
                            (SELECT COUNT(*) FROM facilities f
@@ -43,7 +44,7 @@ final class CompanyController
                     WHERE  c.archived_at IS NULL';
             $params = [];
         } else {
-            $sql = 'SELECT c.id, c.name, c.ico, c.address, c.contact,
+            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact,
                            (SELECT COUNT(*) FROM facilities f
                              WHERE f.company_id = c.id AND f.archived_at IS NULL) AS facilities_count,
                            (SELECT MAX(i.executed_on) FROM inspections i
@@ -83,7 +84,7 @@ final class CompanyController
         $row = self::findOrFail($isAdmin ? null : $accountId, $id);
 
         $facStmt = Db::pdo()->prepare(
-            'SELECT id, name, address, contact_person, notes
+            'SELECT id, name, street, postal_code, city, contact_person, notes
              FROM   facilities
              WHERE  company_id = ? AND archived_at IS NULL
              ORDER  BY name ASC'
@@ -120,6 +121,7 @@ final class CompanyController
         }
         foreach ($facilities as &$fac) {
             $fac['id'] = (int) $fac['id'];
+            $fac['address'] = Address::format($fac['street'], $fac['postal_code'], $fac['city']);
             $fac['last_periodicities'] = $defaultsByFacility[$fac['id']] ?? new \stdClass();
         }
         unset($fac);
@@ -135,13 +137,13 @@ final class CompanyController
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
 
-        [$name, $ico, $address, $contact] = self::readBody($req);
+        [$name, $ico, $addr, $contact] = self::readBody($req);
 
         $stmt = Db::pdo()->prepare(
-            'INSERT INTO companies (account_id, name, ico, address, contact)
-             VALUES (?, ?, ?, ?, ?)'
+            'INSERT INTO companies (account_id, name, ico, street, postal_code, city, contact)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
-        $stmt->execute([$accountId, $name, $ico, $address, $contact]);
+        $stmt->execute([$accountId, $name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact]);
         $id = (int) Db::pdo()->lastInsertId();
 
         Response::json(['company' => self::shape(self::findOrFail($accountId, $id))], 201);
@@ -157,13 +159,13 @@ final class CompanyController
         $existing = self::findOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
-        [$name, $ico, $address, $contact] = self::readBody($req);
+        [$name, $ico, $addr, $contact] = self::readBody($req);
 
         $stmt = Db::pdo()->prepare(
-            'UPDATE companies SET name = ?, ico = ?, address = ?, contact = ?
+            'UPDATE companies SET name = ?, ico = ?, street = ?, postal_code = ?, city = ?, contact = ?
              WHERE  id = ? AND account_id = ?'
         );
-        $stmt->execute([$name, $ico, $address, $contact, $id, $scopeAccountId]);
+        $stmt->execute([$name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $id, $scopeAccountId]);
 
         Response::json(['company' => self::shape(self::findOrFail($isAdmin ? null : $accountId, $id))]);
     }
@@ -184,7 +186,12 @@ final class CompanyController
         Response::noContent();
     }
 
-    /** @return array{0:string,1:?string,2:?string,3:?string} */
+    /**
+     * @return array{
+     *   0:string, 1:?string,
+     *   2:array{street:?string,postal_code:?string,city:?string}, 3:?string
+     * }
+     */
     private static function readBody(Request $req): array
     {
         $name    = $req->jsonString('name');
@@ -204,7 +211,15 @@ final class CompanyController
             }
         }
 
-        return [$name, $ico, $address, $contact];
+        // The edit form sends the structured parts; offline/import clients may
+        // still send a single combined "Adresa" string.
+        $addr = Address::resolve(
+            $req->jsonString('street'),
+            $req->jsonString('postal_code'),
+            $req->jsonString('city'),
+            $address,
+        );
+        return [$name, $ico, $addr, $contact];
     }
 
     /** @return array<string, mixed> */
@@ -212,14 +227,14 @@ final class CompanyController
     {
         if ($accountId === null) {
             $stmt = Db::pdo()->prepare(
-                'SELECT id, account_id, name, ico, address, contact, created_at
+                'SELECT id, account_id, name, ico, street, postal_code, city, contact, created_at
                  FROM   companies
                  WHERE  id = ? AND archived_at IS NULL'
             );
             $stmt->execute([$id]);
         } else {
             $stmt = Db::pdo()->prepare(
-                'SELECT id, account_id, name, ico, address, contact, created_at
+                'SELECT id, account_id, name, ico, street, postal_code, city, contact, created_at
                  FROM   companies
                  WHERE  id = ? AND account_id = ? AND archived_at IS NULL'
             );
@@ -246,6 +261,11 @@ final class CompanyController
         }
         if (isset($row['inspections_count'])) {
             $row['inspections_count'] = (int) $row['inspections_count'];
+        }
+        // Expose both the combined `address` (for read-only display) and the
+        // structured parts (so the edit form can prefill them individually).
+        if (array_key_exists('street', $row) || array_key_exists('postal_code', $row) || array_key_exists('city', $row)) {
+            $row['address'] = Address::format($row['street'] ?? null, $row['postal_code'] ?? null, $row['city'] ?? null);
         }
         $row['id'] = (int) $row['id'];
         return $row;

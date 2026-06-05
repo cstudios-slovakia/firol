@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { MapPin, NotebookPen, User, Warehouse } from 'lucide-react';
+import { Map, Mailbox, MapPin, NotebookPen, User, Warehouse } from 'lucide-react';
 import { Facilities, type Facility, type FacilityPayload } from '@/api/facilities';
 import { ApiError } from '@/lib/api';
 import { facilityCreateOptimistic } from '@/lib/offlineEntities';
@@ -44,7 +44,9 @@ export function FacilityForm({
   const toast = useToast();
 
   const [name, setName] = useState(initial?.name ?? '');
-  const [address, setAddress] = useState(initial?.address ?? '');
+  const [street, setStreet] = useState(initial?.street ?? '');
+  const [postalCode, setPostalCode] = useState(initial?.postal_code ?? '');
+  const [city, setCity] = useState(initial?.city ?? '');
   const [contactPerson, setContactPerson] = useState(initial?.contact_person ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
 
@@ -67,7 +69,9 @@ export function FacilityForm({
     setSubmitting(true);
     const payload: FacilityPayload = {
       name: name.trim(),
-      address: address.trim() || undefined,
+      street: street.trim() || undefined,
+      postal_code: postalCode.trim() || undefined,
+      city: city.trim() || undefined,
       contact_person: contactPerson.trim() || undefined,
       notes: notes.trim() || undefined,
     };
@@ -75,7 +79,9 @@ export function FacilityForm({
       const optimistic = facilityCreateOptimistic({
         companyId: companyId!,
         name: payload.name,
-        address: payload.address ?? null,
+        street: payload.street ?? null,
+        postal_code: payload.postal_code ?? null,
+        city: payload.city ?? null,
         contact_person: payload.contact_person ?? null,
         notes: payload.notes ?? null,
       });
@@ -109,17 +115,43 @@ export function FacilityForm({
         )}
       </Field>
 
-      <Field label="Adresa">
+      <Field label="Ulica a číslo">
         {(p) => (
           <Input
             {...p}
             leftIcon={<MapPin className="size-4" />}
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="Priemyselná 5, Bratislava"
+            value={street}
+            onChange={(e) => setStreet(e.target.value)}
+            placeholder="Priemyselná 5"
           />
         )}
       </Field>
+
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="PSČ" className="col-span-1">
+          {(p) => (
+            <Input
+              {...p}
+              leftIcon={<Mailbox className="size-4" />}
+              value={postalCode}
+              onChange={(e) => setPostalCode(e.target.value)}
+              placeholder="851 01"
+            />
+          )}
+        </Field>
+
+        <Field label="Obec" className="col-span-2">
+          {(p) => (
+            <Input
+              {...p}
+              leftIcon={<Map className="size-4" />}
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              placeholder="Bratislava"
+            />
+          )}
+        </Field>
+      </div>
 
       <Field label="Kontaktná osoba">
         {(p) => (

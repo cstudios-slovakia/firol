@@ -4,7 +4,11 @@ export type CompanyListItem = {
   id: number;
   name: string;
   ico: string | null;
+  /** Combined address for read-only display; reassembled from the parts below. */
   address: string | null;
+  street: string | null;
+  postal_code: string | null;
+  city: string | null;
   contact: string | null;
   facilities_count: number;
   inspections_count: number;
@@ -18,7 +22,11 @@ export type Company = {
   id: number;
   name: string;
   ico: string | null;
+  /** Combined address for read-only display; reassembled from the parts below. */
   address: string | null;
+  street: string | null;
+  postal_code: string | null;
+  city: string | null;
   contact: string | null;
   created_at?: string;
 };
@@ -26,7 +34,11 @@ export type Company = {
 export type FacilityListItem = {
   id: number;
   name: string;
+  /** Combined address for read-only display; reassembled from the parts below. */
   address: string | null;
+  street: string | null;
+  postal_code: string | null;
+  city: string | null;
   contact_person: string | null;
   notes: string | null;
   /**
@@ -45,7 +57,9 @@ export type CompanyDetail = {
 export type CompanyPayload = {
   name: string;
   ico?: string;
-  address?: string;
+  street?: string;
+  postal_code?: string;
+  city?: string;
   contact?: string;
 };
 

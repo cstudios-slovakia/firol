@@ -10,6 +10,7 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Support\Address;
 
 final class FacilityController
 {
@@ -54,13 +55,13 @@ final class FacilityController
             }
         }
 
-        [$name, $address, $contactPerson, $notes] = self::readBody($req);
+        [$name, $addr, $contactPerson, $notes] = self::readBody($req);
 
         $stmt = Db::pdo()->prepare(
-            'INSERT INTO facilities (account_id, company_id, name, address, contact_person, notes)
-             VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO facilities (account_id, company_id, name, street, postal_code, city, contact_person, notes)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        $stmt->execute([$accountId, $companyId, $name, $address, $contactPerson, $notes]);
+        $stmt->execute([$accountId, $companyId, $name, $addr['street'], $addr['postal_code'], $addr['city'], $contactPerson, $notes]);
         $id = (int) Db::pdo()->lastInsertId();
 
         Response::json(['facility' => self::shapePublic(self::loadOrFail($accountId, $id))], 201);
@@ -76,13 +77,13 @@ final class FacilityController
         $existing = self::loadOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
-        [$name, $address, $contactPerson, $notes] = self::readBody($req);
+        [$name, $addr, $contactPerson, $notes] = self::readBody($req);
 
         Db::pdo()->prepare(
             'UPDATE facilities
-             SET    name = ?, address = ?, contact_person = ?, notes = ?
+             SET    name = ?, street = ?, postal_code = ?, city = ?, contact_person = ?, notes = ?
              WHERE  id = ? AND account_id = ?'
-        )->execute([$name, $address, $contactPerson, $notes, $id, $scopeAccountId]);
+        )->execute([$name, $addr['street'], $addr['postal_code'], $addr['city'], $contactPerson, $notes, $id, $scopeAccountId]);
 
         Response::json(['facility' => self::shapePublic(self::loadOrFail($scopeAccountId, $id))]);
     }
@@ -104,7 +105,12 @@ final class FacilityController
         Response::noContent();
     }
 
-    /** @return array{0:string,1:?string,2:?string,3:?string} */
+    /**
+     * @return array{
+     *   0:string,
+     *   1:array{street:?string,postal_code:?string,city:?string}, 2:?string, 3:?string
+     * }
+     */
     private static function readBody(Request $req): array
     {
         $name          = $req->jsonString('name');
@@ -115,13 +121,21 @@ final class FacilityController
         if ($name === null || $name === '') {
             Response::error('Field required: name', 422);
         }
-        return [$name, $address, $contactPerson, $notes];
+        // The edit form sends the structured parts; offline/import clients may
+        // still send a single combined "Adresa" string.
+        $addr = Address::resolve(
+            $req->jsonString('street'),
+            $req->jsonString('postal_code'),
+            $req->jsonString('city'),
+            $address,
+        );
+        return [$name, $addr, $contactPerson, $notes];
     }
 
     /** @return array<string, mixed> */
     private static function loadOrFail(?int $accountId, int $id): array
     {
-        $sql = 'SELECT f.id, f.account_id, f.name, f.address, f.contact_person, f.notes,
+        $sql = 'SELECT f.id, f.account_id, f.name, f.street, f.postal_code, f.city, f.contact_person, f.notes,
                        f.company_id, c.name AS company_name
                 FROM   facilities f
                 JOIN   companies  c ON c.id = f.company_id
@@ -147,6 +161,9 @@ final class FacilityController
     private static function shapePublic(array $row): array
     {
         unset($row['account_id']);
+        // Expose both the combined `address` (for read-only display) and the
+        // structured parts (so the edit form can prefill them individually).
+        $row['address'] = Address::format($row['street'] ?? null, $row['postal_code'] ?? null, $row['city'] ?? null);
         $row['id']         = (int) $row['id'];
         $row['company_id'] = (int) $row['company_id'];
         return $row;

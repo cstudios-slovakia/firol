@@ -10,6 +10,7 @@ use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Import\Schema;
+use Firol\Support\Address;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -340,8 +341,8 @@ final class ImportController
             $companyIdByIco = self::loadCompanyMap($accountId);
 
             $insertCompany = $pdo->prepare(
-                'INSERT INTO companies (account_id, name, ico, address, contact)
-                 VALUES (?, ?, ?, ?, ?)'
+                'INSERT INTO companies (account_id, name, ico, street, postal_code, city, contact)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)'
             );
             foreach ($rowsBySheet['Firmy'] as $idx => $row) {
                 $rowNum = $idx + 2; // header + 0-based offset
@@ -360,7 +361,8 @@ final class ImportController
                     continue;
                 }
 
-                $insertCompany->execute([$accountId, $name, $ico, $address, $contact]);
+                $addr = Address::parse($address);
+                $insertCompany->execute([$accountId, $name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact]);
                 $newId = (int) $pdo->lastInsertId();
                 $createdCompanies++;
                 if ($ico !== null) {
@@ -369,8 +371,8 @@ final class ImportController
             }
 
             $insertFacility = $pdo->prepare(
-                'INSERT INTO facilities (account_id, company_id, name, address, contact_person, notes)
-                 VALUES (?, ?, ?, ?, ?, ?)'
+                'INSERT INTO facilities (account_id, company_id, name, street, postal_code, city, contact_person, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
             );
             foreach ($rowsBySheet['Prevadzky'] as $idx => $row) {
                 $rowNum = $idx + 2;
@@ -389,11 +391,14 @@ final class ImportController
                     $errors[] = ['sheet' => 'Prevadzky', 'row' => $rowNum, 'message' => "Firma s IČO $ico neexistuje."];
                     continue;
                 }
+                $facAddr = Address::parse(self::str($row, 'address'));
                 $insertFacility->execute([
                     $accountId,
                     $companyId,
                     $name,
-                    self::str($row, 'address'),
+                    $facAddr['street'],
+                    $facAddr['postal_code'],
+                    $facAddr['city'],
                     self::str($row, 'contact_person'),
                     self::str($row, 'notes'),
                 ]);

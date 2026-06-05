@@ -3,7 +3,11 @@ import { api, type OptimisticSpec } from '@/lib/api';
 export type Facility = {
   id: number;
   name: string;
+  /** Combined address for read-only display; reassembled from the parts below. */
   address: string | null;
+  street: string | null;
+  postal_code: string | null;
+  city: string | null;
   contact_person: string | null;
   notes: string | null;
   company_id: number;
@@ -12,7 +16,9 @@ export type Facility = {
 
 export type FacilityPayload = {
   name: string;
-  address?: string;
+  street?: string;
+  postal_code?: string;
+  city?: string;
   contact_person?: string;
   notes?: string;
 };

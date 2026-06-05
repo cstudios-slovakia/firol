@@ -43,6 +43,7 @@ import type {
   FacilityListItem,
 } from '@/api/companies';
 import type { Facility } from '@/api/facilities';
+import { formatAddress } from './address';
 
 function nowIso(): string {
   // Server timestamps look like "2026-06-03 10:20:00"; mirror that shape.
@@ -152,15 +153,21 @@ export function trainingCreateOptimistic(args: {
 export function companyCreateOptimistic(args: {
   name: string;
   ico: string | null;
-  address: string | null;
+  street: string | null;
+  postal_code: string | null;
+  city: string | null;
   contact: string | null;
 }): OptimisticSpec {
   const id = mintTempId();
+  const address = formatAddress(args.street, args.postal_code, args.city);
   const company: Company = {
     id,
     name: args.name,
     ico: args.ico,
-    address: args.address,
+    address,
+    street: args.street,
+    postal_code: args.postal_code,
+    city: args.city,
     contact: args.contact,
     created_at: nowIso(),
   };
@@ -169,7 +176,10 @@ export function companyCreateOptimistic(args: {
     id,
     name: args.name,
     ico: args.ico,
-    address: args.address,
+    address,
+    street: args.street,
+    postal_code: args.postal_code,
+    city: args.city,
     contact: args.contact,
     facilities_count: 0,
     inspections_count: 0,
@@ -190,15 +200,21 @@ export function facilityCreateOptimistic(args: {
   companyId: number;
   companyName?: string;
   name: string;
-  address: string | null;
+  street: string | null;
+  postal_code: string | null;
+  city: string | null;
   contact_person: string | null;
   notes: string | null;
 }): OptimisticSpec {
   const id = mintTempId();
+  const address = formatAddress(args.street, args.postal_code, args.city);
   const facility: Facility = {
     id,
     name: args.name,
-    address: args.address,
+    address,
+    street: args.street,
+    postal_code: args.postal_code,
+    city: args.city,
     contact_person: args.contact_person,
     notes: args.notes,
     company_id: args.companyId,
@@ -207,7 +223,10 @@ export function facilityCreateOptimistic(args: {
   const listRow: FacilityListItem = {
     id,
     name: args.name,
-    address: args.address,
+    address,
+    street: args.street,
+    postal_code: args.postal_code,
+    city: args.city,
     contact_person: args.contact_person,
     notes: args.notes,
     last_periodicities: {},

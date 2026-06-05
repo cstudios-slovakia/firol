@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, MapPin, NotebookPen, User, Warehouse } from 'lucide-react';
+import { ArrowLeft, Map, Mailbox, MapPin, NotebookPen, User, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Facilities } from '@/api/facilities';
 import { facilityCreateOptimistic } from '@/lib/offlineEntities';
@@ -31,7 +31,9 @@ export function FacilityEditPage() {
   const toast = useToast();
 
   const [name, setName] = useState('');
-  const [address, setAddress] = useState('');
+  const [street, setStreet] = useState('');
+  const [postalCode, setPostalCode] = useState('');
+  const [city, setCity] = useState('');
   const [contactPerson, setContactPerson] = useState('');
   const [notes, setNotes] = useState('');
   const [companyId, setCompanyId] = useState<number | null>(
@@ -51,7 +53,9 @@ export function FacilityEditPage() {
         if (cancelled) return;
         const f = res.facility;
         setName(f.name);
-        setAddress(f.address ?? '');
+        setStreet(f.street ?? '');
+        setPostalCode(f.postal_code ?? '');
+        setCity(f.city ?? '');
         setContactPerson(f.contact_person ?? '');
         setNotes(f.notes ?? '');
         setCompanyId(f.company_id);
@@ -76,7 +80,9 @@ export function FacilityEditPage() {
     setSubmitting(true);
     const payload = {
       name: name.trim(),
-      address: address.trim() || undefined,
+      street: street.trim() || undefined,
+      postal_code: postalCode.trim() || undefined,
+      city: city.trim() || undefined,
       contact_person: contactPerson.trim() || undefined,
       notes: notes.trim() || undefined,
     };
@@ -85,7 +91,9 @@ export function FacilityEditPage() {
         const optimistic = facilityCreateOptimistic({
           companyId: mode.companyId,
           name: payload.name,
-          address: payload.address ?? null,
+          street: payload.street ?? null,
+          postal_code: payload.postal_code ?? null,
+          city: payload.city ?? null,
           contact_person: payload.contact_person ?? null,
           notes: payload.notes ?? null,
         });
@@ -152,17 +160,43 @@ export function FacilityEditPage() {
               )}
             </Field>
 
-            <Field label="Adresa">
+            <Field label="Ulica a číslo">
               {(p) => (
                 <Input
                   {...p}
                   leftIcon={<MapPin className="size-4" />}
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Priemyselná 5, Bratislava"
+                  value={street}
+                  onChange={(e) => setStreet(e.target.value)}
+                  placeholder="Priemyselná 5"
                 />
               )}
             </Field>
+
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="PSČ" className="col-span-1">
+                {(p) => (
+                  <Input
+                    {...p}
+                    leftIcon={<Mailbox className="size-4" />}
+                    value={postalCode}
+                    onChange={(e) => setPostalCode(e.target.value)}
+                    placeholder="851 01"
+                  />
+                )}
+              </Field>
+
+              <Field label="Obec" className="col-span-2">
+                {(p) => (
+                  <Input
+                    {...p}
+                    leftIcon={<Map className="size-4" />}
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="Bratislava"
+                  />
+                )}
+              </Field>
+            </div>
 
             <Field label="Kontaktná osoba">
               {(p) => (

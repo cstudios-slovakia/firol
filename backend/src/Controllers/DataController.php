@@ -10,6 +10,7 @@ use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Storage\Storage;
+use Firol\Support\Address;
 use PDO;
 
 /**
@@ -125,20 +126,20 @@ final class DataController
 
         // ── Companies + Facilities ─────────────────────────────────────────────
         $compStmt = $pdo->prepare(
-            'SELECT id, name, ico, address, contact, created_at
+            'SELECT id, name, ico, street, postal_code, city, contact, created_at
              FROM   companies WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
         );
         $compStmt->execute([$accountId]);
-        $companies = $compStmt->fetchAll(PDO::FETCH_ASSOC);
+        $companies = array_map([self::class, 'withCombinedAddress'], $compStmt->fetchAll(PDO::FETCH_ASSOC));
 
         $facStmt = $pdo->prepare(
-            'SELECT id, company_id, name, address, contact_person, notes, created_at
+            'SELECT id, company_id, name, street, postal_code, city, contact_person, notes, created_at
              FROM   facilities WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
         );
         $facStmt->execute([$accountId]);
         $facByCompany = [];
         foreach ($facStmt->fetchAll(PDO::FETCH_ASSOC) as $f) {
-            $facByCompany[(int) $f['company_id']][] = $f;
+            $facByCompany[(int) $f['company_id']][] = self::withCombinedAddress($f);
         }
         foreach ($companies as &$c) {
             $c['id'] = (int) $c['id'];
@@ -279,5 +280,19 @@ final class DataController
         if (empty($remaining)) {
             @rmdir($baseDir);
         }
+    }
+
+    /**
+     * Collapses the split address columns into a single `address` field so the
+     * export keeps the same shape the import expects.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private static function withCombinedAddress(array $row): array
+    {
+        $row['address'] = Address::format($row['street'] ?? null, $row['postal_code'] ?? null, $row['city'] ?? null);
+        unset($row['street'], $row['postal_code'], $row['city']);
+        return $row;
     }
 }

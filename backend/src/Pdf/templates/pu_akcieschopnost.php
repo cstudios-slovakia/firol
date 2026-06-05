@@ -43,11 +43,8 @@ if (!empty($inspector['certification_number'])) {
     $inspectorLine .= ' | č. opr.: ' . $h($inspector['certification_number']);
 }
 
-$addrSrc = $facility['address'] ?: $company['address'] ?: '';
-$city = '';
-if (preg_match('/\d{3}\s\d{2}\s+(.+)$/u', $addrSrc, $m)) {
-    $city = trim($m[1]);
-}
+// "Miesto" for the signature line: facility city, falling back to company city.
+$city = ($facility['city'] ?? '') ?: ($company['city'] ?? '');
 $miesto = ($city ? $city . ', ' : '') . $formatDate($inspection['executed_on'] ?? null);
 
 $bulletItems = [];

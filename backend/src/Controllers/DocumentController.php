@@ -15,6 +15,7 @@ use Firol\Mail\Mailer;
 use Firol\Mail\Templates\DocumentEmail;
 use Firol\Pdf\PdfRenderer;
 use Firol\Storage\Storage;
+use Firol\Support\Address;
 
 /**
  * Generates PDF protocols and serves the stored binaries back. Generation
@@ -431,8 +432,9 @@ final class DocumentController
         $sql = 'SELECT i.id, i.account_id, i.type, i.periodicity_months, i.executed_on, i.status,
                        i.notes, i.inspector_user_id,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
-                       c.address AS company_address,
-                       i.facility_id, f.name AS facility_name, f.address AS facility_address,
+                       c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
+                       i.facility_id, f.name AS facility_name,
+                       f.street AS facility_street, f.postal_code AS facility_postal_code, f.city AS facility_city,
                        f.contact_person AS facility_contact_person
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
@@ -523,11 +525,13 @@ final class DocumentController
             'company' => [
                 'name'    => $inspection['company_name'],
                 'ico'     => $inspection['company_ico'],
-                'address' => $inspection['company_address'],
+                'address' => Address::format($inspection['company_street'], $inspection['company_postal_code'], $inspection['company_city']),
+                'city'    => $inspection['company_city'],
             ],
             'facility' => [
                 'name'           => $inspection['facility_name'],
-                'address'        => $inspection['facility_address'],
+                'address'        => Address::format($inspection['facility_street'], $inspection['facility_postal_code'], $inspection['facility_city']),
+                'city'           => $inspection['facility_city'],
                 'contact_person' => $inspection['facility_contact_person'],
             ],
             'inspector' => [
@@ -831,8 +835,9 @@ final class DocumentController
     {
         $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics, t.status,
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
-                       c.address AS company_address,
-                       t.facility_id, f.name AS facility_name, f.address AS facility_address,
+                       c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
+                       t.facility_id, f.name AS facility_name,
+                       f.street AS facility_street, f.postal_code AS facility_postal_code, f.city AS facility_city,
                        t.trainer_id, tr.fullname AS trainer_name,
                        ip.cert_general   AS trainer_certification_number,
                        ip.signature_path AS trainer_signature_path
@@ -922,11 +927,13 @@ final class DocumentController
             'company' => [
                 'name'    => $training['company_name'],
                 'ico'     => $training['company_ico'],
-                'address' => $training['company_address'],
+                'address' => Address::format($training['company_street'], $training['company_postal_code'], $training['company_city']),
+                'city'    => $training['company_city'],
             ],
             'facility' => [
                 'name'    => $training['facility_name'],
-                'address' => $training['facility_address'],
+                'address' => Address::format($training['facility_street'], $training['facility_postal_code'], $training['facility_city']),
+                'city'    => $training['facility_city'],
             ],
             'trainer' => [
                 'fullname'             => $training['trainer_name'],
