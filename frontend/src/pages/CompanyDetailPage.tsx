@@ -7,6 +7,7 @@ import { Companies, type CompanyDetail } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
+import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 
 export function CompanyDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
@@ -76,6 +77,8 @@ export function CompanyDetailPage() {
         <ArrowLeft className="size-4" />
         Späť na zoznam
       </Link>
+
+      <PendingSyncBanner resource="companies" id={id} />
 
       <Card className="overflow-hidden">
         <div className="bg-gradient-to-br from-firol-50/60 to-transparent px-5 pt-5">

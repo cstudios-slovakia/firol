@@ -11,6 +11,7 @@ import {
   type Training,
 } from '@/api/trainings';
 import { ApiError } from '@/lib/api';
+import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -38,14 +39,19 @@ export function TrainingEditPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([Trainings.show(id), Team.list()])
-      .then(([detail, tm]) => {
+    // The training drives the page (served from cache offline). The team list
+    // is best-effort — offline it may be uncached, in which case the trainer
+    // picker simply has no options.
+    Trainings.show(id)
+      .then(async (detail) => {
         if (cancelled) return;
         const t = detail.training;
         setTraining(t);
-        setMembers(tm.items.filter((m) => m.is_active));
         setDate(t.date ?? '');
         setTrainerId(t.trainer_id);
+        const tm = await Team.list().catch(() => ({ items: [] as TeamMember[] }));
+        if (cancelled) return;
+        setMembers(tm.items.filter((m) => m.is_active));
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -70,6 +76,11 @@ export function TrainingEditPage() {
       toast.success('Školenie uložené');
       navigate(`/trainings/${id}`, { replace: true });
     } catch (err) {
+      // Offline edit: queued + cache patched, navigate to the detail anyway.
+      if (handleOfflineSave(err, toast)) {
+        navigate(`/trainings/${id}`, { replace: true });
+        return;
+      }
       const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
       setError(msg);
       toast.error(msg);

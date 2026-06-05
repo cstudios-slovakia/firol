@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/Button';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 import { getTypeModule } from '@/inspection-types';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
+import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 
 /**
  * Step 3 — summary screen. Final review before PDF generation.
@@ -48,11 +49,17 @@ export function InspectionDetailPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([Inspections.show(id), Inspections.documents(id)])
-      .then(([detail, docs]) => {
+    // The inspection itself drives the page and is served from the local cache
+    // when offline. Documents are a server-only side list (PDFs can't exist for
+    // an unsynced draft), so a failed fetch must not blank out the whole page.
+    Inspections.show(id)
+      .then(async (detail) => {
         if (cancelled) return;
         setData(detail);
-        setDocuments(docs.items);
+        const docs = await Inspections.documents(id).catch(
+          () => ({ items: [] as InspectionDocument[] }),
+        );
+        if (!cancelled) setDocuments(docs.items);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -108,7 +115,11 @@ export function InspectionDetailPage() {
       const res = await Inspections.update(id, { executed_on: value }, csrfToken);
       setData((prev) => (prev ? { ...prev, inspection: { ...prev.inspection, ...res.inspection } } : prev));
     } catch (err) {
-      if (handleOfflineSave(err, toast)) return;
+      if (handleOfflineSave(err, toast)) {
+        // Queued offline — reflect the new date locally (cache is already patched).
+        setData((prev) => (prev ? { ...prev, inspection: { ...prev.inspection, executed_on: value } } : prev));
+        return;
+      }
       setError(err instanceof ApiError ? err.message : 'Dátum sa nepodarilo uložiť.');
     } finally {
       setSavingDate(false);
@@ -169,6 +180,8 @@ export function InspectionDetailPage() {
         <ArrowLeft className="size-4" />
         Späť na zoznam kontrol
       </Link>
+
+      <PendingSyncBanner resource="inspections" id={id} />
 
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">

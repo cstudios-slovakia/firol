@@ -29,6 +29,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 // SIGNATURE DISABLED — import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
+import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 
 export function TrainingDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
@@ -47,11 +48,17 @@ export function TrainingDetailPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([Trainings.show(id), Trainings.documents(id)])
-      .then(([detail, docs]) => {
+    // The training drives the page and is served from cache offline. Documents
+    // are server-only (no PDFs for an unsynced draft), so a failed fetch must
+    // not blank out the whole page.
+    Trainings.show(id)
+      .then(async (detail) => {
         if (cancelled) return;
         setData(detail);
-        setDocuments(docs.items);
+        const docs = await Trainings.documents(id).catch(
+          () => ({ items: [] as TrainingDocument[] }),
+        );
+        if (!cancelled) setDocuments(docs.items);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -63,11 +70,11 @@ export function TrainingDetailPage() {
   }, [id]);
 
   async function refreshDetail() {
-    const [fresh, docs] = await Promise.all([
-      Trainings.show(id),
-      Trainings.documents(id),
-    ]);
+    const fresh = await Trainings.show(id);
     setData(fresh);
+    const docs = await Trainings.documents(id).catch(
+      () => ({ items: [] as TrainingDocument[] }),
+    );
     setDocuments(docs.items);
   }
 
@@ -175,6 +182,8 @@ export function TrainingDetailPage() {
         <ArrowLeft className="size-4" />
         Späť na zoznam
       </Link>
+
+      <PendingSyncBanner resource="trainings" id={id} />
 
       <Card className="overflow-hidden">
         <div className="bg-gradient-to-br from-firol-50/60 to-transparent px-5 pt-5">

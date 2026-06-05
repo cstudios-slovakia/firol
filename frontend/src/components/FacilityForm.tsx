@@ -3,6 +3,7 @@ import { Map, Mailbox, MapPin, NotebookPen, User, Warehouse } from 'lucide-react
 import { Facilities, type Facility, type FacilityPayload } from '@/api/facilities';
 import { ApiError } from '@/lib/api';
 import { facilityCreateOptimistic } from '@/lib/offlineEntities';
+import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -91,6 +92,11 @@ export function FacilityForm({
       onSaved(res.facility);
       toast.success(mode === 'edit' ? 'Prevádzka uložená' : 'Prevádzka vytvorená');
     } catch (err) {
+      // Offline edit: queued + cache patched, navigate on as if saved.
+      if (handleOfflineSave(err, toast)) {
+        if (initial) onSaved(initial);
+        return;
+      }
       const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
       setApiError(msg);
       toast.error(msg);

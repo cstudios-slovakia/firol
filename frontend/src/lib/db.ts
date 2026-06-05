@@ -47,6 +47,9 @@ export interface MutationEntry {
   contentKind: 'json' | 'formdata' | 'none';
   /** Optional one-line description for the pending-changes UI. */
   label: string;
+  /** Concrete name of the affected record (company/inspection/… name), shown
+   *  under the generic label in the pending-changes UI. */
+  detail?: string;
   createdAt: number;
   attempts: number;
   status: MutationStatus;

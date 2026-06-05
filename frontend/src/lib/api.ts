@@ -46,6 +46,8 @@ export type OptimisticSpec = {
   create?: { clientId: number; idPath: string };
   /** Friendly label for the pending-changes UI. */
   label?: string;
+  /** Concrete name of the record (e.g. company name) shown under the label. */
+  detail?: string;
 };
 
 // In production VITE_API_BASE_URL is "/api.php?path=" — the path and its
@@ -138,6 +140,7 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
         path,
         body: opts.body,
         label: opts.label ?? optimistic.label ?? `${method} ${path}`,
+        detail: optimistic.detail,
         clientId: optimistic.create?.clientId,
         idPath: optimistic.create?.idPath,
       });

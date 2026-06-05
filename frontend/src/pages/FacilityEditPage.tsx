@@ -5,6 +5,7 @@ import { useAuth } from '@/auth/AuthContext';
 import { Facilities } from '@/api/facilities';
 import { facilityCreateOptimistic } from '@/lib/offlineEntities';
 import { ApiError } from '@/lib/api';
+import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -106,6 +107,11 @@ export function FacilityEditPage() {
         navigate(`/facilities/${mode.facilityId}`, { replace: true });
       }
     } catch (err) {
+      // Offline edit: queued + cache patched, navigate to the detail anyway.
+      if (handleOfflineSave(err, toast)) {
+        if (mode.kind === 'edit') navigate(`/facilities/${mode.facilityId}`, { replace: true });
+        return;
+      }
       const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
       setError(msg);
       toast.error(msg);

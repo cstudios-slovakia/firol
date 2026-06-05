@@ -3,6 +3,7 @@ import { Building2, Hash, MapPin, Phone, Mailbox, Map } from 'lucide-react';
 import { Companies, type Company, type CompanyPayload } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { companyCreateOptimistic } from '@/lib/offlineEntities';
+import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -80,6 +81,13 @@ export function CompanyForm({
       onSaved(res.company);
       toast.success(mode === 'edit' ? 'Firma uložená' : 'Firma vytvorená');
     } catch (err) {
+      // Offline edit: the PATCH is queued and the local cache already reflects
+      // the change — navigate on as if saved; the detail shows the "waiting to
+      // save" banner. (Create offline resolves normally via the optimistic spec.)
+      if (handleOfflineSave(err, toast)) {
+        if (initial) onSaved(initial);
+        return;
+      }
       const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
       setError(msg);
       toast.error(msg);

@@ -3,7 +3,8 @@ import { CloudOff, Cloud, RotateCw, Trash2, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useOnlineStatus } from '@/lib/useOnlineStatus';
 import { usePendingMutations } from '@/lib/usePendingMutations';
-import { drainQueue, retryMutation, discardMutation } from '@/lib/queue';
+import { drainQueue, retryMutation, discardMutation, type DrainResult } from '@/lib/queue';
+import { useToast } from '@/lib/toast';
 
 /**
  * Chip in the AppShell header showing offline state + queued mutations.
@@ -20,8 +21,19 @@ import { drainQueue, retryMutation, discardMutation } from '@/lib/queue';
 export function OfflineIndicator() {
   const online = useOnlineStatus();
   const pending = usePendingMutations();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Manual sync feedback: a network error means "still offline" — surface it
+  // as one clear toast instead of stamping "Failed to fetch" on every row.
+  function reportSync(res: DrainResult) {
+    if (res.networkError) {
+      toast.error('Údaje sa nepodarilo synchronizovať — skontroluj pripojenie na internet.');
+    } else if (res.synced > 0 && res.failed === 0) {
+      toast.success('Údaje boli uložené.');
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -70,7 +82,7 @@ export function OfflineIndicator() {
             {hasQueue && (
               <button
                 type="button"
-                onClick={() => drainQueue().catch(() => undefined)}
+                onClick={() => drainQueue().then(reportSync).catch(() => undefined)}
                 disabled={!online}
                 className="text-xs font-medium text-firol-700 hover:text-firol-800 disabled:opacity-40"
               >
@@ -106,6 +118,11 @@ export function OfflineIndicator() {
                         )}
                         <span className="truncate">{m.label}</span>
                       </div>
+                      {m.detail && (
+                        <div className="mt-0.5 truncate text-[11px] font-medium text-ink-700">
+                          {m.detail}
+                        </div>
+                      )}
                       <div className="mt-0.5 text-[11px] text-ink-500">
                         {new Date(m.createdAt).toLocaleTimeString('sk', {
                           hour: '2-digit',
@@ -120,7 +137,7 @@ export function OfflineIndicator() {
                     <div className="flex shrink-0 gap-1">
                       <button
                         type="button"
-                        onClick={() => retryMutation(m.id!).catch(() => undefined)}
+                        onClick={() => retryMutation(m.id!).then(reportSync).catch(() => undefined)}
                         disabled={!online}
                         className="grid size-7 place-items-center rounded-lg text-ink-500 hover:bg-white hover:text-ink-700 disabled:opacity-40"
                         aria-label="Opakovať"

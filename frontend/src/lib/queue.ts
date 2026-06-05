@@ -33,6 +33,8 @@ export type EnqueueInput = {
   path: string;
   body: unknown;
   label: string;
+  /** Concrete name of the affected record, shown under the label in the UI. */
+  detail?: string;
   /** Temp id this create resolves — drives id remapping on sync. */
   clientId?: number;
   /** Dot-path to the real id in the server response, e.g. `inspection.id`. */
@@ -40,7 +42,7 @@ export type EnqueueInput = {
 };
 
 export async function enqueueMutation(input: EnqueueInput): Promise<number> {
-  const { method, path, body, label, clientId, idPath } = input;
+  const { method, path, body, label, detail, clientId, idPath } = input;
   let serialised: unknown;
   let kind: MutationEntry['contentKind'];
   if (body === undefined) {
@@ -60,6 +62,7 @@ export async function enqueueMutation(input: EnqueueInput): Promise<number> {
     body: serialised,
     contentKind: kind,
     label,
+    detail,
     createdAt: Date.now(),
     attempts: 0,
     status: 'pending',
@@ -71,9 +74,25 @@ export async function enqueueMutation(input: EnqueueInput): Promise<number> {
 
 let draining = false;
 
-export async function drainQueue(): Promise<void> {
-  if (draining) return;
-  if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+/** Outcome summary so manual sync callers can show the right toast. */
+export type DrainResult = {
+  /** Mutations that replayed successfully. */
+  synced: number;
+  /** Mutations the server rejected (4xx/5xx) — parked for manual retry. */
+  failed: number;
+  /** True when the drain stopped because the network is still down. */
+  networkError: boolean;
+};
+
+type ReplayOutcome = 'synced' | 'failed' | 'stop-auth' | 'stop-network';
+
+export async function drainQueue(): Promise<DrainResult> {
+  const result: DrainResult = { synced: 0, failed: 0, networkError: false };
+  if (draining) return result;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    result.networkError = true;
+    return result;
+  }
   draining = true;
   try {
     while (true) {
@@ -83,17 +102,25 @@ export async function drainQueue(): Promise<void> {
         .sortBy('createdAt');
       const mutation = next[0];
       if (!mutation) break;
-      const stop = await replay(mutation);
-      if (stop) break;
+      const outcome = await replay(mutation);
+      if (outcome === 'synced') result.synced += 1;
+      else if (outcome === 'failed') result.failed += 1;
+      else if (outcome === 'stop-network') {
+        result.networkError = true;
+        break;
+      } else if (outcome === 'stop-auth') {
+        break;
+      }
     }
   } finally {
     draining = false;
   }
+  return result;
 }
 
-/** Returns true to abort the drain (e.g. 401 — wait for re-auth). */
-async function replay(m: MutationEntry): Promise<boolean> {
-  await db.mutations.update(m.id!, { status: 'syncing', attempts: m.attempts + 1 });
+/** Replays one mutation and reports how it went (see ReplayOutcome). */
+async function replay(m: MutationEntry): Promise<ReplayOutcome> {
+  await db.mutations.update(m.id!, { status: 'syncing' });
   try {
     const headers: Record<string, string> = {};
     let body: BodyInit | undefined;
@@ -117,7 +144,7 @@ async function replay(m: MutationEntry): Promise<boolean> {
       // Session lost — leave the mutation pending and stop. We'll try
       // again when the user logs back in and AuthContext re-runs drain.
       await db.mutations.update(m.id!, { status: 'pending', lastStatus: 401 });
-      return true;
+      return 'stop-auth';
     }
 
     if (!res.ok) {
@@ -131,10 +158,11 @@ async function replay(m: MutationEntry): Promise<boolean> {
       // 5xx → also park (likely server bug; auto-retry won't help).
       await db.mutations.update(m.id!, {
         status: 'failed',
+        attempts: m.attempts + 1,
         lastStatus: res.status,
         lastError: message,
       });
-      return false;
+      return 'failed';
     }
 
     // Success — if this was a create, swap the temp id for the real one
@@ -147,27 +175,28 @@ async function replay(m: MutationEntry): Promise<boolean> {
         await db.mutations.delete(m.id!);
         await remapId(m.clientId, realId, m.accountId);
         await invalidatePrefix(resourceRoot(m.path));
-        return false;
+        return 'synced';
       }
     }
     // Drop from queue and bust any list caches under the same resource root,
     // so the next GET picks up the server's view.
     await db.mutations.delete(m.id!);
     await invalidatePrefix(resourceRoot(m.path));
-    return false;
-  } catch (err) {
-    // Network error — leave pending, stop draining to wait for next online tick.
-    await db.mutations.update(m.id!, {
-      status: 'pending',
-      lastError: err instanceof Error ? err.message : String(err),
-    });
-    return true;
+    return 'synced';
+  } catch {
+    // Network error — the device is (still) offline. Leave the mutation
+    // pending and stop draining; we'll retry on the next online tick. We
+    // deliberately don't record this as `lastError` or bump `attempts`: it's
+    // not a problem with the data, just missing connectivity, and surfacing a
+    // raw "Failed to fetch" per item only confuses the user.
+    await db.mutations.update(m.id!, { status: 'pending', lastError: undefined });
+    return 'stop-network';
   }
 }
 
-export async function retryMutation(id: number): Promise<void> {
+export async function retryMutation(id: number): Promise<DrainResult> {
   await db.mutations.update(id, { status: 'pending', lastError: undefined, lastStatus: undefined });
-  await drainQueue();
+  return drainQueue();
 }
 
 export async function discardMutation(id: number): Promise<void> {

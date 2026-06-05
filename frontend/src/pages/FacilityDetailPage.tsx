@@ -43,6 +43,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
 import { DetailHeaderSkeleton, SkeletonList } from "@/components/ui/Skeleton";
+import { PendingSyncBanner } from "@/components/PendingSyncBanner";
 
 export function FacilityDetailPage() {
     const { id: idStr } = useParams<{ id: string }>();
@@ -154,14 +155,23 @@ export function FacilityDetailPage() {
 
     useEffect(() => {
         let cancelled = false;
-        Promise.all([
-            Facilities.show(id),
-            Inspections.list({ facility_id: id }),
-            Trainings.list({ facility_id: id }),
-        ])
-            .then(([f, ins, trs]) => {
+        // The facility drives the page and is served from cache offline. The
+        // inspection/training lists are filtered queries that may not be cached
+        // for a facility created offline, so fetch them best-effort — a failure
+        // shouldn't blank out the whole page.
+        Facilities.show(id)
+            .then(async (f) => {
                 if (cancelled) return;
                 setFacility(f.facility);
+                const [ins, trs] = await Promise.all([
+                    Inspections.list({ facility_id: id }).catch(
+                        () => ({ items: [] as InspectionListItem[] }),
+                    ),
+                    Trainings.list({ facility_id: id }).catch(
+                        () => ({ items: [] as TrainingListItem[] }),
+                    ),
+                ]);
+                if (cancelled) return;
                 setInspections(ins.items);
                 setTrainings(trs.items);
             })
@@ -220,6 +230,8 @@ export function FacilityDetailPage() {
                 <ArrowLeft className="size-4" />
                 Späť na firmu
             </Link>
+
+            <PendingSyncBanner resource="facilities" id={id} />
 
             <Card className="overflow-hidden">
                 <div className="bg-gradient-to-br from-firol-50/60 to-transparent px-5 pt-5">
