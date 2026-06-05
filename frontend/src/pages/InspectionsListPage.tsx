@@ -26,8 +26,11 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
+import { Pagination } from "@/components/ui/Pagination";
 import { SkeletonList } from "@/components/ui/Skeleton";
 import { Spinner } from "@/components/ui/Spinner";
+
+const PAGE_SIZE = 10;
 
 const TYPE_CHIPS: [InspectionType, string][] = [
     ["php", "PHP"],
@@ -53,6 +56,7 @@ export function InspectionsListPage() {
     const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
     const [deleting, setDeleting] = useState(false);
     const [repeatingId, setRepeatingId] = useState<number | null>(null);
+    const [page, setPage] = useState(1);
 
     useEffect(() => {
         let cancelled = false;
@@ -121,6 +125,32 @@ export function InspectionsListPage() {
             valid: valid.sort(byDateDesc),
         };
     }, [filtered]);
+
+    const totalItems = filtered?.length ?? 0;
+    const totalPages = Math.ceil(totalItems / PAGE_SIZE);
+
+    useEffect(() => {
+        setPage(1);
+    }, [query, typeFilter]);
+
+    // Paginate across the ordered groups (overdue → soon → valid) so each
+    // page holds at most PAGE_SIZE rows; section headers render only for the
+    // items that fall on the current page.
+    const pageIds = useMemo(() => {
+        if (!grouped) return null;
+        const ordered = [...grouped.overdue, ...grouped.soon, ...grouped.valid];
+        const slice = ordered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+        return new Set(slice.map((it) => it.id));
+    }, [grouped, page]);
+
+    const pagedGroups = useMemo(() => {
+        if (!grouped || !pageIds) return null;
+        return {
+            overdue: grouped.overdue.filter((it) => pageIds.has(it.id)),
+            soon: grouped.soon.filter((it) => pageIds.has(it.id)),
+            valid: grouped.valid.filter((it) => pageIds.has(it.id)),
+        };
+    }, [grouped, pageIds]);
 
     async function handleDelete() {
         if (pendingDeleteId === null) return;
@@ -265,60 +295,69 @@ export function InspectionsListPage() {
                 </Card>
             )}
 
-            {grouped && (grouped.overdue.length > 0 || grouped.soon.length > 0 || grouped.valid.length > 0) && (
-                <div className="flex flex-col gap-5">
-                    {grouped.overdue.length > 0 && (
-                        <section>
-                            <div className="mb-2 flex items-center gap-2">
-                                <span className="size-2 rounded-full bg-[var(--color-status-bad)]" />
-                                <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-status-bad)]">
-                                    Po termíne
-                                </h2>
-                            </div>
-                            <ul className="flex flex-col gap-2">
-                                {grouped.overdue.map((it) => (
-                                    <li key={it.id}>
-                                        <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
-                                    </li>
-                                ))}
-                            </ul>
-                        </section>
-                    )}
-                    {grouped.soon.length > 0 && (
-                        <section>
-                            <div className="mb-2 flex items-center gap-2">
-                                <span className="size-2 rounded-full bg-[var(--color-status-warn)]" />
-                                <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-status-warn)]">
-                                    Blíži sa termín
-                                </h2>
-                            </div>
-                            <ul className="flex flex-col gap-2">
-                                {grouped.soon.map((it) => (
-                                    <li key={it.id}>
-                                        <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
-                                    </li>
-                                ))}
-                            </ul>
-                        </section>
-                    )}
-                    {grouped.valid.length > 0 && (
-                        <section>
-                            <div className="mb-2 flex items-center gap-2">
-                                <span className="size-2 rounded-full bg-[var(--color-status-ok)]" />
-                                <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-status-ok)]">
-                                    Platné
-                                </h2>
-                            </div>
-                            <ul className="flex flex-col gap-2">
-                                {grouped.valid.map((it) => (
-                                    <li key={it.id}>
-                                        <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
-                                    </li>
-                                ))}
-                            </ul>
-                        </section>
-                    )}
-                </div>
+            {pagedGroups && (pagedGroups.overdue.length > 0 || pagedGroups.soon.length > 0 || pagedGroups.valid.length > 0) && (
+                <>
+                    <div className="flex flex-col gap-5">
+                        {pagedGroups.overdue.length > 0 && (
+                            <section>
+                                <div className="mb-2 flex items-center gap-2">
+                                    <span className="size-2 rounded-full bg-[var(--color-status-bad)]" />
+                                    <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-status-bad)]">
+                                        Po termíne
+                                    </h2>
+                                </div>
+                                <ul className="flex flex-col gap-2">
+                                    {pagedGroups.overdue.map((it) => (
+                                        <li key={it.id}>
+                                            <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
+                                        </li>
+                                    ))}
+                                </ul>
+                            </section>
+                        )}
+                        {pagedGroups.soon.length > 0 && (
+                            <section>
+                                <div className="mb-2 flex items-center gap-2">
+                                    <span className="size-2 rounded-full bg-[var(--color-status-warn)]" />
+                                    <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-status-warn)]">
+                                        Blíži sa termín
+                                    </h2>
+                                </div>
+                                <ul className="flex flex-col gap-2">
+                                    {pagedGroups.soon.map((it) => (
+                                        <li key={it.id}>
+                                            <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
+                                        </li>
+                                    ))}
+                                </ul>
+                            </section>
+                        )}
+                        {pagedGroups.valid.length > 0 && (
+                            <section>
+                                <div className="mb-2 flex items-center gap-2">
+                                    <span className="size-2 rounded-full bg-[var(--color-status-ok)]" />
+                                    <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-status-ok)]">
+                                        Platné
+                                    </h2>
+                                </div>
+                                <ul className="flex flex-col gap-2">
+                                    {pagedGroups.valid.map((it) => (
+                                        <li key={it.id}>
+                                            <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
+                                        </li>
+                                    ))}
+                                </ul>
+                            </section>
+                        )}
+                    </div>
+                    <Pagination
+                        page={page}
+                        totalPages={totalPages}
+                        totalItems={totalItems}
+                        pageSize={PAGE_SIZE}
+                        onChange={setPage}
+                    />
+                </>
             )}
 
             <Dialog

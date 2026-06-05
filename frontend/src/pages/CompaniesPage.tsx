@@ -7,7 +7,10 @@ import { Companies, type CompanyListItem } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { Pagination } from '@/components/ui/Pagination';
 import { SkeletonList } from '@/components/ui/Skeleton';
+
+const PAGE_SIZE = 10;
 
 export function CompaniesPage() {
   const { isAdmin } = useAuth();
@@ -17,11 +20,16 @@ export function CompaniesPage() {
   const [debounced, setDebounced] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 200);
     return () => clearTimeout(t);
   }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debounced]);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,6 +54,9 @@ export function CompaniesPage() {
     () => items.reduce((acc, c) => acc + c.facilities_count, 0),
     [items],
   );
+
+  const totalPages = Math.ceil(items.length / PAGE_SIZE);
+  const paged = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="flex flex-col gap-5">
@@ -128,13 +139,22 @@ export function CompaniesPage() {
       )}
 
       {items.length > 0 && (
-        <ul className="flex flex-col gap-3">
-          {items.map((c) => (
-            <li key={c.id}>
-              <CompanyCard company={c} showAccount={isAdmin} />
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="flex flex-col gap-3">
+            {paged.map((c) => (
+              <li key={c.id}>
+                <CompanyCard company={c} showAccount={isAdmin} />
+              </li>
+            ))}
+          </ul>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={items.length}
+            pageSize={PAGE_SIZE}
+            onChange={setPage}
+          />
+        </>
       )}
     </div>
   );
