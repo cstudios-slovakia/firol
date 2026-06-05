@@ -41,6 +41,7 @@ export function InspectionDetailPage() {
   const [data, setData] = useState<InspectionDetail | null>(null);
   const [documents, setDocuments] = useState<InspectionDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const [savingDate, setSavingDate] = useState(false);
   const [localDate, setLocalDate] = useState<string>('');
   const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
@@ -90,7 +91,7 @@ export function InspectionDetailPage() {
 
   async function handleGeneratePdf() {
     if (!data) return;
-    setError(null);
+    setPdfError(null);
     setGenerating(true);
     try {
       const res = await Inspections.generatePdf(id, csrfToken);
@@ -102,7 +103,7 @@ export function InspectionDetailPage() {
       setDocuments(docs.items);
       window.open(documentDownloadUrl(res.document.id), '_blank', 'noopener');
     } catch (err) {
-      setError(offlineMessage(err, 'PDF sa nepodarilo vygenerovať.'));
+      setPdfError(offlineMessage(err, 'PDF sa nepodarilo vygenerovať.'));
     } finally {
       setGenerating(false);
     }
@@ -309,6 +310,7 @@ export function InspectionDetailPage() {
         generating={generating}
         onGenerate={handleGeneratePdf}
         finalized={!isDraft}
+        pdfError={pdfError}
       />
     </div>
   );
@@ -320,12 +322,14 @@ function DocumentsBlock({
   generating,
   onGenerate,
   finalized,
+  pdfError,
 }: {
   documents: InspectionDocument[];
   canGenerate: boolean;
   generating: boolean;
   onGenerate: () => void;
   finalized: boolean;
+  pdfError?: string | null;
 }) {
   if (documents.length === 0) {
     return (
@@ -350,6 +354,9 @@ function DocumentsBlock({
         >
           Generovať PDF protokol
         </Button>
+        {pdfError && (
+          <p className="text-xs text-status-bad">{pdfError}</p>
+        )}
       </Card>
     );
   }

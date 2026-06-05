@@ -53,15 +53,22 @@ export function NewTrainingPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([Companies.list(), Team.list()])
-      .then(([cs, tm]) => {
+    // The companies list drives the page (served from cache offline). The team
+    // list is best-effort — offline it may be uncached, in which case the
+    // trainer picker simply has no options. Loading them together with
+    // Promise.all would let an uncached team list reject the whole load and
+    // leave the page stuck on the spinner.
+    Companies.list()
+      .then(async (cs) => {
         if (cancelled) return;
         setCompanies(cs.items);
-        const active = tm.items.filter((m) => m.is_active);
-        setMembers(active);
         if (presetCompanyId === null && cs.items.length === 1) {
           setCompanyId(cs.items[0].id);
         }
+        const tm = await Team.list().catch(() => ({ items: [] as TeamMember[] }));
+        if (cancelled) return;
+        const active = tm.items.filter((m) => m.is_active);
+        setMembers(active);
         // Pre-select the logged-in user as trainer when possible.
         if (user && active.some((m) => m.id === user.id)) {
           setTrainerId(user.id);
@@ -71,6 +78,10 @@ export function NewTrainingPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        // Resolve the loading state so the page renders the error instead of
+        // spinning forever.
+        setCompanies([]);
+        setMembers([]);
         setApiError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať dáta.');
       });
     return () => {
@@ -160,6 +171,18 @@ export function NewTrainingPage() {
     return (
       <div className="flex justify-center py-10 text-ink-400">
         <Spinner />
+      </div>
+    );
+  }
+
+  if (companies.length === 0 && apiError) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Link to="/trainings" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť
+        </Link>
+        <Card className="px-4 py-3 text-sm text-status-bad">{apiError}</Card>
       </div>
     );
   }

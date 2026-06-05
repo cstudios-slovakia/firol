@@ -41,6 +41,7 @@ export function TrainingDetailPage() {
   const [data, setData] = useState<TrainingDetail | null>(null);
   const [documents, setDocuments] = useState<TrainingDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -80,7 +81,7 @@ export function TrainingDetailPage() {
 
   async function handleGeneratePdf() {
     if (!data) return;
-    setError(null);
+    setPdfError(null);
     setGenerating(true);
     try {
       const res = await Trainings.generatePdf(id, csrfToken);
@@ -88,9 +89,7 @@ export function TrainingDetailPage() {
       toast.success('PDF protokol vygenerovaný');
       window.open(trainingDocumentDownloadUrl(res.document.id), '_blank', 'noopener');
     } catch (err) {
-      const msg = offlineMessage(err, 'PDF sa nepodarilo vygenerovať.');
-      setError(msg);
-      toast.error(msg);
+      setPdfError(offlineMessage(err, 'PDF sa nepodarilo vygenerovať.'));
     } finally {
       setGenerating(false);
     }
@@ -322,6 +321,7 @@ export function TrainingDetailPage() {
         onGenerate={handleGeneratePdf}
         finalized={!isDraft}
         isReadOnly={isReadOnly}
+        pdfError={pdfError}
       />
     </div>
   );
@@ -347,6 +347,7 @@ function DocumentsBlock({
   onGenerate,
   finalized,
   isReadOnly,
+  pdfError,
 }: {
   documents: TrainingDocument[];
   canGenerate: boolean;
@@ -355,6 +356,7 @@ function DocumentsBlock({
   onGenerate: () => void;
   finalized: boolean;
   isReadOnly: boolean;
+  pdfError?: string | null;
 }) {
   if (documents.length === 0) {
     if (isReadOnly) return null;
@@ -380,6 +382,9 @@ function DocumentsBlock({
         >
           Generovať PDF protokol
         </Button>
+        {pdfError && (
+          <p className="text-xs text-status-bad">{pdfError}</p>
+        )}
       </Card>
     );
   }
