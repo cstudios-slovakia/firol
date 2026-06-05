@@ -114,6 +114,9 @@ export function TrainingDetailPage() {
       toast.success('Účastník uložený');
     } catch (err) {
       if (handleOfflineSave(err, toast)) {
+        // The mutation was queued and the detail cache patched optimistically —
+        // re-read it so the new trainee shows immediately, not just after reload.
+        await refreshDetail().catch(() => undefined);
         setShowAddForm(false);
         return;
       }
@@ -137,7 +140,11 @@ export function TrainingDetailPage() {
       await refreshDetail();
       toast.success('Účastník zmazaný');
     } catch (err) {
-      if (handleOfflineSave(err, toast)) return;
+      if (handleOfflineSave(err, toast)) {
+        // Queued delete + patched cache — re-read so the row disappears now.
+        await refreshDetail().catch(() => undefined);
+        return;
+      }
       const msg = err instanceof ApiError ? err.message : 'Mazanie sa nepodarilo.';
       setError(msg);
       toast.error(msg);
