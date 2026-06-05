@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import { useAuth, type Account, type User } from '@/auth/AuthContext';
+import { useToast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 
 /**
@@ -10,6 +11,7 @@ import { cn } from '@/lib/cn';
  */
 export function AccountSwitcher() {
   const { accounts, activeAccountId, switchAccount, user } = useAuth();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -35,9 +37,19 @@ export function AccountSwitcher() {
       setOpen(false);
       return;
     }
+    // Switching hits the server (POST /api/me/switch-account) and isn't
+    // queueable — offline it just rejects, so surface a clear toast instead
+    // of silently closing the dropdown with nothing changed.
+    if (!navigator.onLine) {
+      toast.error('Prepnutie účtu vyžaduje pripojenie na internet.');
+      setOpen(false);
+      return;
+    }
     setBusy(true);
     try {
       await switchAccount(id);
+    } catch {
+      toast.error('Prepnutie účtu vyžaduje pripojenie na internet.');
     } finally {
       setBusy(false);
       setOpen(false);

@@ -4,7 +4,7 @@ import { CreditCard, Hash, LogOut, MapPin, Receipt, ShieldCheck } from 'lucide-r
 import { useAuth } from '@/auth/AuthContext';
 import { AccountApi, type Account } from '@/api/account';
 import { Billing, type BillingPeriod } from '@/api/billing';
-import { ApiError } from '@/lib/api';
+import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { AuthLayout } from './AuthLayout';
 import { Card } from '@/components/ui/Card';
@@ -56,7 +56,7 @@ export function OnboardingBillingPage() {
         setIcDph(res.account.invoice_ic_dph ?? '');
       })
       .catch((err: unknown) => {
-        toast.error(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať fakturačné údaje.');
+        toast.error(offlineMessage(err, 'Nepodarilo sa načítať fakturačné údaje.'));
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -87,15 +87,25 @@ export function OnboardingBillingPage() {
       const res = await Billing.checkout(plan, csrfToken);
       window.location.assign(res.url);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Uloženie alebo spustenie platby zlyhalo.';
+      const msg = offlineMessage(err, 'Uloženie alebo spustenie platby zlyhalo.');
       toast.error(msg);
       setBusy(false);
     }
   }
 
   async function onLogout() {
-    await logout();
-    navigate('/login');
+    // Logout needs the server and isn't queueable; offline it just rejects,
+    // so flag it instead of silently leaving the user on this gate.
+    if (!navigator.onLine) {
+      toast.error('Odhlásenie vyžaduje pripojenie na internet.');
+      return;
+    }
+    try {
+      await logout();
+      navigate('/login');
+    } catch {
+      toast.error('Odhlásenie vyžaduje pripojenie na internet.');
+    }
   }
 
   const priceLabel = plan === null ? '—' : plan === 'yearly' ? '199 € / rok' : '19 € / mesiac';

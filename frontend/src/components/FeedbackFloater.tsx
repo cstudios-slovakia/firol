@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { Bug, Lightbulb, MessageSquarePlus, Send } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Feedback, type FeedbackKind } from '@/api/feedback';
-import { ApiError } from '@/lib/api';
+import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Dialog } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
@@ -111,7 +111,7 @@ export function FeedbackDialog({
       toast.success('Ďakujeme! Tvoja správa bola odoslaná.');
       onClose();
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Odoslanie zlyhalo.';
+      const msg = offlineMessage(err, 'Odoslanie zlyhalo.');
       setError(msg);
       toast.error(msg);
     } finally {

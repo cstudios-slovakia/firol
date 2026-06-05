@@ -6,7 +6,7 @@ import {
 import { useAuth } from '@/auth/AuthContext';
 import { AccountApi, type Account } from '@/api/account';
 import { Billing, type BillingPeriod, type Invoice } from '@/api/billing';
-import { ApiError } from '@/lib/api';
+import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -198,7 +198,7 @@ function BillingSection({
       const res = await Billing.checkout(period, csrfToken);
       window.location.assign(res.url);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Stripe Checkout sa nepodarilo spustiť.';
+      const msg = offlineMessage(err, 'Stripe Checkout sa nepodarilo spustiť.');
       toast.error(msg);
       setBusy(false);
     }
@@ -210,7 +210,7 @@ function BillingSection({
       const res = await Billing.portal(csrfToken);
       window.location.assign(res.url);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Customer Portal sa nepodarilo otvoriť.';
+      const msg = offlineMessage(err, 'Customer Portal sa nepodarilo otvoriť.');
       toast.error(msg);
       setBusy(false);
     }
@@ -225,7 +225,7 @@ function BillingSection({
       setConfirmCancel(false);
       toast.success('Predplatné bude zrušené ku koncu obdobia.');
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Zrušenie zlyhalo.';
+      const msg = offlineMessage(err, 'Zrušenie zlyhalo.');
       toast.error(msg);
     } finally {
       setCancelling(false);
@@ -240,7 +240,7 @@ function BillingSection({
       onAccountChange(fresh.account);
       toast.success('Predplatné obnovené — bude pokračovať aj po skončení obdobia.');
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Obnovenie zlyhalo.';
+      const msg = offlineMessage(err, 'Obnovenie zlyhalo.');
       toast.error(msg);
     } finally {
       setResuming(false);
@@ -621,7 +621,7 @@ function InvoiceDetailsSection({
         toast.success('Fakturačné údaje uložené.');
       }
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Uloženie zlyhalo.';
+      const msg = offlineMessage(err, 'Uloženie zlyhalo.');
       toast.error(msg);
     } finally {
       setSaving(false);

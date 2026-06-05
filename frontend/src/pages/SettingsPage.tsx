@@ -56,6 +56,7 @@ import {
 } from "@/api/team";
 import { Select, type SelectOption } from "@/components/ui/Select";
 import { ApiError } from "@/lib/api";
+import { offlineMessage } from "@/lib/offline";
 import { useToast } from "@/lib/toast";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -1918,7 +1919,7 @@ function ImportSubSection({ section }: { section: ImportSectionDef }) {
         try {
             await ImportApi.downloadTemplate(section.kind);
         } catch (err) {
-            const msg = err instanceof ApiError ? err.message : "Stiahnutie šablóny zlyhalo.";
+            const msg = offlineMessage(err, "Stiahnutie šablóny zlyhalo.");
             setNetworkError(msg);
             toast.error(msg);
         } finally {
@@ -1943,7 +1944,7 @@ function ImportSubSection({ section }: { section: ImportSectionDef }) {
                 toast.success(`Naimportované: ${summary}`);
             }
         } catch (err) {
-            const msg = err instanceof ApiError ? err.message : "Nahrávanie zlyhalo.";
+            const msg = offlineMessage(err, "Nahrávanie zlyhalo.");
             setNetworkError(msg);
             toast.error(msg);
         } finally {
@@ -2199,8 +2200,8 @@ function DataSection() {
             toast.success(
                 `${label}: vymazaných ${res.deleted} záznamov.`,
             );
-        } catch {
-            toast.error("Vymazanie zlyhalo. Skús to znova.");
+        } catch (err) {
+            toast.error(offlineMessage(err, "Vymazanie zlyhalo. Skús to znova."));
         } finally {
             setBusy(false);
         }

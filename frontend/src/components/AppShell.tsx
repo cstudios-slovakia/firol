@@ -14,6 +14,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
 import { Billing } from "@/api/billing";
 import { ApiError } from "@/lib/api";
+import { offlineMessage } from "@/lib/offline";
 import { useToast } from "@/lib/toast";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { OfflineIndicator } from "./OfflineIndicator";
@@ -94,8 +95,24 @@ type Tab = {
 
 export function AppShell() {
     const { logout } = useAuth();
+    const toast = useToast();
     const location = useLocation();
     const navigate = useNavigate();
+
+    // Logout hits the server (POST /api/auth/logout) and isn't queueable, so
+    // offline the request just rejects and nothing visible happens. Guard it
+    // with a clear toast instead of a silent no-op.
+    async function handleLogout() {
+        if (!navigator.onLine) {
+            toast.error("Odhlásenie vyžaduje pripojenie na internet.");
+            return;
+        }
+        try {
+            await logout();
+        } catch {
+            toast.error("Odhlásenie vyžaduje pripojenie na internet.");
+        }
+    }
 
     // When a queued create syncs, queue.ts fires `firol:remap` with the temp
     // id and the server-issued real id. If the user is sitting on the temp-id
@@ -155,7 +172,7 @@ export function AppShell() {
                             <AccountSwitcher />
                             <button
                                 type="button"
-                                onClick={logout}
+                                onClick={handleLogout}
                                 aria-label="Odhlásiť"
                                 className="grid size-9 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700"
                             >
@@ -228,10 +245,10 @@ function SubscriptionBanner() {
                 navigate("/billing?onboarding=billing");
                 return;
             }
-            const msg =
-                err instanceof ApiError
-                    ? err.message
-                    : "Stripe Checkout sa nepodarilo otvoriť.";
+            const msg = offlineMessage(
+                err,
+                "Stripe Checkout sa nepodarilo otvoriť.",
+            );
             toast.error(msg);
             setBusy(false);
         }
@@ -317,10 +334,10 @@ function TrialBanner() {
                 navigate("/billing?onboarding=billing");
                 return;
             }
-            const msg =
-                err instanceof ApiError
-                    ? err.message
-                    : "Stripe Checkout sa nepodarilo otvoriť.";
+            const msg = offlineMessage(
+                err,
+                "Stripe Checkout sa nepodarilo otvoriť.",
+            );
             toast.error(msg);
         }
     }

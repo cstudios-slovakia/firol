@@ -13,7 +13,7 @@ import {
   type InspectionDocument,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
-import { handleOfflineSave } from '@/lib/offline';
+import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -75,7 +75,7 @@ export function InspectionDetailPage() {
       const res = await Inspections.repeat(id, csrfToken);
       navigate(`/inspections/${res.inspection.id}`, { replace: false });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Opakovať sa nepodarilo.');
+      setError(offlineMessage(err, 'Opakovať sa nepodarilo.'));
     } finally {
       setRepeating(false);
     }
@@ -95,7 +95,7 @@ export function InspectionDetailPage() {
       setDocuments(docs.items);
       window.open(documentDownloadUrl(res.document.id), '_blank', 'noopener');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'PDF sa nepodarilo vygenerovať.');
+      setError(offlineMessage(err, 'PDF sa nepodarilo vygenerovať.'));
     } finally {
       setGenerating(false);
     }

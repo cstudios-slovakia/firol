@@ -18,7 +18,7 @@ import {
   type TrainingDocument,
 } from '@/api/trainings';
 import { ApiError } from '@/lib/api';
-import { handleOfflineSave } from '@/lib/offline';
+import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -81,7 +81,7 @@ export function TrainingDetailPage() {
       toast.success('PDF protokol vygenerovaný');
       window.open(trainingDocumentDownloadUrl(res.document.id), '_blank', 'noopener');
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'PDF sa nepodarilo vygenerovať.';
+      const msg = offlineMessage(err, 'PDF sa nepodarilo vygenerovať.');
       setError(msg);
       toast.error(msg);
     } finally {
