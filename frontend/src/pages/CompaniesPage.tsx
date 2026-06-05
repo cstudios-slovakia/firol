@@ -1,26 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Building2, ChevronRight, Plus, Search, ShieldCheck } from 'lucide-react';
+import { Building2, Edit2, Plus, Search, ShieldCheck, Trash2 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
+import { useToast } from '@/lib/toast';
 import { Companies, type CompanyListItem } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { Pagination } from '@/components/ui/Pagination';
 import { SkeletonList } from '@/components/ui/Skeleton';
 
 const PAGE_SIZE = 10;
 
 export function CompaniesPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, csrfToken } = useAuth();
   const isReadOnly = useIsReadOnly();
+  const toast = useToast();
   const [items, setItems] = useState<CompanyListItem[]>([]);
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 200);
@@ -57,6 +62,21 @@ export function CompaniesPage() {
 
   const totalPages = Math.ceil(items.length / PAGE_SIZE);
   const paged = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  async function handleDelete() {
+    if (pendingDeleteId === null) return;
+    setDeleting(true);
+    try {
+      await Companies.archive(pendingDeleteId, csrfToken);
+      setItems((prev) => prev.filter((c) => c.id !== pendingDeleteId));
+      setPendingDeleteId(null);
+      toast.success('Firma odstránená');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Nepodarilo sa odstrániť firmu.');
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -140,10 +160,15 @@ export function CompaniesPage() {
 
       {items.length > 0 && (
         <>
-          <ul className="flex flex-col gap-3">
+          <ul className="flex flex-col gap-2">
             {paged.map((c) => (
               <li key={c.id}>
-                <CompanyCard company={c} showAccount={isAdmin} />
+                <CompanyRow
+                  company={c}
+                  showAccount={isAdmin}
+                  isReadOnly={isReadOnly}
+                  onDelete={setPendingDeleteId}
+                />
               </li>
             ))}
           </ul>
@@ -156,51 +181,115 @@ export function CompaniesPage() {
           />
         </>
       )}
+
+      <Dialog
+        open={pendingDeleteId !== null}
+        onClose={() => {
+          if (!deleting) setPendingDeleteId(null);
+        }}
+        title="Odstrániť firmu?"
+        description="Táto akcia je nevratná. Firma bude odstránená spolu so všetkými prevádzkami."
+        dismissible={!deleting}
+      >
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setPendingDeleteId(null)}
+            disabled={deleting}
+          >
+            Zrušiť
+          </Button>
+          <Button variant="danger" size="sm" loading={deleting} onClick={handleDelete}>
+            Odstrániť
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
 
-function CompanyCard({ company, showAccount }: { company: CompanyListItem; showAccount?: boolean }) {
+function CompanyRow({
+  company,
+  showAccount,
+  isReadOnly,
+  onDelete,
+}: {
+  company: CompanyListItem;
+  showAccount?: boolean;
+  isReadOnly: boolean;
+  onDelete: (id: number) => void;
+}) {
   const lastDate = company.last_inspection_at;
   const formattedLast = lastDate
     ? new Date(lastDate).toLocaleDateString('sk-SK', { day: 'numeric', month: 'numeric', year: 'numeric' })
     : null;
 
   return (
-    <Link to={`/companies/${company.id}`} className="block group">
-      <Card className="px-4 py-3.5 transition-[box-shadow,transform] duration-150 group-hover:-translate-y-px group-hover:shadow-[var(--shadow-lift)]">
-        <div className="flex items-center gap-3">
-          <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-600">
-            <Building2 className="size-5" />
+    <Card className="px-4 py-3">
+      <div className="flex items-center gap-3">
+        <Link
+          to={`/companies/${company.id}`}
+          className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)] transition-colors hover:bg-firol-600"
+        >
+          <Building2 className="size-5" />
+        </Link>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <Link
+              to={`/companies/${company.id}`}
+              className="truncate text-sm font-semibold text-ink-900 transition-colors hover:text-firol-600"
+            >
+              {company.name}
+            </Link>
+            {showAccount && company.account_name && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-ink-200 bg-ink-50 px-2 py-0.5 text-[10px] text-ink-500">
+                <ShieldCheck className="size-3 text-amber-500" />
+                {company.account_name}
+              </span>
+            )}
           </div>
-          <div className="min-w-0 flex-1">
-            <h3 className="truncate text-sm font-semibold text-ink-900">{company.name}</h3>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-500">
-              {company.ico && <span>IČO {company.ico}</span>}
-              <span>·</span>
-              <span>{company.facilities_count} {plural(company.facilities_count, 'prevádzka', 'prevádzky', 'prevádzok')}</span>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {company.inspections_count === 0 ? (
-                <Badge tone="neutral">Žiadne kontroly</Badge>
-              ) : (
-                <Badge tone="brand">
-                  {company.inspections_count} {plural(company.inspections_count, 'kontrola', 'kontroly', 'kontrol')}
-                  {formattedLast && ` · posledná ${formattedLast}`}
-                </Badge>
-              )}
-              {showAccount && company.account_name && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-ink-200 bg-ink-50 px-2 py-0.5 text-xs text-ink-500">
-                  <ShieldCheck className="size-3 text-amber-500" />
-                  {company.account_name}
-                </span>
-              )}
-            </div>
-          </div>
-          <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform group-hover:translate-x-0.5 group-hover:text-ink-500" />
+          <p className="mt-0.5 truncate text-xs text-ink-500">
+            {company.ico && (
+              <>
+                IČO {company.ico}
+                <span className="mx-1.5 text-ink-300">·</span>
+              </>
+            )}
+            {company.facilities_count}{' '}
+            {plural(company.facilities_count, 'prevádzka', 'prevádzky', 'prevádzok')}
+          </p>
+          <p className="mt-0.5 truncate text-[11px] text-ink-400">
+            {company.inspections_count === 0
+              ? 'Žiadne kontroly'
+              : `${company.inspections_count} ${plural(company.inspections_count, 'kontrola', 'kontroly', 'kontrol')}${formattedLast ? ` · posledná ${formattedLast}` : ''}`}
+          </p>
         </div>
-      </Card>
-    </Link>
+
+        {!isReadOnly && (
+          <div className="flex shrink-0 items-center gap-3">
+            <Link
+              to={`/companies/${company.id}/edit`}
+              title="Upraviť"
+              aria-label="Upraviť"
+              className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
+            >
+              <Edit2 className="size-4" />
+            </Link>
+            <button
+              type="button"
+              title="Odstrániť"
+              aria-label="Odstrániť"
+              onClick={() => onDelete(company.id)}
+              className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
+            >
+              <Trash2 className="size-4" />
+            </button>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

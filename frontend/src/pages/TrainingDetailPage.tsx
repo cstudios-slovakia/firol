@@ -20,6 +20,7 @@ import {
 import { ApiError } from '@/lib/api';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { useConfirm } from '@/lib/confirm';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -37,6 +38,7 @@ export function TrainingDetailPage() {
   const { csrfToken } = useAuth();
   const isReadOnly = useIsReadOnly();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [data, setData] = useState<TrainingDetail | null>(null);
   const [documents, setDocuments] = useState<TrainingDocument[]>([]);
@@ -133,7 +135,12 @@ export function TrainingDetailPage() {
   }
 
   async function handleDelete(traineeId: number) {
-    if (!window.confirm('Naozaj zmazať účastníka? Jeho podpis sa stratí.')) return;
+    const ok = await confirm({
+      title: 'Odstrániť účastníka?',
+      description: 'Účastník bude odstránený zo zoznamu školenia.',
+      confirmLabel: 'Odstrániť',
+    });
+    if (!ok) return;
     setDeletingId(traineeId);
     try {
       await Trainings.deleteTrainee(id, traineeId, csrfToken);
@@ -450,6 +457,7 @@ function AddTraineeForm({
   submitting: boolean;
 }) {
   // SIGNATURE DISABLED — const padRef = useRef<SignaturePadHandle>(null);
+  const confirm = useConfirm();
   const [fullname, setFullname] = useState('');
   const [position, setPosition] = useState('');
   // SIGNATURE DISABLED — const [empty, setEmpty] = useState(true);
@@ -457,11 +465,16 @@ function AddTraineeForm({
   // SIGNATURE DISABLED — const [signatureError, setSignatureError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
-  function handleCancel() {
+  async function handleCancel() {
     // SIGNATURE DISABLED — const hasData = !!fullname.trim() || !!position.trim() || !empty;
     const hasData = !!fullname.trim() || !!position.trim();
-    if (hasData && !window.confirm('Formulár obsahuje neuložené údaje. Naozaj zavrieť bez uloženia?')) {
-      return;
+    if (hasData) {
+      const ok = await confirm({
+        title: 'Zavrieť formulár?',
+        description: 'Formulár obsahuje neuložené údaje, ktoré sa stratia.',
+        confirmLabel: 'Zavrieť bez uloženia',
+      });
+      if (!ok) return;
     }
     onCancel();
   }

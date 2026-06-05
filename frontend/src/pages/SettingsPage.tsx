@@ -58,6 +58,7 @@ import { Select, type SelectOption } from "@/components/ui/Select";
 import { ApiError } from "@/lib/api";
 import { offlineMessage } from "@/lib/offline";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Field } from "@/components/ui/Field";
@@ -601,6 +602,7 @@ const FIROL_DEFAULT_COLOR = "#e8433a";
 function BrandingSection() {
     const { csrfToken } = useAuth();
     const toast = useToast();
+    const confirm = useConfirm();
     const [account, setAccount] = useState<Account | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -697,7 +699,12 @@ function BrandingSection() {
     }
 
     async function onLogoDelete() {
-        if (!window.confirm("Naozaj odstrániť logo z PDF protokolov?")) return;
+        const ok = await confirm({
+            title: "Odstrániť logo?",
+            description: "Logo zmizne z PDF protokolov.",
+            confirmLabel: "Odstrániť",
+        });
+        if (!ok) return;
         setError(null);
         setBusy(true);
         try {
@@ -930,6 +937,7 @@ export function TeamPage() {
 function TeamSection() {
     const { csrfToken, user, accounts, activeAccountId } = useAuth();
     const toast = useToast();
+    const confirm = useConfirm();
 
     const activeAccount =
         accounts.find((a) => a.id === activeAccountId) ?? null;
@@ -1076,12 +1084,12 @@ function TeamSection() {
     }
 
     async function onRemove(m: TeamMember) {
-        if (
-            !window.confirm(
-                `Naozaj odstrániť technika ${m.fullname} z tímu? Jeho účet zostane, len ho odpojíme od tejto firmy.`,
-            )
-        )
-            return;
+        const ok = await confirm({
+            title: "Odstrániť technika?",
+            description: `${m.fullname} sa odpojí od tejto firmy. Jeho účet zostane zachovaný.`,
+            confirmLabel: "Odstrániť",
+        });
+        if (!ok) return;
         setBusyId(m.id);
         try {
             await Team.remove(m.id, csrfToken);
@@ -1101,12 +1109,13 @@ function TeamSection() {
     }
 
     async function onCancelInvite(invite: PendingInvite) {
-        if (
-            !window.confirm(
-                `Naozaj zrušiť pozvánku pre ${invite.email}? Odkaz prestane platiť.`,
-            )
-        )
-            return;
+        const ok = await confirm({
+            title: "Zrušiť pozvánku?",
+            description: `Odkaz pre ${invite.email} prestane platiť.`,
+            confirmLabel: "Zrušiť pozvánku",
+            cancelLabel: "Späť",
+        });
+        if (!ok) return;
         setBusyInviteId(invite.id);
         try {
             await Team.cancelInvite(invite.id, csrfToken);

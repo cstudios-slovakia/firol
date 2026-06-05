@@ -37,6 +37,7 @@ import {
 } from "@/api/trainings";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { useConfirm } from "@/lib/confirm";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -53,6 +54,7 @@ export function FacilityDetailPage() {
     const { csrfToken } = useAuth();
     const isReadOnly = useIsReadOnly();
     const toast = useToast();
+    const confirm = useConfirm();
     const [facility, setFacility] = useState<Facility | null>(null);
     const [inspections, setInspections] = useState<InspectionListItem[] | null>(null);
     const [trainings, setTrainings] = useState<TrainingListItem[] | null>(null);
@@ -97,13 +99,18 @@ export function FacilityDetailPage() {
         });
     }, [trainings, trainingQuery, trainingTypeFilter]);
 
-    async function onArchive() {
-        if (!window.confirm("Naozaj archivovať prevádzku? Údaje zostanú v systéme, len sa skryjú.")) return;
+    async function onDelete() {
+        const ok = await confirm({
+            title: "Odstrániť prevádzku?",
+            description: "Táto akcia je nevratná. Prevádzka bude odstránená spolu so svojimi kontrolami a školeniami.",
+            confirmLabel: "Odstrániť",
+        });
+        if (!ok) return;
         try {
             await Facilities.archive(id, csrfToken);
             navigate(facility ? `/companies/${facility.company_id}` : "/", { replace: true });
         } catch (err) {
-            setError(err instanceof ApiError ? err.message : "Archiváciu sa nepodarilo dokončiť.");
+            setError(err instanceof ApiError ? err.message : "Prevádzku sa nepodarilo odstrániť.");
         }
     }
 
@@ -264,8 +271,8 @@ export function FacilityDetailPage() {
                                 </Link>
                                 <button
                                     type="button"
-                                    aria-label="Archivovať"
-                                    onClick={onArchive}
+                                    aria-label="Odstrániť"
+                                    onClick={onDelete}
                                     className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
                                 >
                                     <Trash2 className="size-4" />

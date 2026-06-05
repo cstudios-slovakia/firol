@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from '@/auth/AuthContext';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ToastProvider } from '@/lib/toast';
+import { ConfirmProvider } from '@/lib/confirm';
 import { initPwa } from '@/lib/pwa';
 import App from './App';
 import './index.css';
@@ -16,7 +17,9 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
       <BrowserRouter>
         <AuthProvider>
           <ToastProvider>
-            <App />
+            <ConfirmProvider>
+              <App />
+            </ConfirmProvider>
           </ToastProvider>
         </AuthProvider>
       </BrowserRouter>

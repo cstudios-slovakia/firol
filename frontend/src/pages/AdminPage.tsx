@@ -35,6 +35,7 @@ import {
 import { Feedback, type FeedbackSubmission } from "@/api/feedback";
 import { ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Field } from "@/components/ui/Field";
@@ -66,6 +67,7 @@ export function AdminPage() {
 function FeedbackSection() {
     const { csrfToken } = useAuth();
     const toast = useToast();
+    const confirm = useConfirm();
     const [items, setItems] = useState<FeedbackSubmission[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [busyId, setBusyId] = useState<number | null>(null);
@@ -90,12 +92,12 @@ function FeedbackSection() {
     }, []);
 
     async function onDelete(s: FeedbackSubmission) {
-        if (
-            !window.confirm(
-                "Naozaj zmazať túto spätnú väzbu? Akcia je nezvratná.",
-            )
-        )
-            return;
+        const ok = await confirm({
+            title: "Zmazať spätnú väzbu?",
+            description: "Táto akcia je nezvratná.",
+            confirmLabel: "Zmazať",
+        });
+        if (!ok) return;
         setBusyId(s.id);
         try {
             await Feedback.remove(s.id, csrfToken);
@@ -248,6 +250,7 @@ function cnLocal(...parts: Array<string | false | null | undefined>): string {
 function AccountsSection() {
     const { csrfToken, activeAccountId } = useAuth();
     const toast = useToast();
+    const confirm = useConfirm();
     const [page, setPage] = useState<AdminAccountsPage | null>(null);
     // Tracks how many items we've fetched from the server (independent of local deletions).
     // Used to determine the correct offset for the next loadMore call and whether more exist.
@@ -398,12 +401,12 @@ function AccountsSection() {
     }
 
     async function onDeleteAccount(a: AdminAccount) {
-        if (
-            !window.confirm(
-                `Naozaj zmazať účet „${a.invoice_company_name}"? Vymažú sa všetky firmy, kontroly, školenia, faktúry a používatelia tohto účtu. Akcia je nezvratná.`,
-            )
-        )
-            return;
+        const ok = await confirm({
+            title: "Zmazať účet?",
+            description: `Účet „${a.invoice_company_name}" sa zmaže vrátane všetkých firiem, kontrol, školení, faktúr a používateľov. Akcia je nezvratná.`,
+            confirmLabel: "Zmazať účet",
+        });
+        if (!ok) return;
         try {
             await AdminPanel.deleteAccount(a.id, csrfToken);
             removeAccount(a.id);
@@ -416,12 +419,12 @@ function AccountsSection() {
     }
 
     async function onDeleteUser(accountId: number, u: AdminUser) {
-        if (
-            !window.confirm(
-                `Naozaj zmazať používateľa „${u.fullname}"? Akcia je nezvratná.`,
-            )
-        )
-            return;
+        const ok = await confirm({
+            title: "Zmazať používateľa?",
+            description: `Používateľ „${u.fullname}" bude natrvalo zmazaný. Akcia je nezvratná.`,
+            confirmLabel: "Zmazať",
+        });
+        if (!ok) return;
         try {
             await AdminPanel.deleteUser(u.id, csrfToken);
             removeUser(accountId, u.id);

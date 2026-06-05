@@ -15,6 +15,7 @@ import {
 import { ApiError } from '@/lib/api';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { useConfirm } from '@/lib/confirm';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -37,6 +38,7 @@ export function InspectionDetailPage() {
   const { csrfToken } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [data, setData] = useState<InspectionDetail | null>(null);
   const [documents, setDocuments] = useState<InspectionDocument[]>([]);
@@ -128,7 +130,12 @@ export function InspectionDetailPage() {
   }
 
   async function handleDeleteItem(itemId: number) {
-    if (!window.confirm('Naozaj zmazať túto položku?')) return;
+    const ok = await confirm({
+      title: 'Odstrániť položku?',
+      description: 'Položka bude odstránená z tejto kontroly.',
+      confirmLabel: 'Odstrániť',
+    });
+    if (!ok) return;
     setDeletingItemId(itemId);
     try {
       await Inspections.deleteItem(id, itemId, csrfToken);

@@ -5,6 +5,7 @@ import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyDetail } from '@/api/companies';
 import { ApiError } from '@/lib/api';
+import { useConfirm } from '@/lib/confirm';
 import { Card } from '@/components/ui/Card';
 import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
@@ -15,17 +16,23 @@ export function CompanyDetailPage() {
   const navigate = useNavigate();
   const { csrfToken } = useAuth();
   const isReadOnly = useIsReadOnly();
+  const confirm = useConfirm();
 
   const [data, setData] = useState<CompanyDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function onArchive() {
-    if (!window.confirm('Naozaj archivovať firmu? Údaje zostanú v systéme, len sa skryjú.')) return;
+  async function onDelete() {
+    const ok = await confirm({
+      title: 'Odstrániť firmu?',
+      description: 'Táto akcia je nevratná. Firma bude odstránená spolu so všetkými prevádzkami.',
+      confirmLabel: 'Odstrániť',
+    });
+    if (!ok) return;
     try {
       await Companies.archive(id, csrfToken);
       navigate('/companies', { replace: true });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Archiváciu sa nepodarilo dokončiť.');
+      setError(err instanceof ApiError ? err.message : 'Firmu sa nepodarilo odstrániť.');
     }
   }
 
@@ -105,8 +112,8 @@ export function CompanyDetailPage() {
                 </Link>
                 <button
                   type="button"
-                  aria-label="Archivovať"
-                  onClick={onArchive}
+                  aria-label="Odstrániť"
+                  onClick={onDelete}
                   className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
                 >
                   <Trash2 className="size-4" />
