@@ -19,7 +19,7 @@
  *
  * Throws ApiError on non-2xx so callers can branch on `.status`.
  */
-import { readCache, writeCache, invalidatePrefix } from './cache';
+import { readCache, writeCache, cachedPathsUnder } from './cache';
 import { enqueueMutation, OfflineQueuedError } from './queue';
 import { autoOptimistic } from './offlineEntities';
 
@@ -161,7 +161,8 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
   }
 
   if (res.status === 204) {
-    if (method !== 'GET') await invalidatePrefix(resourceRoot(path));
+    // Fire-and-forget refresh; the mutation already succeeded server-side.
+    if (method !== 'GET') refreshAfterMutation(path).catch(() => undefined);
     return undefined as T;
   }
 
@@ -183,11 +184,45 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
     // Fire-and-forget cache write; failures here shouldn't break the call.
     writeCache(path, parsed).catch(() => undefined);
   } else {
-    // Successful mutation likely invalidates the list view at the resource root.
-    invalidatePrefix(resourceRoot(path)).catch(() => undefined);
+    // Successful mutation: refresh the reads it likely affected so the cache
+    // stays in step with the server — without ever leaving an empty hole.
+    refreshAfterMutation(path).catch(() => undefined);
   }
 
   return parsed as T;
+}
+
+/**
+ * After a successful mutation, refresh the reads it likely affected so the
+ * IndexedDB cache reflects the server — WITHOUT deleting anything. We re-fetch
+ * the resource's list view(s) and the one entity the mutation touched; a failed
+ * re-fetch (e.g. connectivity just dropped) leaves the existing cache entry in
+ * place, so the offline fallback is never left empty.
+ *
+ * Deliberately bounded: only the list root and the single affected entity are
+ * refreshed, never every cached detail under the resource — so e.g. editing one
+ * inspection doesn't re-fetch twenty unrelated detail pages.
+ *
+ * Exported so the mutation-queue drain can reuse it after replaying a queued
+ * write back online.
+ */
+export async function refreshAfterMutation(path: string): Promise<void> {
+  const pathOnly = path.split('?')[0];
+  const root = resourceRoot(pathOnly);
+  const idMatch = pathOnly.match(/^\/api\/[^/]+\/(-?\d+)/);
+  const entityRoot = idMatch ? `${root}/${idMatch[1]}` : null;
+
+  const cached = await cachedPathsUnder(root);
+  const targets = cached.filter((p) => {
+    const po = p.split('?')[0];
+    if (po === root) return true; // list view(s), incl. ?search=/?filter= variants
+    if (entityRoot && (po === entityRoot || po.startsWith(`${entityRoot}/`))) return true;
+    return false;
+  });
+
+  // Re-fetch via the GET path: success overwrites the cache with fresh data;
+  // failure falls back to (and preserves) the existing entry.
+  await Promise.all(targets.map((p) => api(p).catch(() => undefined)));
 }
 
 function safeJson(text: string): unknown {

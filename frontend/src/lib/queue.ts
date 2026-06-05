@@ -17,7 +17,7 @@
  */
 import { db, cacheKey, type MutationEntry, type SerializedFormData, type SerializedBlob } from './db';
 import { getActiveAccountId, getCsrfToken } from './session';
-import { invalidatePrefix } from './cache';
+import { refreshAfterMutation } from './api';
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -174,14 +174,15 @@ async function replay(m: MutationEntry): Promise<ReplayOutcome> {
       if (typeof realId === 'number') {
         await db.mutations.delete(m.id!);
         await remapId(m.clientId, realId, m.accountId);
-        await invalidatePrefix(resourceRoot(m.path));
+        // Reconcile the cache with the server now that the create has a real id.
+        await refreshAfterMutation(replaceIdSegment(m.path, m.clientId, realId));
         return 'synced';
       }
     }
-    // Drop from queue and bust any list caches under the same resource root,
-    // so the next GET picks up the server's view.
+    // Drop from queue and refresh the reads under this resource root so the
+    // next view (online or offline) reflects the server's post-sync state.
     await db.mutations.delete(m.id!);
-    await invalidatePrefix(resourceRoot(m.path));
+    await refreshAfterMutation(m.path);
     return 'synced';
   } catch {
     // Network error — the device is (still) offline. Leave the mutation
@@ -247,15 +248,6 @@ function safeJson(text: string): unknown {
   } catch {
     return null;
   }
-}
-
-/**
- * Derive the "resource root" path used to invalidate list caches after
- * a successful mutation. /api/inspections/123/items → /api/inspections.
- */
-function resourceRoot(path: string): string {
-  const m = path.match(/^(\/api\/[^/?]+)/);
-  return m ? m[1] : path;
 }
 
 // --- temp-id remapping ---------------------------------------------------

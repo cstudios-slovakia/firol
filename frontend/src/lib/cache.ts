@@ -51,3 +51,22 @@ export async function invalidatePrefix(prefix: string): Promise<void> {
     await db.cache.bulkDelete(keysToDelete);
   }
 }
+
+/**
+ * Paths of every cached GET whose key falls under `prefix`, for the active
+ * account. Used to *refresh* (re-fetch) the reads a mutation likely affected
+ * instead of deleting them: deleting would leave a hole that breaks the
+ * offline fallback if connectivity drops before the next successful GET.
+ */
+export async function cachedPathsUnder(prefix: string): Promise<string[]> {
+  const accountId = getActiveAccountId();
+  const keyPrefix = `${accountId ?? 'anon'}::${prefix}`;
+  const paths: string[] = [];
+  await db.cache
+    .where('key')
+    .startsWith(keyPrefix)
+    .each((entry) => {
+      paths.push(entry.path);
+    });
+  return paths;
+}

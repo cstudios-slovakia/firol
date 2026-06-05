@@ -44,3 +44,6 @@ AUDIT.md
 # advertise tooling. Live copy stays on developer machines.
 CLAUDE.md
 
+
+# Local offline-mode audit harness (not for commit)
+.offline-audit/
