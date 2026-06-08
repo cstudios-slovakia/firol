@@ -136,6 +136,18 @@ export function AppShell() {
     const topBarRef = useRef<HTMLDivElement>(null);
     const [topBarH, setTopBarH] = useState(65);
 
+    // When launched as an installed PWA (standalone display mode) the brand in
+    // the header reads "POAPP"; in the browser it stays "Firol".
+    const [isInstalled] = useState(
+        () =>
+            typeof window !== "undefined" &&
+            (window.matchMedia?.("(display-mode: standalone)").matches ||
+                // iOS Safari uses a non-standard navigator.standalone flag.
+                (window.navigator as Navigator & { standalone?: boolean })
+                    .standalone === true),
+    );
+    const brandName = isInstalled ? "POAPP" : "Firol";
+
     useLayoutEffect(() => {
         const el = topBarRef.current;
         if (!el) return;
@@ -161,11 +173,11 @@ export function AppShell() {
                         >
                             <img
                                 src="/icons/firol-icon-only.png"
-                                alt="Firol"
+                                alt={brandName}
                                 className="size-9 transition-transform group-hover:scale-105"
                             />
                             <span className="font-semibold tracking-tight text-ink-900 transition-colors group-hover:text-firol-700">
-                                Firol
+                                {brandName}
                             </span>
                         </Link>
                         <div className="flex items-center gap-2">

@@ -25,7 +25,7 @@ export default defineConfig({
       includeAssets: ['icons/favicon.ico', 'icons/apple-touch-icon-180x180.png'],
       manifest: {
         name: 'Firol',
-        short_name: 'Firol',
+        short_name: 'POAPP',
         description: 'Aplikácia pre technikov požiarnej ochrany',
         lang: 'sk',
         theme_color: '#E8433A',
