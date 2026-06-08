@@ -33,6 +33,7 @@ import {
     Shield,
     ShieldCheck,
     ShieldOff,
+    Smartphone,
     Trash2,
     UploadCloud,
     User,
@@ -44,6 +45,7 @@ import { AccountApi, type Account } from "@/api/account";
 import { DataApi } from "@/api/data";
 import { ImportApi, type ImportKind, type ImportResult } from "@/api/import";
 import { BackupReminderModal } from "@/components/BackupReminderModal";
+import { InstallAppCard } from "@/components/InstallAppCard";
 import {
     InspectorProfileApi,
     type InspectorProfile,
@@ -77,6 +79,7 @@ const SECTION_TABS = [
     { to: "/settings/branding", label: "Branding PDF", icon: Palette },
     { to: "/settings/technici", label: "Technici", icon: UsersRound },
     { to: "/settings/data", label: "Správa dát", icon: Database },
+    { to: "/settings/systemove", label: "Systémové", icon: Smartphone },
 ] as const;
 
 const MENU_ITEMS = [
@@ -121,6 +124,15 @@ const MENU_ITEMS = [
         icon: Database,
         color: "text-slate-600",
         bg: "bg-slate-50",
+    },
+    {
+        to: "/settings/systemove",
+        label: "Systémové",
+        description:
+            "Inštalácia aplikácie na zariadenie a nastavenia appky.",
+        icon: Smartphone,
+        color: "text-cyan-600",
+        bg: "bg-cyan-50",
     },
 ] as const;
 
@@ -2075,6 +2087,17 @@ export function DataPage() {
         <>
             <SectionBack label="Správa dát" />
             <DataSection />
+        </>
+    );
+}
+
+// ─── Systémové ───────────────────────────────────────────────────────────────
+
+export function SystemPage() {
+    return (
+        <>
+            <SectionBack label="Systémové" />
+            <InstallAppCard />
         </>
     );
 }

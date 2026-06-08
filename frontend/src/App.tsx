@@ -29,6 +29,7 @@ import {
   BrandingPage,
   TeamPage,
   DataPage,
+  SystemPage,
 } from '@/pages/SettingsPage';
 import { BillingPage } from '@/pages/BillingPage';
 import { AdminPage, RequireAdmin } from '@/pages/AdminPage';
@@ -102,6 +103,7 @@ export default function App() {
           <Route path="branding" element={<BrandingPage />} />
           <Route path="technici" element={<TeamPage />} />
           <Route path="data" element={<DataPage />} />
+          <Route path="systemove" element={<SystemPage />} />
           <Route path="admin" element={<RequireAdmin><AdminPage /></RequireAdmin>} />
         </Route>
         <Route path="/billing" element={<BillingPage />} />
