@@ -81,13 +81,13 @@ $checklistItems = [
   table.items { border-collapse: collapse; width: 100%; font-size: 8.5pt; margin-top: 4pt; }
   table.items th { background: #f3f3f6; color: #2a2a32; padding: 4pt 5pt; border: 1pt solid #d6d6dc; text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; }
   table.items td { padding: 4pt 5pt; border: 1pt solid #e5e5ea; vertical-align: top; }
-  .sig-tbl { border-collapse: collapse; width: 100%; margin-top: 12pt; font-size: 9pt; }
+  .sig-tbl { border-collapse: collapse; width: 100%; margin-top: 8pt; font-size: 9pt; }
   .sig-tbl th { background: #f3f3f6; padding: 4pt 6pt; border: 1pt solid #d6d6dc; font-size: 8pt; text-transform: uppercase; letter-spacing: .3pt; font-weight: bold; color: #2a2a32; }
   .sig-tbl td { border: 1pt solid #e5e5ea; padding: 6pt; vertical-align: top; }
-  .sig-row td { height: 50pt; vertical-align: bottom; text-align: center; }
+  .sig-row td { height: 36pt; vertical-align: bottom; text-align: center; }
   .sig-img { max-height: 38pt; max-width: 150pt; }
   .sig-line { border-top: 1pt solid #2a2a32; margin-top: 4pt; padding-top: 3pt; font-size: 8pt; color: #6b6b75; }
-  .footer { border-top: 1pt solid #e5e5ea; margin-top: 12pt; padding-top: 4pt; font-size: 8pt; color: #6b6b75; }
+  .footer { border-top: 1pt solid #e5e5ea; margin-top: 8pt; padding-top: 4pt; font-size: 8pt; color: #6b6b75; }
 </style>
 
 <table class="hdr">

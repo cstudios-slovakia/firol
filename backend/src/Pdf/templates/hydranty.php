@@ -243,7 +243,7 @@ foreach ($items as $idx => $it) {
   .sig-tbl {
     border-collapse: collapse;
     width: 100%;
-    margin-top: 12pt;
+    margin-top: 8pt;
     font-size: 9pt;
   }
 
@@ -265,7 +265,7 @@ foreach ($items as $idx => $it) {
   }
 
   .sig-row td {
-    height: 50pt;
+    height: 36pt;
     vertical-align: bottom;
     text-align: center;
   }
@@ -285,7 +285,7 @@ foreach ($items as $idx => $it) {
 
   .footer {
     border-top: 1pt solid #e5e5ea;
-    margin-top: 12pt;
+    margin-top: 8pt;
     padding-top: 4pt;
     font-size: 8pt;
     color: #6b6b75;

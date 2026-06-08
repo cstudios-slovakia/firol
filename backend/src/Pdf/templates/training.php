@@ -345,7 +345,7 @@ if (!empty($trainer['certification_number'])) {
 
   .footer {
     border-top: 1pt solid #e5e5ea;
-    margin-top: 12pt;
+    margin-top: 8pt;
     padding-top: 4pt;
     font-size: 8pt;
     color: #1a1a1f;

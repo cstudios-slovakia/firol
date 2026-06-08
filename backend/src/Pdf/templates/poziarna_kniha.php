@@ -300,7 +300,7 @@ $contactLine = $facility['contact_person'] ?? '';
   .sig-tbl {
     border-collapse: collapse;
     width: 100%;
-    margin-top: 12pt;
+    margin-top: 8pt;
     font-size: 9pt;
   }
 
@@ -322,7 +322,7 @@ $contactLine = $facility['contact_person'] ?? '';
   }
 
   .sig-row td {
-    height: 50pt;
+    height: 36pt;
     vertical-align: bottom;
     text-align: center;
   }
@@ -342,7 +342,7 @@ $contactLine = $facility['contact_person'] ?? '';
 
   .footer {
     border-top: 1pt solid #e5e5ea;
-    margin-top: 12pt;
+    margin-top: 8pt;
     padding-top: 4pt;
     font-size: 8pt;
     color: #6b6b75;
