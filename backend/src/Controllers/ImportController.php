@@ -14,6 +14,7 @@ use Firol\Support\Address;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
@@ -54,7 +55,7 @@ final class ImportController
     }
 
     /**
-     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}> $sheets
+     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,date?:bool,prompt?:string,prompt_title?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}> $sheets
      */
     private static function sendTemplate(string $filename, array $sheets): void
     {
@@ -83,7 +84,7 @@ final class ImportController
      * separate from {@see sendTemplate} so it can be exercised without the
      * HTTP/streaming layer.
      *
-     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}> $sheets
+     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,date?:bool,prompt?:string,prompt_title?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}> $sheets
      */
     private static function buildWorkbook(array $sheets): Spreadsheet
     {
@@ -117,7 +118,10 @@ final class ImportController
                     ],
                     'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT],
                 ]);
-                $ws->getColumnDimensionByColumn($col1)->setWidth(26);
+                // Widen to fit longer, more descriptive headers (e.g. the
+                // linking-number columns) while capping so a single column
+                // never dominates the sheet.
+                $ws->getColumnDimensionByColumn($col1)->setWidth(max(26, min(mb_strlen($col['header']) + 2, 50)));
 
                 $range = "{$colLetter}2:{$colLetter}1001";
 
@@ -164,6 +168,28 @@ final class ImportController
                         : 'Zadaj jednu alebo viac hodnôt oddelených čiarkou. Úplný zoznam povolených hodnôt nájdeš na hárku „Pokyny".';
                     $dv->setPrompt($prompt);
                     $dv->setSqref($range);
+                } elseif (!empty($col['date'])) {
+                    // Force a real date number format so the cells render as
+                    // DD-MM-RRRR in (Slovak) Excel and typed values are parsed
+                    // consistently as dates rather than left as ambiguous text.
+                    $ws->getStyle($range)->getNumberFormat()->setFormatCode('dd-mm-yyyy');
+                    $dv = $ws->getCell("{$colLetter}2")->getDataValidation();
+                    $dv->setType(DataValidation::TYPE_NONE);
+                    $dv->setShowInputMessage(true);
+                    $dv->setPromptTitle('Dátum');
+                    $dv->setPrompt('Zadaj dátum vo formáte DD-MM-RRRR (napr. 15-01-2026).');
+                    $dv->setSqref($range);
+                } elseif (!empty($col['prompt'])) {
+                    // Plain text column with an explanatory in-cell tooltip —
+                    // used by the linking-number columns that tie items to a
+                    // parent inspection, so the relationship is obvious right
+                    // where the user types.
+                    $dv = $ws->getCell("{$colLetter}2")->getDataValidation();
+                    $dv->setType(DataValidation::TYPE_NONE);
+                    $dv->setShowInputMessage(true);
+                    $dv->setPromptTitle($col['prompt_title'] ?? 'Pomôcka');
+                    $dv->setPrompt($col['prompt']);
+                    $dv->setSqref($range);
                 }
             }
 
@@ -184,7 +210,7 @@ final class ImportController
      * the user can look up valid inputs; it cannot be hidden or erased by
      * filling in the data sheets.
      *
-     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}> $sheets
+     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,date?:bool,prompt?:string,prompt_title?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}> $sheets
      */
     private static function buildInstructionsSheet(Spreadsheet $spreadsheet, array $sheets): void
     {
@@ -209,7 +235,7 @@ final class ImportController
             'Stĺpce označené hviezdičkou (*) sú povinné.',
             'Stĺpce typu „Výber zo zoznamu“: klikni na bunku a vyber hodnotu zo šípky vpravo. Iná hodnota sa odmietne.',
             'Stĺpce typu „Viac hodnôt“: zadaj povolené hodnoty oddelené čiarkou (napr. tlakova_skuska,plnenie).',
-            'Dátumy zadávaj vo formáte RRRR-MM-DD (napr. 2026-01-15).',
+            'Dátumy zadávaj vo formáte DD-MM-RRRR (napr. 15-01-2026).',
         ];
 
         // Sheets that reference a company by IČO can create that company (and
@@ -228,6 +254,23 @@ final class ImportController
             $intro[] = 'Firma sa hľadá podľa IČO. Ak firma s daným IČO ešte v systéme neexistuje, vytvorí sa automaticky pod zadaným názvom — nemusíš ju importovať vopred.';
             $intro[] = 'IČO má prednosť pred názvom: ak firma s daným IČO už existuje, použije sa existujúca (aj keď je názov napísaný inak, napr. bez diakritiky) a nevytvorí sa duplicitná.';
             $intro[] = 'Prevádzka sa hľadá podľa názvu v rámci firmy. Ak ešte neexistuje, vytvorí sa automaticky.';
+        }
+
+        // Inspection templates split the data across the "Kontroly" sheet and
+        // one "Položky" sheet per type. Spell out the linking number up front,
+        // because it is the single most common point of confusion.
+        if (isset($sheets['Kontroly'])) {
+            $intro[] = 'Hárok „Kontroly" a hárky s položkami sa prepájajú cez číslo kontroly: na hárku „Kontroly" zadaj do stĺpca „Číslo kontroly" ľubovoľné číslo (napr. 1, 2, 3…) a to isté číslo potom uveď v stĺpci „Číslo kontroly z hárku Kontroly" pri každej položke, ktorá k danej kontrole patrí.';
+            $intro[] = 'Príklad: kontrola s číslom 1 na hárku „Kontroly" → všetky jej položky majú v stĺpci „Číslo kontroly z hárku Kontroly" tiež 1.';
+            $intro[] = 'Toto číslo slúži len na spárovanie v rámci tohto súboru — môžeš si ho zvoliť ľubovoľne a po importe sa nikde neukladá.';
+        }
+
+        // Training templates split the data across the "Školenia" sheet and the
+        // "Účastníci" sheet, linked the same way as inspections and their items.
+        if (isset($sheets['Skolenia'])) {
+            $intro[] = 'Hárok „Školenia" a hárok „Účastníci" sa prepájajú cez číslo školenia: na hárku „Školenia" zadaj do stĺpca „Číslo školenia" ľubovoľné číslo (napr. 1, 2, 3…) a to isté číslo potom uveď v stĺpci „Číslo školenia z hárku Školenia" pri každom účastníkovi daného školenia.';
+            $intro[] = 'Príklad: školenie s číslom 1 na hárku „Školenia" → všetci jeho účastníci majú v stĺpci „Číslo školenia z hárku Školenia" tiež 1.';
+            $intro[] = 'Toto číslo slúži len na spárovanie v rámci tohto súboru — môžeš si ho zvoliť ľubovoľne a po importe sa nikde neukladá.';
         }
         foreach ($intro as $line) {
             $ws->getCell("A{$r}")->setValue('•  ' . $line);
@@ -291,6 +334,10 @@ final class ImportController
                     }
                     $allowed = implode("\n", $parts);
                     $lines   = count($parts);
+                } elseif (!empty($col['date'])) {
+                    $type    = 'Dátum (DD-MM-RRRR)';
+                    $allowed = !empty($col['hint']) ? 'napr. ' . $col['hint'] : 'napr. 15-01-2026';
+                    $lines   = 1;
                 } else {
                     $type    = 'Voľný text';
                     $allowed = !empty($col['hint']) ? 'napr. ' . $col['hint'] : '';
@@ -484,7 +531,7 @@ final class ImportController
                     continue;
                 }
                 if ($date === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-                    $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Neplatný dátum (formát YYYY-MM-DD).'];
+                    $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Neplatný dátum (formát DD-MM-RRRR).'];
                     continue;
                 }
                 // Match by IČO; create the company when it does not exist yet.
@@ -524,25 +571,33 @@ final class ImportController
                 $createdTrainings++;
             }
 
-            $insertTrainee = $pdo->prepare(
-                'INSERT INTO trainees (training_id, fullname, position)
-                 VALUES (?, ?, ?)'
-            );
-            foreach ($rowsBySheet['Ucastnici'] as $idx => $row) {
-                $rowNum = $idx + 2;
-                $trainingRowNo = self::intOrNull($row, 'training_row_no');
-                $fullname = self::str($row, 'fullname');
-                if ($trainingRowNo === null || $fullname === null) {
-                    $errors[] = ['sheet' => 'Ucastnici', 'row' => $rowNum, 'message' => 'Chýba # riadok školenia alebo meno.'];
-                    continue;
+            // Účastníci are only validated once the Školenia sheet is fully
+            // clean — otherwise a participant pointing at a training that
+            // failed its own validation would raise a second, cascading
+            // "Školenie s # N neexistuje" on top of the real error one sheet
+            // over. Since the whole import is one transaction, item-level
+            // errors are surfaced only after the parent sheet is sound.
+            if ($errors === []) {
+                $insertTrainee = $pdo->prepare(
+                    'INSERT INTO trainees (training_id, fullname, position)
+                     VALUES (?, ?, ?)'
+                );
+                foreach ($rowsBySheet['Ucastnici'] as $idx => $row) {
+                    $rowNum = $idx + 2;
+                    $trainingRowNo = self::intOrNull($row, 'training_row_no');
+                    $fullname = self::str($row, 'fullname');
+                    if ($trainingRowNo === null || $fullname === null) {
+                        $errors[] = ['sheet' => 'Ucastnici', 'row' => $rowNum, 'message' => 'Chýba # riadok školenia alebo meno.'];
+                        continue;
+                    }
+                    $trainingId = $trainingIdByRowNo[$trainingRowNo] ?? null;
+                    if ($trainingId === null) {
+                        $errors[] = ['sheet' => 'Ucastnici', 'row' => $rowNum, 'message' => "Školenie s # $trainingRowNo neexistuje v sheete Školenia."];
+                        continue;
+                    }
+                    $insertTrainee->execute([$trainingId, $fullname, self::str($row, 'position')]);
+                    $createdTrainees++;
                 }
-                $trainingId = $trainingIdByRowNo[$trainingRowNo] ?? null;
-                if ($trainingId === null) {
-                    $errors[] = ['sheet' => 'Ucastnici', 'row' => $rowNum, 'message' => "Školenie s # $trainingRowNo neexistuje v sheete Školenia."];
-                    continue;
-                }
-                $insertTrainee->execute([$trainingId, $fullname, self::str($row, 'position')]);
-                $createdTrainees++;
             }
 
             if ($errors !== []) {
@@ -598,13 +653,6 @@ final class ImportController
             /** @var array<int, array{id:int,type:string}> $inspectionByRowNo */
             $inspectionByRowNo = [];
 
-            // # riadok values that appear on the Kontroly sheet but failed
-            // validation (so they never made it into $inspectionByRowNo). Lets
-            // the item loop tell "parent is broken — fix it on Kontroly" apart
-            // from "parent number was never entered at all".
-            /** @var array<int, true> $invalidInspectionRowNos */
-            $invalidInspectionRowNos = [];
-
             $insertInspection = $pdo->prepare(
                 'INSERT INTO inspections
                     (account_id, company_id, facility_id, type, periodicity_months,
@@ -628,23 +676,19 @@ final class ImportController
                 }
                 if ($ico === null || $companyName === null || $facilityName === null || $type === null) {
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Chýba názov firmy / IČO firmy / prevádzka / typ.'];
-                    $invalidInspectionRowNos[$rowNo] = true;
                     continue;
                 }
                 $allowed = Schema::INSPECTION_PERIODICITIES[$type] ?? null;
                 if ($allowed === null) {
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Neznámy typ kontroly: $type."];
-                    $invalidInspectionRowNos[$rowNo] = true;
                     continue;
                 }
                 if ($periodicity === null || !in_array($periodicity, $allowed, true)) {
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Neplatná periodicita pre typ $type (povolené: " . implode(',', $allowed) . ')'];
-                    $invalidInspectionRowNos[$rowNo] = true;
                     continue;
                 }
                 if ($executedOn === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $executedOn)) {
-                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Neplatný dátum (YYYY-MM-DD).'];
-                    $invalidInspectionRowNos[$rowNo] = true;
+                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Neplatný dátum (formát DD-MM-RRRR).'];
                     continue;
                 }
                 // Match by IČO; create the company/facility when missing.
@@ -680,62 +724,65 @@ final class ImportController
                 $createdInspections++;
             }
 
-            // Item sheets — each maps to one inspection type. We resolve
-            // the parent by # kontrola which must reference a row in the
-            // Kontroly sheet whose type matches the item sheet.
-            $itemSheets = [
-                'Polozky_php'                => 'php',
-                'Polozky_hydranty'           => 'hydranty',
-                'Polozky_oprava_ts_php'      => 'oprava_ts_php',
-                'Polozky_poziarna_kniha'     => 'poziarna_kniha',
-                'Polozky_pu_akcieschopnost'  => 'pu_akcieschopnost',
-                'Polozky_pu_udrzba'          => 'pu_udrzba',
-                'Polozky_nudzove_osvetlenie' => 'nudzove_osvetlenie',
-                'Polozky_ts_hadic'           => 'ts_hadic',
-            ];
+            // Item sheets are only validated once the Kontroly sheet is fully
+            // clean. An item that references a broken parent would otherwise
+            // raise a second, cascading error ("Kontrola # N je chybná") on
+            // top of the real one on Kontroly — two messages for one cause,
+            // which reads as two separate problems. Since the whole import is
+            // one transaction (nothing is saved while any error stands), we
+            // surface item-level errors only after the parent sheet is sound.
+            if ($errors === []) {
+                // Each sheet maps to one inspection type. We resolve the parent
+                // by # kontrola which must reference a row in the Kontroly sheet
+                // whose type matches the item sheet.
+                $itemSheets = [
+                    'Polozky_php'                => 'php',
+                    'Polozky_hydranty'           => 'hydranty',
+                    'Polozky_oprava_ts_php'      => 'oprava_ts_php',
+                    'Polozky_poziarna_kniha'     => 'poziarna_kniha',
+                    'Polozky_pu_akcieschopnost'  => 'pu_akcieschopnost',
+                    'Polozky_pu_udrzba'          => 'pu_udrzba',
+                    'Polozky_nudzove_osvetlenie' => 'nudzove_osvetlenie',
+                    'Polozky_ts_hadic'           => 'ts_hadic',
+                ];
 
-            $insertItem = $pdo->prepare(
-                'INSERT INTO inspection_items (inspection_id, position, fields)
-                 SELECT ?, COALESCE(MAX(position), 0) + 1, ?
-                 FROM   inspection_items WHERE inspection_id = ?'
-            );
+                $insertItem = $pdo->prepare(
+                    'INSERT INTO inspection_items (inspection_id, position, fields)
+                     SELECT ?, COALESCE(MAX(position), 0) + 1, ?
+                     FROM   inspection_items WHERE inspection_id = ?'
+                );
 
-            foreach ($itemSheets as $sheetCode => $expectedType) {
-                foreach ($rowsBySheet[$sheetCode] ?? [] as $idx => $row) {
-                    $rowNum = $idx + 2;
-                    $parentRowNo = self::intOrNull($row, 'row_no');
-                    if ($parentRowNo === null) {
-                        $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => 'Chýba # kontrola.'];
-                        continue;
+                foreach ($itemSheets as $sheetCode => $expectedType) {
+                    foreach ($rowsBySheet[$sheetCode] ?? [] as $idx => $row) {
+                        $rowNum = $idx + 2;
+                        $parentRowNo = self::intOrNull($row, 'row_no');
+                        if ($parentRowNo === null) {
+                            $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => 'Chýba # kontrola.'];
+                            continue;
+                        }
+                        $parent = $inspectionByRowNo[$parentRowNo] ?? null;
+                        if ($parent === null) {
+                            // The Kontroly sheet validated cleanly, so this can
+                            // only be a number that was never entered there.
+                            $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => "Kontrola # $parentRowNo neexistuje v sheete Kontroly."];
+                            continue;
+                        }
+                        if ($parent['type'] !== $expectedType) {
+                            $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => "Kontrola # $parentRowNo má typ {$parent['type']}, nie $expectedType."];
+                            continue;
+                        }
+                        $fields = self::buildItemFields($expectedType, $row, $sheetCode, $rowNum, $errors);
+                        if ($fields === null) {
+                            continue;
+                        }
+                        $json = json_encode($fields, JSON_UNESCAPED_UNICODE);
+                        if ($json === false) {
+                            $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => 'Položku sa nepodarilo serializovať.'];
+                            continue;
+                        }
+                        $insertItem->execute([$parent['id'], $json, $parent['id']]);
+                        $createdItems++;
                     }
-                    $parent = $inspectionByRowNo[$parentRowNo] ?? null;
-                    if ($parent === null) {
-                        // A parent that exists on the Kontroly sheet but failed
-                        // its own validation is a more useful thing to surface
-                        // than a bare "doesn't exist" — otherwise the user
-                        // chases a phantom missing row instead of the real
-                        // error one sheet over.
-                        $message = isset($invalidInspectionRowNos[$parentRowNo])
-                            ? "Kontrola # $parentRowNo je chybná — oprav ju na hárku Kontroly."
-                            : "Kontrola # $parentRowNo neexistuje v sheete Kontroly.";
-                        $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => $message];
-                        continue;
-                    }
-                    if ($parent['type'] !== $expectedType) {
-                        $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => "Kontrola # $parentRowNo má typ {$parent['type']}, nie $expectedType."];
-                        continue;
-                    }
-                    $fields = self::buildItemFields($expectedType, $row, $sheetCode, $rowNum, $errors);
-                    if ($fields === null) {
-                        continue;
-                    }
-                    $json = json_encode($fields, JSON_UNESCAPED_UNICODE);
-                    if ($json === false) {
-                        $errors[] = ['sheet' => $sheetCode, 'row' => $rowNum, 'message' => 'Položku sa nepodarilo serializovať.'];
-                        continue;
-                    }
-                    $insertItem->execute([$parent['id'], $json, $parent['id']]);
-                    $createdItems++;
                 }
             }
 
@@ -901,7 +948,7 @@ final class ImportController
      * keyed by schema field name. Sheets missing from the upload are
      * returned as empty arrays so callers can iterate without null checks.
      *
-     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string}>}> $schema
+     * @param array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,date?:bool}>}> $schema
      * @return array<string, list<array<string, string>>>
      */
     private static function readUpload(array $schema): array
@@ -941,22 +988,28 @@ final class ImportController
                 $assoc = [];
                 $anyValue = false;
                 for ($c = 1; $c <= $colCount; $c++) {
+                    $col   = $columns[$c - 1];
                     $value = $ws->getCell([$c, $r])->getValue();
-                    if ($value instanceof \DateTimeInterface) {
-                        $value = $value->format('Y-m-d');
-                    } elseif (is_float($value) && $columns[$c - 1]['key'] !== 'q' && $columns[$c - 1]['key'] !== 'hs' && $columns[$c - 1]['key'] !== 'hd' && $columns[$c - 1]['key'] !== 'working_pressure' && $columns[$c - 1]['key'] !== 'test_pressure' && $columns[$c - 1]['key'] !== 'length') {
+                    if (!empty($col['date'])) {
+                        // Normalize every date representation Excel can produce
+                        // (a serial number when read data-only, a DateTime, or
+                        // DD-MM-RRRR / DD.MM.RRRR text) to the canonical Y-m-d
+                        // the importers and the DB expect.
+                        $str = self::normalizeImportDate($value);
+                    } elseif ($value instanceof \DateTimeInterface) {
+                        $str = $value->format('Y-m-d');
+                    } elseif (is_float($value) && !in_array($col['key'], ['q', 'hs', 'hd', 'working_pressure', 'test_pressure', 'length'], true)) {
                         // Excel stores all numbers as floats. Re-flatten
                         // to int for fields that aren't decimal by nature.
-                        if (floor($value) === $value) {
-                            $value = (int) $value;
-                        }
+                        $str = floor($value) === $value ? (string) (int) $value : (string) $value;
+                    } else {
+                        $str = $value === null ? '' : (string) $value;
                     }
-                    $str = $value === null ? '' : (string) $value;
                     $str = trim($str);
                     if ($str !== '') {
                         $anyValue = true;
                     }
-                    $assoc[$columns[$c - 1]['key']] = $str;
+                    $assoc[$col['key']] = $str;
                 }
                 if (!$anyValue) {
                     continue;
@@ -1038,6 +1091,51 @@ final class ImportController
         if ($v === null) return null;
         if (!preg_match('/^-?\d+$/', $v)) return null;
         return (int) $v;
+    }
+
+    /**
+     * Normalizes a raw date cell value to the canonical `Y-m-d` string the
+     * importers validate and store, or returns the trimmed input unchanged
+     * when it can't be parsed (so per-row validation surfaces a clean
+     * "Neplatný dátum" rather than a silently wrong date).
+     *
+     * Handles the three shapes Excel can deliver for a date entered in the
+     * template's `DD-MM-RRRR` cells:
+     *   - a serial number (the common case when reading data-only, because
+     *     styles aren't loaded and the cell is a real Excel date),
+     *   - a DateTime (when the reader does surface one),
+     *   - text in DD-MM-RRRR / DD.MM.RRRR / DD/MM/RRRR, or already-canonical
+     *     YYYY-MM-DD for backward compatibility.
+     */
+    private static function normalizeImportDate(mixed $value): string
+    {
+        if ($value === null || $value === '') {
+            return '';
+        }
+        if (is_int($value) || is_float($value)) {
+            try {
+                return ExcelDate::excelToDateTimeObject((float) $value)->format('Y-m-d');
+            } catch (Throwable) {
+                return (string) $value;
+            }
+        }
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d');
+        }
+        $s = trim((string) $value);
+        if ($s === '') {
+            return '';
+        }
+        // Day-first text (the format the template asks for).
+        if (preg_match('#^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$#', $s, $m)) {
+            return sprintf('%04d-%02d-%02d', (int) $m[3], (int) $m[2], (int) $m[1]);
+        }
+        // Already canonical — pass through untouched.
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $s)) {
+            return $s;
+        }
+        // Unrecognized — hand back as-is so validation rejects it clearly.
+        return $s;
     }
 
     /** @param array<string,string> $row */

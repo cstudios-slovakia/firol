@@ -364,7 +364,8 @@ $contactLine = $facility['contact_person'] ?? '';
           <td>
             <div class="hdr-company"><?= $h($company['name']) ?></div>
             <div class="hdr-sub">Prevádzka: <?= $h($facility['name']) ?> | IČO: <?= $h($company['ico']) ?></div>
-            <div class="hdr-sub"><?= $h($company['address']) ?></div>
+            <?php if (!empty($facility['address'])): ?>
+              <div class="hdr-sub"><?= $h($facility['address']) ?></div><?php endif ?>
           </td>
         </tr>
       </table>
@@ -394,7 +395,7 @@ $contactLine = $facility['contact_person'] ?? '';
   </tr>
   <tr>
     <td class="bl">Prevádzka</td>
-    <td class="bv"><?= $h($facility['name']) ?></td>
+    <td class="bv"><?= $h($facility['name']) ?><?= !empty($facility['address']) ? '<br><span style="font-weight:normal;color:#555;">' . $h($facility['address']) . '</span>' : '' ?></td>
     <td class="bl">Záznam vykonal</td>
     <td class="bv"><?= $inspectorLine ?></td>
   </tr>

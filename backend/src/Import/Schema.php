@@ -24,7 +24,7 @@ namespace Firol\Import;
 final class Schema
 {
     /**
-     * @return array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}>
+     * @return array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,date?:bool,prompt?:string,prompt_title?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}>
      */
     public static function companies(): array
     {
@@ -52,7 +52,7 @@ final class Schema
     }
 
     /**
-     * @return array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}>
+     * @return array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,date?:bool,prompt?:string,prompt_title?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}>
      */
     public static function trainings(): array
     {
@@ -60,7 +60,13 @@ final class Schema
             'Skolenia' => [
                 'title' => 'Školenia',
                 'columns' => [
-                    ['header' => '# riadok *', 'key' => 'row_no', 'hint' => '1'],
+                    [
+                        'header' => 'Číslo školenia (ľubovoľné, na spárovanie s účastníkmi) *',
+                        'key' => 'row_no',
+                        'hint' => '1',
+                        'prompt_title' => 'Číslo školenia',
+                        'prompt' => 'Zadaj ľubovoľné číslo (napr. 1, 2, 3…). To isté číslo zopakuj na hárku „Účastníci" v stĺpci „Číslo školenia z hárku Školenia", aby sa účastníci priradili k tomuto školeniu.',
+                    ],
                     ['header' => 'Názov firmy *', 'key' => 'company_name', 'hint' => 'Acme s.r.o.'],
                     ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678'],
                     ['header' => 'Prevádzka', 'key' => 'facility_name', 'hint' => 'Sklad Žilina'],
@@ -70,14 +76,20 @@ final class Schema
                         'hint' => 'vstupne',
                         'options' => self::TRAINING_TYPES,
                     ],
-                    ['header' => 'Dátum (YYYY-MM-DD) *', 'key' => 'date', 'hint' => '2026-01-15'],
+                    ['header' => 'Dátum (DD-MM-RRRR) *', 'key' => 'date', 'hint' => '15-01-2026', 'date' => true],
                     ['header' => 'E-mail lektora', 'key' => 'trainer_email', 'hint' => 'lektor@firma.sk'],
                 ],
             ],
             'Ucastnici' => [
                 'title' => 'Účastníci',
                 'columns' => [
-                    ['header' => '# riadok školenia *', 'key' => 'training_row_no', 'hint' => '1'],
+                    [
+                        'header' => 'Číslo školenia z hárku Školenia *',
+                        'key' => 'training_row_no',
+                        'hint' => '1',
+                        'prompt_title' => 'Číslo školenia',
+                        'prompt' => 'Napíš číslo školenia z hárku „Školenia" (stĺpec „Číslo školenia"). Účastník v tomto riadku sa priradí k danému školeniu.',
+                    ],
                     ['header' => 'Meno a priezvisko *', 'key' => 'fullname', 'hint' => 'Ján Účastník'],
                     ['header' => 'Pracovné zaradenie', 'key' => 'position', 'hint' => 'Skladník'],
                 ],
@@ -150,7 +162,7 @@ final class Schema
     ];
 
     /**
-     * @return array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}>
+     * @return array<string, array{title:string, columns: list<array{header:string,key:string,hint?:string,date?:bool,prompt?:string,prompt_title?:string,options?:list<string>,multi_options?:list<array{value:string,label:string}>}>}>
      */
     public static function inspections(): array
     {
@@ -160,7 +172,13 @@ final class Schema
             'Kontroly' => [
                 'title' => 'Kontroly',
                 'columns' => [
-                    ['header' => '# riadok *', 'key' => 'row_no', 'hint' => '1'],
+                    [
+                        'header' => 'Číslo kontroly (ľubovoľné, na spárovanie s položkami) *',
+                        'key' => 'row_no',
+                        'hint' => '1',
+                        'prompt_title' => 'Číslo kontroly',
+                        'prompt' => 'Zadaj ľubovoľné číslo (napr. 1, 2, 3…). To isté číslo zopakuj na hárkoch s položkami v stĺpci „Číslo kontroly z hárku Kontroly", aby sa položky priradili k tejto kontrole.',
+                    ],
                     ['header' => 'Názov firmy *', 'key' => 'company_name', 'hint' => 'Acme s.r.o.'],
                     ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678'],
                     ['header' => 'Prevádzka *', 'key' => 'facility_name', 'hint' => 'Sklad Žilina'],
@@ -180,7 +198,7 @@ final class Schema
                         // which type to pair it with.
                         'options_help' => self::periodicityHelp(),
                     ],
-                    ['header' => 'Vykonané (YYYY-MM-DD) *', 'key' => 'executed_on', 'hint' => '2026-01-10'],
+                    ['header' => 'Vykonané (DD-MM-RRRR) *', 'key' => 'executed_on', 'hint' => '10-01-2026', 'date' => true],
                     ['header' => 'E-mail technika', 'key' => 'inspector_email', 'hint' => 'technik@firma.sk'],
                     ['header' => 'Poznámka', 'key' => 'notes', 'hint' => ''],
                 ],
@@ -188,7 +206,13 @@ final class Schema
             'Polozky_php' => [
                 'title' => 'Položky — PHP',
                 'columns' => [
-                    ['header' => '# kontrola *', 'key' => 'row_no', 'hint' => '1'],
+                    [
+                        'header' => 'Číslo kontroly z hárku Kontroly *',
+                        'key' => 'row_no',
+                        'hint' => '1',
+                        'prompt_title' => 'Číslo kontroly',
+                        'prompt' => 'Napíš číslo kontroly z hárku „Kontroly" (stĺpec „Číslo kontroly"). Položka v tomto riadku sa priradí k danej kontrole.',
+                    ],
                     ['header' => 'Výrobca *', 'key' => 'manufacturer', 'hint' => 'Gloria'],
                     ['header' => 'Typ *', 'key' => 'type', 'hint' => 'P6'],
                     ['header' => 'Výrobné číslo / séria *', 'key' => 'serial', 'hint' => 'GLR-2024-001'],
@@ -206,7 +230,13 @@ final class Schema
             'Polozky_hydranty' => [
                 'title' => 'Položky — Hydranty',
                 'columns' => [
-                    ['header' => '# kontrola *', 'key' => 'row_no', 'hint' => '1'],
+                    [
+                        'header' => 'Číslo kontroly z hárku Kontroly *',
+                        'key' => 'row_no',
+                        'hint' => '1',
+                        'prompt_title' => 'Číslo kontroly',
+                        'prompt' => 'Napíš číslo kontroly z hárku „Kontroly" (stĺpec „Číslo kontroly"). Položka v tomto riadku sa priradí k danej kontrole.',
+                    ],
                     [
                         'header' => 'Typ hydrantu *',
                         'key' => 'type',
@@ -231,7 +261,13 @@ final class Schema
             'Polozky_oprava_ts_php' => [
                 'title' => 'Položky — Oprava/TS PHP',
                 'columns' => [
-                    ['header' => '# kontrola *', 'key' => 'row_no', 'hint' => '1'],
+                    [
+                        'header' => 'Číslo kontroly z hárku Kontroly *',
+                        'key' => 'row_no',
+                        'hint' => '1',
+                        'prompt_title' => 'Číslo kontroly',
+                        'prompt' => 'Napíš číslo kontroly z hárku „Kontroly" (stĺpec „Číslo kontroly"). Položka v tomto riadku sa priradí k danej kontrole.',
+                    ],
                     ['header' => 'Výrobca *', 'key' => 'manufacturer', 'hint' => 'Gloria'],
                     ['header' => 'Typ *', 'key' => 'type', 'hint' => 'P6'],
                     ['header' => 'Výrobné číslo / séria *', 'key' => 'serial', 'hint' => 'GLR-2020-001'],
@@ -253,7 +289,13 @@ final class Schema
             'Polozky_poziarna_kniha' => [
                 'title' => 'Položky — Požiarna kniha',
                 'columns' => [
-                    ['header' => '# kontrola *', 'key' => 'row_no', 'hint' => '1'],
+                    [
+                        'header' => 'Číslo kontroly z hárku Kontroly *',
+                        'key' => 'row_no',
+                        'hint' => '1',
+                        'prompt_title' => 'Číslo kontroly',
+                        'prompt' => 'Napíš číslo kontroly z hárku „Kontroly" (stĺpec „Číslo kontroly"). Položka v tomto riadku sa priradí k danej kontrole.',
+                    ],
                     ['header' => 'Prehliadnuté pracoviská *', 'key' => 'workspaces', 'hint' => 'Hala A, sklad'],
                     [
                         'header' => 'Vykonané činnosti (oddeľ čiarkou) *',
@@ -269,14 +311,20 @@ final class Schema
                         'options' => ['bez_nedostatkov', 'zistene_nedostatky'],
                     ],
                     ['header' => 'Závada — popis', 'key' => 'defect_description', 'hint' => ''],
-                    ['header' => 'Závada — termín (YYYY-MM-DD)', 'key' => 'defect_deadline', 'hint' => ''],
+                    ['header' => 'Závada — termín (DD-MM-RRRR)', 'key' => 'defect_deadline', 'hint' => '30-06-2026', 'date' => true],
                     ['header' => 'Poznámky', 'key' => 'notes', 'hint' => ''],
                 ],
             ],
             'Polozky_pu_akcieschopnost' => [
                 'title' => 'Položky — PU akcieschopnosť',
                 'columns' => [
-                    ['header' => '# kontrola *', 'key' => 'row_no', 'hint' => '1'],
+                    [
+                        'header' => 'Číslo kontroly z hárku Kontroly *',
+                        'key' => 'row_no',
+                        'hint' => '1',
+                        'prompt_title' => 'Číslo kontroly',
+                        'prompt' => 'Napíš číslo kontroly z hárku „Kontroly" (stĺpec „Číslo kontroly"). Položka v tomto riadku sa priradí k danej kontrole.',
+                    ],
                     [
                         'header' => 'Druh *',
                         'key' => 'kind',
@@ -298,7 +346,13 @@ final class Schema
             'Polozky_pu_udrzba' => [
                 'title' => 'Položky — PU údržba',
                 'columns' => [
-                    ['header' => '# kontrola *', 'key' => 'row_no', 'hint' => '1'],
+                    [
+                        'header' => 'Číslo kontroly z hárku Kontroly *',
+                        'key' => 'row_no',
+                        'hint' => '1',
+                        'prompt_title' => 'Číslo kontroly',
+                        'prompt' => 'Napíš číslo kontroly z hárku „Kontroly" (stĺpec „Číslo kontroly"). Položka v tomto riadku sa priradí k danej kontrole.',
+                    ],
                     [
                         'header' => 'Druh uzáveru*',
                         'key' => 'kind',
@@ -321,7 +375,13 @@ final class Schema
             'Polozky_nudzove_osvetlenie' => [
                 'title' => 'Položky — Núdzové osvetlenie',
                 'columns' => [
-                    ['header' => '# kontrola *', 'key' => 'row_no', 'hint' => '1'],
+                    [
+                        'header' => 'Číslo kontroly z hárku Kontroly *',
+                        'key' => 'row_no',
+                        'hint' => '1',
+                        'prompt_title' => 'Číslo kontroly',
+                        'prompt' => 'Napíš číslo kontroly z hárku „Kontroly" (stĺpec „Číslo kontroly"). Položka v tomto riadku sa priradí k danej kontrole.',
+                    ],
                     ['header' => 'Evid. č. svietidla *', 'key' => 'evid_number', 'hint' => 'NO-001'],
                     ['header' => 'Podlažie *', 'key' => 'floor', 'hint' => '1.NP'],
                     ['header' => 'Druh / typ *', 'key' => 'luminaire_type', 'hint' => 'LED nástenné'],
@@ -340,7 +400,13 @@ final class Schema
             'Polozky_ts_hadic' => [
                 'title' => 'Položky — TS hadíc',
                 'columns' => [
-                    ['header' => '# kontrola *', 'key' => 'row_no', 'hint' => '1'],
+                    [
+                        'header' => 'Číslo kontroly z hárku Kontroly *',
+                        'key' => 'row_no',
+                        'hint' => '1',
+                        'prompt_title' => 'Číslo kontroly',
+                        'prompt' => 'Napíš číslo kontroly z hárku „Kontroly" (stĺpec „Číslo kontroly"). Položka v tomto riadku sa priradí k danej kontrole.',
+                    ],
                     ['header' => 'Typ / priemer hadice *', 'key' => 'hose_type', 'hint' => 'C52'],
                     ['header' => 'Umiestnenie *', 'key' => 'location', 'hint' => 'Hala A'],
                     ['header' => 'Výrobca *', 'key' => 'manufacturer', 'hint' => 'PavLiš'],
