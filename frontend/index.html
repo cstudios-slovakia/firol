@@ -12,7 +12,16 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <title>POAPP</title>
+    <title>Firol</title>
+    <script>
+      // Installed PWA (standalone) shows "POAPP"; browser tab keeps "Firol".
+      if (
+        window.matchMedia('(display-mode: standalone)').matches ||
+        window.navigator.standalone === true
+      ) {
+        document.title = 'POAPP';
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
