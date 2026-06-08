@@ -24,7 +24,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/favicon.ico', 'icons/apple-touch-icon-180x180.png'],
       manifest: {
-        name: 'Firol',
+        name: 'POAPP',
         short_name: 'POAPP',
         description: 'Aplikácia pre technikov požiarnej ochrany',
         lang: 'sk',
