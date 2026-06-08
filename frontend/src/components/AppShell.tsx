@@ -20,6 +20,7 @@ import { AccountSwitcher } from "./AccountSwitcher";
 import { OfflineIndicator } from "./OfflineIndicator";
 import { AuroraBackground } from "./AuroraBackground";
 import { FeedbackFloater } from "./FeedbackFloater";
+import { InstallPrompt } from "./InstallPrompt";
 import { cn } from "@/lib/cn";
 
 const TOP_TABS = [
@@ -194,6 +195,7 @@ export function AppShell() {
 
             <BottomTabBar />
             <FeedbackFloater />
+            <InstallPrompt />
         </div>
     );
 }

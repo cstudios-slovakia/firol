@@ -8,8 +8,13 @@
  */
 import { registerSW } from 'virtual:pwa-register';
 import { drainQueue } from './queue';
+import { initInstallPrompt } from './installPrompt';
 
 export function initPwa(): void {
+  // Capture the native install prompt early so it isn't lost before the app
+  // shell mounts (see lib/installPrompt).
+  initInstallPrompt();
+
   registerSW({
     immediate: true,
     onRegisteredSW(swUrl) {
