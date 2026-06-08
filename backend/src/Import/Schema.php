@@ -33,7 +33,7 @@ final class Schema
                 'title' => 'Firmy',
                 'columns' => [
                     ['header' => 'Názov firmy *', 'key' => 'name', 'hint' => 'Acme s.r.o.'],
-                    ['header' => 'IČO', 'key' => 'ico', 'hint' => '12345678'],
+                    ['header' => 'IČO *', 'key' => 'ico', 'hint' => '12345678'],
                     ['header' => 'Adresa', 'key' => 'address', 'hint' => 'Hlavná 1, 010 01 Žilina'],
                     ['header' => 'Kontakt', 'key' => 'contact', 'hint' => 'Ján Vedúci · +421 900 000 000 · jan@acme.sk'],
                 ],
@@ -223,6 +223,16 @@ final class Schema
                         'key' => 'status',
                         'hint' => 'A',
                         'options' => ['A', 'TS', 'O', 'V'],
+                        // Spell out each cryptic code in the dropdown value
+                        // itself, e.g. "TS (Tlaková skúška)". The importer
+                        // strips the parenthetical back to the bare code, so a
+                        // file with plain "TS" still imports unchanged.
+                        'option_labels' => [
+                            'A'  => 'Akcieschopný',
+                            'TS' => 'Tlaková skúška',
+                            'O'  => 'Vyžaduje opravu',
+                            'V'  => 'Vyradený',
+                        ],
                     ],
                     ['header' => 'Poznámky', 'key' => 'notes', 'hint' => ''],
                 ],
@@ -246,9 +256,9 @@ final class Schema
                     ['header' => 'Typ — iný', 'key' => 'type_other', 'hint' => ''],
                     ['header' => 'Umiestnenie *', 'key' => 'location', 'hint' => 'Hala A'],
                     ['header' => 'Počet hadíc *', 'key' => 'hose_count', 'hint' => '1'],
-                    ['header' => 'Hs *', 'key' => 'hs', 'hint' => '0.4'],
-                    ['header' => 'Hd *', 'key' => 'hd', 'hint' => '0.2'],
-                    ['header' => 'Q *', 'key' => 'q', 'hint' => '52'],
+                    ['header' => 'Hs (statický tlak, MPa) *', 'key' => 'hs', 'hint' => '0.4'],
+                    ['header' => 'Hd (dynamický tlak, MPa) *', 'key' => 'hd', 'hint' => '0.2'],
+                    ['header' => 'Q (prietok, l/s) *', 'key' => 'q', 'hint' => '52'],
                     ['header' => 'Závady', 'key' => 'defects', 'hint' => ''],
                     [
                         'header' => 'Výsledok *',

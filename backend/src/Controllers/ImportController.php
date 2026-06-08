@@ -138,6 +138,18 @@ final class ImportController
                     $dv->setShowInputMessage(true);
                     $dv->setShowErrorMessage(true);
                     $dv->setPromptTitle('Vyber zo zoznamu');
+                    // option_labels embed the human meaning into each dropdown
+                    // value (e.g. "TS (Tlaková skúška)"); the importer strips
+                    // the parenthetical back to the bare code on read. Without
+                    // labels the offered values are the raw codes unchanged.
+                    $optionValues = empty($col['option_labels'])
+                        ? $col['options']
+                        : array_map(
+                            fn(string $opt): string => isset($col['option_labels'][$opt])
+                                ? $opt . ' (' . $col['option_labels'][$opt] . ')'
+                                : $opt,
+                            $col['options'],
+                        );
                     if (!empty($col['options_help'])) {
                         // Annotate each value with the types it applies to.
                         $parts = [];
@@ -147,11 +159,11 @@ final class ImportController
                         }
                         $dv->setPrompt('Povolené hodnoty: ' . implode(', ', $parts));
                     } else {
-                        $dv->setPrompt('Povolené hodnoty: ' . implode(', ', $col['options']));
+                        $dv->setPrompt('Povolené hodnoty: ' . implode(', ', $optionValues));
                     }
                     $dv->setErrorTitle('Neplatná hodnota');
                     $dv->setError('Vyber jednu z hodnôt zo zoznamu (šípka vpravo v bunke).');
-                    $dv->setFormula1('"' . implode(',', $col['options']) . '"');
+                    $dv->setFormula1('"' . implode(',', $optionValues) . '"');
                     $dv->setSqref($range);
                 } elseif (!empty($col['multi_options'])) {
                     // Multi-value → no native multi-select in Excel, so guide
@@ -322,6 +334,15 @@ final class ImportController
                         }
                         $allowed = implode("\n", $parts);
                         $lines   = count($parts);
+                    } elseif (!empty($col['option_labels'])) {
+                        // One code per line with its meaning spelled out.
+                        $parts = [];
+                        foreach ($col['options'] as $opt) {
+                            $label   = $col['option_labels'][$opt] ?? '';
+                            $parts[] = $label !== '' ? "$opt  —  $label" : $opt;
+                        }
+                        $allowed = implode("\n", $parts);
+                        $lines   = count($parts);
                     } else {
                         $allowed = implode(', ', $col['options']);
                         $lines   = 1;
@@ -402,7 +423,13 @@ final class ImportController
                     $errors[] = ['sheet' => 'Firmy', 'row' => $rowNum, 'message' => 'Chýba názov firmy.'];
                     continue;
                 }
-                if ($ico !== null && isset($companyIdByIco[$ico])) {
+                if ($ico === null) {
+                    // IČO is the key the Prevadzky sheet links facilities by, so
+                    // a company without one can never be referenced.
+                    $errors[] = ['sheet' => 'Firmy', 'row' => $rowNum, 'message' => 'Chýba IČO firmy.'];
+                    continue;
+                }
+                if (isset($companyIdByIco[$ico])) {
                     // Skip silently — re-uploading a sheet with an existing
                     // IČO should be idempotent on the company itself.
                     continue;
@@ -412,9 +439,7 @@ final class ImportController
                 $insertCompany->execute([$accountId, $name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact]);
                 $newId = (int) $pdo->lastInsertId();
                 $createdCompanies++;
-                if ($ico !== null) {
-                    $companyIdByIco[$ico] = $newId;
-                }
+                $companyIdByIco[$ico] = $newId;
             }
 
             $insertFacility = $pdo->prepare(
@@ -1006,6 +1031,12 @@ final class ImportController
                         $str = $value === null ? '' : (string) $value;
                     }
                     $str = trim($str);
+                    if (!empty($col['option_labels'])) {
+                        // Dropdown values carry their meaning in parentheses
+                        // (e.g. "TS (Tlaková skúška)"); reduce back to the bare
+                        // code so it matches the same as a hand-typed "TS".
+                        $str = self::stripOptionLabel($str);
+                    }
                     if ($str !== '') {
                         $anyValue = true;
                     }
@@ -1073,6 +1104,19 @@ final class ImportController
         $v = $row[$key] ?? '';
         $v = trim($v);
         return $v === '' ? null : $v;
+    }
+
+    /**
+     * Reduces a labelled dropdown value back to its bare code: "TS (Tlaková
+     * skúška)" → "TS". Leaves bare codes and free text untouched, so a file
+     * filled with plain codes imports exactly as before.
+     */
+    private static function stripOptionLabel(string $value): string
+    {
+        if (preg_match('/^(.*?)\s+\(.*\)$/u', $value, $m)) {
+            return trim($m[1]);
+        }
+        return $value;
     }
 
     /** @param array<string,string> $row */
