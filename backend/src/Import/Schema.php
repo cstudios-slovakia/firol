@@ -102,11 +102,11 @@ final class Schema
         'php' => [12, 24],
         'hydranty' => [12],
         'oprava_ts_php' => [60],
-        'poziarna_kniha' => [3, 6],
+        'poziarna_kniha' => [3, 6, 12],
         'pu_akcieschopnost' => [3],
         'pu_udrzba' => [12],
         'nudzove_osvetlenie' => [12],
-        'ts_hadic' => [60],
+        'ts_hadic' => [12],
     ];
 
     public const TRAINING_TYPES = [

@@ -135,6 +135,15 @@ final class PdfRenderer
         $mpdf->SetCreator('Firol');
         $mpdf->SetAuthor('Firol');
 
+        // Small promotional line on the bottom of every page of every
+        // generated document (inspections + trainings). Rendered inside the
+        // bottom page margin so it never overlaps the document content.
+        $mpdf->SetHTMLFooter(
+            '<div style="text-align:center; font-size:7pt; color:#9b9ba3;">'
+            . 'Tento dokument bol vytvorený pomocou softvéru poapp.sk'
+            . '</div>'
+        );
+
         $mpdf->WriteHTML($html);
 
         return (string) $mpdf->Output('', Destination::STRING_RETURN);
