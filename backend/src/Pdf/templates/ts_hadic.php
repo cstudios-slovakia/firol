@@ -190,6 +190,11 @@ foreach ($items as $idx => $it) {
     text-align: right;
   }
 
+  table.items th.press,
+  table.items td.press {
+    white-space: nowrap;
+  }
+
   .res-ok {
     color: #2e7d32;
     font-weight: bold;
@@ -341,14 +346,14 @@ foreach ($items as $idx => $it) {
     <tr>
       <th style="width:4%">Č.</th>
       <th style="width:12%">Typ / priemer</th>
-      <th style="width:18%">Výrobca</th>
-      <th style="width:20%">Umiestnenie</th>
-      <th style="width:8%">Prac. tlak</th>
-      <th style="width:8%">Skúš. tlak</th>
+      <th style="width:13%">Výrobca</th>
+      <th style="width:15%">Umiestnenie</th>
+      <th class="press" style="width:11%">Prac. tlak</th>
+      <th class="press" style="width:11%">Skúš. tlak</th>
       <th style="width:6%">Dĺžka</th>
       <th style="width:6%">Rok výr.</th>
       <th style="width:9%">Výsledok</th>
-      <th style="width:9%">Závady</th>
+      <th style="width:13%">Závady</th>
     </tr>
   </thead>
   <tbody>
@@ -360,8 +365,8 @@ foreach ($items as $idx => $it) {
         <td><?= $h($f['hose_type'] ?? null) ?></td>
         <td><?= $h($f['manufacturer'] ?? null) ?></td>
         <td><?= $h($f['location'] ?? null) ?></td>
-        <td class="num"><?= $formatNum($f['working_pressure'] ?? null) ?> MPa</td>
-        <td class="num"><?= $formatNum($f['test_pressure'] ?? null) ?> MPa</td>
+        <td class="num press"><?= $formatNum($f['working_pressure'] ?? null) ?> MPa</td>
+        <td class="num press"><?= $formatNum($f['test_pressure'] ?? null) ?> MPa</td>
         <td class="num"><?= is_numeric($f['length'] ?? null) ? $formatNum($f['length'], 1) . ' m' : '—' ?></td>
         <td class="num"><?= isset($f['year_of_manufacture']) ? (int) $f['year_of_manufacture'] : '—' ?></td>
         <td class="<?= $r === 'vyhovuje' ? 'res-ok' : ($r === 'nevyhovuje' ? 'res-bad' : '') ?>">
