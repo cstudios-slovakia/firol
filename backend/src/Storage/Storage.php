@@ -72,9 +72,30 @@ final class Storage
         return "documents/$accountId/$year/$number.pdf";
     }
 
+    /**
+     * Sibling path to documentRelative() carrying the editable .docx
+     * version of a generated documentation bundle. Lives next to the PDF
+     * so both formats share the per-account/year folder and lifecycle.
+     */
+    public static function documentDocxRelative(int $accountId, int $year, string $number): string
+    {
+        return "documents/$accountId/$year/$number.docx";
+    }
+
     public static function documentAbsolute(string $relativePath): string
     {
         return self::root() . '/' . $relativePath;
+    }
+
+    /**
+     * Source Word template for the Dokumentácia PO module. Lives in the
+     * repo (backend/templates/) so FIROL can swap the legal wording by
+     * committing a new .docx — no code change needed. Sits outside the
+     * storage root because it ships with the code, not with user data.
+     */
+    public static function documentationTemplatePath(): string
+    {
+        return dirname(__DIR__, 2) . '/templates/dokumentacia_po.docx';
     }
 
     /**
@@ -85,6 +106,19 @@ final class Storage
     public static function mpdfTempDir(): string
     {
         $dir = self::root() . '/mpdf-tmp';
+        self::ensureDir($dir);
+        return $dir;
+    }
+
+    /**
+     * Writable scratch directory for the Dokumentácia PO pipeline: the
+     * JSON payload handed to the Node renderer and the intermediate
+     * .docx/.pdf before they're moved to their numbered home. Inside the
+     * storage root so permissions match the rest of the writable tree.
+     */
+    public static function docxTempDir(): string
+    {
+        $dir = self::root() . '/docx-tmp';
         self::ensureDir($dir);
         return $dir;
     }

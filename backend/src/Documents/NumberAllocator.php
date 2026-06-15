@@ -34,6 +34,8 @@ final class NumberAllocator
         // and a single per-account+year sequence. The training type
         // itself is stored in the body, not encoded in the number.
         'skolenie'           => 'SKO',
+        // Dokumentácia PO — one number per generated documentation bundle.
+        'dokumentacia'       => 'DOK',
     ];
 
     /**

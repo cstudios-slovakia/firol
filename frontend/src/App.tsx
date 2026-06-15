@@ -22,6 +22,9 @@ import { TrainingsListPage } from '@/pages/TrainingsListPage';
 import { NewTrainingPage } from '@/pages/NewTrainingPage';
 import { TrainingDetailPage } from '@/pages/TrainingDetailPage';
 import { TrainingEditPage } from '@/pages/TrainingEditPage';
+import { DocumentationsListPage } from '@/pages/DocumentationsListPage';
+import { DocumentationWizardPage } from '@/pages/DocumentationWizardPage';
+import { DocumentationModuleSettingsPage } from '@/pages/DocumentationModuleSettingsPage';
 import {
   SettingsLayout,
   SettingsIndexPage,
@@ -97,6 +100,11 @@ export default function App() {
         <Route path="/trainings/new" element={<NewTrainingPage />} />
         <Route path="/trainings/:id" element={<TrainingDetailPage />} />
         <Route path="/trainings/:id/edit" element={<TrainingEditPage />} />
+
+        <Route path="/documentation" element={<DocumentationsListPage />} />
+        <Route path="/documentation/new" element={<DocumentationWizardPage />} />
+        <Route path="/documentation/:id" element={<DocumentationWizardPage />} />
+
         <Route path="/settings" element={<SettingsLayout />}>
           <Route index element={<SettingsIndexPage />} />
           <Route path="profil" element={<InspectorProfilePage />} />
@@ -104,6 +112,7 @@ export default function App() {
           <Route path="technici" element={<TeamPage />} />
           <Route path="data" element={<DataPage />} />
           <Route path="systemove" element={<SystemPage />} />
+          <Route path="dokumentacia-po" element={<RequireAdmin><DocumentationModuleSettingsPage /></RequireAdmin>} />
           <Route path="admin" element={<RequireAdmin><AdminPage /></RequireAdmin>} />
         </Route>
         <Route path="/billing" element={<BillingPage />} />

@@ -480,6 +480,55 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
 
 ---
 
+## Phase 8 — Dokumentácia PO 🟡
+Third record type next to inspections and trainings: the complete fire-
+protection documentation a company must keep by law (spec: *Specifikacia
+modul Dokumentacia PO*, v3.0). The technician picks a company + facility,
+fills a 4-step form, and the app fills one Word template (all documents,
+one per page) and converts it to a single signed PDF. Output is stored and
+downloadable as both **PDF** (canonical) and editable **.docx**.
+
+- ✅ **Data model**: `documentations` table (migration 024) — one record
+  per documentation with the whole form payload as a single `data` JSON
+  column (open/edit/generate-again, like inspections but no sub-items).
+  `documents` extended: `parent_type` enum gains `documentation`, plus a
+  nullable `docx_path` so the editable .docx files next to the PDF.
+  Numbering: `DOK` prefix via `NumberAllocator`.
+- ✅ **Render pipeline (per spec §7 — chosen by product owner)**: the legal
+  texts live in `backend/templates/dokumentacia_po.docx` (FIROL swaps it
+  without code). `Firol\Pdf\DocxRenderer` shells out to
+  `backend/docx/render.mjs` (docxtemplater, `{{ }}` delimiters,
+  `paragraphLoop` + `linebreaks`) to fill it; `Firol\Pdf\PdfConverter`
+  converts DOCX→PDF via a pluggable, env-selected driver
+  (`FIROL_PDF_CONVERTER` = `gotenberg` | `libreoffice`). Local dev runs a
+  Gotenberg sidecar (docker-compose) + Node baked into the php image;
+  deploy installs `backend/docx` deps via `npm ci`.
+- ✅ **Backend**: `DocumentationController` (CRUD), `DocumentController`
+  gains `generateForDocumentation` (payload via
+  `Support\Documentation\DocumentationPayload`, which maps the form +
+  company/facility/author to all template placeholders, builds the title-
+  page list and derives the booleans), `indexForDocumentation`, and a
+  `?format=docx` download. Regeneration is allowed (issues a fresh DOK
+  number each time).
+- ✅ **Settings (§9)**: `DocumentationSettingsController` over
+  `system_settings` — admin-managed signer-function list + per-region
+  water-utility phones; readable by any technician for the wizard.
+- ✅ **Frontend**: `Dokumentácia` nav entry; 4-step wizard
+  (`DocumentationWizardPage`, draft autosave + repeating rows + Áno/Nie
+  segments + evac toggle + custom title-page items), list page, and an
+  admin Settings sub-page (`/settings/dokumentacia-po`).
+- ⚠️ **Production infra to provision** (the spec's pipeline needs a
+  converter the current shared host may not have): set `FIROL_PDF_CONVERTER`
+  + `FIROL_GOTENBERG_URL` (or `FIROL_LIBREOFFICE_BIN`) and ensure a `node`
+  binary + `proc_open` are available in the PHP-FPM runtime. Without these,
+  generation fails with a clear error; the rest of the module still works.
+- ⬜ Possible later (spec §10): region auto-detection from PSČ; "neboli
+  určené miesta…" alternative page; uploading the evacuation-plan graphic;
+  SK/HU; template versioning with history; include documentation in the
+  account data export.
+
+---
+
 ## Open questions (must be answered before the relevant phase starts)
 - **Company entity:** base doc says only "name, IČO, address, contact".
   Proposed full set (need confirmation):

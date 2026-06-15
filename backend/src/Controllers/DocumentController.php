@@ -13,9 +13,12 @@ use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Mail\Mailer;
 use Firol\Mail\Templates\DocumentEmail;
+use Firol\Pdf\DocxRenderer;
+use Firol\Pdf\PdfConverter;
 use Firol\Pdf\PdfRenderer;
 use Firol\Storage\Storage;
 use Firol\Support\Address;
+use Firol\Support\Documentation\DocumentationPayload;
 
 /**
  * Generates PDF protocols and serves the stored binaries back. Generation
@@ -216,19 +219,207 @@ final class DocumentController
             Response::error('Document not found', 404);
         }
 
-        $abs = Storage::documentAbsolute($doc['file_path']);
+        // Dokumentácia bundles ship in two formats; `?format=docx` serves
+        // the editable Word file, anything else the canonical PDF.
+        $wantDocx = $req->query('format') === 'docx';
+        if ($wantDocx && empty($doc['docx_path'])) {
+            Response::error('Document has no DOCX version.', 404);
+        }
+
+        $relPath  = $wantDocx ? $doc['docx_path'] : $doc['file_path'];
+        $abs      = Storage::documentAbsolute($relPath);
         if (!is_file($abs)) {
             error_log('[document-download] file missing: ' . $abs);
             Response::error('Document file is missing on disk.', 410);
         }
 
-        $filename = ($doc['number'] ?? 'protocol') . '.pdf';
-        header('Content-Type: application/pdf');
+        $ext      = $wantDocx ? 'docx' : 'pdf';
+        $mime     = $wantDocx
+            ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            : 'application/pdf';
+        $filename = ($doc['number'] ?? 'protocol') . '.' . $ext;
+        // DOCX is meant to be saved/opened in Word, so force a download;
+        // PDFs stay inline so the browser viewer can show them.
+        $disposition = $wantDocx ? 'attachment' : 'inline';
+        header('Content-Type: ' . $mime);
         header('Content-Length: ' . filesize($abs));
-        header('Content-Disposition: inline; filename="' . $filename . '"');
+        header('Content-Disposition: ' . $disposition . '; filename="' . $filename . '"');
         header('Cache-Control: private, max-age=300');
         readfile($abs);
         exit;
+    }
+
+    /**
+     * Generate the Dokumentácia PO bundle for a documentation record. The
+     * form payload (stored as JSON on the record) is mapped to the
+     * docxtemplater placeholders, the Word template is filled (DocxRenderer)
+     * and converted to PDF (PdfConverter); both files are stored and a
+     * documents row is inserted. Unlike inspections, regeneration is
+     * allowed — each call issues a fresh DOK number and a new document, so
+     * the technician can "edit and generate again" any time.
+     */
+    public static function generateForDocumentation(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
+        $docId     = (int) $params['id'];
+
+        $doc = self::loadDocumentationForGenerate($isAdmin ? null : $accountId, $docId);
+        $accountId = (int) $doc['account_id'];
+
+        if ($doc['issued_on'] === null) {
+            Response::error('Doplň dátum vyhotovenia pred generovaním.', 422);
+        }
+
+        $data = json_decode((string) $doc['data'], true);
+        $data = is_array($data) ? $data : [];
+
+        // Konateľ údaje sú povinné (§5.2).
+        foreach (['konatel_meno', 'konatel_priezvisko', 'konatel_tel'] as $required) {
+            if (trim((string) ($data[$required] ?? '')) === '') {
+                Response::error('Doplň údaje konateľa (meno, priezvisko, telefón).', 422);
+            }
+        }
+
+        // Technik PO identity comes from the author's user profile (§5.1).
+        $authorStmt = Db::pdo()->prepare('SELECT fullname, phone FROM users WHERE id = ?');
+        $authorStmt->execute([(int) $doc['author_user_id']]);
+        $author = $authorStmt->fetch() ?: ['fullname' => '', 'phone' => ''];
+
+        $payload = DocumentationPayload::build($doc, $data, $author);
+
+        $year = (int) substr((string) $doc['issued_on'], 0, 4);
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            $allocated = NumberAllocator::allocate($accountId, 'dokumentacia', $year);
+
+            $docxBytes = DocxRenderer::render(Storage::documentationTemplatePath(), $payload);
+            $pdfBytes  = PdfConverter::convert($docxBytes);
+
+            $pdfRel  = Storage::documentRelative($accountId, $year, $allocated['number']);
+            $docxRel = Storage::documentDocxRelative($accountId, $year, $allocated['number']);
+            $pdfAbs  = Storage::documentAbsolute($pdfRel);
+            $docxAbs = Storage::documentAbsolute($docxRel);
+            Storage::ensureDir(dirname($pdfAbs));
+
+            if (file_put_contents($docxAbs, $docxBytes) === false
+                || file_put_contents($pdfAbs, $pdfBytes) === false) {
+                throw new \RuntimeException('Failed to write documentation files to storage.');
+            }
+
+            $pdo->prepare(
+                'INSERT INTO documents
+                    (account_id, parent_type, parent_id, type, number,
+                     file_path, docx_path, signed, signed_at)
+                 VALUES (?, "documentation", ?, "dokumentacia", ?, ?, ?, 1, NOW())'
+            )->execute([
+                $accountId,
+                $docId,
+                $allocated['number'],
+                $pdfRel,
+                $docxRel,
+            ]);
+            $documentId = (int) $pdo->lastInsertId();
+
+            $pdo->prepare(
+                'UPDATE documentations SET status = "finalized" WHERE id = ? AND account_id = ?'
+            )->execute([$docId, $accountId]);
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            foreach ([$pdfAbs ?? null, $docxAbs ?? null] as $orphan) {
+                if (is_string($orphan) && is_file($orphan) && !@unlink($orphan)) {
+                    error_log('[generate-doc] orphan cleanup failed: ' . $orphan);
+                }
+            }
+            error_log('[generate-doc] ' . $e::class . ': ' . $e->getMessage());
+            Response::error('Dokumentáciu sa nepodarilo vygenerovať. Skontroluj nastavenie generátora (Node/konverzia).', 500);
+        }
+
+        Response::json([
+            'document' => self::loadDocument($accountId, $documentId),
+        ], 201);
+    }
+
+    public static function indexForDocumentation(Request $req, array $params): void
+    {
+        $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
+        $docId     = (int) $params['id'];
+
+        if ($isAdmin) {
+            $check = Db::pdo()->prepare(
+                'SELECT account_id FROM documentations WHERE id = ? AND archived_at IS NULL'
+            );
+            $check->execute([$docId]);
+            $docAccountId = $check->fetchColumn();
+            if ($docAccountId === false) {
+                Response::error('Documentation not found', 404);
+            }
+            $accountId = (int) $docAccountId;
+        } else {
+            $check = Db::pdo()->prepare(
+                'SELECT 1 FROM documentations WHERE id = ? AND account_id = ? AND archived_at IS NULL'
+            );
+            $check->execute([$docId, $accountId]);
+            if ($check->fetchColumn() === false) {
+                Response::error('Documentation not found', 404);
+            }
+        }
+
+        $stmt = Db::pdo()->prepare(
+            'SELECT id, type, number, file_path, docx_path, generated_at, signed
+             FROM   documents
+             WHERE  account_id = ? AND parent_type = "documentation" AND parent_id = ?
+             ORDER  BY generated_at DESC'
+        );
+        $stmt->execute([$accountId, $docId]);
+        $items = array_map(static function (array $r): array {
+            return [
+                'id'                => (int) $r['id'],
+                'type'              => $r['type'],
+                'number'            => $r['number'],
+                'generated_at'      => $r['generated_at'],
+                'signed'            => (int) $r['signed'] === 1,
+                'download_url'      => '/api/documents/' . (int) $r['id'] . '/download',
+                'docx_download_url' => !empty($r['docx_path'])
+                    ? '/api/documents/' . (int) $r['id'] . '/download?format=docx'
+                    : null,
+            ];
+        }, $stmt->fetchAll());
+
+        Response::json(['items' => $items]);
+    }
+
+    /** @return array<string, mixed> */
+    private static function loadDocumentationForGenerate(?int $accountId, int $docId): array
+    {
+        $sql = 'SELECT d.id, d.account_id, d.company_id, d.facility_id, d.author_user_id,
+                       d.issued_on, d.data, d.status,
+                       c.name AS company_name, c.ico AS company_ico,
+                       c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
+                       f.name AS facility_name,
+                       f.street AS facility_street, f.postal_code AS facility_postal_code, f.city AS facility_city
+                FROM   documentations d
+                JOIN   companies  c ON c.id = d.company_id
+                LEFT JOIN facilities f ON f.id = d.facility_id
+                WHERE  d.id = ? AND d.archived_at IS NULL';
+        $params = [$docId];
+        if ($accountId !== null) {
+            $sql .= ' AND d.account_id = ?';
+            $params[] = $accountId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch();
+        if (!$row) {
+            Response::error('Documentation not found', 404);
+        }
+        return $row;
     }
 
     /** Lists documents for a single inspection (used by the UI to show download links). */
@@ -790,7 +981,7 @@ final class DocumentController
      */
     private static function loadDocument(?int $accountId, int $documentId): ?array
     {
-        $sql = 'SELECT id, account_id, parent_type, parent_id, type, number, file_path,
+        $sql = 'SELECT id, account_id, parent_type, parent_id, type, number, file_path, docx_path,
                        generated_at, signed, signed_at
                 FROM   documents
                 WHERE  id = ?';
@@ -805,18 +996,23 @@ final class DocumentController
         if (!$row) {
             return null;
         }
+        $hasDocx = !empty($row['docx_path']);
         return [
-            'id'           => (int) $row['id'],
-            'account_id'   => (int) $row['account_id'],
-            'parent_type'  => $row['parent_type'],
-            'parent_id'    => (int) $row['parent_id'],
-            'type'         => $row['type'],
-            'number'       => $row['number'],
-            'file_path'    => $row['file_path'],
-            'generated_at' => $row['generated_at'],
-            'signed'       => (int) $row['signed'] === 1,
-            'signed_at'    => $row['signed_at'],
-            'download_url' => '/api/documents/' . (int) $row['id'] . '/download',
+            'id'                => (int) $row['id'],
+            'account_id'        => (int) $row['account_id'],
+            'parent_type'       => $row['parent_type'],
+            'parent_id'         => (int) $row['parent_id'],
+            'type'              => $row['type'],
+            'number'            => $row['number'],
+            'file_path'         => $row['file_path'],
+            'docx_path'         => $row['docx_path'],
+            'generated_at'      => $row['generated_at'],
+            'signed'            => (int) $row['signed'] === 1,
+            'signed_at'         => $row['signed_at'],
+            'download_url'      => '/api/documents/' . (int) $row['id'] . '/download',
+            'docx_download_url' => $hasDocx
+                ? '/api/documents/' . (int) $row['id'] . '/download?format=docx'
+                : null,
         ];
     }
 

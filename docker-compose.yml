@@ -9,10 +9,26 @@ services:
       - ./backend:/var/www/backend
     environment:
       PHP_DISPLAY_ERRORS: "1"
+      # Dokumentácia PO — fill DOCX with Node (bundled in the image) then
+      # convert to PDF via the Gotenberg sidecar. Prod overrides these in
+      # backend/.env.
+      FIROL_NODE_BIN: "node"
+      FIROL_PDF_CONVERTER: "gotenberg"
+      FIROL_GOTENBERG_URL: "http://gotenberg:3000"
     networks: [firol]
     depends_on:
       db:
         condition: service_healthy
+      gotenberg:
+        condition: service_started
+
+  # Headless DOCX→PDF conversion for the Dokumentácia PO module. Runs as a
+  # container so no system packages (LibreOffice) are needed on the host.
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: firol-gotenberg
+    restart: unless-stopped
+    networks: [firol]
 
   nginx:
     image: nginx:1.27-alpine

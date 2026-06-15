@@ -27,6 +27,16 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Node — needed at runtime by the Dokumentácia PO module, which shells out
+# to backend/docx/render.mjs (docxtemplater) to fill the Word template.
+# Copied from the official node image rather than installed via apt so the
+# version is pinned and matches a modern LTS. (DOCX→PDF conversion is a
+# separate concern handled by Gotenberg/LibreOffice, see PdfConverter.)
+COPY --from=node:20-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:20-bookworm-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 RUN { \

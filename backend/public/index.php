@@ -24,6 +24,8 @@ use Firol\Controllers\BillingController;
 use Firol\Controllers\CompanyController;
 use Firol\Controllers\FacilityController;
 use Firol\Controllers\DocumentController;
+use Firol\Controllers\DocumentationController;
+use Firol\Controllers\DocumentationSettingsController;
 use Firol\Controllers\FeedbackController;
 use Firol\Controllers\ImportController;
 use Firol\Controllers\InspectionController;
@@ -153,6 +155,17 @@ $router->delete('/api/trainings/{id}/trainees/{trainee_id}', [TraineeController:
 $router->get('/api/trainees/{id}/signature',        [TraineeController::class, 'downloadSignature']);
 $router->post('/api/trainings/{id}/generate-pdf',   [DocumentController::class, 'generateForTraining']);
 $router->get('/api/trainings/{id}/documents',       [DocumentController::class, 'indexForTraining']);
+
+$router->get('/api/documentations',                 [DocumentationController::class, 'index']);
+$router->post('/api/documentations',                [DocumentationController::class, 'store']);
+$router->get('/api/documentations/{id}',            [DocumentationController::class, 'show']);
+$router->patch('/api/documentations/{id}',          [DocumentationController::class, 'update']);
+$router->delete('/api/documentations/{id}',         [DocumentationController::class, 'archive']);
+$router->post('/api/documentations/{id}/generate',  [DocumentController::class, 'generateForDocumentation']);
+$router->get('/api/documentations/{id}/documents',  [DocumentController::class, 'indexForDocumentation']);
+
+$router->get('/api/documentation-settings',         [DocumentationSettingsController::class, 'show']);
+$router->patch('/api/documentation-settings',       [DocumentationSettingsController::class, 'update']);
 
 $router->get('/api/account/export',                [DataController::class, 'exportData']);
 $router->delete('/api/account/data/companies',   [DataController::class, 'purgeCompanies']);

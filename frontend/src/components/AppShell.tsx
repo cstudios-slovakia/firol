@@ -4,6 +4,7 @@ import {
     Building2,
     ClipboardList,
     CreditCard,
+    FileStack,
     GraduationCap,
     LayoutDashboard,
     LogOut,
@@ -58,6 +59,16 @@ const TOP_TABS = [
             "bg-emerald-50 shadow-[inset_0_0_0_1px_theme(colors.emerald.100)]",
         iconBg: "bg-emerald-100",
     },
+    {
+        to: "/documentation",
+        label: "Dokumentácia",
+        shortLabel: "Dokum.",
+        icon: FileStack,
+        activeColor: "text-violet-600",
+        activeBg:
+            "bg-violet-50 shadow-[inset_0_0_0_1px_theme(colors.violet.100)]",
+        iconBg: "bg-violet-100",
+    },
 ] as const;
 
 const SETTINGS_TAB = {
@@ -82,12 +93,14 @@ const DESKTOP_BOTTOM_TABS = [
     SETTINGS_TAB,
 ] as const;
 
-// Mobile bottom nav — 5 tabs only
+// Mobile bottom nav
 const MOBILE_TABS = [...TOP_TABS, SETTINGS_TAB] as const;
 
 type Tab = {
     readonly to: string;
     readonly label: string;
+    /** Shorter label for the cramped mobile bottom bar; falls back to label. */
+    readonly shortLabel?: string;
     readonly icon: typeof Settings;
     readonly activeColor: string;
     readonly activeBg: string;
@@ -485,7 +498,7 @@ function BottomTabBar() {
                                             isActive && "scale-110 stroke-[2.25px]",
                                         )}
                                     />
-                                    <span>{tab.label}</span>
+                                    <span>{("shortLabel" in tab && tab.shortLabel) || tab.label}</span>
                                 </>
                             )}
                         </NavLink>

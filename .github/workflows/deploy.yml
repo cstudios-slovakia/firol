@@ -40,6 +40,13 @@ jobs:
             # Install PHP dependencies into backend/vendor (outside docroot).
             cd $ROOT/backend && composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction --no-progress
 
+            # Install the Node deps for the Dokumentácia PO renderer
+            # (docxtemplater). The PHP backend shells out to
+            # backend/docx/render.mjs to fill the Word template before it is
+            # converted to PDF. Requires FIROL_PDF_CONVERTER + the matching
+            # FIROL_GOTENBERG_URL / FIROL_LIBREOFFICE_BIN in backend/.env.
+            cd $ROOT/backend/docx && npm ci --omit=dev
+
             # Apply any pending DB migrations. The runner is idempotent —
             # already-applied migrations are skipped via the `migrations`
             # table. Requires backend/.env to be in place on the server.
@@ -53,7 +60,8 @@ jobs:
                      $ROOT/backend/storage/documents \
                      $ROOT/backend/storage/accounts \
                      $ROOT/backend/storage/trainings \
-                     $ROOT/backend/storage/mpdf-tmp
+                     $ROOT/backend/storage/mpdf-tmp \
+                     $ROOT/backend/storage/docx-tmp
 
             # One-time cleanup of artifacts a previous (broken) deploy
             # placed at the project root instead of frontend/dist/. Safe

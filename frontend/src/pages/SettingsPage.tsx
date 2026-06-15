@@ -22,6 +22,7 @@ import {
     Download,
     FileSignature,
     FileSpreadsheet,
+    FileStack,
     GraduationCap,
     Hash,
     ImagePlus,
@@ -136,6 +137,15 @@ const MENU_ITEMS = [
     },
 ] as const;
 
+const DOC_MENU_ITEM = {
+    to: "/settings/dokumentacia-po",
+    label: "Dokumentácia PO",
+    description: "Funkcie podpisujúceho a telefóny vodární podľa regiónu",
+    icon: FileStack,
+    color: "text-violet-600",
+    bg: "bg-violet-50",
+} as const;
+
 const ADMIN_MENU_ITEM = {
     to: "/settings/admin",
     label: "Admin",
@@ -199,6 +209,31 @@ export function SettingsLayout() {
                     ))}
                     {isAdmin && (
                         <NavLink
+                            to="/settings/dokumentacia-po"
+                            className={({ isActive }) =>
+                                cn(
+                                    "flex shrink-0 items-center gap-2 px-3.5 py-2.5 text-sm font-medium rounded-t-xl border-b-2 -mb-px transition-all duration-150",
+                                    isActive
+                                        ? "border-violet-500 text-violet-700 bg-violet-50/60"
+                                        : "border-transparent text-ink-500 hover:text-ink-800 hover:bg-ink-50",
+                                )
+                            }
+                        >
+                            {({ isActive }) => (
+                                <>
+                                    <FileStack
+                                        className={cn(
+                                            "size-4 shrink-0 transition-transform duration-150",
+                                            isActive && "scale-110",
+                                        )}
+                                    />
+                                    <span>Dokumentácia PO</span>
+                                </>
+                            )}
+                        </NavLink>
+                    )}
+                    {isAdmin && (
+                        <NavLink
                             to="/settings/admin"
                             className={({ isActive }) =>
                                 cn(
@@ -251,7 +286,7 @@ export function SettingsIndexPage() {
         }
     }, [navigate]);
 
-    const items = isAdmin ? [...MENU_ITEMS, ADMIN_MENU_ITEM] : [...MENU_ITEMS];
+    const items = isAdmin ? [...MENU_ITEMS, DOC_MENU_ITEM, ADMIN_MENU_ITEM] : [...MENU_ITEMS];
 
     return (
         <div className="flex flex-col gap-2 sm:hidden">

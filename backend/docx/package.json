@@ -1,0 +1,15 @@
+{
+  "name": "firol-docx-renderer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fills the Dokumentácia PO Word template with docxtemplater. Invoked by the PHP backend (Firol\\Pdf\\DocxRenderer) as a child process.",
+  "main": "render.mjs",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "docxtemplater": "^3.50.0",
+    "pizzip": "^3.1.7"
+  }
+}
