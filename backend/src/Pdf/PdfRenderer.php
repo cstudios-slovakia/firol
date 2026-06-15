@@ -125,8 +125,8 @@ final class PdfRenderer
             'format'         => 'A4',
             'margin_top'     => 12,
             'margin_bottom'  => 12,
-            'margin_left'    => 16,
-            'margin_right'   => 16,
+            'margin_left'    => 11,
+            'margin_right'   => 11,
             'default_font'   => 'dejavusans',
             'default_font_size' => 10,
         ]);
