@@ -197,7 +197,7 @@ export function OnboardingBillingPage() {
             <p className="mt-1 flex items-start gap-2 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">
               <ShieldCheck className="mt-0.5 size-4 shrink-0 text-firol-600" />
               Po uložení ťa presmerujeme na Stripe Checkout. Kartu zadávaš priamo
-              tam — Firol ju nevidí ani neukladá.
+              tam — POapp ju nevidí ani neukladá.
             </p>
 
             <div className="flex justify-end pt-1">

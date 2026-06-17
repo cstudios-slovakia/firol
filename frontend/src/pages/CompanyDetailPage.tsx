@@ -4,8 +4,10 @@ import { ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, Hash, MapPin,
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyDetail } from '@/api/companies';
+import { Facilities } from '@/api/facilities';
 import { ApiError } from '@/lib/api';
 import { useConfirm } from '@/lib/confirm';
+import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
@@ -17,9 +19,28 @@ export function CompanyDetailPage() {
   const { csrfToken } = useAuth();
   const isReadOnly = useIsReadOnly();
   const confirm = useConfirm();
+  const toast = useToast();
 
   const [data, setData] = useState<CompanyDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function onDeleteFacility(facilityId: number, name: string) {
+    const ok = await confirm({
+      title: 'Odstrániť prevádzku?',
+      description: `Prevádzka „${name}“ bude odstránená spolu so svojimi kontrolami a školeniami. Táto akcia je nevratná.`,
+      confirmLabel: 'Odstrániť',
+    });
+    if (!ok) return;
+    try {
+      await Facilities.archive(facilityId, csrfToken);
+      setData((prev) =>
+        prev ? { ...prev, facilities: prev.facilities.filter((f) => f.id !== facilityId) } : prev,
+      );
+      toast.success('Prevádzka odstránená');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Prevádzku sa nepodarilo odstrániť.');
+    }
+  }
 
   async function onDelete() {
     const ok = await confirm({
@@ -179,23 +200,45 @@ export function CompanyDetailPage() {
           <ul className="flex flex-col gap-2">
             {facilities.map((f) => (
               <li key={f.id}>
-                <Link
-                  to={`/facilities/${f.id}`}
-                  className="block group"
-                >
-                  <Card className="flex items-center gap-3 px-4 py-3 transition-shadow group-hover:shadow-[var(--shadow-lift)]">
+                <Card className="flex items-center gap-3 px-4 py-3 transition-shadow hover:shadow-[var(--shadow-lift)]">
+                  <Link
+                    to={`/facilities/${f.id}`}
+                    className="flex flex-1 items-center gap-3 group min-w-0"
+                  >
                     <div className="grid size-9 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-600">
                       <Warehouse className="size-4" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <h3 className="truncate text-sm font-semibold text-ink-900">{f.name}</h3>
+                      <h3 className="truncate text-sm font-semibold text-ink-900 group-hover:text-firol-700">{f.name}</h3>
                       {f.address && (
                         <p className="truncate text-xs text-ink-500">{f.address}</p>
                       )}
                     </div>
-                    <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform group-hover:translate-x-0.5 group-hover:text-ink-500" />
-                  </Card>
-                </Link>
+                  </Link>
+                  {!isReadOnly ? (
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Link
+                        to={`/facilities/${f.id}/edit`}
+                        title="Upraviť"
+                        aria-label="Upraviť"
+                        className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
+                      >
+                        <Edit2 className="size-4" />
+                      </Link>
+                      <button
+                        type="button"
+                        title="Odstrániť"
+                        aria-label="Odstrániť"
+                        onClick={() => onDeleteFacility(f.id, f.name)}
+                        className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <ChevronRight className="size-4 shrink-0 text-ink-300" />
+                  )}
+                </Card>
               </li>
             ))}
           </ul>

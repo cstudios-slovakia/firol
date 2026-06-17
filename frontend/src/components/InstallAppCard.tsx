@@ -62,7 +62,7 @@ export function InstallAppCard() {
         <div className="min-w-0 flex-1">
           <h2 className="text-base font-semibold text-ink-900">Inštalácia aplikácie</h2>
           <p className="text-xs text-ink-500">
-            Pridaj si Firol na plochu — otvára sa na celú obrazovku a funguje aj bez internetu.
+            Pridaj si POapp na plochu — otvára sa na celú obrazovku a funguje aj bez internetu.
           </p>
         </div>
       </div>
@@ -71,7 +71,7 @@ export function InstallAppCard() {
         {alreadyInstalled ? (
           <div className="flex items-center gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm font-medium text-emerald-800">
             <Check className="size-4 shrink-0" />
-            Firol je nainštalovaný na tomto zariadení.
+            POapp je nainštalovaný na tomto zariadení.
           </div>
         ) : (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
@@ -101,7 +101,7 @@ export function InstallAppCard() {
                 </p>
               ) : (
                 <p>
-                  Nainštaluj si Firol ako bežnú aplikáciu — budeš ho mať po ruke jedným ťuknutím
+                  Nainštaluj si POapp ako bežnú aplikáciu — budeš ho mať po ruke jedným ťuknutím
                   bez otvárania prehliadača.
                 </p>
               )}

@@ -21,6 +21,7 @@ import { OfflineIndicator } from "./OfflineIndicator";
 import { AuroraBackground } from "./AuroraBackground";
 import { FeedbackFloater } from "./FeedbackFloater";
 import { InstallPrompt } from "./InstallPrompt";
+import { BrandMark } from "./Logo";
 import { cn } from "@/lib/cn";
 
 const TOP_TABS = [
@@ -136,18 +137,6 @@ export function AppShell() {
     const topBarRef = useRef<HTMLDivElement>(null);
     const [topBarH, setTopBarH] = useState(65);
 
-    // When launched as an installed PWA (standalone display mode) the brand in
-    // the header reads "POAPP"; in the browser it stays "Firol".
-    const [isInstalled] = useState(
-        () =>
-            typeof window !== "undefined" &&
-            (window.matchMedia?.("(display-mode: standalone)").matches ||
-                // iOS Safari uses a non-standard navigator.standalone flag.
-                (window.navigator as Navigator & { standalone?: boolean })
-                    .standalone === true),
-    );
-    const brandName = isInstalled ? "POAPP" : "Firol";
-
     useLayoutEffect(() => {
         const el = topBarRef.current;
         if (!el) return;
@@ -171,13 +160,9 @@ export function AppShell() {
                             aria-label="Domov"
                             className="group flex items-center gap-2.5 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
                         >
-                            <img
-                                src="/icons/firol-icon-only.png"
-                                alt={brandName}
-                                className="size-9 transition-transform group-hover:scale-105"
-                            />
-                            <span className="font-semibold tracking-tight text-ink-900 transition-colors group-hover:text-firol-700">
-                                {brandName}
+                            <BrandMark className="size-9 text-firol-600 transition-transform group-hover:scale-105" />
+                            <span className="font-bold tracking-tight text-ink-900 transition-colors group-hover:text-firol-700">
+                                PO<span className="text-firol-600">app</span>
                             </span>
                         </Link>
                         <div className="flex items-center gap-2">

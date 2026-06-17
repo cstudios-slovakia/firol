@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POapp — softvér pre technikov požiarnej ochrany</title>
+<meta name="description" content="POapp je aplikácia pre technikov požiarnej ochrany. Digitálne protokoly o kontrole hasiacich prístrojov, hydrantov a uzáverov, požiarna kniha aj školenia. Funguje na mobile aj tablete.">
+<meta name="robots" content="index,follow">
+<meta name="theme-color" content="#e11d2a">
+<link rel="canonical" href="https://poapp.sk/">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2034%2038'%3E%3Cpath%20d='M17%201%20L32%206%20V18%20C32%2028%2025%2034%2017%2037%20C9%2034%202%2028%202%2018%20V6%20Z'%20fill='%23fff'%20stroke='%23e11d2a'%20stroke-width='2'/%3E%3Cpath%20d='M17%209%20C20%2013%2022%2015%2022%2019.5%20C22%2023%2019.8%2025.5%2017%2025.5%20C14.2%2025.5%2012%2023%2012%2019.5%20C12%2017.5%2013%2016%2014%2015%20C14%2017%2015%2018%2016%2018.5%20C16%2016%2016.5%2012%2017%209%20Z'%20fill='%23e11d2a'/%3E%3C/svg%3E">
+
+<!-- Open Graph / social sharing -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="POapp">
+<meta property="og:locale" content="sk_SK">
+<meta property="og:url" content="https://poapp.sk/">
+<meta property="og:title" content="POapp — softvér pre technikov požiarnej ochrany">
+<meta property="og:description" content="Digitálne protokoly o kontrole hasiacich prístrojov, hydrantov a uzáverov, požiarna kniha aj školenia. Funguje na mobile aj tablete.">
+<meta property="og:image" content="https://poapp.sk/poapp-og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="POapp — softvér pre technikov požiarnej ochrany">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="POapp — softvér pre technikov požiarnej ochrany">
+<meta name="twitter:description" content="Digitálne protokoly o kontrole hasiacich prístrojov, hydrantov a uzáverov, požiarna kniha aj školenia. Funguje na mobile aj tablete.">
+<meta name="twitter:image" content="https://poapp.sk/poapp-og.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#ffffff;
+    --bg-soft:#faf9f7;
+    --surface:#ffffff;
+    --line:#e8e6e1;
+    --ink:#16171c;
+    --muted:#6b7280;
+    --red:#e11d2a;
+    --red-bright:#f5333f;
+    --ember:#f4730c;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+
+  body{
+    font-family:"Plus Jakarta Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+    position:relative;
+  }
+
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  /* ---- Header ---- */
+  header{position:relative;z-index:3;padding:26px 0}
+  .nav{display:flex;align-items:center;justify-content:space-between}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand .logo{width:34px;height:38px}
+  .brand .name{font-weight:800;font-size:20px;letter-spacing:-.02em}
+  .brand .name b{color:var(--red)}
+  .nav-cta{
+    font-weight:700;font-size:14px;color:var(--muted);
+    display:inline-flex;align-items:center;gap:7px;transition:color .2s ease;
+  }
+  .nav-cta:hover{color:var(--red)}
+
+  /* Ambient glow — anchored to the very top of the page, behind the header
+     and hero. Pulse opacity only (no scaling) so the whitespace above it
+     stays put while the colour breathes. */
+  .glow{
+    position:absolute;top:0;left:50%;transform:translateX(-50%);
+    width:1000px;height:760px;max-width:135vw;
+    background:radial-gradient(circle at 50% 16%, rgba(244,115,12,.34), rgba(225,29,42,.14) 44%, transparent 68%);
+    z-index:0;pointer-events:none;
+    animation:breathe 5s ease-in-out infinite;
+  }
+  @keyframes breathe{
+    0%,100%{opacity:.45}
+    50%{opacity:1}
+  }
+
+  /* ---- Hero ---- */
+  .hero{position:relative;z-index:2;text-align:center;padding:72px 0 96px}
+
+  .crest{width:96px;height:108px;margin:0 auto 30px;filter:drop-shadow(0 14px 34px rgba(225,29,42,.22))}
+
+  .eyebrow{
+    display:inline-block;
+    font-size:13px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--red);
+    padding:7px 16px;margin-bottom:26px;
+    border:1px solid var(--line);border-radius:100px;
+    background:rgba(225,29,42,.04);
+  }
+
+  h1{font-weight:800;letter-spacing:-.035em;line-height:1.04;font-size:clamp(38px,7vw,68px);margin-bottom:22px}
+  h1 .accent{
+    background:linear-gradient(100deg,var(--ember),var(--red));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .lead{font-size:clamp(17px,2.4vw,21px);color:var(--muted);max-width:620px;margin:0 auto 44px}
+
+  .cta{
+    display:inline-flex;align-items:center;gap:12px;
+    font-weight:800;font-size:18px;letter-spacing:-.01em;color:#fff;
+    padding:18px 34px;border-radius:14px;
+    background:linear-gradient(135deg,var(--red-bright),var(--red));
+    box-shadow:0 14px 34px rgba(225,29,42,.30);
+    transition:transform .15s ease,box-shadow .2s ease;
+  }
+  .cta:hover{transform:translateY(-2px);box-shadow:0 18px 44px rgba(225,29,42,.42)}
+  .cta:active{transform:translateY(0)}
+  .cta svg{width:20px;height:20px}
+  .cta-note{display:block;margin-top:16px;font-size:14px;color:var(--muted)}
+  .cta-note span{color:var(--ink);font-weight:600}
+
+  /* ---- Features ---- */
+  .features{position:relative;z-index:2;padding-bottom:96px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .card{
+    background:var(--bg-soft);
+    border:1px solid var(--line);border-radius:18px;padding:30px 26px;
+    transition:border-color .2s ease,transform .2s ease,box-shadow .2s ease;
+  }
+  .card:hover{border-color:rgba(225,29,42,.45);transform:translateY(-3px);box-shadow:0 16px 40px rgba(20,20,25,.07)}
+  .card .ico{
+    width:46px;height:46px;border-radius:12px;display:grid;place-items:center;margin-bottom:18px;
+    background:rgba(225,29,42,.08);border:1px solid rgba(225,29,42,.18);color:var(--red);
+  }
+  .card .ico svg{width:24px;height:24px}
+  .card h3{font-size:18px;font-weight:700;letter-spacing:-.01em;margin-bottom:8px}
+  .card p{font-size:15px;color:var(--muted)}
+
+  /* ---- Contact ---- */
+  .contact{position:relative;z-index:2;padding-bottom:96px}
+  .contact-box{
+    background:var(--bg-soft);border:1px solid var(--line);border-radius:18px;
+    padding:40px 32px;text-align:center;
+  }
+  .contact-box h2{font-size:clamp(22px,3vw,28px);font-weight:800;letter-spacing:-.02em;margin-bottom:8px}
+  .contact-box p{color:var(--muted);margin-bottom:24px}
+  .contact-list{display:flex;justify-content:center;flex-wrap:wrap;gap:14px 32px}
+  .contact-list a,.contact-list span{
+    display:inline-flex;align-items:center;gap:9px;
+    font-weight:600;font-size:16px;color:var(--ink);
+  }
+  .contact-list a:hover{color:var(--red)}
+  .contact-list svg{width:18px;height:18px;color:var(--red)}
+
+  /* ---- Footer ---- */
+  footer{border-top:1px solid var(--line);padding:32px 0}
+  .foot{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:14px;color:var(--muted)}
+  .foot a:hover{color:var(--red)}
+
+  @media (max-width:760px){
+    .grid{grid-template-columns:1fr}
+    .hero{padding:48px 0 72px}
+    .nav-cta{display:none}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .glow{animation:none}
+    *{transition:none!important}
+  }
+</style>
+</head>
+<body>
+
+  <div class="glow" aria-hidden="true"></div>
+
+  <header>
+    <div class="wrap nav">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 34 38" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M17 1 L32 6 V18 C32 28 25 34 17 37 C9 34 2 28 2 18 V6 Z" fill="#fff" stroke="#e11d2a" stroke-width="2"/>
+          <path d="M17 9 C20 13 22 15 22 19.5 C22 23 19.8 25.5 17 25.5 C14.2 25.5 12 23 12 19.5 C12 17.5 13 16 14 15 C14 17 15 18 16 18.5 C16 16 16.5 12 17 9 Z" fill="#e11d2a"/>
+        </svg>
+        <span class="name">PO<b>app</b></span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap">
+
+        <svg class="crest" viewBox="0 0 34 38" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M17 1 L32 6 V18 C32 28 25 34 17 37 C9 34 2 28 2 18 V6 Z" fill="#fff" stroke="#e11d2a" stroke-width="2"/>
+          <path d="M17 9 C20 13 22 15 22 19.5 C22 23 19.8 25.5 17 25.5 C14.2 25.5 12 23 12 19.5 C12 17.5 13 16 14 15 C14 17 15 18 16 18.5 C16 16 16.5 12 17 9 Z" fill="#e11d2a"/>
+        </svg>
+
+        <span class="eyebrow">Softvér pre požiarnu ochranu</span>
+        <h1>Kontroly PO <span class="accent">rýchlo a bez chaosu</span></h1>
+        <p class="lead">
+          POapp je aplikácia pre technikov požiarnej ochrany. Protokol vyplníš priamo
+          v teréne na mobile či tablete a PDF máš hotové na pár klikov.
+        </p>
+
+        <a class="cta" href="https://app.poapp.sk">
+          Vyskúšať zdarma
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <span class="cta-note">14 dní zdarma, bez záväzkov · prejdeš na <span>app.poapp.sk</span></span>
+
+      </div>
+    </section>
+
+    <section class="features">
+      <div class="wrap grid">
+
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13l2 2 4-4"/></svg></div>
+          <h3>Digitálne protokoly</h3>
+          <p>Hasiace prístroje, hydranty, požiarne uzávery aj núdzové osvetlenie — vyplníš a PDF vygeneruješ hneď.</p>
+        </div>
+
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>
+          <h3>Požiarna kniha a školenia</h3>
+          <p>Záznamy, kontroly aj školenia PO máš na jednom mieste — vždy poruke a po dátumoch.</p>
+        </div>
+
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></div>
+          <h3>Funguje aj v teréne</h3>
+          <p>Bežná webová appka (PWA) — nainštaluješ ju na telefón či tablet a používaš kdekoľvek.</p>
+        </div>
+
+      </div>
+    </section>
+    <section class="contact">
+      <div class="wrap">
+        <div class="contact-box">
+          <h2>Máte otázky?</h2>
+          <p>Ozvite sa nám, radi vám s POapp pomôžeme.</p>
+          <div class="contact-list">
+            <a href="tel:+421902166537">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+              +421 902 166 537
+            </a>
+            <a href="mailto:office@firol.sk">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
+              office@firol.sk
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap foot">
+      <span>POapp · Prevádzkovateľ FIROL s.r.o.</span>
+      <span>© 2026 · <a href="mailto:office@firol.sk">office@firol.sk</a></span>
+    </div>
+  </footer>
+
+</body>
+</html>

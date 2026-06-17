@@ -230,7 +230,7 @@ export function SettingsLayout() {
             </div>
 
             <p className="hidden sm:block text-center text-[11px] text-ink-300 tabular-nums pt-2">
-                Firol {__APP_VERSION__}
+                POapp {__APP_VERSION__}
             </p>
         </div>
     );
@@ -306,7 +306,7 @@ export function SettingsIndexPage() {
             </div>
 
             <p className="mt-6 text-center text-[11px] text-ink-300 tabular-nums">
-                Firol {__APP_VERSION__}
+                POapp {__APP_VERSION__}
             </p>
 
             {feedbackOpen && (
@@ -864,7 +864,7 @@ function BrandingSection() {
                                     setUsingCustomColor(false);
                                 }}
                                 disabled={!usingCustomColor}
-                                title="Obnoviť pôvodnú Firol farbu"
+                                title="Obnoviť pôvodnú farbu"
                                 className="grid size-10 shrink-0 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700 disabled:opacity-40"
                             >
                                 <RotateCcw className="size-4" />
@@ -1266,7 +1266,7 @@ function TeamSection() {
                             <p className="mt-0.5 text-xs text-amber-800">
                                 Pre väčší tím nám napíš — pripravíme
                                 individuálnu cenovú ponuku. Po dohode admin
-                                Firolu zvýši zahrnutý počet technikov pre tvoj
+                                POapp zvýši zahrnutý počet technikov pre tvoj
                                 účet.
                             </p>
                         </div>

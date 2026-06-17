@@ -24,8 +24,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/favicon.ico', 'icons/apple-touch-icon-180x180.png'],
       manifest: {
-        name: 'POAPP',
-        short_name: 'POAPP',
+        name: 'POapp',
+        short_name: 'POapp',
         description: 'Aplikácia pre technikov požiarnej ochrany',
         lang: 'sk',
         theme_color: '#E8433A',
