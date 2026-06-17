@@ -75,9 +75,12 @@
      and hero. Pulse opacity only (no scaling) so the whitespace above it
      stays put while the colour breathes. */
   .glow{
-    position:absolute;top:0;left:50%;transform:translateX(-50%);
-    width:1000px;height:760px;max-width:135vw;
-    background:radial-gradient(circle at 50% 16%, rgba(244,115,12,.34), rgba(225,29,42,.14) 44%, transparent 68%);
+    position:absolute;top:-300px;left:50%;transform:translateX(-50%);
+    width:1320px;height:1120px;max-width:150vw;
+    /* closest-side ties the fade to the element's own size, so the colour
+       always reaches full transparency before the edges — no hard square cut. */
+    background:radial-gradient(ellipse closest-side,
+      rgba(244,115,12,.34), rgba(225,29,42,.13) 40%, transparent 78%);
     z-index:0;pointer-events:none;
     animation:breathe 5s ease-in-out infinite;
   }
