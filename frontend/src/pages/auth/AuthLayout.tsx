@@ -1,5 +1,6 @@
 import { CheckCircle2, FileText, Shield } from 'lucide-react';
 import { AuroraBackground } from '@/components/AuroraBackground';
+import { Logo } from '@/components/Logo';
 
 const HERO_FEATURES = [
   { icon: Shield, text: 'Evidencia hasiacich prístrojov a hydrantov' },
@@ -35,19 +36,12 @@ export function AuthLayout({
 
           <div className="relative z-10 flex flex-col gap-10">
             {/* brand */}
-            <div className="flex items-center gap-3">
-              <img
-                src="/icons/firol-icon-only.png"
-                alt="Firol"
-                className="size-11"
-              />
-              <span className="text-xl font-bold tracking-tight text-white">Firol</span>
-            </div>
+            <Logo tone="inverted" markClassName="size-10" wordClassName="text-xl" />
 
             {/* headline */}
             <div>
               <h2 className="text-[3.25rem] font-bold leading-tight text-white">
-                Vitajte<br />vo Firole
+                Vitajte<br />v POapp
               </h2>
               <p className="mt-3 max-w-xs text-base leading-relaxed text-white/70">
                 Moderný softvér pre požiarnych technikov. Správa inšpekcií, protokoly a klienti na jednom mieste.

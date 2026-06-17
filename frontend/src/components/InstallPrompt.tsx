@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useState } from 'react';
 import { Download, Share, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { BrandMark } from '@/components/Logo';
 import {
   type BeforeInstallPromptEvent,
   clearDeferredPrompt,
@@ -92,11 +93,11 @@ export function InstallPrompt() {
         {/* Header */}
         <div className="flex items-start gap-3 rounded-t-3xl border-b border-firol-100 bg-gradient-to-br from-firol-50 to-transparent px-5 py-4">
           <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white shadow-sm">
-            <img src="/icons/firol-icon-only.png" alt="" className="size-7" />
+            <BrandMark className="size-7 text-firol-600" />
           </div>
           <div className="min-w-0 flex-1 pt-0.5 pr-6">
             <h2 id="install-prompt-title" className="text-base font-semibold text-ink-900">
-              Nainštaluj si Firol na plochu
+              Nainštaluj si POapp na plochu
             </h2>
             <p className="mt-0.5 text-xs text-ink-500">
               Rýchlejší prístup a práca aj bez internetu.
@@ -130,7 +131,7 @@ export function InstallPrompt() {
             </div>
           ) : (
             <p className="text-sm text-ink-700">
-              Pridaj si Firol medzi aplikácie — otvára sa na celú obrazovku ako bežná appka a máš
+              Pridaj si POapp medzi aplikácie — otvára sa na celú obrazovku ako bežná appka a máš
               ho po ruke jedným ťuknutím.
             </p>
           )}

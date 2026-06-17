@@ -217,7 +217,7 @@ export function InviteAcceptPage() {
         ) : (
           <form onSubmit={onAccept} className="flex flex-col gap-4" noValidate>
             <p className="text-sm text-ink-700">
-              Vytvor si konto pre Firol — heslo si nastavíš teraz a budeš mať okamžite prístup.
+              Vytvor si konto pre POapp — heslo si nastavíš teraz a budeš mať okamžite prístup.
             </p>
 
             <Field label="Email">
