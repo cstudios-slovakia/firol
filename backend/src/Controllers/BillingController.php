@@ -60,6 +60,17 @@ final class BillingController
 
         $account = self::loadAccountFull($accountId);
 
+        // Don't let a customer stack a second subscription on top of a live
+        // one — the UI hides the button when a sub exists, but the endpoint
+        // is reachable directly. Direct them to the portal instead.
+        $existingStatus = (string) ($account['stripe_status'] ?? '');
+        if (in_array($existingStatus, ['active', 'trialing'], true)) {
+            Response::error(
+                'Účet už má aktívne predplatné. Spravuj ho cez Stripe portál.',
+                409,
+            );
+        }
+
         // Billing details (address + IČO) are required before any Stripe session
         // can be created — iDoklad needs them to issue a proper Slovak invoice.
         if (
@@ -75,6 +86,11 @@ final class BillingController
         }
 
         $customerId = self::ensureCustomer($account);
+
+        // Push the latest billing details onto the Stripe Customer so any
+        // Stripe-side document (and the fallback receipt we surface when
+        // iDoklad is unavailable) carries the company address and tax IDs.
+        self::syncCustomerBillingDetails($customerId, $account);
 
         // Land back on /billing — that's where the checkout success handler
         // lives (calls /api/billing/checkout-sync to pull the fresh
@@ -580,7 +596,9 @@ final class BillingController
     {
         $stmt = Db::pdo()->prepare(
             'SELECT id, invoice_company_name, stripe_customer_id, subscription_end_date,
-                    invoice_street, invoice_postal_code, invoice_city, invoice_ico,
+                    stripe_status,
+                    invoice_street, invoice_postal_code, invoice_city, invoice_country,
+                    invoice_ico, invoice_dic, invoice_ic_dph,
                     included_technicians, extra_technicians
              FROM   accounts WHERE id = ?'
         );
@@ -661,6 +679,76 @@ final class BillingController
         )->execute([$customer->id, $account['id']]);
 
         return $customer->id;
+    }
+
+    /**
+     * Mirror the account's invoice_* fields onto the Stripe Customer so the
+     * hosted invoice / receipt — which we fall back to when iDoklad can't
+     * issue the legal SK invoice — shows the company address and tax IDs.
+     *
+     * Stripe has no native slot for the Slovak IČO, so it goes into
+     * customer metadata (visible in the dashboard / via API) alongside the
+     * DIČ. The EU VAT number (IČ DPH) is registered as a real `eu_vat`
+     * tax ID when present so it renders on the document.
+     *
+     * Entirely best-effort: any Stripe error here must never block checkout.
+     *
+     * @param array<string, mixed> $account
+     */
+    private static function syncCustomerBillingDetails(string $customerId, array $account): void
+    {
+        $ico   = trim((string) ($account['invoice_ico']    ?? ''));
+        $dic   = trim((string) ($account['invoice_dic']    ?? ''));
+        $icDph = trim((string) ($account['invoice_ic_dph'] ?? ''));
+
+        try {
+            StripeClient::get()->customers->update($customerId, [
+                'name'    => (string) ($account['invoice_company_name'] ?? '') ?: null,
+                'address' => [
+                    'line1'       => (string) ($account['invoice_street']      ?? '') ?: null,
+                    'postal_code' => (string) ($account['invoice_postal_code'] ?? '') ?: null,
+                    'city'        => (string) ($account['invoice_city']        ?? '') ?: null,
+                    'country'     => self::countryCode((string) ($account['invoice_country'] ?? 'Slovensko')),
+                ],
+                'metadata' => [
+                    'firol_ico' => $ico,
+                    'firol_dic' => $dic,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            error_log('[billing.syncCustomerBillingDetails] ' . $e->getMessage());
+        }
+
+        // Register the EU VAT number as a tax ID, but only once — Stripe
+        // would otherwise accumulate duplicates on every checkout.
+        if ($icDph === '') {
+            return;
+        }
+        try {
+            $stripe   = StripeClient::get();
+            $existing = $stripe->customers->allTaxIds($customerId, ['limit' => 20]);
+            foreach ($existing->data as $tid) {
+                if (strcasecmp((string) ($tid->value ?? ''), $icDph) === 0) {
+                    return; // already present
+                }
+            }
+            $stripe->customers->createTaxId($customerId, [
+                'type'  => 'eu_vat',
+                'value' => $icDph,
+            ]);
+        } catch (\Throwable $e) {
+            // Invalid/foreign VAT format etc. — non-fatal, just log.
+            error_log('[billing.syncCustomerTaxId] ' . $e->getMessage());
+        }
+    }
+
+    /** Map a free-text country name onto an ISO 3166-1 alpha-2 code for Stripe. */
+    private static function countryCode(string $name): string
+    {
+        $n = strtolower(trim($name));
+        if ($n === '' || str_contains($n, 'sloven')) return 'SK';
+        if (str_contains($n, 'česk') || str_contains($n, 'czech') || str_contains($n, 'cesk')) return 'CZ';
+        return 'SK';
     }
 
     private static function findAccountByCustomer(string $customerId): ?int

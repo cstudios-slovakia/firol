@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
     AtSign,
     Bug,
@@ -6,6 +6,8 @@ import {
     CalendarDays,
     ChevronDown,
     ChevronRight,
+    Download,
+    FileText,
     Hash,
     Lightbulb,
     Link as LinkIcon,
@@ -13,6 +15,8 @@ import {
     MessageSquarePlus,
     Pencil,
     Phone,
+    Power,
+    PowerOff,
     Search,
     Settings as SettingsIcon,
     ShieldCheck,
@@ -29,12 +33,14 @@ import {
     AdminPanel,
     type AdminAccount,
     type AdminAccountsPage,
+    type AdminInvoice,
     type AdminUser,
     type SystemSettings,
 } from "@/api/admin";
 import { Feedback, type FeedbackSubmission } from "@/api/feedback";
 import { ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { cn } from "@/lib/cn";
 import { useConfirm } from "@/lib/confirm";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -451,6 +457,21 @@ function AccountsSection() {
         }
     }
 
+    async function onToggleActive(accountId: number, u: AdminUser) {
+        const next = !u.is_active;
+        try {
+            await AdminPanel.setUserActive(accountId, u.id, next, csrfToken);
+            patchUser(accountId, u.id, { is_active: next });
+            toast.success(
+                next ? "Technik aktivovaný" : "Technik deaktivovaný",
+            );
+        } catch (err) {
+            toast.error(
+                err instanceof ApiError ? err.message : "Operácia zlyhala.",
+            );
+        }
+    }
+
     // First load — show skeleton for the whole block
     if (page === null) {
         if (error) {
@@ -524,6 +545,7 @@ function AccountsSection() {
                                 }
                                 onUserDelete={(u) => onDeleteUser(a.id, u)}
                                 onToggleAdmin={(u) => onToggleAdmin(a.id, u)}
+                                onToggleActive={(u) => onToggleActive(a.id, u)}
                             />
                         ))}
                     </ul>
@@ -567,6 +589,7 @@ function AccountRow({
     onUserSaved,
     onUserDelete,
     onToggleAdmin,
+    onToggleActive,
 }: {
     account: AdminAccount;
     isActive: boolean;
@@ -577,6 +600,7 @@ function AccountRow({
     onUserSaved: (userId: number, patch: Partial<AdminUser>) => void;
     onUserDelete: (u: AdminUser) => void;
     onToggleAdmin: (u: AdminUser) => void;
+    onToggleActive: (u: AdminUser) => void;
 }) {
     const [editing, setEditing] = useState(false);
 
@@ -675,27 +699,178 @@ function AccountRow({
             )}
 
             {expanded && (
-                <ul className="flex flex-col gap-2 border-t border-ink-100 bg-ink-50/40 px-3 py-3">
-                    {account.users.length === 0 ? (
-                        <li className="px-3 py-2 text-xs italic text-ink-400">
-                            Účet nemá priradených používateľov.
-                        </li>
-                    ) : (
-                        account.users.map((u) => (
-                            <UserRow
-                                key={u.id}
-                                user={u}
-                                isMain={u.id === account.main_user_id}
-                                onSaved={(patch) => onUserSaved(u.id, patch)}
-                                onDelete={() => onUserDelete(u)}
-                                onToggleAdmin={() => onToggleAdmin(u)}
-                            />
-                        ))
-                    )}
-                </ul>
+                <div className="border-t border-ink-100 bg-ink-50/40">
+                    <ul className="flex flex-col gap-2 px-3 py-3">
+                        {account.users.length === 0 ? (
+                            <li className="px-3 py-2 text-xs italic text-ink-400">
+                                Účet nemá priradených používateľov.
+                            </li>
+                        ) : (
+                            account.users.map((u) => (
+                                <UserRow
+                                    key={u.id}
+                                    user={u}
+                                    isMain={u.id === account.main_user_id}
+                                    onSaved={(patch) => onUserSaved(u.id, patch)}
+                                    onDelete={() => onUserDelete(u)}
+                                    onToggleAdmin={() => onToggleAdmin(u)}
+                                    onToggleActive={() => onToggleActive(u)}
+                                />
+                            ))
+                        )}
+                    </ul>
+                    <AccountInvoices accountId={account.id} />
+                </div>
             )}
         </li>
     );
+}
+
+/**
+ * Per-account invoice browser shown inside an expanded admin account row.
+ * Lazily loads invoices on first expand and paginates by calendar year via
+ * a year switcher. Each row links to the iDoklad PDF (or the Stripe receipt
+ * fallback) for download.
+ */
+function AccountInvoices({ accountId }: { accountId: number }) {
+    const [years, setYears] = useState<number[] | null>(null);
+    const [year, setYear] = useState<number | null>(null);
+    const [items, setItems] = useState<AdminInvoice[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    function load(selectYear?: number) {
+        setLoading(true);
+        setError(null);
+        AdminPanel.listInvoices(accountId, selectYear)
+            .then((res) => {
+                setYears(res.years);
+                setYear(res.year);
+                setItems(res.items);
+            })
+            .catch((err: unknown) => {
+                setError(
+                    err instanceof ApiError
+                        ? err.message
+                        : "Faktúry sa nepodarilo načítať.",
+                );
+            })
+            .finally(() => setLoading(false));
+    }
+
+    useEffect(() => {
+        load();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [accountId]);
+
+    return (
+        <div className="border-t border-ink-100 px-3 py-3">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-500">
+                    <FileText className="size-3.5" />
+                    Faktúry
+                </span>
+                {years && years.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                        {years.map((y) => (
+                            <button
+                                key={y}
+                                type="button"
+                                onClick={() => load(y)}
+                                className={cn(
+                                    "rounded-lg px-2 py-1 text-xs font-medium transition-colors",
+                                    y === year
+                                        ? "bg-firol-500 text-white"
+                                        : "bg-white text-ink-600 hover:bg-ink-100",
+                                )}
+                            >
+                                {y}
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {loading ? (
+                <p className="px-1 py-2 text-xs text-ink-400">Načítavam…</p>
+            ) : error ? (
+                <p className="px-1 py-2 text-xs text-status-bad">{error}</p>
+            ) : items.length === 0 ? (
+                <p className="px-1 py-2 text-xs italic text-ink-400">
+                    Za rok {year} nie sú žiadne faktúry.
+                </p>
+            ) : (
+                <ul className="flex flex-col gap-1.5">
+                    {items.map((inv) => (
+                        <li
+                            key={inv.id}
+                            className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm"
+                        >
+                            <span className="font-mono text-xs text-ink-500">
+                                {new Date(inv.issued_at).toLocaleDateString("sk-SK")}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate font-medium text-ink-800">
+                                {inv.document_number ?? (
+                                    <span className="italic text-ink-400">
+                                        (bez čísla)
+                                    </span>
+                                )}
+                            </span>
+                            <span className="font-semibold text-ink-900">
+                                {(inv.amount_cents / 100).toFixed(2)} {inv.currency}
+                            </span>
+                            <Badge
+                                tone={
+                                    inv.status === "issued" || inv.status === "paid"
+                                        ? "ok"
+                                        : inv.status === "error"
+                                          ? "warn"
+                                          : "neutral"
+                                }
+                            >
+                                {adminInvoiceStatusLabel(inv.status)}
+                            </Badge>
+                            {inv.pdf_url ? (
+                                <a
+                                    href={inv.pdf_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-firol-700 transition-colors hover:bg-firol-50"
+                                    title="Stiahnuť PDF"
+                                >
+                                    <Download className="size-3.5" />
+                                    PDF
+                                </a>
+                            ) : (
+                                <span className="text-xs italic text-ink-400">
+                                    PDF nie je
+                                </span>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+}
+
+function adminInvoiceStatusLabel(status: string): string {
+    switch (status) {
+        case "issued":
+            return "Vystavená";
+        case "draft":
+            return "Koncept";
+        case "paid":
+            return "Zaplatená";
+        case "pending":
+            return "Spracováva sa";
+        case "skipped":
+            return "iDoklad off";
+        case "error":
+            return "Chyba";
+        default:
+            return status;
+    }
 }
 
 function AccountEditForm({
@@ -818,14 +993,31 @@ function UserRow({
     onSaved,
     onDelete,
     onToggleAdmin,
+    onToggleActive,
 }: {
     user: AdminUser;
     isMain: boolean;
     onSaved: (patch: Partial<AdminUser>) => void;
     onDelete: () => void;
     onToggleAdmin: () => void;
+    onToggleActive: () => void;
 }) {
     const [editing, setEditing] = useState(false);
+    const toast = useToast();
+    // Throttle the "can't delete" hint so sweeping the mouse over the button
+    // doesn't stack a wall of identical toasts.
+    const lastHintAt = useRef(0);
+
+    function showUndeletableHint() {
+        const now = Date.now();
+        if (now - lastHintAt.current < 3000) return;
+        lastHintAt.current = now;
+        toast.error(
+            isMain
+                ? "Tohto používateľa nie je možné zmazať — je hlavným používateľom účtu."
+                : "Tohto používateľa nie je možné zmazať — jeho meno je uvedené na už vystavených protokoloch. Namiesto zmazania ho deaktivuj.",
+        );
+    }
 
     return (
         <li className="rounded-xl border border-ink-100 bg-white">
@@ -865,12 +1057,36 @@ function UserRow({
                               ? "Odobrať admin práva"
                               : "Prideliť admin práva"
                     }
-                    className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700 disabled:opacity-40"
+                    className="grid size-9 place-items-center rounded-xl text-firol-600 transition-colors hover:bg-firol-50 disabled:opacity-40"
                 >
                     {user.is_admin || user.is_env_seed ? (
                         <ShieldOff className="size-4" />
                     ) : (
                         <ShieldCheck className="size-4" />
+                    )}
+                </button>
+                <button
+                    type="button"
+                    onClick={onToggleActive}
+                    disabled={isMain}
+                    title={
+                        isMain
+                            ? "Hlavného používateľa nie je možné deaktivovať"
+                            : user.is_active
+                              ? "Deaktivovať technika"
+                              : "Aktivovať technika"
+                    }
+                    className={cn(
+                        "grid size-9 place-items-center rounded-xl transition-colors disabled:opacity-40",
+                        user.is_active
+                            ? "text-[var(--color-status-warn)] hover:bg-[var(--color-status-warn-bg)]"
+                            : "text-[var(--color-status-ok)] hover:bg-[var(--color-status-ok-bg)]",
+                    )}
+                >
+                    {user.is_active ? (
+                        <PowerOff className="size-4" />
+                    ) : (
+                        <Power className="size-4" />
                     )}
                 </button>
                 <button
@@ -883,9 +1099,22 @@ function UserRow({
                 </button>
                 <button
                     type="button"
-                    onClick={onDelete}
-                    title="Zmazať používateľa"
-                    className="ml-2.5 grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad"
+                    onClick={user.deletable ? onDelete : showUndeletableHint}
+                    onMouseEnter={
+                        user.deletable ? undefined : showUndeletableHint
+                    }
+                    title={
+                        user.deletable
+                            ? "Zmazať používateľa"
+                            : "Tohto používateľa nie je možné zmazať"
+                    }
+                    aria-disabled={!user.deletable}
+                    className={cn(
+                        "ml-2.5 grid size-9 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors",
+                        user.deletable
+                            ? "hover:bg-[var(--color-status-bad-bg)]"
+                            : "cursor-not-allowed opacity-40 hover:opacity-60",
+                    )}
                 >
                     <Trash2 className="size-4" />
                 </button>
