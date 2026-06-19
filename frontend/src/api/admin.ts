@@ -9,6 +9,8 @@ export type AdminUser = {
   is_env_seed: boolean;
   role: string;
   is_active: boolean;
+  /** False when the user is an account owner or appears on a generated protocol — a hard delete would fail. */
+  deletable: boolean;
   created_at: string;
 };
 
@@ -45,11 +47,37 @@ export type AdminUserUpdate = Partial<{
   is_admin: boolean;
 }>;
 
+export type AdminInvoice = {
+  id: number;
+  stripe_invoice_id: string;
+  idoklad_invoice_id: number | null;
+  document_number: string | null;
+  amount_cents: number;
+  currency: string;
+  status: string;
+  issued_at: string;
+  /** iDoklad PublicHtmlUrl when issued, Stripe invoice PDF otherwise. */
+  pdf_url: string | null;
+};
+
+export type AdminInvoicesPage = {
+  items: AdminInvoice[];
+  /** Years that have at least one invoice, newest first. */
+  years: number[];
+  /** The year the returned items belong to. */
+  year: number;
+  account_id: number;
+};
+
 export const AdminPanel = {
   listAccounts: (offset: number = 0, search?: string) => {
     const params = new URLSearchParams({ offset: String(offset) });
     if (search) params.set('search', search);
     return api<AdminAccountsPage>(`/api/admin/accounts?${params}`);
+  },
+  listInvoices: (accountId: number, year?: number) => {
+    const qs = year ? `?year=${year}` : '';
+    return api<AdminInvoicesPage>(`/api/admin/accounts/${accountId}/invoices${qs}`);
   },
   updateAccount: (id: number, body: AdminAccountUpdate, csrfToken: string | null) =>
     api<{ ok: true }>(`/api/admin/accounts/${id}`, { method: 'PATCH', body, csrfToken }),
@@ -59,6 +87,16 @@ export const AdminPanel = {
     api<{ ok: true }>(`/api/admin/users/${id}`, { method: 'PATCH', body, csrfToken }),
   deleteUser: (id: number, csrfToken: string | null) =>
     api<void>(`/api/admin/users/${id}`, { method: 'DELETE', csrfToken }),
+  setUserActive: (
+    accountId: number,
+    userId: number,
+    isActive: boolean,
+    csrfToken: string | null,
+  ) =>
+    api<{ ok: true; is_active: boolean }>(
+      `/api/admin/accounts/${accountId}/users/${userId}`,
+      { method: 'PATCH', body: { is_active: isActive }, csrfToken },
+    ),
 };
 
 export type SystemSettings = {

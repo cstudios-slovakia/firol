@@ -100,10 +100,12 @@ $router->get('/api/admin/feedback',         [FeedbackController::class, 'index']
 $router->delete('/api/admin/feedback/{id}', [FeedbackController::class, 'destroy']);
 
 $router->get('/api/admin/accounts',         [AdminPanelController::class, 'listAccounts']);
+$router->get('/api/admin/accounts/{id}/invoices', [AdminPanelController::class, 'listInvoices']);
 $router->patch('/api/admin/accounts/{id}',  [AdminPanelController::class, 'updateAccount']);
 $router->delete('/api/admin/accounts/{id}', [AdminPanelController::class, 'deleteAccount']);
 $router->patch('/api/admin/users/{id}',     [AdminPanelController::class, 'updateUser']);
 $router->delete('/api/admin/users/{id}',    [AdminPanelController::class, 'deleteUser']);
+$router->patch('/api/admin/accounts/{id}/users/{user_id}', [AdminPanelController::class, 'setUserActive']);
 
 $router->post('/api/billing/checkout',      [BillingController::class, 'checkout']);
 $router->post('/api/billing/checkout-sync', [BillingController::class, 'checkoutSync']);
@@ -179,6 +181,10 @@ $router->post('/api/import/trainings',           [ImportController::class, 'impo
  * - /api/auth/*            — must be able to log in/out + reset password
  * - /api/me/switch-account — must be able to escape to another tenant
  * - /api/billing/*         — Phase 6b: paying must always work
+ * - PATCH /api/account     — saving invoice details is a prerequisite for
+ *                            checkout; blocking it would deadlock an expired
+ *                            user out of ever paying. The /api/account/*
+ *                            subtree (invites, logo, data purge) stays gated.
  * - DELETE on the session  — logout (covered by /api/auth/logout above)
  */
 $method = $request->method();
@@ -187,7 +193,7 @@ $isMutation = !in_array($method, ['GET', 'HEAD'], true);
 $isWhitelisted = (bool) preg_match(
     '#^/api/(auth/|me/switch-account|billing/|admin/|feedback|invites/)#',
     $path,
-);
+) || ($path === '/api/account' && $method === 'PATCH');
 if ($isMutation && !$isWhitelisted) {
     $sessionUserId    = Session::userId();
     $sessionAccountId = Session::activeAccountId();

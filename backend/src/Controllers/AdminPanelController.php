@@ -120,23 +120,57 @@ final class AdminPanelController
             ];
         }
 
+        // A user whose name is printed on a generated protocol cannot be
+        // hard-deleted — inspections.inspector_user_id and the immutable
+        // effective_inspector_user_id snapshot both reference users(id) with
+        // ON DELETE RESTRICT. Surface that to the panel so it can de-emphasise
+        // the delete action instead of letting it 409 on click.
+        $referenced = [];
+        $userIds = [];
+        foreach ($usersByAccount as $list) {
+            foreach ($list as $u) {
+                $userIds[(int) $u['id']] = true;
+            }
+        }
+        if ($userIds !== []) {
+            $uids = array_keys($userIds);
+            $uph  = implode(',', array_fill(0, count($uids), '?'));
+            $refStmt = $pdo->prepare(
+                "SELECT inspector_user_id AS uid FROM inspections WHERE inspector_user_id IN ($uph)
+                 UNION
+                 SELECT effective_inspector_user_id FROM inspections WHERE effective_inspector_user_id IN ($uph)"
+            );
+            $refStmt->execute([...$uids, ...$uids]);
+            foreach ($refStmt->fetchAll(\PDO::FETCH_COLUMN) as $uid) {
+                $referenced[(int) $uid] = true;
+            }
+        }
+
         // Default for any legacy NULL row falls back to the current admin
         // setting (default_included_technicians) so the panel never shows a
         // stale literal that drifts away from what new accounts get.
         $defaultIncluded = SeatSync::defaultIncludedTechnicians();
-        $items = array_map(static function (array $a) use ($usersByAccount, $defaultIncluded): array {
-            $id = (int) $a['id'];
+        $items = array_map(static function (array $a) use ($usersByAccount, $defaultIncluded, $referenced): array {
+            $id      = (int) $a['id'];
+            $mainId  = (int) $a['main_user_id'];
+            $users   = array_map(static function (array $u) use ($mainId, $referenced): array {
+                $uid = (int) $u['id'];
+                // Deletable only when nothing pins the row: not the account
+                // owner and not printed on any protocol.
+                $u['deletable'] = $uid !== $mainId && !isset($referenced[$uid]);
+                return $u;
+            }, $usersByAccount[$id] ?? []);
             return [
                 'id'                    => $id,
                 'invoice_company_name'  => (string) $a['invoice_company_name'],
                 'subscription_end_date' => $a['subscription_end_date'],
-                'main_user_id'          => (int) $a['main_user_id'],
+                'main_user_id'          => $mainId,
                 'stripe_status'         => $a['stripe_status'],
                 'billing_period'        => $a['billing_period'],
                 'created_at'            => $a['created_at'],
                 'included_technicians'  => (int) ($a['included_technicians'] ?? $defaultIncluded),
                 'extra_technicians'     => (int) ($a['extra_technicians'] ?? 0),
-                'users'                 => $usersByAccount[$id] ?? [],
+                'users'                 => $users,
             ];
         }, $accounts);
 
@@ -145,6 +179,77 @@ final class AdminPanelController
             'total'  => $total,
             'offset' => $offset,
             'limit'  => $limit,
+        ]);
+    }
+
+    /**
+     * GET /api/admin/accounts/{id}/invoices?year=YYYY
+     *
+     * Admin view of one account's invoices, paginated by calendar year.
+     * Returns the requested year's rows plus the list of years that have
+     * invoices so the UI can render a year switcher. When no year is given
+     * (or it has no invoices) we default to the most recent year on file.
+     */
+    public static function listInvoices(Request $req, array $params): void
+    {
+        Admin::require();
+
+        $accountId = (int) ($params['id'] ?? 0);
+        if ($accountId <= 0) Response::error('Invalid account id', 422);
+
+        $pdo = Db::pdo();
+        $exists = $pdo->prepare('SELECT 1 FROM accounts WHERE id = ?');
+        $exists->execute([$accountId]);
+        if ($exists->fetchColumn() === false) Response::error('Account not found', 404);
+
+        // Distinct years that actually have invoices, newest first.
+        $yearsStmt = $pdo->prepare(
+            'SELECT DISTINCT YEAR(issued_at) AS y
+             FROM   invoices WHERE account_id = ?
+             ORDER  BY y DESC'
+        );
+        $yearsStmt->execute([$accountId]);
+        $years = array_map(static fn ($r) => (int) $r['y'], $yearsStmt->fetchAll());
+
+        // Resolve the requested year: honour ?year= when it has invoices,
+        // otherwise fall back to the newest year (or the current year when
+        // the account has no invoices at all, so the empty state is sane).
+        $requested = isset($_GET['year']) ? (int) $_GET['year'] : 0;
+        $year = in_array($requested, $years, true)
+            ? $requested
+            : ($years[0] ?? (int) date('Y'));
+
+        $stmt = $pdo->prepare(
+            'SELECT id, stripe_invoice_id, idoklad_invoice_id, document_number,
+                    idoklad_public_url, stripe_invoice_pdf_url,
+                    amount_cents, currency, status, issued_at
+             FROM   invoices
+             WHERE  account_id = ? AND YEAR(issued_at) = ?
+             ORDER  BY issued_at DESC, id DESC'
+        );
+        $stmt->execute([$accountId, $year]);
+
+        $items = array_map(static function (array $r): array {
+            // Prefer the legal iDoklad invoice; fall back to the Stripe PDF.
+            $pdfUrl = $r['idoklad_public_url'] ?: ($r['stripe_invoice_pdf_url'] ?: null);
+            return [
+                'id'                 => (int) $r['id'],
+                'stripe_invoice_id'  => (string) $r['stripe_invoice_id'],
+                'idoklad_invoice_id' => $r['idoklad_invoice_id'] !== null ? (int) $r['idoklad_invoice_id'] : null,
+                'document_number'    => $r['document_number'] ?: null,
+                'amount_cents'       => (int) $r['amount_cents'],
+                'currency'           => (string) $r['currency'],
+                'status'             => (string) $r['status'],
+                'issued_at'          => $r['issued_at'],
+                'pdf_url'            => $pdfUrl,
+            ];
+        }, $stmt->fetchAll());
+
+        Response::json([
+            'items'      => $items,
+            'years'      => $years,
+            'year'       => $year,
+            'account_id' => $accountId,
         ]);
     }
 
@@ -387,9 +492,84 @@ final class AdminPanelController
         $snap->execute([$id]);
         $snapRow = $snap->fetch() ?: null;
 
-        Db::pdo()->prepare('DELETE FROM users WHERE id = ?')->execute([$id]);
+        // A technician whose identity is printed on already-generated
+        // protocols cannot be hard-deleted: inspections.inspector_user_id and
+        // the immutable effective_inspector_user_id snapshot both reference
+        // users(id) with ON DELETE RESTRICT. Surface that as a friendly 409
+        // instead of letting the raw FK violation bubble up as a 500 — the
+        // admin should deactivate the technician, not erase signed history.
+        try {
+            Db::pdo()->prepare('DELETE FROM users WHERE id = ?')->execute([$id]);
+        } catch (\PDOException $e) {
+            if ($e->getCode() === '23000') {
+                Response::error(
+                    'Tohto používateľa nie je možné zmazať — jeho meno je uvedené na už vystavených protokoloch. Namiesto zmazania ho deaktivuj.',
+                    409,
+                );
+            }
+            throw $e;
+        }
         AuditLog::record('user.delete', 'users', $id, $snapRow ?: null, null);
 
         Response::noContent();
+    }
+
+    /**
+     * Activate / deactivate a technician on a specific account. This is the
+     * admin-side counterpart to the main-user-only toggle in
+     * {@see TeamController::update}, and the correct alternative to deleteUser
+     * for technicians whose identity is already printed on protocols (which
+     * the FK refuses to delete). is_active lives on account_users, so the
+     * route carries both the account and the user.
+     */
+    public static function setUserActive(Request $req, array $params): void
+    {
+        Admin::require();
+        Csrf::require($req);
+
+        $accountId = (int) ($params['id'] ?? 0);
+        $userId    = (int) ($params['user_id'] ?? 0);
+        if ($accountId <= 0 || $userId <= 0) Response::error('Invalid id', 422);
+
+        $isActive = $req->jsonBool('is_active');
+        if ($isActive === null) Response::error('Field required: is_active', 422);
+
+        // The main user owns the account and must stay active — deactivating
+        // them would strip the tenant of its only guaranteed member.
+        $mainStmt = Db::pdo()->prepare('SELECT main_user_id FROM accounts WHERE id = ?');
+        $mainStmt->execute([$accountId]);
+        $mainId = $mainStmt->fetchColumn();
+        if ($mainId === false) Response::error('Account not found', 404);
+        if (!$isActive && (int) $mainId === $userId) {
+            Response::error('Hlavného používateľa účtu nie je možné deaktivovať.', 409);
+        }
+
+        $upd = Db::pdo()->prepare(
+            'UPDATE account_users SET is_active = ? WHERE account_id = ? AND user_id = ?'
+        );
+        $upd->execute([$isActive ? 1 : 0, $accountId, $userId]);
+
+        // rowCount() is 0 both when the value was already set and when the
+        // row doesn't exist — only the latter is an error.
+        if ($upd->rowCount() === 0) {
+            $exists = Db::pdo()->prepare(
+                'SELECT 1 FROM account_users WHERE account_id = ? AND user_id = ?'
+            );
+            $exists->execute([$accountId, $userId]);
+            if ($exists->fetchColumn() === false) {
+                Response::error('Používateľ nie je členom tohto účtu.', 404);
+            }
+        }
+
+        SeatSync::recompute($accountId);
+        AuditLog::record(
+            $isActive ? 'user.activate' : 'user.deactivate',
+            'account_users',
+            $userId,
+            null,
+            ['account_id' => $accountId, 'is_active' => $isActive],
+        );
+
+        Response::json(['ok' => true, 'is_active' => $isActive]);
     }
 }
