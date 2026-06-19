@@ -54,8 +54,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {children}
       <div
         // Bottom-left so it doesn't collide with the bottom-right CTAs
-        // (e.g. "Uložiť" buttons in forms align to the right).
-        className="pointer-events-none fixed bottom-6 left-4 right-4 z-50 flex max-w-md flex-col gap-3 sm:left-6 sm:right-auto sm:w-full"
+        // (e.g. "Uložiť" buttons in forms align to the right). z-index sits
+        // above modal overlays (all z-50) so an error toast triggered from
+        // inside a dialog stays visible instead of hiding behind its blurred
+        // backdrop.
+        className="pointer-events-none fixed bottom-6 left-4 right-4 z-[60] flex max-w-md flex-col gap-3 sm:left-6 sm:right-auto sm:w-full"
         role="region"
         aria-label="Oznámenia"
       >
