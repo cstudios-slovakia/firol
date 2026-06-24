@@ -19,6 +19,8 @@ import {
 } from "@/api/inspections";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { daysUntilNext, getInspectionStatus } from "@/lib/inspectionStatus";
+import { InspectionStatusBadge } from "@/components/InspectionStatusBadge";
 import { useAuth } from "@/auth/AuthContext";
 import { useIsReadOnly } from "@/auth/useIsReadOnly";
 import { useToast } from "@/lib/toast";
@@ -110,12 +112,13 @@ export function InspectionsListPage() {
         const soon: InspectionListItem[] = [];
         const valid: InspectionListItem[] = [];
         for (const it of filtered) {
-            const days = daysUntilNext(it.executed_on, it.periodicity_months);
-            if (it.status === "finalized" && days !== null && days < 0) {
+            const { kind } = getInspectionStatus(it);
+            if (kind === "overdue") {
                 overdue.push(it);
-            } else if (it.status === "finalized" && days !== null && days >= 0 && days <= 30) {
+            } else if (kind === "soon") {
                 soon.push(it);
             } else {
+                // valid, superseded ("nahradená") and drafts all live here.
                 valid.push(it);
             }
         }
@@ -392,40 +395,6 @@ export function InspectionsListPage() {
     );
 }
 
-function daysUntilNext(
-    executedOn: string | null,
-    periodicityMonths: number,
-): number | null {
-    if (!executedOn) return null;
-    const base = new Date(executedOn);
-    if (isNaN(base.getTime())) return null;
-    const next = new Date(base);
-    next.setMonth(next.getMonth() + periodicityMonths);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    next.setHours(0, 0, 0, 0);
-    return Math.round(
-        (next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-    );
-}
-
-function NextDueBadge({ days }: { days: number }) {
-    const overdue = days < 0;
-    const soon = days >= 0 && days <= 50;
-    const cls = overdue
-        ? "bg-[var(--color-status-bad-bg)] text-[var(--color-status-bad)]"
-        : soon
-          ? "bg-[var(--color-status-warn-bg)] text-[var(--color-status-warn)]"
-          : "bg-[var(--color-status-ok-bg)] text-[var(--color-status-ok)]";
-    return (
-        <span
-            className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${cls}`}
-        >
-            {days < 0 ? `${days} dní` : `${days} dní`}
-        </span>
-    );
-}
-
 function InspectionRow({
     it,
     onDelete,
@@ -439,7 +408,6 @@ function InspectionRow({
     repeatingId: number | null;
     isReadOnly: boolean;
 }) {
-    const days = daysUntilNext(it.executed_on, it.periodicity_months);
     const isRepeating = repeatingId === it.id;
 
     const actions = isReadOnly ? null : (
@@ -491,11 +459,12 @@ function InspectionRow({
                         >
                             {INSPECTION_TYPE_LABELS[it.type]}
                         </Link>
-                        <Badge tone={it.status === "draft" ? "warn" : "ok"} className="shrink-0">
-                            {it.status === "draft" ? "Koncept" : "Hotová"}
-                        </Badge>
-                        {it.status === "finalized" && days !== null && (
-                            <NextDueBadge days={days} />
+                        {it.status === "draft" ? (
+                            <Badge tone="warn" className="shrink-0">
+                                Koncept
+                            </Badge>
+                        ) : (
+                            <InspectionStatusBadge inspection={it} className="shrink-0" />
                         )}
                     </div>
                     <p className="mt-0.5 truncate text-xs text-ink-500">

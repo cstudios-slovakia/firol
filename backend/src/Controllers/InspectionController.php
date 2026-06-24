@@ -15,6 +15,25 @@ use PDO;
 final class InspectionController
 {
     /**
+     * Computes whether an inspection has been "superseded" — i.e. a newer
+     * inspection exists for the same facility + type (within the same
+     * account). The validity status (platná / blíži sa / po termíne) is
+     * derived on the frontend; a superseded record drops out of the overdue
+     * bucket so a renewed control no longer flags "po termíne". This covers
+     * both the "Opakovať" flow and a manually re-created inspection — any
+     * newer row wins, even a still-open draft (higher id = created later).
+     * Correlates on the outer alias `i`.
+     */
+    private const SUPERSEDED_EXPR = 'EXISTS(
+                           SELECT 1 FROM inspections s
+                           WHERE  s.account_id  = i.account_id
+                             AND  s.facility_id = i.facility_id
+                             AND  s.type        = i.type
+                             AND  s.archived_at IS NULL
+                             AND  s.id          > i.id
+                       ) AS is_superseded';
+
+    /**
      * Allowed periodicities per inspection type. Source of truth: locked
      * decisions in docs/Firol base document and docs/development-roadmap.md.
      * Step 1 must reject anything outside this map.
@@ -48,7 +67,8 @@ final class InspectionController
                        i.inspector_user_id, u.fullname AS inspector_name,
                        i.effective_inspector_user_id,
                        eu.fullname AS effective_inspector_name,
-                       i.effective_cert_number
+                       i.effective_cert_number,
+                       ' . self::SUPERSEDED_EXPR . '
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
                 JOIN   facilities  f ON f.id = i.facility_id
@@ -440,7 +460,8 @@ final class InspectionController
                        i.inspector_user_id, u.fullname AS inspector_name,
                        i.effective_inspector_user_id,
                        eu.fullname AS effective_inspector_name,
-                       i.effective_cert_number
+                       i.effective_cert_number,
+                       ' . self::SUPERSEDED_EXPR . '
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
                 JOIN   facilities  f ON f.id = i.facility_id
@@ -477,6 +498,7 @@ final class InspectionController
             : null;
         $row['effective_inspector_name'] = $row['effective_inspector_name'] ?? null;
         $row['effective_cert_number'] = $row['effective_cert_number'] ?? null;
+        $row['is_superseded'] = (bool) ($row['is_superseded'] ?? false);
         unset($row['account_id']);
         return $row;
     }

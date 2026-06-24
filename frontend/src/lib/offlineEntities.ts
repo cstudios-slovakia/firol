@@ -96,6 +96,8 @@ export function inspectionCreateOptimistic(args: {
     effective_inspector_user_id: null,
     effective_inspector_name: null,
     effective_cert_number: null,
+    // Freshly created draft is always the newest for its facility + type.
+    is_superseded: false,
   };
   const detail: InspectionDetail = { inspection, items: [] };
   const listRow: InspectionListItem = { ...inspection };

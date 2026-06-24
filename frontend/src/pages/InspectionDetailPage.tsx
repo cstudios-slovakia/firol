@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Building2, CalendarDays, ClipboardList, Download, FileText,
-  Plus, Repeat, Warehouse,
+  History, Plus, Repeat, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
@@ -23,6 +23,7 @@ import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleto
 import { getTypeModule } from '@/inspection-types';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
+import { InspectionStatusBadge } from '@/components/InspectionStatusBadge';
 
 /**
  * Step 3 — summary screen. Final review before PDF generation.
@@ -210,9 +211,11 @@ export function InspectionDetailPage() {
               {i.facility_name}
             </Link>
             <span className="text-ink-300">·</span>
-            <Badge tone={isDraft ? 'warn' : 'ok'}>
-              {isDraft ? 'Rozpracovaná' : 'Dokončená'}
-            </Badge>
+            {isDraft ? (
+              <Badge tone="warn">Rozpracovaná</Badge>
+            ) : (
+              <InspectionStatusBadge inspection={i} />
+            )}
           </p>
         </div>
         {!isDraft ? (
@@ -228,6 +231,17 @@ export function InspectionDetailPage() {
           </Button>
         ) : null}
       </header>
+
+      {!isDraft && i.is_superseded && (
+        <Card className="flex items-start gap-2.5 bg-ink-50 px-4 py-3 text-xs text-ink-600">
+          <History className="mt-0.5 size-4 shrink-0 text-ink-400" />
+          <p>
+            Túto kontrolu už nahradila novšia kontrola tej istej prevádzky
+            a typu, preto sa neoznačuje ako „po termíne". Stále ju môžeš
+            zobraziť aj znova opakovať.
+          </p>
+        </Card>
+      )}
 
       <Card className="flex flex-col gap-3 border-status-warn/30 bg-[var(--color-status-warn-bg)]/40 p-4">
         <div className="flex items-start gap-3">

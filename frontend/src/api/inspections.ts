@@ -57,6 +57,10 @@ export type InspectionListItem = {
   effective_inspector_user_id: number | null;
   effective_inspector_name: string | null;
   effective_cert_number: string | null;
+  // True when a newer inspection exists for the same facility + type. Such a
+  // record is treated as "Nahradená" and never flags as overdue — a renewed
+  // control (via Opakovať or a fresh manual one) supersedes the previous.
+  is_superseded: boolean;
 };
 
 export type Inspection = InspectionListItem & {
