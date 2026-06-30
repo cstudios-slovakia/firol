@@ -400,9 +400,12 @@ final class InspectionItemController
 
     /**
      * Požiarne uzávery — prevádzková údržba (PU-UD).
-     * Same identification as AK minus manufacturer, plus mandatory
-     * maintenance_work text describing what was done (lubrication,
-     * gasket replacement, self-closer check, etc.).
+     * Same identification as AK (kind + identifier + manufacturer +
+     * location) plus mandatory maintenance_work text describing what was
+     * done (lubrication, gasket replacement, self-closer check, etc.).
+     * Manufacturer is optional here — the manual-entry form does not
+     * require it — but it must be persisted when provided so it survives
+     * to the summary, edit screen and PDF.
      *
      * @param array<string, mixed> $body
      * @return array<string, mixed>
@@ -414,6 +417,7 @@ final class InspectionItemController
             self::failValidation('Field kind must be one of: dvere, okno, klapka.');
         }
         $identifier      = self::stringField($body, 'identifier',       required: true,  max: 80);
+        $manufacturer    = self::stringField($body, 'manufacturer',     required: false, max: 80);
         $location        = self::stringField($body, 'location',         required: true,  max: 191);
         $maintenanceWork = self::stringField($body, 'maintenance_work', required: true,  max: 500);
         $notes           = self::stringField($body, 'notes',            required: false, max: 500);
@@ -426,6 +430,7 @@ final class InspectionItemController
         return [
             'kind'             => $kind,
             'identifier'       => $identifier,
+            'manufacturer'     => $manufacturer,
             'location'         => $location,
             'maintenance_work' => $maintenanceWork,
             'result'           => $result,
