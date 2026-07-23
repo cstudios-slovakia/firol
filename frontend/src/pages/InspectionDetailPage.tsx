@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Building2, CalendarDays, ClipboardList, Download, FileText,
-  History, Plus, Repeat, Warehouse,
+  ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, Download, FileText,
+  GitBranch, History, Link2, Plus, Repeat, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
@@ -11,6 +11,7 @@ import {
   documentDownloadUrl,
   type InspectionDetail,
   type InspectionDocument,
+  type InspectionType,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
@@ -50,6 +51,7 @@ export function InspectionDetailPage() {
   const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
   const [generating, setGenerating] = useState(false);
   const [repeating, setRepeating] = useState(false);
+  const [creatingFollowUp, setCreatingFollowUp] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +91,21 @@ export function InspectionDetailPage() {
       setError(offlineMessage(err, 'Opakovať sa nepodarilo.'));
     } finally {
       setRepeating(false);
+    }
+  }
+
+  async function handleCreateFollowUp(targetType: InspectionType) {
+    if (!data) return;
+    setError(null);
+    setCreatingFollowUp(true);
+    try {
+      const res = await Inspections.createFollowUp(id, targetType, csrfToken);
+      toast.success(res.created ? 'Koncept vytvorený' : 'Koncept už existoval — otváram ho');
+      navigate(`/inspections/${res.inspection_id}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Koncept sa nepodarilo vytvoriť.');
+    } finally {
+      setCreatingFollowUp(false);
     }
   }
 
@@ -325,6 +342,15 @@ export function InspectionDetailPage() {
         </Card>
       )}
 
+      <FollowUpBlock
+        type={i.type}
+        items={items}
+        sourceInspectionId={i.source_inspection_id}
+        followUps={data.follow_ups ?? []}
+        creating={creatingFollowUp}
+        onCreate={handleCreateFollowUp}
+      />
+
       <DocumentsBlock
         documents={documents}
         canGenerate={isDraft && items.length > 0 && !!i.executed_on}
@@ -334,6 +360,112 @@ export function InspectionDetailPage() {
         pdfError={pdfError}
       />
     </div>
+  );
+}
+
+/**
+ * Linked protocols (change request 2.1). Two things live here:
+ *  - a "created from" back-link when this inspection is itself a follow-up draft;
+ *  - existing follow-up drafts spawned from this inspection, and — when the
+ *    items qualify — an offer to create the follow-up draft (PHP → Oprava/TS,
+ *    Hydranty → TS hadíc). The disposal ("vyradenie") protocol for status-V
+ *    prístroje is a separate document type still pending its template.
+ */
+function FollowUpBlock({
+  type,
+  items,
+  sourceInspectionId,
+  followUps,
+  creating,
+  onCreate,
+}: {
+  type: InspectionType;
+  items: InspectionDetail['items'];
+  sourceInspectionId: number | null;
+  followUps: NonNullable<InspectionDetail['follow_ups']>;
+  creating: boolean;
+  onCreate: (targetType: InspectionType) => void;
+}) {
+  // What follow-up can this type offer, and how many source items qualify?
+  let targetType: InspectionType | null = null;
+  let qualifying = 0;
+  let offerText = '';
+  if (type === 'php') {
+    qualifying = items.filter((it) => it.fields.status === 'TS').length;
+    targetType = 'oprava_ts_php';
+    offerText = `${qualifying} ${qualifying === 1 ? 'prístroj má' : qualifying < 5 ? 'prístroje majú' : 'prístrojov má'} stav „Tlaková skúška"`;
+  } else if (type === 'hydranty') {
+    qualifying = items.length;
+    targetType = 'ts_hadic';
+    offerText = `${qualifying} ${qualifying === 1 ? 'kontrolovaný hydrant' : 'kontrolovaných hydrantov'}`;
+  }
+
+  // Don't offer a follow-up that already exists for this source.
+  const alreadyMade = targetType !== null && followUps.some((f) => f.type === targetType);
+  const showOffer = targetType !== null && qualifying > 0 && !alreadyMade;
+
+  if (!sourceInspectionId && followUps.length === 0 && !showOffer) return null;
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-3 border-b border-ink-100 px-4 py-3">
+        <div className="grid size-9 place-items-center rounded-2xl bg-firol-50 text-firol-600">
+          <GitBranch className="size-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold text-ink-900">Prepojené protokoly</h3>
+          <p className="text-xs text-ink-500">Nadväzujúce kontroly vytvorené z tejto kontroly.</p>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 px-4 py-3">
+        {sourceInspectionId && (
+          <Link
+            to={`/inspections/${sourceInspectionId}`}
+            className="inline-flex items-center gap-1.5 text-xs text-ink-500 hover:text-firol-600"
+          >
+            <Link2 className="size-3.5" />
+            Tento koncept vznikol z inej kontroly — zobraziť zdroj
+          </Link>
+        )}
+
+        {followUps.map((f) => (
+          <Link
+            key={f.id}
+            to={`/inspections/${f.id}`}
+            className="flex items-center gap-3 rounded-xl border border-ink-100 px-3 py-2.5 transition-colors hover:bg-ink-50"
+          >
+            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-firol-50 text-firol-600">
+              <ArrowRight className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-ink-900">{INSPECTION_TYPE_LABELS[f.type]}</p>
+              <p className="text-xs text-ink-500">
+                {f.status === 'draft' ? 'Rozpracovaný koncept' : 'Dokončená kontrola'}
+              </p>
+            </div>
+          </Link>
+        ))}
+
+        {showOffer && targetType && (
+          <div className="rounded-xl border border-firol-200 bg-firol-50/60 p-3.5">
+            <p className="text-sm text-ink-800">
+              {offerText} — vytvoriť koncept <strong>{INSPECTION_TYPE_LABELS[targetType]}</strong> s týmito
+              položkami?
+            </p>
+            <Button
+              type="button"
+              className="mt-3"
+              loading={creating}
+              onClick={() => onCreate(targetType)}
+              leftIcon={<Plus className="size-4" />}
+            >
+              Vytvoriť koncept
+            </Button>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

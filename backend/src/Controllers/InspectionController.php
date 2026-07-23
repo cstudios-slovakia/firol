@@ -68,7 +68,8 @@ final class InspectionController
         $type = $req->query('type');
 
         $sql = 'SELECT i.id, i.type, i.periodicity_months, i.executed_on,
-                       i.is_preventive_inspection, i.status, i.notes, i.created_at,
+                       i.is_preventive_inspection, i.source_inspection_id,
+                       i.status, i.notes, i.created_at,
                        i.company_id, c.name AS company_name,
                        i.facility_id, f.name AS facility_name,
                        i.inspector_user_id, u.fullname AS inspector_name,
@@ -194,10 +195,192 @@ final class InspectionController
             ];
         }, $rawItems);
 
+        // Follow-up drafts spawned from this inspection (change request 2.1),
+        // so the detail view can show "nadväzujúci koncept existuje" and link.
+        $fuStmt = Db::pdo()->prepare(
+            'SELECT id, type, status FROM inspections
+             WHERE  source_inspection_id = ? AND archived_at IS NULL
+             ORDER  BY id ASC'
+        );
+        $fuStmt->execute([$id]);
+        $followUps = array_map(static function (array $r): array {
+            return [
+                'id' => (int) $r['id'],
+                'type' => (string) $r['type'],
+                'status' => (string) $r['status'],
+            ];
+        }, $fuStmt->fetchAll());
+
         Response::json([
             'inspection' => self::shapeRow($row),
             'items' => $items,
+            'follow_ups' => $followUps,
         ]);
+    }
+
+    /**
+     * Create a pre-filled DRAFT of a follow-up control off the back of this
+     * inspection (change request 2.1):
+     *   php      → oprava_ts_php   (prístroje with status "TS")
+     *   hydranty → ts_hadic        (hoses from the checked hydrants)
+     * The draft is never finalized — the technician opens it later, enters the
+     * real results and date, and generates the protocol. Re-triggering the
+     * offer for the same source returns the existing draft (no duplicate).
+     */
+    public static function followUp(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $sourceId = (int) $params['id'];
+
+        $source = self::loadOrFail($isAdmin ? null : $accountId, $sourceId);
+        $accountId = (int) $source['account_id'];
+        $sourceType = (string) $source['type'];
+
+        $targetType = $req->jsonString('target_type');
+        $allowed = [
+            'php'      => 'oprava_ts_php',
+            'hydranty' => 'ts_hadic',
+        ];
+        if (!isset($allowed[$sourceType]) || $targetType !== $allowed[$sourceType]) {
+            Response::error('Pre tento typ kontroly nie je dostupný nadväzujúci koncept.', 422);
+        }
+
+        // Pull source items and map them to the target type's field shape.
+        $itemsStmt = Db::pdo()->prepare(
+            'SELECT fields FROM inspection_items
+             WHERE  inspection_id = ? ORDER BY position ASC, id ASC'
+        );
+        $itemsStmt->execute([$sourceId]);
+        $sourceItems = array_map(
+            static fn (array $r): array => json_decode((string) $r['fields'], true) ?: [],
+            $itemsStmt->fetchAll(),
+        );
+
+        $mapped = $targetType === 'oprava_ts_php'
+            ? self::mapPhpToOprava($sourceItems)
+            : self::mapHydrantyToTsHadic($sourceItems);
+
+        if ($mapped === []) {
+            Response::error('Zdrojová kontrola neobsahuje položky pre nadväzujúci koncept.', 422);
+        }
+
+        $pdo = Db::pdo();
+
+        // Idempotency: if a draft already grew from THIS source, return it
+        // instead of creating a second one.
+        $existing = $pdo->prepare(
+            'SELECT id FROM inspections
+             WHERE  source_inspection_id = ? AND type = ? AND status = "draft"
+                AND archived_at IS NULL
+             ORDER  BY id DESC LIMIT 1'
+        );
+        $existing->execute([$sourceId, $targetType]);
+        $existingId = $existing->fetchColumn();
+        if ($existingId !== false) {
+            Response::json(['inspection_id' => (int) $existingId, 'created' => false], 200);
+        }
+
+        $periodicity = self::TYPE_PERIODICITIES[$targetType][0];
+
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare(
+                'INSERT INTO inspections
+                    (account_id, company_id, facility_id, source_inspection_id, type,
+                     periodicity_months, executed_on, inspector_user_id, status, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, "draft", NULL)'
+            )->execute([
+                $accountId,
+                $source['company_id'],
+                $source['facility_id'],
+                $sourceId,
+                $targetType,
+                $periodicity,
+                $source['inspector_user_id'],
+            ]);
+            $newId = (int) $pdo->lastInsertId();
+
+            $ins = $pdo->prepare(
+                'INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)'
+            );
+            foreach ($mapped as $pos => $fields) {
+                $ins->execute([$newId, $pos + 1, json_encode($fields, JSON_UNESCAPED_UNICODE)]);
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        Response::json(['inspection_id' => $newId, 'created' => true], 201);
+    }
+
+    /**
+     * PHP items with status "TS" (na tlakovú skúšku) → Oprava/plnenie/TS PHP
+     * draft items. Carries identification only; the standard scope of work is
+     * fixed on that protocol and the note starts blank.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return list<array<string, mixed>>
+     */
+    private static function mapPhpToOprava(array $items): array
+    {
+        $out = [];
+        foreach ($items as $f) {
+            if (($f['status'] ?? null) !== 'TS') {
+                continue;
+            }
+            $out[] = [
+                'manufacturer' => (string) ($f['manufacturer'] ?? ''),
+                'type'         => (string) ($f['type'] ?? ''),
+                'serial'       => (string) ($f['serial'] ?? ''),
+                'year'         => (int) ($f['year'] ?? 0),
+                'location'     => (string) ($f['location'] ?? ''),
+                'notes'        => null,
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Hydrant items → Tlaková skúška hadíc draft items. One hose row per hose
+     * on the hydrant (hose_count), carrying the hydrant's type/DN as the hose
+     * type and the hydrant location. Measured pressures/length are left blank
+     * for the technician to fill when the test is actually performed.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return list<array<string, mixed>>
+     */
+    private static function mapHydrantyToTsHadic(array $items): array
+    {
+        $out = [];
+        foreach ($items as $f) {
+            $type = (string) ($f['type'] ?? '');
+            if ($type === 'other') {
+                $type = (string) ($f['type_other'] ?? '');
+            }
+            $location = (string) ($f['location'] ?? '');
+            $count = (int) ($f['hose_count'] ?? 0);
+            // A hydrant with no hoses still yields one row so the technician can
+            // record the test; otherwise one row per hose.
+            $rows = max(1, $count);
+            for ($n = 0; $n < $rows; $n++) {
+                $out[] = [
+                    'hose_type'           => $type,
+                    'location'            => $location,
+                    'manufacturer'        => '',
+                    'working_pressure'    => null,
+                    'test_pressure'       => null,
+                    'length'              => null,
+                    'year_of_manufacture' => null,
+                    'result'              => 'vyhovuje',
+                    'notes'               => null,
+                ];
+            }
+        }
+        return $out;
     }
 
     public static function store(Request $req): void
@@ -520,7 +703,7 @@ final class InspectionController
     private static function loadOrFail(?int $accountId, int $id): array
     {
         $sql = 'SELECT i.id, i.account_id, i.type, i.periodicity_months,
-                       i.is_preventive_inspection,
+                       i.is_preventive_inspection, i.source_inspection_id,
                        i.executed_on, i.status, i.notes,
                        i.created_at, i.updated_at,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
@@ -568,6 +751,9 @@ final class InspectionController
         $row['effective_cert_number'] = $row['effective_cert_number'] ?? null;
         $row['is_superseded'] = (bool) ($row['is_superseded'] ?? false);
         $row['is_preventive_inspection'] = (bool) ($row['is_preventive_inspection'] ?? true);
+        $row['source_inspection_id'] = isset($row['source_inspection_id'])
+            ? (int) $row['source_inspection_id']
+            : null;
         unset($row['account_id']);
         return $row;
     }

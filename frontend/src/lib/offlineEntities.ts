@@ -101,6 +101,9 @@ export function inspectionCreateOptimistic(args: {
     // Defaults to a preventive inspection; the record form flips this to false
     // for a plain fire-book entry once it is saved.
     is_preventive_inspection: true,
+    // A manually created inspection has no source; follow-up drafts are made
+    // server-side (change request 2.1).
+    source_inspection_id: null,
   };
   const detail: InspectionDetail = { inspection, items: [] };
   const listRow: InspectionListItem = { ...inspection };

@@ -66,6 +66,9 @@ export type InspectionListItem = {
   // as overdue and does not supersede the previous inspection. Always true for
   // every other inspection type.
   is_preventive_inspection: boolean;
+  // Set when this inspection is a follow-up draft the app pre-filled from
+  // another inspection (change request 2.1); null otherwise.
+  source_inspection_id: number | null;
 };
 
 export type Inspection = InspectionListItem & {
@@ -256,9 +259,18 @@ export type InspectionItem = {
   updated_at: string;
 };
 
+/** A follow-up draft spawned from this inspection (change request 2.1). */
+export type FollowUpRef = {
+  id: number;
+  type: InspectionType;
+  status: InspectionStatus;
+};
+
 export type InspectionDetail = {
   inspection: Inspection;
   items: InspectionItem[];
+  /** Present on show(); follow-up drafts created from this inspection. */
+  follow_ups?: FollowUpRef[];
 };
 
 export type InspectionDocument = {
@@ -340,6 +352,19 @@ export const Inspections = {
     }),
   archive: (id: number, csrfToken: string | null) =>
     api<void>(`/api/inspections/${id}`, { method: 'DELETE', csrfToken }),
+
+  /**
+   * Create (or return the existing) pre-filled follow-up draft from this
+   * inspection (change request 2.1). `created` is false when an earlier draft
+   * from the same source was returned instead of a new one.
+   */
+  createFollowUp: (id: number, targetType: InspectionType, csrfToken: string | null) =>
+    api<{ inspection_id: number; created: boolean }>(`/api/inspections/${id}/follow-up`, {
+      method: 'POST',
+      body: { target_type: targetType },
+      csrfToken,
+      requireOnline: true,
+    }),
 
   addItem: (
     inspectionId: number,
