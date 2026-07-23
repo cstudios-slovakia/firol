@@ -310,10 +310,22 @@ function buildQuery(filters: InspectionListFilters = {}): string {
   return parts.length > 0 ? `?${parts.join('&')}` : '';
 }
 
+export type SuggestionField = 'manufacturer' | 'type' | 'location';
+
 export const Inspections = {
   list: (filters?: InspectionListFilters) =>
     api<{ items: InspectionListItem[] }>(`/api/inspections${buildQuery(filters)}`),
   show: (id: number) => api<InspectionDetail>(`/api/inspections/${id}`),
+  /**
+   * Autocomplete values for a repetitive field (manufacturer / type /
+   * location), drawn from the account's own history (change request 2.4.1).
+   * Pass facilityId for `location` to float that facility's values to the top.
+   */
+  suggestions: (field: SuggestionField, q: string, facilityId?: number) => {
+    const parts = [`field=${field}`, `q=${encodeURIComponent(q)}`];
+    if (facilityId) parts.push(`facility_id=${facilityId}`);
+    return api<{ suggestions: string[] }>(`/api/inspections/suggestions?${parts.join('&')}`);
+  },
   createDraft: (
     body: InspectionDraftPayload,
     csrfToken: string | null,

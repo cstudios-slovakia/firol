@@ -19,6 +19,8 @@ export type SubmitAction = 'save-and-next' | 'save-and-summary';
 
 export type Step2FormProps = {
   inspectionId: number;
+  /** Facility of the inspection — used to bias location autocomplete (2.4.1). */
+  facilityId: number;
   /** When set, the form opens in edit mode and prefills from this item. */
   initialItem: InspectionItem | null;
   /** CSRF token from AuthContext, threaded through via the parent. */

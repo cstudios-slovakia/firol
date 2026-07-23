@@ -162,6 +162,7 @@ export function InspectionStep2Page() {
       <FormComponent
         key={editing ? `edit-${itemId}` : `new-${detail.items.length}`}
         inspectionId={inspectionId}
+        facilityId={i.facility_id}
         initialItem={initialItem}
         csrfToken={csrfToken}
         onSaved={handleSaved}

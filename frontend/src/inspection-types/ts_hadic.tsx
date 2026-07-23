@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowRight, Building2, CheckCircle2, Edit2, Gauge,
+  AlertTriangle, ArrowRight, Building2, CheckCircle2, CopyPlus, Edit2, Gauge,
   ListChecks, MapPin, NotebookPen, Ruler, Save, Trash2,
 } from 'lucide-react';
 import {
@@ -14,11 +14,13 @@ import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
+import { consumeDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
 import type {
   InspectionTypeModule,
   ItemRowProps,
@@ -35,7 +37,10 @@ function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
 }
 
-function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+/** Carried into the next hose by "Ďalší rovnaký" — never measured pressures. */
+type TsHadicSeed = { hose_type: string; manufacturer: string };
+
+function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -67,12 +72,15 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
       setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
-      setHoseType(''); setLocation(''); setManufacturer('');
+      // "Ďalší rovnaký": carry hose type + manufacturer; measured pressures,
+      // length, year and result always start blank/default (2.4.2).
+      const seed = consumeDuplicateSeed<TsHadicSeed>(inspectionId);
+      setHoseType(seed?.hose_type ?? ''); setLocation(''); setManufacturer(seed?.manufacturer ?? '');
       setWorkingPressure(''); setTestPressure('');
       setLength(''); setYearOfManufacture('');
       setResult('vyhovuje'); setNotes('');
     }
-  }, [initialItem]);
+  }, [initialItem, inspectionId]);
 
   function clearErr(key: string) {
     setFieldErrors((prev) => { const n = { ...prev }; delete n[key]; return n; });
@@ -90,7 +98,11 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
     void handleSubmit(e as FormEvent, 'save-and-summary');
   }
 
-  async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
+  async function handleSubmit(
+    e: FormEvent,
+    action: 'save-and-next' | 'save-and-summary',
+    duplicate = false,
+  ) {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (!hoseType.trim()) errs.hoseType = 'Doplň typ / priemer hadice (napr. DN33, C52).';
@@ -131,6 +143,10 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
       } else {
         await Inspections.addItem(inspectionId, fields, csrfToken);
       }
+      if (duplicate) {
+        const seed: TsHadicSeed = { hose_type: hoseType.trim(), manufacturer: manufacturer.trim() };
+        setDuplicateSeed(inspectionId, seed);
+      }
       onSaved(action);
       toast.success('Položka uložená');
     } catch (err) {
@@ -155,16 +171,16 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
 
         <Field label="Umiestnenie" required error={fieldErrors.location}>
           {(p) => (
-            <Input {...p} required leftIcon={<MapPin className="size-4" />}
-              value={location} onChange={(e) => { setLocation(e.target.value); clearErr('location'); }}
+            <AutocompleteInput {...p} required field="location" facilityId={facilityId} leftIcon={<MapPin className="size-4" />}
+              value={location} onChange={(v) => { setLocation(v); clearErr('location'); }}
               placeholder="Chodba — 2. poschodie" />
           )}
         </Field>
 
         <Field label="Výrobca" required error={fieldErrors.manufacturer}>
           {(p) => (
-            <Input {...p} required leftIcon={<Building2 className="size-4" />}
-              value={manufacturer} onChange={(e) => { setManufacturer(e.target.value); clearErr('manufacturer'); }}
+            <AutocompleteInput {...p} required field="manufacturer" leftIcon={<Building2 className="size-4" />}
+              value={manufacturer} onChange={(v) => { setManufacturer(v); clearErr('manufacturer'); }}
               placeholder="PYROSTOP s.r.o." />
           )}
         </Field>
@@ -246,6 +262,13 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
+          {!editing && (
+            <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
+              loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+              title="Uloží a predvyplní ďalšiu hadicu rovnakým typom a výrobcom (namerané hodnoty ostanú prázdne).">
+              Ďalšia rovnaká
+            </Button>
+          )}
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalšia hadica'}

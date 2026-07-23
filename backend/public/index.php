@@ -128,6 +128,8 @@ $router->delete('/api/facilities/{id}',             [FacilityController::class, 
 
 $router->get('/api/inspections',                    [InspectionController::class, 'index']);
 $router->post('/api/inspections',                   [InspectionController::class, 'store']);
+// Must precede /api/inspections/{id} — {id} would otherwise swallow "suggestions".
+$router->get('/api/inspections/suggestions',        [InspectionController::class, 'suggestions']);
 $router->get('/api/inspections/{id}',               [InspectionController::class, 'show']);
 $router->patch('/api/inspections/{id}',             [InspectionController::class, 'updateBasic']);
 $router->delete('/api/inspections/{id}',            [InspectionController::class, 'archive']);

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, DoorClosed, Edit2, Hash,
+  AlertTriangle, ArrowRight, CheckCircle2, CopyPlus, DoorClosed, Edit2, Hash,
   ListChecks, MapPin, NotebookPen, Save, Tag, Trash2,
 } from 'lucide-react';
 import {
@@ -18,11 +18,13 @@ import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
+import { consumeDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
 import type {
   InspectionTypeModule,
   ItemRowProps,
@@ -37,7 +39,10 @@ function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
 }
 
-function PuAkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+/** Carried into the next uzáver by "Ďalší rovnaký" — never the identifier. */
+type PuAkSeed = { kind: PuKind; manufacturer: string };
+
+function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -63,14 +68,16 @@ function PuAkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
       setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
-      setKind('dvere');
+      // "Ďalší rovnaký": carry kind + manufacturer; identifier/location fresh.
+      const seed = consumeDuplicateSeed<PuAkSeed>(inspectionId);
+      setKind(seed?.kind ?? 'dvere');
       setIdentifier('');
-      setManufacturer('');
+      setManufacturer(seed?.manufacturer ?? '');
       setLocation('');
       setResult('vyhovuje');
       setNotes('');
     }
-  }, [initialItem]);
+  }, [initialItem, inspectionId]);
 
   function isPristine() {
     return (
@@ -85,7 +92,11 @@ function PuAkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
     void handleSubmit(e as FormEvent, 'save-and-summary');
   }
 
-  async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
+  async function handleSubmit(
+    e: FormEvent,
+    action: 'save-and-next' | 'save-and-summary',
+    duplicate = false,
+  ) {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (!identifier.trim()) errs.identifier = 'Doplň číslo / označenie uzáveru.';
@@ -108,6 +119,10 @@ function PuAkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
         await Inspections.updateItem(inspectionId, itemId, fields, csrfToken);
       } else {
         await Inspections.addItem(inspectionId, fields, csrfToken);
+      }
+      if (duplicate) {
+        const seed: PuAkSeed = { kind, manufacturer: manufacturer.trim() };
+        setDuplicateSeed(inspectionId, seed);
       }
       onSaved(action);
       toast.success('Položka uložená');
@@ -145,8 +160,8 @@ function PuAkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
           </Field>
           <Field label="Výrobca" required error={fieldErrors.manufacturer}>
             {(p) => (
-              <Input {...p} required leftIcon={<Tag className="size-4" />}
-                value={manufacturer} onChange={(e) => { setManufacturer(e.target.value); if (fieldErrors.manufacturer) setFieldErrors((prev) => { const n = { ...prev }; delete n.manufacturer; return n; }); }}
+              <AutocompleteInput {...p} required field="manufacturer" leftIcon={<Tag className="size-4" />}
+                value={manufacturer} onChange={(v) => { setManufacturer(v); if (fieldErrors.manufacturer) setFieldErrors((prev) => { const n = { ...prev }; delete n.manufacturer; return n; }); }}
                 placeholder="Hörmann" />
             )}
           </Field>
@@ -154,8 +169,8 @@ function PuAkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
 
         <Field label="Umiestnenie" required error={fieldErrors.location}>
           {(p) => (
-            <Input {...p} required leftIcon={<MapPin className="size-4" />}
-              value={location} onChange={(e) => { setLocation(e.target.value); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
+            <AutocompleteInput {...p} required field="location" facilityId={facilityId} leftIcon={<MapPin className="size-4" />}
+              value={location} onChange={(v) => { setLocation(v); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
               placeholder="Hala A → kancelárie" />
           )}
         </Field>
@@ -199,6 +214,13 @@ function PuAkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
+          {!editing && (
+            <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
+              loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+              title="Uloží a predvyplní ďalší uzáver rovnakého druhu a výrobcu.">
+              Ďalší rovnaký
+            </Button>
+          )}
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}

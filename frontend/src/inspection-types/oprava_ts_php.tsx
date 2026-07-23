@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, Edit2, FileSearch, Hash, ListChecks, MapPin,
+  ArrowRight, CopyPlus, Edit2, FileSearch, Hash, ListChecks, MapPin,
   NotebookPen, Save, Tag, Trash2, Wrench,
 } from 'lucide-react';
 import {
@@ -13,9 +13,11 @@ import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { AutocompleteInput, PHP_COMMON_TYPES } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
+import { consumeDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
 import type {
   InspectionTypeModule,
   ItemRowProps,
@@ -23,7 +25,10 @@ import type {
   Step2FormProps,
 } from './common';
 
-function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+/** Fields carried into the next item by "Ďalší rovnaký" — never serial/location. */
+type OpravaSeed = { manufacturer: string; type: string; year: string };
+
+function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -49,14 +54,16 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
       setLocation(typeof f.location === 'string' ? f.location : '');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
-      setManufacturer('');
-      setExtType('');
+      // Carry identification over from "Ďalší rovnaký"; serial/location blank.
+      const seed = consumeDuplicateSeed<OpravaSeed>(inspectionId);
+      setManufacturer(seed?.manufacturer ?? '');
+      setExtType(seed?.type ?? '');
       setSerial('');
-      setYear('');
+      setYear(seed?.year ?? '');
       setLocation('');
       setNotes('');
     }
-  }, [initialItem]);
+  }, [initialItem, inspectionId]);
 
   function isPristine() {
     return (
@@ -70,7 +77,11 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
     void handleSubmit(e as FormEvent, 'save-and-summary');
   }
 
-  async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
+  async function handleSubmit(
+    e: FormEvent,
+    action: 'save-and-next' | 'save-and-summary',
+    duplicate = false,
+  ) {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (!manufacturer.trim()) errs.manufacturer = 'Doplň výrobcu.';
@@ -97,6 +108,10 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
       } else {
         await Inspections.addItem(inspectionId, fields, csrfToken);
       }
+      if (duplicate) {
+        const seed: OpravaSeed = { manufacturer: manufacturer.trim(), type: extType.trim(), year: year.trim() };
+        setDuplicateSeed(inspectionId, seed);
+      }
       onSaved(action);
       toast.success('Položka uložená');
     } catch (err) {
@@ -116,15 +131,15 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Výrobca" required error={fieldErrors.manufacturer}>
             {(p) => (
-              <Input {...p} required leftIcon={<Tag className="size-4" />}
-                value={manufacturer} onChange={(e) => { setManufacturer(e.target.value); if (fieldErrors.manufacturer) setFieldErrors((prev) => { const n = { ...prev }; delete n.manufacturer; return n; }); }}
+              <AutocompleteInput {...p} required field="manufacturer" leftIcon={<Tag className="size-4" />}
+                value={manufacturer} onChange={(v) => { setManufacturer(v); if (fieldErrors.manufacturer) setFieldErrors((prev) => { const n = { ...prev }; delete n.manufacturer; return n; }); }}
                 placeholder="Gloria" />
             )}
           </Field>
           <Field label="Typ" required hint={fieldErrors.extType ? undefined : 'Napr. P6, CO2-5, P9'} error={fieldErrors.extType}>
             {(p) => (
-              <Input {...p} required leftIcon={<FileSearch className="size-4" />}
-                value={extType} onChange={(e) => { setExtType(e.target.value); if (fieldErrors.extType) setFieldErrors((prev) => { const n = { ...prev }; delete n.extType; return n; }); }}
+              <AutocompleteInput {...p} required field="type" staticOptions={PHP_COMMON_TYPES} leftIcon={<FileSearch className="size-4" />}
+                value={extType} onChange={(v) => { setExtType(v); if (fieldErrors.extType) setFieldErrors((prev) => { const n = { ...prev }; delete n.extType; return n; }); }}
                 placeholder="P6" />
             )}
           </Field>
@@ -150,8 +165,8 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
 
         <Field label="Umiestnenie" required error={fieldErrors.location}>
           {(p) => (
-            <Input {...p} required leftIcon={<MapPin className="size-4" />}
-              value={location} onChange={(e) => { setLocation(e.target.value); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
+            <AutocompleteInput {...p} required field="location" facilityId={facilityId} leftIcon={<MapPin className="size-4" />}
+              value={location} onChange={(v) => { setLocation(v); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
               placeholder="Hala A, vchod" />
           )}
         </Field>
@@ -185,6 +200,13 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
+          {!editing && (
+            <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
+              loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+              title="Uloží a predvyplní ďalšiu položku rovnakými údajmi (okrem výr. čísla a umiestnenia).">
+              Ďalší rovnaký
+            </Button>
+          )}
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}

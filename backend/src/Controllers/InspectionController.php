@@ -109,6 +109,65 @@ final class InspectionController
         Response::json(['items' => $items]);
     }
 
+    /**
+     * Autocomplete suggestions for repetitive item fields (manufacturer / type
+     * / location) drawn from the account's own history — so a technician
+     * entering ten prístroje of the same make types it once, not ten times
+     * (change request 2.4.1). Distinct values are ranked by how often they were
+     * used; for `location`, values from the given facility float to the top.
+     */
+    public static function suggestions(Request $req): void
+    {
+        $accountId = Tenant::currentAccountId();
+
+        // Whitelist the JSON key so it can be safely interpolated into the
+        // JSON path (never user-controlled beyond this fixed set — so no SQL
+        // injection is possible). Kept out of a bound param on purpose: the
+        // same expression appears several times and reusing a named
+        // placeholder is not portable across PDO emulation settings.
+        $field = (string) $req->query('field');
+        if (!in_array($field, ['manufacturer', 'type', 'location'], true)) {
+            Response::error('Invalid field', 422);
+        }
+        $val = "JSON_UNQUOTE(JSON_EXTRACT(ji.fields, '\$.$field'))";
+
+        $q = trim((string) ($req->query('q') ?? ''));
+        $facilityId = self::queryInt($req, 'facility_id');
+
+        // LIKE-escape the prefix so %/_ typed by the user match literally.
+        $like = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
+
+        $preferFacility = $field === 'location' && $facilityId !== null;
+
+        $sql = "SELECT $val AS val"
+             . ($preferFacility ? ', MAX(i.facility_id = :fid) AS same_fac' : '')
+             . ", COUNT(*) AS uses
+                FROM   inspection_items ji
+                JOIN   inspections i ON i.id = ji.inspection_id
+                WHERE  i.account_id = :acct
+                  AND  i.archived_at IS NULL
+                  AND  $val IS NOT NULL
+                  AND  $val <> ''
+                  AND  $val LIKE :like
+                GROUP  BY val
+                ORDER  BY " . ($preferFacility ? 'same_fac DESC, ' : '') . "uses DESC, val ASC
+                LIMIT  20";
+
+        $params = ['acct' => $accountId, 'like' => $like];
+        if ($preferFacility) {
+            $params['fid'] = $facilityId;
+        }
+
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
+        $values = array_values(array_filter(array_map(
+            static fn ($r): string => (string) $r['val'],
+            $stmt->fetchAll(),
+        ), static fn (string $v): bool => $v !== ''));
+
+        Response::json(['suggestions' => $values]);
+    }
+
     public static function show(Request $req, array $params): void
     {
         $accountId = Tenant::currentAccountId();
