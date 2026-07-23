@@ -2,6 +2,7 @@ import { Link, Outlet, NavLink, useNavigate, useLocation } from "react-router-do
 import {
     AlertTriangle,
     Building2,
+    CalendarClock,
     ClipboardList,
     CreditCard,
     GraduationCap,
@@ -51,6 +52,14 @@ const TOP_TABS = [
         iconBg: "bg-orange-100",
     },
     {
+        to: "/kalendar",
+        label: "Kalendár",
+        icon: CalendarClock,
+        activeColor: "text-firol-600",
+        activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
+        iconBg: "bg-firol-100",
+    },
+    {
         to: "/trainings",
         label: "Školenia",
         icon: GraduationCap,
@@ -83,7 +92,7 @@ const DESKTOP_BOTTOM_TABS = [
     SETTINGS_TAB,
 ] as const;
 
-// Mobile bottom nav — 5 tabs only
+// Mobile bottom nav — the top tabs plus settings.
 const MOBILE_TABS = [...TOP_TABS, SETTINGS_TAB] as const;
 
 type Tab = {

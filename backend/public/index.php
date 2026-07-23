@@ -21,6 +21,7 @@ use Firol\Controllers\AdminController;
 use Firol\Controllers\AdminPanelController;
 use Firol\Controllers\AuthController;
 use Firol\Controllers\BillingController;
+use Firol\Controllers\CalendarController;
 use Firol\Controllers\CompanyController;
 use Firol\Controllers\FacilityController;
 use Firol\Controllers\DocumentController;
@@ -140,6 +141,14 @@ $router->patch('/api/inspections/{id}/items/{item_id}',  [InspectionItemControll
 $router->delete('/api/inspections/{id}/items/{item_id}', [InspectionItemController::class, 'destroy']);
 $router->post('/api/inspections/{id}/generate-pdf',  [DocumentController::class, 'generateForInspection']);
 $router->get('/api/inspections/{id}/documents',      [DocumentController::class, 'indexForInspection']);
+
+// Calendar (change request 2.5) — computed deadlines + planned dates + events.
+$router->get('/api/calendar',                        [CalendarController::class, 'index']);
+$router->patch('/api/calendar/plans/{inspection_id}', [CalendarController::class, 'setPlan']);
+$router->delete('/api/calendar/plans/{inspection_id}', [CalendarController::class, 'deletePlan']);
+$router->post('/api/calendar/events',                [CalendarController::class, 'createEvent']);
+$router->patch('/api/calendar/events/{id}',          [CalendarController::class, 'updateEvent']);
+$router->delete('/api/calendar/events/{id}',         [CalendarController::class, 'deleteEvent']);
 $router->get('/api/documents/{id}/download',         [DocumentController::class, 'download']);
 $router->post('/api/documents/{id}/email',           [DocumentController::class, 'emailDocument']);
 
