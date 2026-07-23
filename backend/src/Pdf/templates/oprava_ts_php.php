@@ -159,11 +159,12 @@ $checklistItems = [
   <thead>
     <tr>
       <th style="width:4%">Č.</th>
-      <th style="width:16%">Výrobca</th>
-      <th style="width:10%">Typ</th>
-      <th style="width:20%">Výr. číslo / séria</th>
-      <th style="width:9%">Rok výr.</th>
-      <th style="width:41%">Umiestnenie</th>
+      <th style="width:15%">Výrobca</th>
+      <th style="width:9%">Typ</th>
+      <th style="width:17%">Výr. číslo / séria</th>
+      <th style="width:8%">Rok výr.</th>
+      <th style="width:23%">Umiestnenie</th>
+      <th style="width:24%">Poznámka</th>
     </tr>
   </thead>
   <tbody>
@@ -175,6 +176,7 @@ $checklistItems = [
       <td><?= $h($f['serial'] ?? null) ?></td>
       <td><?= (int) ($f['year'] ?? 0) ?: '—' ?></td>
       <td><?= $h($f['location'] ?? null) ?></td>
+      <td><?= !empty($f['notes']) ? $h($f['notes']) : '—' ?></td>
     </tr>
     <?php endforeach ?>
   </tbody>

@@ -90,7 +90,7 @@ export function RegisterPage() {
     <AuthLayout
       wide
       title="Registrácia"
-      subtitle="Vytvor si konto, vyber plán a vyplň fakturačné údaje — potom zaplatíš cez Stripe a okamžite získaš prístup."
+      subtitle="Vytvor si konto a vyber si plán. Skúšobnú verziu spustíš hneď a bez platby — pri ročnom či mesačnom predplatnom zaplatíš cez Stripe a okamžite získaš plný prístup."
       footer={
         <>
           Už máš konto?{' '}
@@ -224,7 +224,7 @@ export function RegisterPage() {
             </div>
             <p className="text-xs text-ink-400">
               {plan === 'trial'
-                ? `Skúšobné obdobie ${trialDays ?? '—'} dní bez platby. Predplatné si vyberieš neskôr v nastaveniach.`
+                ? `Skúšobné obdobie je ${trialDays ?? 14} dní bez platby. Predplatné si vieš aktivovať aj neskôr v nastaveniach.`
                 : 'V ďalšom kroku doplníš fakturačné údaje a presmerujeme ťa na bezpečnú platbu cez Stripe.'}
             </p>
           </div>

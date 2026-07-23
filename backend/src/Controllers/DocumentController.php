@@ -644,20 +644,8 @@ final class DocumentController
                 }
                 return $stats;
             case 'oprava_ts_php':
-                // Counts how many items had each action performed. An item
-                // can contribute to multiple buckets (tlakova_skuska +
-                // plnenie are typically combined on the same prístroj).
-                $stats += ['tlakova_skuska' => 0, 'oprava' => 0, 'plnenie' => 0];
-                foreach ($items as $it) {
-                    $actions = $it['fields']['actions'] ?? [];
-                    if (is_array($actions)) {
-                        foreach ($actions as $a) {
-                            if (isset($stats[$a])) {
-                                $stats[$a]++;
-                            }
-                        }
-                    }
-                }
+                // Standard scope of performed work is fixed on the protocol,
+                // so only the number of serviced prístroje matters here.
                 return $stats;
             case 'poziarna_kniha':
                 // Single-record protocol — total is always 0 or 1; the

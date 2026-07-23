@@ -1236,6 +1236,15 @@ function UserEditForm({
     );
 }
 
+/**
+ * Parse a EUR amount typed by an admin. Accepts both the dot and the comma
+ * as decimal separator (e.g. "24.60" or "24,60") — Slovak users routinely
+ * type prices with a comma. Returns NaN for unparseable input.
+ */
+function parseEurAmount(raw: string): number {
+    return Number(String(raw).trim().replace(",", "."));
+}
+
 function AdminSettingsSection() {
     const { csrfToken } = useAuth();
     const toast = useToast();
@@ -1282,12 +1291,12 @@ function AdminSettingsSection() {
         e.preventDefault();
         setSaving(true);
         try {
-            const extraCents = Math.round(Number(extraTechEur) * 100);
+            const extraCents = Math.round(parseEurAmount(extraTechEur) * 100);
             const res = await Admin.updateSettings(
                 {
                     trial_days: Number(trialDays),
-                    price_monthly_eur: Number(priceMonthly),
-                    price_yearly_eur: Number(priceYearly),
+                    price_monthly_eur: parseEurAmount(priceMonthly),
+                    price_yearly_eur: parseEurAmount(priceYearly),
                     default_included_technicians: Number(defaultIncluded),
                     price_per_extra_technician_cents: Number.isFinite(
                         extraCents,
@@ -1348,25 +1357,23 @@ function AdminSettingsSection() {
                     )}
                 </Field>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <Field label="Cena mesačne (EUR)">
+                    <Field label="Cena mesačne (EUR)" hint="Povolená je aj desatinná čiarka (napr. 24,60).">
                         {(p) => (
                             <Input
                                 {...p}
-                                type="number"
-                                inputMode="numeric"
-                                min={0}
+                                type="text"
+                                inputMode="decimal"
                                 value={priceMonthly}
                                 onChange={(e) => setMonthly(e.target.value)}
                             />
                         )}
                     </Field>
-                    <Field label="Cena ročne (EUR)">
+                    <Field label="Cena ročne (EUR)" hint="Povolená je aj desatinná čiarka (napr. 249,60).">
                         {(p) => (
                             <Input
                                 {...p}
-                                type="number"
-                                inputMode="numeric"
-                                min={0}
+                                type="text"
+                                inputMode="decimal"
                                 value={priceYearly}
                                 onChange={(e) => setYearly(e.target.value)}
                             />
@@ -1406,14 +1413,12 @@ function AdminSettingsSection() {
                                 />
                             )}
                         </Field>
-                        <Field label="Cena za extra (EUR / mesiac)">
+                        <Field label="Cena za extra (EUR / mesiac)" hint="Povolená je aj desatinná čiarka (napr. 3,90).">
                             {(p) => (
                                 <Input
                                     {...p}
-                                    type="number"
+                                    type="text"
                                     inputMode="decimal"
-                                    min={0}
-                                    step="0.01"
                                     value={extraTechEur}
                                     onChange={(e) =>
                                         setExtraTechEur(e.target.value)

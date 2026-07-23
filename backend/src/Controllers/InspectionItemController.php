@@ -32,9 +32,6 @@ final class InspectionItemController
     /** Common pass/fail enum reused across hydranty / PU / NO / TS-HAD. */
     private const RESULT_ENUM = ['vyhovuje', 'nevyhovuje'];
 
-    /** Service actions that may be checked on an Oprava+TS PHP item. */
-    private const OPRAVA_TS_ACTIONS = ['tlakova_skuska', 'oprava', 'plnenie'];
-
     /**
      * Predefined activity slugs for Požiarna kniha entries. Custom activities
      * are stored as free-text strings in `custom_activities`.
@@ -224,10 +221,9 @@ final class InspectionItemController
 
     /**
      * Oprava + plnenie + TS PHP. Same identification block as PHP
-     * (manufacturer/type/serial/year/location) plus a multi-select of
-     * service actions performed during the visit. At least one action
-     * must be checked — otherwise the item is meaningless on this kind
-     * of protocol.
+     * (manufacturer/type/serial/year/location) plus a free-text note.
+     * The PDF lists a fixed standard scope of performed work, so no
+     * per-item "actions" selection is stored.
      *
      * @param array<string, mixed> $body
      * @return array<string, mixed>
@@ -248,30 +244,12 @@ final class InspectionItemController
             self::failValidation('Field year must be an integer year (1900–2200).');
         }
 
-        $actionsRaw = $body['actions'] ?? null;
-        if (!is_array($actionsRaw)) {
-            self::failValidation('Field actions must be an array.');
-        }
-        $actions = [];
-        foreach ($actionsRaw as $a) {
-            if (!is_string($a) || !in_array($a, self::OPRAVA_TS_ACTIONS, true)) {
-                self::failValidation('Each action must be one of: tlakova_skuska, oprava, plnenie.');
-            }
-            if (!in_array($a, $actions, true)) {
-                $actions[] = $a;
-            }
-        }
-        if (count($actions) === 0) {
-            self::failValidation('Vyber aspoň jeden vykonaný úkon (tlaková skúška, oprava alebo plnenie).');
-        }
-
         return [
             'manufacturer' => $manufacturer,
             'type'         => $extType,
             'serial'       => $serial,
             'year'         => $year,
             'location'     => $location,
-            'actions'      => $actions,
             'notes'        => $notes,
         ];
     }
@@ -489,7 +467,16 @@ final class InspectionItemController
         $workingPressure   = self::float($body, 'working_pressure',   min: 0, max: 50);
         $testPressure      = self::float($body, 'test_pressure',      min: 0, max: 50);
         $length            = self::float($body, 'length',             min: 0.1, max: 9999);
-        $yearOfManufacture = (int) self::float($body, 'year_of_manufacture', min: 1900, max: (float) date('Y'));
+
+        // Year of manufacture is optional — old hoses are commonly tested with
+        // no known production year. Accept null/empty and only validate a range
+        // when a value is provided.
+        $yearRaw = $body['year_of_manufacture'] ?? null;
+        if ($yearRaw === null || $yearRaw === '') {
+            $yearOfManufacture = null;
+        } else {
+            $yearOfManufacture = (int) self::float($body, 'year_of_manufacture', min: 1900, max: (float) date('Y'));
+        }
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {

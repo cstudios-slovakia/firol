@@ -1,14 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, CheckCircle2, Edit2, FileSearch, Hash, ListChecks, MapPin,
+  ArrowRight, Edit2, FileSearch, Hash, ListChecks, MapPin,
   NotebookPen, Save, Tag, Trash2, Wrench,
 } from 'lucide-react';
 import {
   Inspections,
-  OPRAVA_ACTIONS,
-  OPRAVA_ACTION_LABELS,
-  type OpravaAction,
   type OpravaTsPhpItemFields,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
@@ -19,18 +16,12 @@ import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
-import { Badge } from '@/components/ui/Badge';
-import { cn } from '@/lib/cn';
 import type {
   InspectionTypeModule,
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
 } from './common';
-
-function isOpravaAction(s: unknown): s is OpravaAction {
-  return s === 'tlakova_skuska' || s === 'oprava' || s === 'plnenie';
-}
 
 function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
@@ -41,7 +32,6 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
   const [serial, setSerial] = useState('');
   const [year, setYear] = useState<string>('');
   const [location, setLocation] = useState('');
-  const [actions, setActions] = useState<OpravaAction[]>([]);
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
@@ -57,7 +47,6 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
       setSerial(typeof f.serial === 'string' ? f.serial : '');
       setYear(typeof f.year === 'number' ? String(f.year) : '');
       setLocation(typeof f.location === 'string' ? f.location : '');
-      setActions(Array.isArray(f.actions) ? f.actions.filter(isOpravaAction) : []);
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
       setManufacturer('');
@@ -65,20 +54,13 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
       setSerial('');
       setYear('');
       setLocation('');
-      setActions([]);
       setNotes('');
     }
   }, [initialItem]);
 
-  function toggleAction(a: OpravaAction) {
-    setActions((prev) => prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]);
-    if (fieldErrors.actions) setFieldErrors((prev) => { const n = { ...prev }; delete n.actions; return n; });
-  }
-
   function isPristine() {
     return (
-      !manufacturer && !extType && !serial && !year && !location && !notes &&
-      actions.length === 0
+      !manufacturer && !extType && !serial && !year && !location && !notes
     );
   }
 
@@ -97,7 +79,6 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
     if (!location.trim()) errs.location = 'Doplň umiestnenie.';
     const yn = Number(year);
     if (!Number.isInteger(yn) || yn < 1900 || yn > 2200) errs.year = 'Rok výroby musí byť v rozsahu 1900–2200.';
-    if (actions.length === 0) errs.actions = 'Vyber aspoň jeden vykonaný úkon.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
     setApiError(null);
@@ -109,7 +90,6 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
         serial: serial.trim(),
         year: Number(year),
         location: location.trim(),
-        actions,
         notes: notes.trim() || null,
       };
       if (editing && itemId !== null) {
@@ -176,16 +156,6 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
           )}
         </Field>
 
-        <Field label="Vykonané úkony" required hint={fieldErrors.actions ? undefined : 'Aspoň jeden — môže byť aj viac naraz.'} error={fieldErrors.actions}>
-          {() => (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="group" aria-label="Vykonané úkony">
-              {OPRAVA_ACTIONS.map((a) => (
-                <ActionCheckbox key={a} value={a} active={actions.includes(a)} onClick={() => toggleAction(a)} />
-              ))}
-            </div>
-          )}
-        </Field>
-
         <Field label="Poznámky" hint="Voliteľné — postup servisu, použité diely, odporúčania.">
           {(p) => (
             <div className="relative">
@@ -225,34 +195,6 @@ function OpravaStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step
   );
 }
 
-function ActionCheckbox({
-  value,
-  active,
-  onClick,
-}: {
-  value: OpravaAction;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button type="button" role="checkbox" aria-checked={active} onClick={onClick}
-      className={cn('rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors text-left',
-        active
-          ? 'border-firol-500 bg-firol-50 text-firol-700'
-          : 'border-ink-200 bg-white text-ink-700 hover:border-firol-300')}>
-      <div className="flex items-center gap-2">
-        <span className={cn(
-          'grid size-4 shrink-0 place-items-center rounded border',
-          active ? 'border-firol-500 bg-firol-500 text-white' : 'border-ink-300 bg-white',
-        )}>
-          {active && <CheckCircle2 className="size-3" strokeWidth={3} />}
-        </span>
-        <span>{OPRAVA_ACTION_LABELS[value]}</span>
-      </div>
-    </button>
-  );
-}
-
 function OpravaItemRow({
   inspectionId,
   index,
@@ -262,7 +204,6 @@ function OpravaItemRow({
   onDelete,
 }: ItemRowProps) {
   const f = item.fields as Partial<OpravaTsPhpItemFields>;
-  const actions = Array.isArray(f.actions) ? f.actions.filter(isOpravaAction) : [];
   return (
     <div className="px-4 py-3">
       <div className="flex items-center gap-3">
@@ -283,13 +224,6 @@ function OpravaItemRow({
             <MapPin className="-mt-0.5 mr-1 inline size-3" />
             {f.location}
           </p>
-          {actions.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {actions.map((a) => (
-                <Badge key={a} tone="brand">{OPRAVA_ACTION_LABELS[a]}</Badge>
-              ))}
-            </div>
-          )}
           {f.notes && (
             <p className="mt-1.5 line-clamp-2 text-xs text-ink-600 italic">{f.notes}</p>
           )}
@@ -313,29 +247,13 @@ function OpravaItemRow({
 
 function OpravaStatsBar({ items }: StatsBarProps) {
   if (items.length === 0) return null;
-  const counts: Record<OpravaAction, number> = { tlakova_skuska: 0, oprava: 0, plnenie: 0 };
-  for (const it of items) {
-    const acts = (it.fields as Partial<OpravaTsPhpItemFields>).actions;
-    if (Array.isArray(acts)) {
-      for (const a of acts) {
-        if (isOpravaAction(a)) counts[a] += 1;
-      }
-    }
-  }
   return (
     <Card className="px-4 py-3">
-      <div className="flex items-center justify-between gap-2 text-xs">
+      <div className="flex items-center justify-between gap-2 text-sm">
         <span className="font-semibold uppercase tracking-wider text-ink-500">Štatistika</span>
-        <span className="text-ink-500">spolu {items.length}</span>
-      </div>
-      <div className="mt-2 grid grid-cols-3 gap-2">
-        {OPRAVA_ACTIONS.map((a) => (
-          <div key={a}
-            className="flex items-center justify-between gap-2 rounded-xl bg-firol-50 px-3 py-2 text-sm text-firol-700">
-            <span className="text-xs">{OPRAVA_ACTION_LABELS[a]}</span>
-            <span className="text-base font-semibold tabular-nums">{counts[a]}</span>
-          </div>
-        ))}
+        <span className="text-ink-700">
+          Prístrojov spolu <span className="text-base font-semibold tabular-nums">{items.length}</span>
+        </span>
       </div>
     </Card>
   );

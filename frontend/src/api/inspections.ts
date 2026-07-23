@@ -115,21 +115,12 @@ export type HydrantItemFields = {
   result: PassFailResult;
 };
 
-export type OpravaAction = 'tlakova_skuska' | 'oprava' | 'plnenie';
-export const OPRAVA_ACTIONS: OpravaAction[] = ['tlakova_skuska', 'oprava', 'plnenie'];
-export const OPRAVA_ACTION_LABELS: Record<OpravaAction, string> = {
-  tlakova_skuska: 'Tlaková skúška',
-  oprava: 'Oprava',
-  plnenie: 'Plnenie',
-};
-
 export type OpravaTsPhpItemFields = {
   manufacturer: string;
   type: string;
   serial: string;
   year: number;
   location: string;
-  actions: OpravaAction[];
   notes: string | null;
 };
 
@@ -240,7 +231,7 @@ export type TsHadicItemFields = {
   working_pressure: number;
   test_pressure: number;
   length: number;
-  year_of_manufacture: number;
+  year_of_manufacture: number | null;
   result: PassFailResult;
   notes: string | null;
 };

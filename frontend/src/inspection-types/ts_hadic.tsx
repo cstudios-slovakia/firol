@@ -105,8 +105,10 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
     const len = Number(length);
     if (!length || !Number.isFinite(len) || len <= 0 || len > 9999)
       errs.length = 'Dĺžka musí byť kladné číslo (v metroch).';
+    // Year of manufacture is optional — old hoses are commonly tested with
+    // no known production year. Only validate the range when a value is given.
     const year = Number(yearOfManufacture);
-    if (!yearOfManufacture || !Number.isInteger(year) || year < 1900 || year > new Date().getFullYear())
+    if (yearOfManufacture && (!Number.isInteger(year) || year < 1900 || year > new Date().getFullYear()))
       errs.yearOfManufacture = 'Zadaj platný rok výroby.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
@@ -120,7 +122,7 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
         working_pressure:    wp,
         test_pressure:       tp,
         length:              len,
-        year_of_manufacture: year,
+        year_of_manufacture: yearOfManufacture ? year : null,
         result,
         notes: notes.trim() || null,
       };
@@ -195,9 +197,9 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
                 placeholder="20" />
             )}
           </Field>
-          <Field label="Rok výroby" required error={fieldErrors.yearOfManufacture}>
+          <Field label="Rok výroby" hint={fieldErrors.yearOfManufacture ? undefined : 'Voliteľné — ak nie je známy, nechaj prázdne.'} error={fieldErrors.yearOfManufacture}>
             {(p) => (
-              <Input {...p} required type="number" inputMode="numeric" step={1} min={1900} max={new Date().getFullYear()}
+              <Input {...p} type="number" inputMode="numeric" step={1} min={1900} max={new Date().getFullYear()}
                 leftIcon={<Ruler className="size-4" />}
                 value={yearOfManufacture} onChange={(e) => { setYearOfManufacture(e.target.value); clearErr('yearOfManufacture'); }}
                 placeholder="2021" />
