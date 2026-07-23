@@ -23,6 +23,12 @@ final class InspectionController
      * both the "Opakovať" flow and a manually re-created inspection — any
      * newer row wins, even a still-open draft (higher id = created later).
      * Correlates on the outer alias `i`.
+     *
+     * A newer row only supersedes when it is itself a cycle-advancing
+     * inspection (`is_preventive_inspection = 1`). A plain požiarna kniha
+     * entry (is_preventive_inspection = 0) must never supersede the previous
+     * preventive inspection — otherwise a routine note would mask a missed
+     * statutory inspection (change request 1.7).
      */
     private const SUPERSEDED_EXPR = 'EXISTS(
                            SELECT 1 FROM inspections s
@@ -31,6 +37,7 @@ final class InspectionController
                              AND  s.type        = i.type
                              AND  s.archived_at IS NULL
                              AND  s.id          > i.id
+                             AND  s.is_preventive_inspection = 1
                        ) AS is_superseded';
 
     /**
@@ -61,7 +68,7 @@ final class InspectionController
         $type = $req->query('type');
 
         $sql = 'SELECT i.id, i.type, i.periodicity_months, i.executed_on,
-                       i.status, i.notes, i.created_at,
+                       i.is_preventive_inspection, i.status, i.notes, i.created_at,
                        i.company_id, c.name AS company_name,
                        i.facility_id, f.name AS facility_name,
                        i.inspector_user_id, u.fullname AS inspector_name,
@@ -337,14 +344,15 @@ final class InspectionController
             $pdo->prepare(
                 'INSERT INTO inspections
                     (account_id, company_id, facility_id, type, periodicity_months,
-                     executed_on, inspector_user_id, status, notes)
-                 VALUES (?, ?, ?, ?, ?, NULL, ?, "draft", ?)'
+                     is_preventive_inspection, executed_on, inspector_user_id, status, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, "draft", ?)'
             )->execute([
                         $accountId,
                         $source['company_id'],
                         $source['facility_id'],
                         $source['type'],
                         $source['periodicity_months'],
+                        !empty($source['is_preventive_inspection']) ? 1 : 0,
                         $source['inspector_user_id'],
                         $source['notes'],
                     ]);
@@ -453,6 +461,7 @@ final class InspectionController
     private static function loadOrFail(?int $accountId, int $id): array
     {
         $sql = 'SELECT i.id, i.account_id, i.type, i.periodicity_months,
+                       i.is_preventive_inspection,
                        i.executed_on, i.status, i.notes,
                        i.created_at, i.updated_at,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
@@ -499,6 +508,7 @@ final class InspectionController
         $row['effective_inspector_name'] = $row['effective_inspector_name'] ?? null;
         $row['effective_cert_number'] = $row['effective_cert_number'] ?? null;
         $row['is_superseded'] = (bool) ($row['is_superseded'] ?? false);
+        $row['is_preventive_inspection'] = (bool) ($row['is_preventive_inspection'] ?? true);
         unset($row['account_id']);
         return $row;
     }

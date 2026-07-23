@@ -61,6 +61,11 @@ export type InspectionListItem = {
   // record is treated as "Nahradená" and never flags as overdue — a renewed
   // control (via Opakovať or a fresh manual one) supersedes the previous.
   is_superseded: boolean;
+  // Požiarna kniha only: false marks a plain fire-book entry (not a preventive
+  // inspection). Such an entry is outside the statutory cycle — it never flags
+  // as overdue and does not supersede the previous inspection. Always true for
+  // every other inspection type.
+  is_preventive_inspection: boolean;
 };
 
 export type Inspection = InspectionListItem & {
@@ -175,6 +180,13 @@ export type PkDefect = {
 };
 
 export type PoziarnaKnihaItemFields = {
+  /**
+   * True = preventive fire inspection (statutory, advances the cycle).
+   * False = plain fire-book entry (e.g. a training note) — no preventive-
+   * inspection wording, does not supersede or shift the next-due term.
+   * Optional for backward compat with records saved before this split.
+   */
+  is_preventive?: boolean;
   workspaces: string;
   activities: PkActivity[];
   custom_activities: string[];

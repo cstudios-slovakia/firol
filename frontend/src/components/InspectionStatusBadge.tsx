@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Clock, History } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, History, NotebookPen } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import {
     getInspectionStatus,
@@ -16,6 +16,7 @@ const META: Record<
     soon: { tone: "warn", label: "Blíži sa", Icon: Clock },
     overdue: { tone: "bad", label: "Po termíne", Icon: AlertTriangle },
     superseded: { tone: "neutral", label: "Nahradená", Icon: History },
+    entry: { tone: "neutral", label: "Zápis", Icon: NotebookPen },
 };
 
 /**
@@ -31,7 +32,11 @@ export function InspectionStatusBadge({
 }: {
     inspection: Pick<
         InspectionListItem,
-        "status" | "executed_on" | "periodicity_months" | "is_superseded"
+        | "status"
+        | "executed_on"
+        | "periodicity_months"
+        | "is_superseded"
+        | "is_preventive_inspection"
     >;
     showDays?: boolean;
     className?: string;

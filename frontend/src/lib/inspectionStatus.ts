@@ -10,14 +10,19 @@ export type InspectionStatusKind =
     | "valid" // platná
     | "soon" // blíži sa termín (within SOON_THRESHOLD_DAYS)
     | "overdue" // po termíne
-    | "superseded"; // nahradená — a newer inspection exists for this facility + type
+    | "superseded" // nahradená — a newer inspection exists for this facility + type
+    | "entry"; // požiarna kniha plain entry — outside the statutory cycle
 
 /** Days before the due date at which a control starts flagging "blíži sa termín". */
 export const SOON_THRESHOLD_DAYS = 30;
 
 type StatusInput = Pick<
     InspectionListItem,
-    "status" | "executed_on" | "periodicity_months" | "is_superseded"
+    | "status"
+    | "executed_on"
+    | "periodicity_months"
+    | "is_superseded"
+    | "is_preventive_inspection"
 >;
 
 /**
@@ -51,6 +56,9 @@ export function getInspectionStatus(it: StatusInput): {
     days: number | null;
 } {
     if (it.status === "draft") return { kind: "draft", days: null };
+    // A plain fire-book entry is outside the statutory cycle: it never counts
+    // down to a due date and never flags overdue (change request 1.7).
+    if (it.is_preventive_inspection === false) return { kind: "entry", days: null };
     if (it.is_superseded) return { kind: "superseded", days: null };
 
     const days = daysUntilNext(it.executed_on, it.periodicity_months);

@@ -47,6 +47,10 @@ $activeSlugs = is_array($record['activities'] ?? null) ? $record['activities'] :
 $result = (string) ($record['result'] ?? '');
 $workspaces = (string) ($record['workspaces'] ?? '');
 $notes = (string) ($record['notes'] ?? '');
+// A plain fire-book entry (not a preventive inspection) carries no statutory
+// prehliadka wording — only its free-text body. Defaults to true so records
+// saved before the split still render as preventive inspections (req 1.7).
+$isPreventive = !array_key_exists('is_preventive', $record) || $record['is_preventive'] !== false;
 $activityLabels = [
   'visual_check' => 'Vizuálna kontrola priestorov spoločnosti',
   'php_check' => 'Kontrola stavu, označenia a dostupnosti PHP',
@@ -86,6 +90,9 @@ $legacyDeadline = isset($record['defect_deadline']) && is_string($record['defect
   : null;
 
 $defectRows = [];
+// True once the free-text note has been consumed as defect rows (legacy
+// records) so it isn't also printed again in the Poznámka section below.
+$notesUsedAsDefects = false;
 if (isset($record['defects']) && is_array($record['defects']) && $record['defects']) {
   foreach ($record['defects'] as $d) {
     if (!is_array($d))
@@ -103,6 +110,7 @@ if (isset($record['defects']) && is_array($record['defects']) && $record['defect
   if (!$defectRows && $notes !== '') {
     $defectRows[] = ['description' => $notes, 'deadline' => $legacyDeadline];
   }
+  $notesUsedAsDefects = $defectRows !== [];
 }
 
 $contactLine = $facility['contact_person'] ?? '';
@@ -401,14 +409,21 @@ $contactLine = $facility['contact_person'] ?? '';
   </tr>
 </table>
 
-<h2>Úvodný záznam</h2>
-<div class="legal-box">Vykonaná preventívna protipožiarna prehliadka všetkých pracovísk v pôsobnosti spoločnosti v
-  zmysle zákona č. 314/2001 Z. z. v platnom znení a vyhlášky MV SR č. 121/2002 Z. z. v platnom znení.</div>
-<?php if ($workspaces): ?>
-  <div class="workspaces-line">Bola vykonaná vizuálna prehliadka pracovísk: <?= $h($workspaces) ?></div>
+<?php if ($isPreventive): ?>
+  <h2>Úvodný záznam</h2>
+  <div class="legal-box">Vykonaná preventívna protipožiarna prehliadka všetkých pracovísk v pôsobnosti spoločnosti v
+    zmysle zákona č. 314/2001 Z. z. v platnom znení a vyhlášky MV SR č. 121/2002 Z. z. v platnom znení.</div>
+  <?php if ($workspaces): ?>
+    <div class="workspaces-line">Bola vykonaná vizuálna prehliadka pracovísk: <?= $h($workspaces) ?></div>
+  <?php endif ?>
+<?php else: ?>
+  <h2>Zápis do požiarnej knihy</h2>
+  <?php if ($notes !== ''): ?>
+    <div class="workspaces-line"><?= nl2br($h($notes)) ?></div>
+  <?php endif ?>
 <?php endif ?>
 
-<?php if ($checkedActivities): ?>
+<?php if ($isPreventive && $checkedActivities): ?>
   <h2>Vykonané činnosti</h2>
   <table class="activities">
     <?php foreach ($checkedActivities as $label): ?>
@@ -440,6 +455,11 @@ $contactLine = $facility['contact_person'] ?? '';
       <?php endforeach ?>
     </tbody>
   </table>
+<?php endif ?>
+
+<?php if ($isPreventive && $notes !== '' && !$notesUsedAsDefects): ?>
+  <h2>Poznámka</h2>
+  <div class="workspaces-line"><?= nl2br($h($notes)) ?></div>
 <?php endif ?>
 
 <h2>Záver</h2>

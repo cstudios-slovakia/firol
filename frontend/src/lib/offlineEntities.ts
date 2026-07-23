@@ -98,6 +98,9 @@ export function inspectionCreateOptimistic(args: {
     effective_cert_number: null,
     // Freshly created draft is always the newest for its facility + type.
     is_superseded: false,
+    // Defaults to a preventive inspection; the record form flips this to false
+    // for a plain fire-book entry once it is saved.
+    is_preventive_inspection: true,
   };
   const detail: InspectionDetail = { inspection, items: [] };
   const listRow: InspectionListItem = { ...inspection };

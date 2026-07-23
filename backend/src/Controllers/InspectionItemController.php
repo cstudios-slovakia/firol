@@ -102,6 +102,7 @@ final class InspectionItemController
             )->execute([$inspectionId, $position, json_encode($fields, JSON_UNESCAPED_UNICODE)]);
 
             $itemId = (int) $pdo->lastInsertId();
+            self::syncPreventiveFlag($pdo, $inspection['type'], $inspectionId, $fields);
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
@@ -135,6 +136,8 @@ final class InspectionItemController
             $inspectionId,
         ]);
 
+        self::syncPreventiveFlag(Db::pdo(), $inspection['type'], $inspectionId, $fields);
+
         Response::json(['item' => self::loadItem($itemId)]);
     }
 
@@ -159,6 +162,25 @@ final class InspectionItemController
         // rows on every delete.
 
         Response::noContent();
+    }
+
+    /**
+     * Mirror the požiarna kniha record's preventive/plain flag onto the parent
+     * inspection row so the supersession query (which runs in SQL) can filter
+     * on it. Only požiarna kniha carries the split; every other type is always
+     * a cycle-advancing inspection and keeps the column's default of 1.
+     *
+     * @param array<string, mixed> $fields
+     */
+    private static function syncPreventiveFlag(\PDO $pdo, string $type, int $inspectionId, array $fields): void
+    {
+        if ($type !== 'poziarna_kniha') {
+            return;
+        }
+        $isPreventive = ($fields['is_preventive'] ?? true) ? 1 : 0;
+        $pdo->prepare(
+            'UPDATE inspections SET is_preventive_inspection = ? WHERE id = ?'
+        )->execute([$isPreventive, $inspectionId]);
     }
 
     /**
@@ -266,6 +288,29 @@ final class InspectionItemController
      */
     private static function validatePoziarnaKnihaFields(array $body): array
     {
+        // A record is either a preventive fire inspection (default, statutory)
+        // or a plain fire-book entry (e.g. a note about a completed training).
+        // The plain entry needs no workspaces/activities/defects — only its
+        // text — and never carries the preventive-inspection legal wording.
+        // Defaults to true so old records (and clients that omit the flag)
+        // keep the previous behaviour. See change request 1.7.
+        $isPreventive = array_key_exists('is_preventive', $body)
+            ? (bool) $body['is_preventive']
+            : true;
+
+        if (!$isPreventive) {
+            $notes = self::stringField($body, 'notes', required: true, max: 1000);
+            return [
+                'is_preventive'     => false,
+                'workspaces'        => '',
+                'activities'        => [],
+                'custom_activities' => [],
+                'result'            => 'bez_nedostatkov',
+                'defects'           => [],
+                'notes'             => $notes,
+            ];
+        }
+
         $workspaces = self::stringField($body, 'workspaces', required: true, max: 500);
         $notes      = self::stringField($body, 'notes', required: false, max: 1000);
 
@@ -334,6 +379,7 @@ final class InspectionItemController
         }
 
         return [
+            'is_preventive'     => true,
             'workspaces'        => $workspaces,
             'activities'        => $activities,
             'custom_activities' => $customActivities,

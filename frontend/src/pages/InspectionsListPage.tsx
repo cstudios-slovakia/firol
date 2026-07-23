@@ -118,7 +118,8 @@ export function InspectionsListPage() {
             } else if (kind === "soon") {
                 soon.push(it);
             } else {
-                // valid, superseded ("nahradená") and drafts all live here.
+                // valid, superseded ("nahradená"), plain entries ("zápis")
+                // and drafts all live here.
                 valid.push(it);
             }
         }

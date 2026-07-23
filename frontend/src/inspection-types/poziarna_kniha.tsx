@@ -48,6 +48,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
+  const [isPreventive, setIsPreventive] = useState(true);
   const [workspaces, setWorkspaces] = useState('');
   const [activities, setActivities] = useState<PkActivity[]>([]);
   const [customActivities, setCustomActivities] = useState<CustomActivity[]>([]);
@@ -66,6 +67,8 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   useEffect(() => {
     if (initialItem) {
       const f = initialItem.fields as Partial<PoziarnaKnihaItemFields>;
+      // Default to a preventive inspection for records saved before the split.
+      setIsPreventive(f.is_preventive !== false);
       setWorkspaces(typeof f.workspaces === 'string' ? f.workspaces : '');
       setActivities(Array.isArray(f.activities) ? f.activities.filter(isPkActivity) : []);
       // Load custom activities — backward compat: old records used activities_other (string)
@@ -101,6 +104,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
       // when we promote them to `defects`, clear notes so they aren't shown twice.
       setNotes(legacyFromNotes.length > 0 ? '' : (typeof f.notes === 'string' ? f.notes : ''));
     } else {
+      setIsPreventive(true);
       setWorkspaces('');
       setActivities([]);
       setCustomActivities([]);
@@ -147,6 +151,43 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     let hasError = false;
+
+    // A plain fire-book entry only needs its text — no workspaces/activities/
+    // defects and no preventive-inspection wording (change request 1.7).
+    if (!isPreventive) {
+      if (!notes.trim()) { setDefectsError('Doplň text zápisu.'); hasError = true; }
+      if (hasError) return;
+      setWorkspacesError(null);
+      setActivitiesError(null);
+      setDefectsError(null);
+      setApiError(null);
+      setSubmitting(true);
+      try {
+        const fields: PoziarnaKnihaItemFields = {
+          is_preventive: false,
+          workspaces: '',
+          activities: [],
+          custom_activities: [],
+          result: 'bez_nedostatkov',
+          defects: [],
+          notes: notes.trim(),
+        };
+        if (editing && itemId !== null) {
+          await Inspections.updateItem(inspectionId, itemId, fields, csrfToken);
+        } else {
+          await Inspections.addItem(inspectionId, fields, csrfToken);
+        }
+        onSaved('save-and-summary');
+        toast.success('Záznam uložený');
+      } catch (err) {
+        if (handleOfflineSave(err, toast)) { onSaved('save-and-summary'); return; }
+        setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     if (!workspaces.trim()) { setWorkspacesError('Doplň prehliadnuté pracoviská.'); hasError = true; }
     const hasCustomChecked = customActivities.some((x) => x.checked && x.label.trim());
     if (activities.length === 0 && !hasCustomChecked) {
@@ -168,6 +209,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
     setSubmitting(true);
     try {
       const fields: PoziarnaKnihaItemFields = {
+        is_preventive: true,
         workspaces: workspaces.trim(),
         activities,
         custom_activities: customActivities
@@ -198,6 +240,38 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   return (
     <Card className="p-5">
       <form className="flex flex-col gap-4" noValidate onSubmit={handleSubmit}>
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={isPreventive}
+          onClick={() => setIsPreventive((v) => !v)}
+          className={cn(
+            'flex items-start gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors',
+            isPreventive
+              ? 'border-firol-500 bg-firol-50'
+              : 'border-ink-200 bg-white hover:border-firol-300',
+          )}
+        >
+          <span className={cn(
+            'mt-0.5 grid size-5 shrink-0 place-items-center rounded-md border transition-colors',
+            isPreventive ? 'border-firol-500 bg-firol-500 text-white' : 'border-ink-300 bg-white',
+          )}>
+            {isPreventive && <Check className="size-3.5" strokeWidth={3} />}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-ink-900">
+              Ide o preventívnu protipožiarnu prehliadku
+            </span>
+            <span className="mt-0.5 block text-xs text-ink-500">
+              {isPreventive
+                ? 'Záznam nahradí predchádzajúcu prehliadku a od jeho dátumu sa počíta termín ďalšej.'
+                : 'Obyčajný zápis do požiarnej knihy (napr. o školení). Neposúva termín ďalšej prehliadky.'}
+            </span>
+          </span>
+        </button>
+
+        {isPreventive && (
+        <>
         <Field
           label="Prehliadnuté pracoviská"
           required
@@ -350,15 +424,27 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
             )}
           </Field>
         )}
+        </>
+        )}
 
-        <Field label="Poznámky" hint="Voliteľné — popis nálezov a navrhované opatrenia.">
+        <Field
+          label={isPreventive ? 'Poznámky' : 'Text zápisu'}
+          required={!isPreventive}
+          hint={isPreventive
+            ? 'Voliteľné — popis nálezov a navrhované opatrenia.'
+            : (defectsError ? undefined : 'Napr. „Vykonané opakované školenie zamestnancov v zmysle §…“')}
+          error={isPreventive ? undefined : defectsError}
+        >
           {(p) => (
             <div className="relative">
               <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
                 <NotebookPen className="size-4" />
               </span>
-              <textarea id={p.id} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
-                placeholder="Popis konkrétnych nálezov a navrhovaných opatrení."
+              <textarea id={p.id} rows={3} value={notes}
+                onChange={(e) => { setNotes(e.target.value); if (!isPreventive && defectsError) setDefectsError(null); }}
+                placeholder={isPreventive
+                  ? 'Popis konkrétnych nálezov a navrhovaných opatrení.'
+                  : 'Text zápisu do požiarnej knihy.'}
                 className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
             </div>
           )}
@@ -448,6 +534,7 @@ function PkItemRow({
   onDelete,
 }: ItemRowProps) {
   const f = item.fields as Partial<PoziarnaKnihaItemFields>;
+  const isEntry = f.is_preventive === false;
   const result = isPkResult(f.result) ? f.result : null;
   const checkedActivities = Array.isArray(f.activities)
     ? f.activities.filter(isPkActivity)
@@ -464,19 +551,26 @@ function PkItemRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h3 className="truncate text-sm font-semibold text-ink-900">
-              <BookOpen className="-mt-0.5 mr-1 inline size-3 text-ink-400" />
-              {f.workspaces}
+              {isEntry
+                ? <NotebookPen className="-mt-0.5 mr-1 inline size-3 text-ink-400" />
+                : <BookOpen className="-mt-0.5 mr-1 inline size-3 text-ink-400" />}
+              {isEntry ? 'Zápis do požiarnej knihy' : f.workspaces}
             </h3>
-            {result && (
+            <Badge tone={isEntry ? 'neutral' : 'brand'}>
+              {isEntry ? 'Zápis' : 'Prehliadka'}
+            </Badge>
+            {!isEntry && result && (
               <Badge tone={result === 'bez_nedostatkov' ? 'ok' : 'bad'}>
                 {PK_RESULT_LABELS[result]}
               </Badge>
             )}
           </div>
+          {!isEntry && (
           <p className="mt-0.5 text-xs text-ink-500">
             {totalActivities} {totalActivities === 1 ? 'činnosť' : 'činností'} zaznamenaných
           </p>
-          {(() => {
+          )}
+          {!isEntry && (() => {
             const list = Array.isArray(f.defects) ? f.defects : [];
             if (list.length > 0) {
               const deadlines = list.map((d) => d.deadline).filter((x): x is string => !!x).sort();
