@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, Download, FileText,
-  GitBranch, History, Link2, Plus, Repeat, Warehouse,
+  GitBranch, History, Link2, NotebookPen, Plus, Repeat, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
@@ -293,6 +293,20 @@ export function InspectionDetailPage() {
           </Button>
         )}
       </Card>
+
+      {i.notes && (
+        <Card className="flex items-start gap-3 px-4 py-3">
+          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-ink-100 text-ink-500">
+            <NotebookPen className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">
+              Poznámky k prevádzke
+            </p>
+            <p className="mt-0.5 whitespace-pre-line text-sm text-ink-700">{i.notes}</p>
+          </div>
+        </Card>
+      )}
 
       {module && items.length > 0 && <module.StatsBar items={items} />}
 
