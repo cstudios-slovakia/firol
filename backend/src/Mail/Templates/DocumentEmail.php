@@ -39,7 +39,7 @@ HTML;
 <p style="margin:0 0 16px 0;">Dobrý deň,</p>
 <p style="margin:0 0 16px 0;">v prílohe Vám zasielame PDF protokol <strong>{$numEsc}</strong> vystavený spoločnosťou <strong>{$brandEsc}</strong>.</p>
 {$noteBlock}
-<p style="margin:24px 0 0 0;font-size:13px;color:#7a8494;">Tento email bol odoslaný automaticky cez aplikáciu Firol.</p>
+<p style="margin:24px 0 0 0;font-size:13px;color:#7a8494;">Tento email bol odoslaný automaticky cez aplikáciu POapp.</p>
 HTML;
 
         $text = "Protokol {$documentNumber} — {$brandName}\n\n"

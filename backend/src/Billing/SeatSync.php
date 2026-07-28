@@ -176,7 +176,7 @@ final class SeatSync
             'unit_amount' => $unitAmount,
             'recurring'   => ['interval' => $interval],
             'product_data' => [
-                'name' => 'Firol — extra technik',
+                'name' => 'POapp — extra technik',
             ],
         ];
     }

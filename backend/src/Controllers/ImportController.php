@@ -41,17 +41,17 @@ final class ImportController
 
     public static function companiesTemplate(Request $req): void
     {
-        self::sendTemplate('Firol-import-firmy.xlsx', Schema::companies());
+        self::sendTemplate('POapp-import-firmy.xlsx', Schema::companies());
     }
 
     public static function trainingsTemplate(Request $req): void
     {
-        self::sendTemplate('Firol-import-skolenia.xlsx', Schema::trainings());
+        self::sendTemplate('POapp-import-skolenia.xlsx', Schema::trainings());
     }
 
     public static function inspectionsTemplate(Request $req): void
     {
-        self::sendTemplate('Firol-import-kontroly.xlsx', Schema::inspections());
+        self::sendTemplate('POapp-import-kontroly.xlsx', Schema::inspections());
     }
 
     /**

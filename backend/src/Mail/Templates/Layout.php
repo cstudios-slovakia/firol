@@ -50,7 +50,7 @@ final class Layout
           <tr>
             <td style="background:#ffffff;padding:24px 32px 20px 32px;border-bottom:1px solid #eef0f3;">
               <img src="https://app.poapp.sk/icons/firol_logo_color_transparent.png"
-                   alt="Firol"
+                   alt="POapp"
                    width="130"
                    height="44"
                    style="display:block;height:44px;width:auto;max-width:130px;border:0;outline:none;text-decoration:none;">
@@ -81,7 +81,7 @@ final class Layout
           <!-- Footer -->
           <tr>
             <td style="padding:18px 32px 26px 32px;border-top:1px solid #eef0f3;font-size:12px;line-height:1.6;color:#7a8494;">
-              Firol &middot; SaaS pre revízie požiarnej ochrany<br>
+              POapp &middot; SaaS pre revízie požiarnej ochrany<br>
               Tento email bol odoslaný automaticky, neodpovedaj naň.
             </td>
           </tr>

@@ -103,7 +103,7 @@ final class Mailer
     private static function fromAddress(): array
     {
         $email = trim((string) ($_ENV['MAIL_FROM'] ?? ''));
-        $name  = trim((string) ($_ENV['MAIL_FROM_NAME'] ?? 'Firol'));
+        $name  = trim((string) ($_ENV['MAIL_FROM_NAME'] ?? 'POapp'));
 
         if ($email === '') {
             $email = 'no-reply@localhost';
