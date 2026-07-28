@@ -47,3 +47,7 @@ CLAUDE.md
 
 # Local offline-mode audit harness (not for commit)
 .offline-audit/
+
+# Client change-request source document — lives in docs/handoff/ with the
+# other client material, which is untracked. Keep the root copy out too.
+fixes-and-new-features.docx
