@@ -1,0 +1,137 @@
+/*
+ * Shared styling for the published legal documents (change request 3.1).
+ *
+ * These pages live in public/ and are served straight from the docroot, so
+ * they must stand on their own — no build step, no app bundle. The palette
+ * mirrors the app's so opening the VOP from the registration form doesn't feel
+ * like leaving the product.
+ */
+
+:root {
+  --firol: #e8433a;
+  --ink-900: #1a1a1f;
+  --ink-700: #3f3f47;
+  --ink-500: #6b6b75;
+  --ink-200: #e5e5ea;
+  --ink-50: #f7f7f9;
+  --page: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ink-50);
+  color: var(--ink-900);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.wrap {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+}
+
+header.doc {
+  border-bottom: 3px solid var(--firol);
+  padding-bottom: 1rem;
+  margin-bottom: 1.75rem;
+}
+
+.brand {
+  font-size: 0.8125rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--firol);
+  font-weight: 700;
+}
+
+h1 {
+  font-size: 1.6rem;
+  line-height: 1.25;
+  margin: 0.4rem 0 0.5rem;
+}
+
+.meta {
+  font-size: 0.875rem;
+  color: var(--ink-500);
+  margin: 0;
+}
+
+h2 {
+  font-size: 1.0625rem;
+  margin: 2rem 0 0.5rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--ink-200);
+}
+
+h3 {
+  font-size: 0.95rem;
+  margin: 1.5rem 0 0.4rem;
+  color: var(--ink-700);
+}
+
+p {
+  margin: 0.6rem 0;
+}
+
+.clause {
+  display: block;
+}
+
+.clause > b {
+  color: var(--ink-700);
+  font-weight: 600;
+  margin-right: 0.25rem;
+}
+
+ul {
+  margin: 0.5rem 0 0.75rem;
+  padding-left: 1.25rem;
+}
+
+li {
+  margin: 0.25rem 0;
+}
+
+a {
+  color: var(--firol);
+}
+
+.note {
+  background: var(--page);
+  border: 1px solid var(--ink-200);
+  border-left: 3px solid var(--firol);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin: 1.25rem 0;
+  font-size: 0.9375rem;
+}
+
+footer.doc {
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ink-200);
+  font-size: 0.8125rem;
+  color: var(--ink-500);
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+
+@media print {
+  body { background: #fff; }
+  .back { display: none; }
+}

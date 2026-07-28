@@ -20,6 +20,7 @@ import {
     CreditCard,
     Database,
     Download,
+    ExternalLink,
     FileSignature,
     FileSpreadsheet,
     GraduationCap,
@@ -30,6 +31,7 @@ import {
     Palette,
     Phone,
     RotateCcw,
+    ScrollText,
     Shield,
     ShieldCheck,
     ShieldOff,
@@ -41,6 +43,12 @@ import {
     UsersRound,
 } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
+import {
+    LEGAL_PRIVACY_LABEL,
+    LEGAL_PRIVACY_URL,
+    LEGAL_VOP_LABEL,
+    LEGAL_VOP_URL,
+} from "@/lib/legal";
 import { AccountApi, type Account } from "@/api/account";
 import { DataApi } from "@/api/data";
 import { ImportApi, type ImportKind, type ImportResult } from "@/api/import";
@@ -828,7 +836,7 @@ function BrandingSection() {
                                 leftIcon={<Building2 className="size-4" />}
                                 value={companyName}
                                 onChange={(e) => setCompanyName(e.target.value)}
-                                placeholder="Firol s.r.o."
+                                placeholder="Vaša firma s.r.o."
                             />
                         )}
                     </Field>
@@ -2098,7 +2106,67 @@ export function SystemPage() {
         <>
             <SectionBack label="Systémové" />
             <InstallAppCard />
+            <LegalDocumentsCard />
         </>
+    );
+}
+
+/**
+ * The published legal documents, reachable from inside the app
+ * (change request 3.1). Links come from /api/me so they always point at the
+ * version the account's consent is measured against; the static constants are
+ * the fallback if the snapshot hasn't loaded yet.
+ */
+function LegalDocumentsCard() {
+    const { terms } = useAuth();
+    const docs = [
+        { href: terms?.vop_url ?? LEGAL_VOP_URL, label: LEGAL_VOP_LABEL,
+          hint: "Vrátane Zmluvy o spracúvaní osobných údajov (príloha)." },
+        { href: terms?.privacy_url ?? LEGAL_PRIVACY_URL, label: LEGAL_PRIVACY_LABEL,
+          hint: "Aké údaje spracúvame, komu ich sprístupňujeme a aké máte práva." },
+    ];
+
+    return (
+        <section className="mt-4 rounded-2xl border border-ink-100 bg-white p-4">
+            <div className="flex items-center gap-3">
+                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600">
+                    <ScrollText className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                    <h2 className="text-sm font-semibold text-ink-900">Právne dokumenty</h2>
+                    <p className="mt-0.5 text-xs text-ink-500">
+                        {terms?.label ?? "Aktuálne znenie obchodných podmienok a zásad ochrany údajov."}
+                    </p>
+                </div>
+            </div>
+
+            <ul className="mt-3 flex flex-col gap-2">
+                {docs.map((doc) => (
+                    <li key={doc.href}>
+                        <a
+                            href={doc.href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group flex items-center gap-3 rounded-xl border border-ink-100 px-3 py-2.5 transition-[background-color,transform] duration-150 hover:bg-ink-50 hover:-translate-y-px"
+                        >
+                            <ExternalLink className="size-4 shrink-0 text-ink-400" />
+                            <span className="min-w-0 flex-1">
+                                <span className="block text-sm font-medium text-ink-900">{doc.label}</span>
+                                <span className="mt-0.5 block text-xs text-ink-500">{doc.hint}</span>
+                            </span>
+                            <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform duration-150 group-hover:translate-x-0.5" />
+                        </a>
+                    </li>
+                ))}
+            </ul>
+
+            {terms?.accepted_at && (
+                <p className="mt-3 text-[11px] text-ink-400">
+                    Oboznámenie potvrdené {new Date(terms.accepted_at.replace(" ", "T")).toLocaleDateString("sk-SK")}
+                    {terms.accepted_version ? ` (verzia ${terms.accepted_version})` : ""}.
+                </p>
+            )}
+        </section>
     );
 }
 

@@ -22,6 +22,7 @@ import { OfflineIndicator } from "./OfflineIndicator";
 import { AuroraBackground } from "./AuroraBackground";
 import { FeedbackFloater } from "./FeedbackFloater";
 import { InstallPrompt } from "./InstallPrompt";
+import { TermsUpdateNotice } from "./TermsUpdateNotice";
 import { BrandMark } from "./Logo";
 import { cn } from "@/lib/cn";
 
@@ -202,6 +203,7 @@ export function AppShell() {
             <BottomTabBar />
             <FeedbackFloater />
             <InstallPrompt />
+            <TermsUpdateNotice />
         </div>
     );
 }

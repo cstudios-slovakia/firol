@@ -10,6 +10,7 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Legal\Terms;
 
 final class MeController
 {
@@ -19,6 +20,23 @@ final class MeController
         $accountId = Tenant::currentAccountId();
 
         Response::json(AuthController::meSnapshot(Db::pdo(), $userId, $accountId));
+    }
+
+    /**
+     * Record that the signed-in user has acknowledged the current version of
+     * the legal documents (change request 3.1). Called from the in-app notice
+     * shown after login when the VOP have changed since their last consent.
+     */
+    public static function acceptTerms(Request $req): void
+    {
+        Csrf::require($req);
+
+        $userId = Tenant::currentUserId();
+        Db::pdo()->prepare(
+            'UPDATE users SET terms_accepted_at = NOW(), terms_version = ? WHERE id = ?'
+        )->execute([Terms::VERSION, $userId]);
+
+        Response::json(AuthController::meSnapshot(Db::pdo(), $userId, Tenant::currentAccountId()));
     }
 
     public static function switchAccount(Request $req): void
