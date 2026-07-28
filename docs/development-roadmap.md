@@ -480,6 +480,63 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
 
 ---
 
+## Change request — `fixes-and-new-features.docx` (FIROL, 23. 7. 2026) ✅
+
+Client change request delivered in three parts. Requested order: Part 1
+(fixes) → Part 3 (terms, tied to the sales launch) → Part 2 (features, in
+the numbered priority order). All items are now implemented on branch
+`fixes-and-new-features`.
+
+- ✅ **Part 1** — 1.1 PDF notes · 1.2 drop oprava "Vykonané úkony" ·
+  1.3 registration copy · 1.4 TS hadíc year optional · 1.6 decimal-comma
+  amounts · 1.7 požiarna kniha preventive toggle (migration `024`).
+- ✅ **2.1 Linked protocols** — migration `025` (`source_inspection_id`),
+  `POST /api/inspections/{id}/follow-up`, `<FollowUpBlock>`. PHP → Oprava/TS
+  (status TS), PHP → **Vyraďovací protokol** (status V), Hydranty → TS hadíc.
+  A PHP inspection can qualify for both of its follow-ups at once.
+- ✅ **2.2 Photo documentation** — migration `028`
+  (`inspection_item_photos`). Photos hang off any inspection item, so one
+  table covers all types. Browser resizes to 1600px/q75 before upload (fast
+  on mobile data, and under PHP's `upload_max_filesize`); the server
+  re-encodes with GD as a backstop, which also strips EXIF/GPS. Full size +
+  400px thumbnail stored under `storage/photos/{account}/{inspection}/`.
+  Rendered as a separate "Príloha — Fotodokumentácia" section appended by
+  `PdfRenderer::renderForType()`, 2 per page — the body templates are
+  untouched, so every type got the appendix without edits. Uploads queue
+  through the existing outbox when offline; a queued item's temp id is read
+  back off the mutation so its photos attach correctly and are remapped on
+  sync.
+- ✅ **2.3 Pokyn — žatevné práce** — new inspection type `pokyn_zatva`
+  (`ZAT-RRRR-NNN`, 12-month cycle). Single-record document; the template text
+  ships in `inspection-types/pokynZatvaTemplate.ts` and is stored *with* the
+  document, so revising the default never alters an issued protocol.
+- ✅ **Vyraďovací protokol** — new inspection type `vyradenie`
+  (`VYR-RRRR-NNN`). Non-cyclic: stored with `is_preventive_inspection = 0`
+  so it never produces a calendar deadline or supersedes anything.
+- ✅ **2.4 Faster item entry** — autocomplete, "Ďalší rovnaký", PHP type list.
+- ✅ **2.5 Calendar** — migration `026`, `CalendarController`, Termíny block.
+  (2.5.4 email button omitted — the spec allows a first version without it.)
+- ✅ **3.1 Terms & consent** — migration `030` (`users.terms_accepted_at`,
+  `terms_version`). `Firol\Legal\Terms` is the single source of truth for the
+  published version; documents are static pages under `public/legal/`, so the
+  registration form can link to them before a session exists. Mandatory,
+  never pre-ticked declaration gates the register button; a version mismatch
+  raises the "new version" notice after login (`<TermsUpdateNotice>`).
+- ✅ **3.2 Data export** — verified, plus photos are now listed in the export.
+- ✅ **3.3 Landing page** — `landing-page.html` swapped.
+
+New company field `approver` ("schvaľujúca osoba", migration `029`) feeds the
+"Schválil" line on both new document types.
+
+Ops changes made alongside: the nightly DB backup cron never ran (its `>>`
+redirect targeted a directory only the script itself created — see
+`deploy.yml`); and `docker/php/Dockerfile` built GD **without** JPEG support
+because an `ext-install` between `ext-configure gd` and `ext-install gd`
+deleted the configured source tree. `backend/db/prune.php` enforces the
+12-month log retention the privacy policy publishes.
+
+---
+
 ## Open questions (must be answered before the relevant phase starts)
 - **Company entity:** base doc says only "name, IČO, address, contact".
   Proposed full set (need confirmation):
