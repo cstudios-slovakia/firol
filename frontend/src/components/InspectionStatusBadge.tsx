@@ -6,6 +6,8 @@ import {
 } from "@/lib/inspectionStatus";
 import type { InspectionListItem } from "@/api/inspections";
 
+const POZIARNA_KNIHA_TYPE = "poziarna_kniha";
+
 type Tone = "neutral" | "ok" | "warn" | "bad";
 
 const META: Record<
@@ -32,6 +34,7 @@ export function InspectionStatusBadge({
 }: {
     inspection: Pick<
         InspectionListItem,
+        | "type"
         | "status"
         | "executed_on"
         | "periodicity_months"
@@ -50,11 +53,25 @@ export function InspectionStatusBadge({
             ? ` · ${Math.abs(days)} dní`
             : "";
 
+    // Požiarna kniha distinguishes a preventive inspection ("Prehliadka") from
+    // a plain fire-book entry ("Zápis"); the latter is already covered by
+    // the "entry" status kind above, so only the preventive case needs its
+    // own label alongside the validity badge.
+    const showPrehliadkaLabel =
+        kind !== "entry" && inspection.type === POZIARNA_KNIHA_TYPE;
+
     return (
-        <Badge tone={tone} className={className}>
-            <Icon className="size-3" />
-            {label}
-            {suffix}
-        </Badge>
+        <>
+            {showPrehliadkaLabel && (
+                <Badge tone="brand" className={className}>
+                    Prehliadka
+                </Badge>
+            )}
+            <Badge tone={tone} className={className}>
+                <Icon className="size-3" />
+                {label}
+                {suffix}
+            </Badge>
+        </>
     );
 }
