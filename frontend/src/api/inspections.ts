@@ -1,4 +1,4 @@
-import { api, type OptimisticSpec } from '@/lib/api';
+import { api, buildUrl, type OptimisticSpec } from '@/lib/api';
 
 /**
  * Inspection types — locked slugs from docs/Firol base document.
@@ -12,7 +12,9 @@ export type InspectionType =
   | 'pu_akcieschopnost'
   | 'pu_udrzba'
   | 'nudzove_osvetlenie'
-  | 'ts_hadic';
+  | 'ts_hadic'
+  | 'pokyn_zatva'
+  | 'vyradenie';
 
 export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   php: 'Hasiace prístroje (PHP)',
@@ -23,6 +25,8 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   pu_udrzba: 'Požiarne uzávery — údržba',
   nudzove_osvetlenie: 'Núdzové osvetlenie',
   ts_hadic: 'Tlaková skúška hadíc',
+  pokyn_zatva: 'Pokyn — žatevné práce',
+  vyradenie: 'Vyraďovací protokol PHP',
 };
 
 export const INSPECTION_TYPE_PERIODICITIES: Record<InspectionType, number[]> = {
@@ -34,6 +38,10 @@ export const INSPECTION_TYPE_PERIODICITIES: Record<InspectionType, number[]> = {
   pu_udrzba: [12],
   nudzove_osvetlenie: [12],
   ts_hadic: [12],
+  // Issued once a year before the harvest, so the annual cycle is real.
+  pokyn_zatva: [12],
+  // One-off document — a disposal doesn't recur.
+  vyradenie: [0],
 };
 
 export type InspectionStatus = 'draft' | 'finalized';
@@ -239,6 +247,34 @@ export type NudzoveOsvetlenieItemFields = {
   notes: string | null;
 };
 
+/**
+ * Vyraďovací protokol (change request 2.1) — one row per disposed
+ * extinguisher. Same identification block as a PHP item plus the reason.
+ */
+export type VyradenieItemFields = {
+  manufacturer: string;
+  type: string;
+  serial: string;
+  year: number;
+  location: string | null;
+  reason: string;
+};
+
+/** One editable block of the Pokyn's instruction text. */
+export type PokynSection = { title: string; text: string };
+
+/**
+ * Pokyn — žatevné práce (change request 2.3). A single-record document: the
+ * harvest year it covers, an optional per-document approver override, and the
+ * instruction text itself. The text is stored with the document so a issued
+ * protocol keeps saying what it said, even if the default template changes.
+ */
+export type PokynZatvaItemFields = {
+  year: number;
+  approver: string | null;
+  sections: PokynSection[];
+};
+
 export type TsHadicItemFields = {
   hose_type: string;
   location: string;
@@ -251,10 +287,31 @@ export type TsHadicItemFields = {
   notes: string | null;
 };
 
+/**
+ * One photo attached to an inspection item (change request 2.2). `url` and
+ * `thumb_url` are API paths — run them through `photoSrc()` before putting
+ * them in an <img>, so the production `/api.php?path=` prefix is applied.
+ */
+export type InspectionPhoto = {
+  id: number;
+  item_id: number;
+  position: number;
+  byte_size: number;
+  width: number;
+  height: number;
+  created_at: string;
+  url: string;
+  thumb_url: string;
+  /** Set only on locally-queued photos that haven't reached the server yet. */
+  pending?: boolean;
+};
+
 export type InspectionItem = {
   id: number;
   position: number;
   fields: Record<string, unknown>;
+  /** Absent on older cached payloads — treat as an empty list. */
+  photos?: InspectionPhoto[];
   created_at: string;
   updated_at: string;
 };
@@ -376,7 +433,9 @@ export const Inspections = {
       | PuAkcieschopnostItemFields
       | PuUdrzbaItemFields
       | NudzoveOsvetlenieItemFields
-      | TsHadicItemFields,
+      | TsHadicItemFields
+      | VyradenieItemFields
+      | PokynZatvaItemFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items`, {
@@ -395,7 +454,9 @@ export const Inspections = {
       | PuAkcieschopnostItemFields
       | PuUdrzbaItemFields
       | NudzoveOsvetlenieItemFields
-      | TsHadicItemFields,
+      | TsHadicItemFields
+      | VyradenieItemFields
+      | PokynZatvaItemFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items/${itemId}`, {
@@ -409,9 +470,48 @@ export const Inspections = {
       csrfToken,
     }),
 
-  generatePdf: (inspectionId: number, csrfToken: string | null) =>
+  /**
+   * Attach one photo to an item (change request 2.2). One request per photo:
+   * a dropped field connection then retries a single shot instead of the whole
+   * batch, and each upload queues independently when offline.
+   *
+   * `itemId` may be a negative temp id when the item itself is still queued —
+   * the outbox rewrites the path once the item create syncs.
+   */
+  addItemPhoto: (
+    inspectionId: number,
+    itemId: number,
+    photo: Blob,
+    csrfToken: string | null,
+  ) => {
+    const form = new FormData();
+    form.append('photo', photo, `foto-${Date.now()}.jpg`);
+    return api<{ photo: InspectionPhoto }>(
+      `/api/inspections/${inspectionId}/items/${itemId}/photos`,
+      { method: 'POST', body: form, csrfToken, label: 'Fotka k položke' },
+    );
+  },
+  deleteItemPhoto: (
+    inspectionId: number,
+    itemId: number,
+    photoId: number,
+    csrfToken: string | null,
+  ) =>
+    api<void>(`/api/inspections/${inspectionId}/items/${itemId}/photos/${photoId}`, {
+      method: 'DELETE',
+      csrfToken,
+      label: 'Zmazať fotku',
+    }),
+
+  /**
+   * `includePhotos` drives the "Priložiť fotodokumentáciu" choice (2.2). The
+   * server defaults it to true, so omitting it keeps the appendix whenever
+   * photos exist.
+   */
+  generatePdf: (inspectionId: number, csrfToken: string | null, includePhotos?: boolean) =>
     api<GeneratePdfResponse>(`/api/inspections/${inspectionId}/generate-pdf`, {
       method: 'POST',
+      body: includePhotos === undefined ? undefined : { include_photos: includePhotos },
       csrfToken,
       requireOnline: true,
     }),
@@ -432,4 +532,13 @@ export const Inspections = {
 export function documentDownloadUrl(documentId: number): string {
   const base = import.meta.env.VITE_API_BASE_URL ?? '';
   return `${base}/api/documents/${documentId}/download`;
+}
+
+/**
+ * Turn a photo's API path into something an <img src> can use. `buildUrl`
+ * applies the production `/api.php?path=` prefix and folds the `?size=thumb`
+ * query into it correctly.
+ */
+export function photoSrc(photo: InspectionPhoto, size: 'thumb' | 'full' = 'thumb'): string {
+  return buildUrl(size === 'thumb' ? photo.thumb_url : photo.url);
 }

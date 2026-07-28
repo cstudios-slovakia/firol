@@ -5,13 +5,12 @@ import {
   ListChecks, MapPin, NotebookPen, Ruler, Save, Trash2,
 } from 'lucide-react';
 import {
-  Inspections,
   type PassFailResult,
   type TsHadicItemFields,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
-import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { ItemPhotoField, usePhotoStaging } from '@/components/ItemPhotos';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
@@ -21,6 +20,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
 import { consumeDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
+import { saveItemMessage, saveItemWithPhotos } from './saveItem';
 import type {
   InspectionTypeModule,
   ItemRowProps,
@@ -58,6 +58,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [apiError, setApiError]       = useState<string | null>(null);
   const toast = useToast();
+  const photos = usePhotoStaging(initialItem?.photos);
 
   useEffect(() => {
     if (initialItem) {
@@ -138,19 +139,20 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
         result,
         notes: notes.trim() || null,
       };
-      if (editing && itemId !== null) {
-        await Inspections.updateItem(inspectionId, itemId, fields, csrfToken);
-      } else {
-        await Inspections.addItem(inspectionId, fields, csrfToken);
-      }
+      const saved = await saveItemWithPhotos({
+        inspectionId,
+        itemId: editing ? itemId : null,
+        fields,
+        csrfToken,
+        photos,
+      });
       if (duplicate) {
         const seed: TsHadicSeed = { hose_type: hoseType.trim(), manufacturer: manufacturer.trim() };
         setDuplicateSeed(inspectionId, seed);
       }
       onSaved(action);
-      toast.success('Položka uložená');
+      toast.success(saveItemMessage(saved));
     } catch (err) {
-      if (handleOfflineSave(err, toast)) { onSaved(action); return; }
       setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
@@ -245,6 +247,8 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
             </div>
           )}
         </Field>
+
+        <ItemPhotoField photos={photos} />
 
         {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">

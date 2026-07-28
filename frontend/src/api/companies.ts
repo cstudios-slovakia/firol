@@ -10,6 +10,8 @@ export type CompanyListItem = {
   postal_code: string | null;
   city: string | null;
   contact: string | null;
+  /** Schvaľujúca osoba — name and role, printed on documents (2.3 / 2.1). */
+  approver: string | null;
   facilities_count: number;
   inspections_count: number;
   last_inspection_at: string | null;
@@ -28,6 +30,8 @@ export type Company = {
   postal_code: string | null;
   city: string | null;
   contact: string | null;
+  /** Schvaľujúca osoba — name and role, printed on documents (2.3 / 2.1). */
+  approver: string | null;
   created_at?: string;
 };
 
@@ -61,6 +65,7 @@ export type CompanyPayload = {
   postal_code?: string;
   city?: string;
   contact?: string;
+  approver?: string;
 };
 
 export const Companies = {

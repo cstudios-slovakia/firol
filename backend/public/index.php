@@ -29,6 +29,7 @@ use Firol\Controllers\FeedbackController;
 use Firol\Controllers\ImportController;
 use Firol\Controllers\InspectionController;
 use Firol\Controllers\InspectionItemController;
+use Firol\Controllers\InspectionPhotoController;
 use Firol\Controllers\InspectorProfileController;
 use Firol\Controllers\InviteController;
 use Firol\Controllers\TeamController;
@@ -70,6 +71,7 @@ $router->post('/api/auth/password-reset/confirm', [AuthController::class, 'passw
 
 $router->get('/api/me',                  [MeController::class, 'show']);
 $router->post('/api/me/switch-account',  [MeController::class, 'switchAccount']);
+$router->post('/api/me/accept-terms',    [MeController::class, 'acceptTerms']);
 
 $router->get('/api/account',             [AccountController::class, 'show']);
 $router->patch('/api/account',           [AccountController::class, 'update']);
@@ -139,6 +141,13 @@ $router->post('/api/inspections/{id}/follow-up',     [InspectionController::clas
 $router->post('/api/inspections/{id}/items',        [InspectionItemController::class, 'store']);
 $router->patch('/api/inspections/{id}/items/{item_id}',  [InspectionItemController::class, 'update']);
 $router->delete('/api/inspections/{id}/items/{item_id}', [InspectionItemController::class, 'destroy']);
+
+// Photo documentation (change request 2.2) — one photo per request so a
+// dropped field connection retries a single shot, not a whole batch.
+$router->post('/api/inspections/{id}/items/{item_id}/photos', [InspectionPhotoController::class, 'store']);
+$router->get('/api/inspections/{id}/items/{item_id}/photos/{photo_id}', [InspectionPhotoController::class, 'download']);
+$router->delete('/api/inspections/{id}/items/{item_id}/photos/{photo_id}', [InspectionPhotoController::class, 'destroy']);
+
 $router->post('/api/inspections/{id}/generate-pdf',  [DocumentController::class, 'generateForInspection']);
 $router->get('/api/inspections/{id}/documents',      [DocumentController::class, 'indexForInspection']);
 
@@ -192,6 +201,9 @@ $router->post('/api/import/trainings',           [ImportController::class, 'impo
  * - GET / HEAD             — reads are always allowed
  * - /api/auth/*            — must be able to log in/out + reset password
  * - /api/me/switch-account — must be able to escape to another tenant
+ * - /api/me/accept-terms   — the new-VOP notice must be dismissible even in
+ *                            read-only mode, or an expired user is stuck
+ *                            behind it with no way to acknowledge
  * - /api/billing/*         — Phase 6b: paying must always work
  * - PATCH /api/account     — saving invoice details is a prerequisite for
  *                            checkout; blocking it would deadlock an expired
@@ -203,7 +215,7 @@ $method = $request->method();
 $path   = rtrim($request->path(), '/') ?: '/';
 $isMutation = !in_array($method, ['GET', 'HEAD'], true);
 $isWhitelisted = (bool) preg_match(
-    '#^/api/(auth/|me/switch-account|billing/|admin/|feedback|invites/)#',
+    '#^/api/(auth/|me/switch-account|me/accept-terms|billing/|admin/|feedback|invites/)#',
     $path,
 ) || ($path === '/api/account' && $method === 'PATCH');
 if ($isMutation && !$isWhitelisted) {

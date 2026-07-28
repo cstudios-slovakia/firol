@@ -9,8 +9,8 @@ use Mpdf\Mpdf;
 use Mpdf\Output\Destination;
 
 /**
- * Renders inspection PDF protocols. One method per inspection type;
- * Phase 3a-3 ships PHP, others land alongside their own form types.
+ * Renders inspection PDF protocols. `renderForType()` maps an inspection type
+ * slug to its template; trainings have their own entry point.
  *
  * Templates are plain PHP files in templates/ that read their data from
  * `$payload` (extracted into local variables). Keeping them as PHP keeps
@@ -24,62 +24,6 @@ use Mpdf\Output\Destination;
  */
 final class PdfRenderer
 {
-    /**
-     * @param array<string, mixed> $payload Must contain: number, generated_at,
-     *   brand{name,logo_path?,color}, inspection (date, periodicity, notes),
-     *   company (name, ico, address), facility (name, address),
-     *   inspector (fullname, certification_number, valid_from, valid_to,
-     *   signature_path?), items (list of PHP fields + position),
-     *   stats (A, TS, O, V, total).
-     */
-    public static function renderPhp(array $payload): string
-    {
-        $html = self::renderTemplate(__DIR__ . '/templates/php.php', $payload);
-        return self::buildPdf($html, $payload['number'] ?? 'firol');
-    }
-
-    public static function renderHydranty(array $payload): string
-    {
-        $html = self::renderTemplate(__DIR__ . '/templates/hydranty.php', $payload);
-        return self::buildPdf($html, $payload['number'] ?? 'firol');
-    }
-
-    public static function renderOpravaTsPhp(array $payload): string
-    {
-        $html = self::renderTemplate(__DIR__ . '/templates/oprava_ts_php.php', $payload);
-        return self::buildPdf($html, $payload['number'] ?? 'firol');
-    }
-
-    public static function renderPoziarnaKniha(array $payload): string
-    {
-        $html = self::renderTemplate(__DIR__ . '/templates/poziarna_kniha.php', $payload);
-        return self::buildPdf($html, $payload['number'] ?? 'firol');
-    }
-
-    public static function renderPuAkcieschopnost(array $payload): string
-    {
-        $html = self::renderTemplate(__DIR__ . '/templates/pu_akcieschopnost.php', $payload);
-        return self::buildPdf($html, $payload['number'] ?? 'firol');
-    }
-
-    public static function renderPuUdrzba(array $payload): string
-    {
-        $html = self::renderTemplate(__DIR__ . '/templates/pu_udrzba.php', $payload);
-        return self::buildPdf($html, $payload['number'] ?? 'firol');
-    }
-
-    public static function renderNudzoveOsvetlenie(array $payload): string
-    {
-        $html = self::renderTemplate(__DIR__ . '/templates/nudzove_osvetlenie.php', $payload);
-        return self::buildPdf($html, $payload['number'] ?? 'firol');
-    }
-
-    public static function renderTsHadic(array $payload): string
-    {
-        $html = self::renderTemplate(__DIR__ . '/templates/ts_hadic.php', $payload);
-        return self::buildPdf($html, $payload['number'] ?? 'firol');
-    }
-
     public static function renderTraining(array $payload): string
     {
         $html = self::renderTemplate(__DIR__ . '/templates/training.php', $payload);
@@ -89,20 +33,55 @@ final class PdfRenderer
     /**
      * Type-aware dispatcher. Adding a new inspection type means adding a
      * branch here + the corresponding template under templates/.
+     *
+     * When `$payload['photos']` is a non-empty list the photo appendix
+     * (change request 2.2) is appended after the body on its own page. The
+     * body markup itself is untouched — types don't need to know about it.
+     *
+     * @param array<string, mixed> $payload Must contain: number, generated_at,
+     *   brand{name,logo_data_uri?,color}, inspection (date, periodicity, notes),
+     *   company (name, ico, address), facility (name, address),
+     *   inspector (fullname, certification_number, valid_from, valid_to,
+     *   signature_data_uri?), items (fields + position), stats, and — when the
+     *   protocol carries photo documentation — photos (caption + path).
      */
     public static function renderForType(string $type, array $payload): string
     {
-        return match ($type) {
-            'php'                => self::renderPhp($payload),
-            'hydranty'           => self::renderHydranty($payload),
-            'oprava_ts_php'      => self::renderOpravaTsPhp($payload),
-            'poziarna_kniha'     => self::renderPoziarnaKniha($payload),
-            'pu_akcieschopnost'  => self::renderPuAkcieschopnost($payload),
-            'pu_udrzba'          => self::renderPuUdrzba($payload),
-            'nudzove_osvetlenie' => self::renderNudzoveOsvetlenie($payload),
-            'ts_hadic'           => self::renderTsHadic($payload),
+        $bodyTemplate = match ($type) {
+            'php'                => 'php.php',
+            'hydranty'           => 'hydranty.php',
+            'oprava_ts_php'      => 'oprava_ts_php.php',
+            'poziarna_kniha'     => 'poziarna_kniha.php',
+            'pu_akcieschopnost'  => 'pu_akcieschopnost.php',
+            'pu_udrzba'          => 'pu_udrzba.php',
+            'nudzove_osvetlenie' => 'nudzove_osvetlenie.php',
+            'ts_hadic'           => 'ts_hadic.php',
+            'pokyn_zatva'        => 'pokyn_zatva.php',
+            'vyradenie'          => 'vyradenie.php',
             default => throw new \InvalidArgumentException("No renderer for type: $type"),
         };
+
+        $html = self::renderTemplate(__DIR__ . '/templates/' . $bodyTemplate, $payload);
+        $html .= self::renderPhotoAppendix($payload);
+
+        return self::buildPdf($html, $payload['number'] ?? 'firol');
+    }
+
+    /**
+     * Renders the "Príloha — Fotodokumentácia" pages, or an empty string when
+     * the inspection has no photos (or the technician unticked the option) —
+     * in which case the PDF looks exactly as it did before 2.2 existed.
+     *
+     * @param array<string, mixed> $payload
+     */
+    public static function renderPhotoAppendix(array $payload): string
+    {
+        $photos = $payload['photos'] ?? [];
+        if (!is_array($photos) || $photos === []) {
+            return '';
+        }
+        return '<pagebreak />'
+            . self::renderTemplate(__DIR__ . '/templates/photo_appendix.php', $payload);
     }
 
     /** @param array<string, mixed> $payload */
@@ -131,9 +110,9 @@ final class PdfRenderer
             'default_font_size' => 10,
         ]);
 
-        $mpdf->SetTitle('Firol — ' . $title);
-        $mpdf->SetCreator('Firol');
-        $mpdf->SetAuthor('Firol');
+        $mpdf->SetTitle('POapp — ' . $title);
+        $mpdf->SetCreator('POapp');
+        $mpdf->SetAuthor('POapp');
 
         // Small promotional line on the bottom of every page of every
         // generated document (inspections + trainings). Rendered inside the

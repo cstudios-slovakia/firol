@@ -28,6 +28,7 @@ import type {
   InspectionDraftPayload,
   InspectionItem,
   InspectionListItem,
+  InspectionPhoto,
 } from '@/api/inspections';
 import type {
   Training,
@@ -167,6 +168,7 @@ export function companyCreateOptimistic(args: {
   postal_code: string | null;
   city: string | null;
   contact: string | null;
+  approver: string | null;
 }): OptimisticSpec {
   const id = mintTempId();
   const address = formatAddress(args.street, args.postal_code, args.city);
@@ -179,6 +181,7 @@ export function companyCreateOptimistic(args: {
     postal_code: args.postal_code,
     city: args.city,
     contact: args.contact,
+    approver: args.approver,
     created_at: nowIso(),
   };
   const detail: CompanyDetail = { company, facilities: [] };
@@ -191,6 +194,7 @@ export function companyCreateOptimistic(args: {
     postal_code: args.postal_code,
     city: args.city,
     contact: args.contact,
+    approver: args.approver,
     facilities_count: 0,
     inspections_count: 0,
     last_inspection_at: null,
@@ -264,6 +268,7 @@ export function facilityCreateOptimistic(args: {
 // --- nested writes (items / trainees) -----------------------------------
 
 const ITEMS_RE = /^\/api\/inspections\/(-?\d+)\/items(?:\/(-?\d+))?$/;
+const PHOTOS_RE = /^\/api\/inspections\/(-?\d+)\/items\/(-?\d+)\/photos(?:\/(-?\d+))?$/;
 const TRAINEES_RE = /^\/api\/trainings\/(-?\d+)\/trainees(?:\/(-?\d+))?$/;
 
 // Top-level entity edits (PATCH /api/<resource>/<id>).
@@ -329,7 +334,7 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
   const company = COMPANY_RE.exec(pathOnly);
   if (company) {
     const id = Number(company[1]);
-    const keys = ['name', 'ico', 'street', 'postal_code', 'city', 'contact'];
+    const keys = ['name', 'ico', 'street', 'postal_code', 'city', 'contact', 'approver'];
     return {
       label: 'Úprava firmy',
       detail: typeof f.name === 'string' ? f.name : undefined,
@@ -434,6 +439,60 @@ export function autoOptimistic(
   if (method === 'PATCH') {
     const edit = topLevelEditOptimistic(pathOnly, body);
     if (edit) return edit;
+  }
+
+  // Photo documentation (change request 2.2). The blob itself is already
+  // persisted by the outbox; these patches only make the summary screen admit
+  // that photos are waiting, instead of showing an item with none.
+  const photoMatch = PHOTOS_RE.exec(pathOnly);
+  if (photoMatch) {
+    const inspectionId = Number(photoMatch[1]);
+    const itemId = Number(photoMatch[2]);
+    const photoId = photoMatch[3] !== undefined ? Number(photoMatch[3]) : null;
+    const detailPath = `/api/inspections/${inspectionId}`;
+
+    const patchItemPhotos = (
+      map: (photos: InspectionPhoto[]) => InspectionPhoto[],
+    ): CachePatch => ({
+      path: detailPath,
+      apply: (current) => {
+        const d = current as InspectionDetail | undefined;
+        if (!d) return undefined;
+        return {
+          ...d,
+          items: d.items.map((it) =>
+            it.id === itemId ? { ...it, photos: map(it.photos ?? []) } : it,
+          ),
+        };
+      },
+    });
+
+    if (method === 'POST') {
+      const newId = mintTempId();
+      const placeholder: InspectionPhoto = {
+        id: newId,
+        item_id: itemId,
+        position: 0,
+        byte_size: 0,
+        width: 0,
+        height: 0,
+        created_at: nowIso(),
+        url: '',
+        thumb_url: '',
+        pending: true,
+      };
+      return {
+        patches: [patchItemPhotos((photos) => [...photos, placeholder])],
+        label: 'Fotka k položke',
+      };
+    }
+
+    if (photoId !== null && method === 'DELETE') {
+      return {
+        patches: [patchItemPhotos((photos) => photos.filter((p) => p.id !== photoId))],
+        label: 'Zmazať fotku',
+      };
+    }
   }
 
   const itemMatch = ITEMS_RE.exec(pathOnly);

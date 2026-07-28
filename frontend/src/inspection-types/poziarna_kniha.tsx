@@ -5,7 +5,6 @@ import {
   NotebookPen, Plus, Save, Trash2, X,
 } from 'lucide-react';
 import {
-  Inspections,
   PK_ACTIVITIES,
   PK_ACTIVITY_LABELS,
   PK_RESULT_LABELS,
@@ -15,8 +14,8 @@ import {
   type PoziarnaKnihaItemFields,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
-import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { ItemPhotoField, usePhotoStaging } from '@/components/ItemPhotos';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -24,6 +23,7 @@ import { Field } from '@/components/ui/Field';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
+import { saveItemMessage, saveItemWithPhotos } from './saveItem';
 import type {
   InspectionTypeModule,
   ItemRowProps,
@@ -62,6 +62,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   const [defectsError, setDefectsError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
   const toast = useToast();
+  const photos = usePhotoStaging(initialItem?.photos);
   const lastInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -172,15 +173,16 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           defects: [],
           notes: notes.trim(),
         };
-        if (editing && itemId !== null) {
-          await Inspections.updateItem(inspectionId, itemId, fields, csrfToken);
-        } else {
-          await Inspections.addItem(inspectionId, fields, csrfToken);
-        }
+        const saved = await saveItemWithPhotos({
+          inspectionId,
+          itemId: editing ? itemId : null,
+          fields,
+          csrfToken,
+          photos,
+        });
         onSaved('save-and-summary');
-        toast.success('Záznam uložený');
+        toast.success(saveItemMessage(saved, 'Záznam uložený'));
       } catch (err) {
-        if (handleOfflineSave(err, toast)) { onSaved('save-and-summary'); return; }
         setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
       } finally {
         setSubmitting(false);
@@ -219,18 +221,16 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
         defects: result === 'zistene_nedostatky' ? cleanedDefects : [],
         notes: notes.trim() || null,
       };
-      if (editing && itemId !== null) {
-        await Inspections.updateItem(inspectionId, itemId, fields, csrfToken);
-      } else {
-        await Inspections.addItem(inspectionId, fields, csrfToken);
-      }
+      const saved = await saveItemWithPhotos({
+        inspectionId,
+        itemId: editing ? itemId : null,
+        fields,
+        csrfToken,
+        photos,
+      });
       onSaved('save-and-summary');
-      toast.success('Záznam uložený');
+      toast.success(saveItemMessage(saved, 'Záznam uložený'));
     } catch (err) {
-      if (handleOfflineSave(err, toast)) {
-        onSaved('save-and-summary');
-        return;
-      }
       setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
@@ -449,6 +449,8 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
             </div>
           )}
         </Field>
+
+        <ItemPhotoField photos={photos} />
 
         {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">

@@ -381,6 +381,7 @@ export function NewTrainingPage() {
               postal_code: c.postal_code,
               city: c.city,
               contact: c.contact,
+              approver: c.approver,
               facilities_count: 0,
               inspections_count: 0,
               last_inspection_at: null,

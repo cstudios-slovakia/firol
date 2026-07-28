@@ -5,15 +5,15 @@ import {
   MapPin, NotebookPen, Save, Tag, Trash2,
 } from 'lucide-react';
 import {
-  Inspections,
   PHP_STATUS_LABELS,
   PHP_STATUS_TONES,
   type PhpItemFields,
   type PhpStatus,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
-import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { ItemPhotoField, usePhotoStaging } from '@/components/ItemPhotos';
+import { saveItemMessage, saveItemWithPhotos } from './saveItem';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { AutocompleteInput, PHP_COMMON_TYPES } from '@/components/ui/AutocompleteInput';
@@ -53,6 +53,7 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [apiError, setApiError] = useState<string | null>(null);
   const toast = useToast();
+  const photos = usePhotoStaging(initialItem?.photos);
 
   useEffect(() => {
     if (initialItem) {
@@ -118,11 +119,13 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
         status,
         notes: notes.trim() || null,
       };
-      if (editing && itemId !== null) {
-        await Inspections.updateItem(inspectionId, itemId, fields, csrfToken);
-      } else {
-        await Inspections.addItem(inspectionId, fields, csrfToken);
-      }
+      const saved = await saveItemWithPhotos({
+        inspectionId,
+        itemId: editing ? itemId : null,
+        fields,
+        csrfToken,
+        photos,
+      });
       if (duplicate) {
         const seed: PhpSeed = {
           manufacturer: manufacturer.trim(),
@@ -133,12 +136,8 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
         setDuplicateSeed(inspectionId, seed);
       }
       onSaved(action);
-      toast.success('Položka uložená');
+      toast.success(saveItemMessage(saved));
     } catch (err) {
-      if (handleOfflineSave(err, toast)) {
-        onSaved(action);
-        return;
-      }
       setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
@@ -213,6 +212,8 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
             </div>
           )}
         </Field>
+
+        <ItemPhotoField photos={photos} />
 
         {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">

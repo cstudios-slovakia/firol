@@ -67,18 +67,19 @@ final class InspectionItemController
         $isAdmin = Admin::isAdmin(Tenant::currentUserId());
         $inspection = self::loadInspectionOrFail($isAdmin ? null : $accountId, $inspectionId);
 
-        // Požiarna kniha is conceptually a single-record protocol; the
-        // schema supports many items but the domain doesn't, so block it
-        // at the controller. The UI enforces this too — this is the
-        // belt-and-braces server-side check.
-        if ($inspection['type'] === 'poziarna_kniha') {
+        // Požiarna kniha and the Pokyn — žatevné práce are conceptually
+        // single-record documents; the schema supports many items but the
+        // domain doesn't, so block it at the controller. The UI enforces this
+        // too — this is the belt-and-braces server-side check.
+        if ($inspection['type'] === 'poziarna_kniha' || $inspection['type'] === 'pokyn_zatva') {
             $existing = Db::pdo()->prepare(
                 'SELECT COUNT(*) FROM inspection_items WHERE inspection_id = ?'
             );
             $existing->execute([$inspectionId]);
             if ((int) $existing->fetchColumn() > 0) {
+                $label = $inspection['type'] === 'poziarna_kniha' ? 'Požiarna kniha' : 'Pokyn';
                 Response::error(
-                    'Požiarna kniha má len jeden záznam — uprav existujúci namiesto pridania nového.',
+                    $label . ' má len jeden záznam — uprav existujúci namiesto pridania nového.',
                     409,
                 );
             }
@@ -201,6 +202,8 @@ final class InspectionItemController
             'pu_udrzba'          => self::validatePuUdrzbaFields($body),
             'nudzove_osvetlenie' => self::validateNudzoveOsvetlenieFields($body),
             'ts_hadic'           => self::validateTsHadicFields($body),
+            'vyradenie'          => self::validateVyradenieFields($body),
+            'pokyn_zatva'        => self::validatePokynZatvaFields($body),
             default => self::failValidation("Items for type '$type' are not supported yet."),
         };
     }
@@ -238,6 +241,104 @@ final class InspectionItemController
             'location'     => $location,
             'status'       => $status,
             'notes'        => $notes,
+        ];
+    }
+
+    /**
+     * Vyraďovací protokol (change request 2.1). One row per hasiaci prístroj
+     * taken out of service: the same identification block as a PHP inspection
+     * item, plus the reason. The reason is free text — the UI offers the
+     * template's typical reasons as quick picks but the technician may write
+     * their own, exactly as the spec asks.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private static function validateVyradenieFields(array $body): array
+    {
+        $manufacturer = self::stringField($body, 'manufacturer', required: true, max: 80);
+        $extType      = self::stringField($body, 'type', required: true, max: 40);
+        $serial       = self::stringField($body, 'serial', required: true, max: 80);
+        $location     = self::stringField($body, 'location', required: false, max: 191);
+        $reason       = self::stringField($body, 'reason', required: true, max: 300);
+
+        $year = $body['year'] ?? null;
+        if (is_string($year) && ctype_digit($year)) {
+            $year = (int) $year;
+        }
+        if (!is_int($year) || $year < 1900 || $year > 2200) {
+            self::failValidation('Field year must be an integer year (1900–2200).');
+        }
+
+        return [
+            'manufacturer' => $manufacturer,
+            'type'         => $extType,
+            'serial'       => $serial,
+            'year'         => $year,
+            'location'     => $location,
+            'reason'       => $reason,
+        ];
+    }
+
+    /**
+     * Pokyn — žatevné práce (change request 2.3). A single-record document:
+     * the year it applies to, an optional per-document approver override, and
+     * the instruction text itself as an ordered list of sections.
+     *
+     * The text is stored with the document rather than referencing a shared
+     * template, because the technician edits it before generating and a
+     * protocol must keep saying what it said the day it was issued — even if
+     * the default template is later revised.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private static function validatePokynZatvaFields(array $body): array
+    {
+        $year = $body['year'] ?? null;
+        if (is_string($year) && ctype_digit($year)) {
+            $year = (int) $year;
+        }
+        if (!is_int($year) || $year < 1900 || $year > 2200) {
+            self::failValidation('Field year must be an integer year (1900–2200).');
+        }
+
+        $approver = self::stringField($body, 'approver', required: false, max: 191);
+
+        $sectionsRaw = $body['sections'] ?? null;
+        if (!is_array($sectionsRaw) || count($sectionsRaw) === 0) {
+            self::failValidation('Pokyn musí obsahovať aspoň jednu sekciu textu.');
+        }
+        if (count($sectionsRaw) > 40) {
+            self::failValidation('Pokyn môže mať najviac 40 sekcií.');
+        }
+
+        $sections = [];
+        foreach ($sectionsRaw as $s) {
+            if (!is_array($s)) {
+                self::failValidation('Field sections must be an array of objects.');
+            }
+            $title = isset($s['title']) && is_string($s['title']) ? trim($s['title']) : '';
+            $text  = isset($s['text']) && is_string($s['text']) ? trim($s['text']) : '';
+            if ($title === '' && $text === '') {
+                continue;
+            }
+            if (mb_strlen($title) > 191) {
+                self::failValidation('Nadpis sekcie je príliš dlhý (max 191 znakov).');
+            }
+            if (mb_strlen($text) > 8000) {
+                self::failValidation('Text sekcie je príliš dlhý (max 8000 znakov).');
+            }
+            $sections[] = ['title' => $title, 'text' => $text];
+        }
+        if ($sections === []) {
+            self::failValidation('Pokyn musí obsahovať aspoň jednu vyplnenú sekciu.');
+        }
+
+        return [
+            'year'     => $year,
+            'approver' => $approver,
+            'sections' => $sections,
         ];
     }
 

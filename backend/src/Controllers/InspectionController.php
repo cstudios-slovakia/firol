@@ -20,25 +20,41 @@ final class InspectionController
      * account). The validity status (platná / blíži sa / po termíne) is
      * derived on the frontend; a superseded record drops out of the overdue
      * bucket so a renewed control no longer flags "po termíne". This covers
-     * both the "Opakovať" flow and a manually re-created inspection — any
-     * newer row wins, even a still-open draft (higher id = created later).
+     * both the "Opakovať" flow and a manually re-created inspection.
      * Correlates on the outer alias `i`.
      *
-     * A newer row only supersedes when it is itself a cycle-advancing
-     * inspection (`is_preventive_inspection = 1`). A plain požiarna kniha
-     * entry (is_preventive_inspection = 0) must never supersede the previous
-     * preventive inspection — otherwise a routine note would mask a missed
-     * statutory inspection (change request 1.7).
+     * Three conditions a row must meet to supersede an older one:
+     *   - it is finalized. A draft carries no validity of its own, so it must
+     *     never invalidate a finished inspection — otherwise merely starting
+     *     a repeat would mark the still-valid protocol "Nahradená".
+     *   - it is newer *by execution date*, not by id. Inspection dates are
+     *     always entered manually, so a backdated record created later has a
+     *     higher id while covering an earlier cycle; `id` only breaks ties
+     *     between two inspections executed on the same day.
+     *   - it is itself a cycle-advancing inspection
+     *     (`is_preventive_inspection = 1`). A plain požiarna kniha entry
+     *     (is_preventive_inspection = 0) must never supersede the previous
+     *     preventive inspection — otherwise a routine note would mask a
+     *     missed statutory inspection (change request 1.7).
+     *
+     * Drafts are never superseded themselves (`i.status = 'finalized'`) — a
+     * concept is judged by its own status, not against the finalized record.
+     *
+     * `executed_on` is nullable, so both sides are coalesced to a floor date
+     * to keep the row comparison from collapsing to NULL.
      */
-    private const SUPERSEDED_EXPR = 'EXISTS(
+    private const SUPERSEDED_EXPR = "EXISTS(
                            SELECT 1 FROM inspections s
-                           WHERE  s.account_id  = i.account_id
+                           WHERE  i.status      = 'finalized'
+                             AND  s.account_id  = i.account_id
                              AND  s.facility_id = i.facility_id
                              AND  s.type        = i.type
                              AND  s.archived_at IS NULL
-                             AND  s.id          > i.id
+                             AND  s.status      = 'finalized'
                              AND  s.is_preventive_inspection = 1
-                       ) AS is_superseded';
+                             AND  (COALESCE(s.executed_on, '1000-01-01'), s.id)
+                                > (COALESCE(i.executed_on, '1000-01-01'), i.id)
+                       ) AS is_superseded";
 
     /**
      * Allowed periodicities per inspection type. Source of truth: locked
@@ -56,7 +72,23 @@ final class InspectionController
         'pu_udrzba' => [12],
         'nudzove_osvetlenie' => [12],
         'ts_hadic' => [12],
+        // Vydáva sa raz ročne pred žatvou (change request 2.3), so the annual
+        // cycle is real and the calendar should surface next year's Pokyn.
+        'pokyn_zatva' => [12],
+        // One-off document — a disposal has no recurrence (change request 2.1).
+        'vyradenie' => [0],
     ];
+
+    /**
+     * Types that record a one-off event rather than advancing a statutory
+     * cycle. Stored with `is_preventive_inspection = 0`, which is the same
+     * mechanism a plain požiarna kniha entry uses (change request 1.7): it
+     * keeps them out of the calendar's deadline computation and stops them
+     * superseding anything.
+     *
+     * @var list<string>
+     */
+    private const NON_CYCLIC_TYPES = ['vyradenie'];
 
     public static function index(Request $req): void
     {
@@ -185,11 +217,16 @@ final class InspectionController
         );
         $itemsStmt->execute([$id]);
         $rawItems = $itemsStmt->fetchAll();
-        $items = array_map(static function (array $r): array {
+        // Photo documentation (change request 2.2) — fetched in one query for
+        // the whole inspection and zipped onto the items below, so a protocol
+        // with 40 items still costs a single extra round trip.
+        $photosByItem = InspectionPhotoController::byItemForInspection($id);
+        $items = array_map(static function (array $r) use ($photosByItem): array {
             return [
                 'id' => (int) $r['id'],
                 'position' => (int) $r['position'],
                 'fields' => json_decode((string) $r['fields'], true) ?? [],
+                'photos' => $photosByItem[(int) $r['id']] ?? [],
                 'created_at' => $r['created_at'],
                 'updated_at' => $r['updated_at'],
             ];
@@ -222,6 +259,7 @@ final class InspectionController
      * Create a pre-filled DRAFT of a follow-up control off the back of this
      * inspection (change request 2.1):
      *   php      → oprava_ts_php   (prístroje with status "TS")
+     *   php      → vyradenie       (prístroje with status "V")
      *   hydranty → ts_hadic        (hoses from the checked hydrants)
      * The draft is never finalized — the technician opens it later, enters the
      * real results and date, and generates the protocol. Re-triggering the
@@ -240,10 +278,14 @@ final class InspectionController
 
         $targetType = $req->jsonString('target_type');
         $allowed = [
-            'php'      => 'oprava_ts_php',
-            'hydranty' => 'ts_hadic',
+            'php'      => ['oprava_ts_php', 'vyradenie'],
+            'hydranty' => ['ts_hadic'],
         ];
-        if (!isset($allowed[$sourceType]) || $targetType !== $allowed[$sourceType]) {
+        if (
+            !isset($allowed[$sourceType])
+            || $targetType === null
+            || !in_array($targetType, $allowed[$sourceType], true)
+        ) {
             Response::error('Pre tento typ kontroly nie je dostupný nadväzujúci koncept.', 422);
         }
 
@@ -258,9 +300,11 @@ final class InspectionController
             $itemsStmt->fetchAll(),
         );
 
-        $mapped = $targetType === 'oprava_ts_php'
-            ? self::mapPhpToOprava($sourceItems)
-            : self::mapHydrantyToTsHadic($sourceItems);
+        $mapped = match ($targetType) {
+            'oprava_ts_php' => self::mapPhpToOprava($sourceItems),
+            'vyradenie'     => self::mapPhpToVyradenie($sourceItems),
+            default         => self::mapHydrantyToTsHadic($sourceItems),
+        };
 
         if ($mapped === []) {
             Response::error('Zdrojová kontrola neobsahuje položky pre nadväzujúci koncept.', 422);
@@ -289,8 +333,9 @@ final class InspectionController
             $pdo->prepare(
                 'INSERT INTO inspections
                     (account_id, company_id, facility_id, source_inspection_id, type,
-                     periodicity_months, executed_on, inspector_user_id, status, notes)
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, "draft", NULL)'
+                     periodicity_months, executed_on, inspector_user_id, status, notes,
+                     is_preventive_inspection)
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, "draft", NULL, ?)'
             )->execute([
                 $accountId,
                 $source['company_id'],
@@ -299,6 +344,7 @@ final class InspectionController
                 $targetType,
                 $periodicity,
                 $source['inspector_user_id'],
+                in_array($targetType, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
             ]);
             $newId = (int) $pdo->lastInsertId();
 
@@ -339,6 +385,35 @@ final class InspectionController
                 'year'         => (int) ($f['year'] ?? 0),
                 'location'     => (string) ($f['location'] ?? ''),
                 'notes'        => null,
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * PHP items with status "V" (vyradený) → vyraďovací protokol draft items
+     * (change request 2.1). The technician's note from the inspection becomes
+     * the starting reason for disposal — it is usually already the reason
+     * ("neúspešná tlaková skúška", "korózia") — and stays editable.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return list<array<string, mixed>>
+     */
+    private static function mapPhpToVyradenie(array $items): array
+    {
+        $out = [];
+        foreach ($items as $f) {
+            if (($f['status'] ?? null) !== 'V') {
+                continue;
+            }
+            $note = trim((string) ($f['notes'] ?? ''));
+            $out[] = [
+                'manufacturer' => (string) ($f['manufacturer'] ?? ''),
+                'type'         => (string) ($f['type'] ?? ''),
+                'serial'       => (string) ($f['serial'] ?? ''),
+                'year'         => (int) ($f['year'] ?? 0),
+                'location'     => (string) ($f['location'] ?? ''),
+                'reason'       => $note !== '' ? $note : 'Neopraviteľná porucha',
             ];
         }
         return $out;
@@ -469,8 +544,9 @@ final class InspectionController
         $stmt = Db::pdo()->prepare(
             'INSERT INTO inspections
                 (account_id, company_id, facility_id, type, periodicity_months,
-                 executed_on, inspector_user_id, status, notes)
-             VALUES (?, ?, ?, ?, ?, ?, ?, "draft", ?)'
+                 executed_on, inspector_user_id, status, notes,
+                 is_preventive_inspection)
+             VALUES (?, ?, ?, ?, ?, ?, ?, "draft", ?, ?)'
         );
         $stmt->execute([
             $accountId,
@@ -481,6 +557,7 @@ final class InspectionController
             $executedOn,
             $inspectorUserId,
             $notes,
+            in_array($type, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
         ]);
         $id = (int) Db::pdo()->lastInsertId();
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, Hash, MapPin, Phone, Plus, Trash2, Warehouse } from 'lucide-react';
+import { ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, Hash, MapPin, Phone, Plus, Trash2, UserCheck, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyDetail } from '@/api/companies';
@@ -154,7 +154,10 @@ export function CompanyDetailPage() {
           {company.contact && (
             <DetailRow icon={<Phone className="size-4" />} label="Kontakt" value={company.contact} />
           )}
-          {!company.ico && !company.address && !company.contact && (
+          {company.approver && (
+            <DetailRow icon={<UserCheck className="size-4" />} label="Schvaľujúca osoba" value={company.approver} />
+          )}
+          {!company.ico && !company.address && !company.contact && !company.approver && (
             <div className="py-2 text-ink-400">Žiadne ďalšie údaje. Doplň ich úpravou firmy.</div>
           )}
         </dl>

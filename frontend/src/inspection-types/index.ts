@@ -8,6 +8,8 @@ import { puAkcieschopnostModule } from './pu_akcieschopnost';
 import { puUdrzbaModule } from './pu_udrzba';
 import { nudzoveOsvetlenieModule } from './nudzove_osvetlenie';
 import { tsHadicModule } from './ts_hadic';
+import { pokynZatvaModule } from './pokyn_zatva';
+import { vyradenieModule } from './vyradenie';
 
 /**
  * Per-inspection-type form/row registry. Pages dispatch via
@@ -25,6 +27,8 @@ const REGISTRY: Partial<Record<InspectionType, InspectionTypeModule>> = {
   pu_udrzba: puUdrzbaModule,
   nudzove_osvetlenie: nudzoveOsvetlenieModule,
   ts_hadic: tsHadicModule,
+  pokyn_zatva: pokynZatvaModule,
+  vyradenie: vyradenieModule,
 };
 
 export function getTypeModule(type: InspectionType): InspectionTypeModule | null {

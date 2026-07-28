@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, Download, FileText,
-  GitBranch, History, Link2, NotebookPen, Plus, Repeat, Warehouse,
+  GitBranch, History, Images, Link2, NotebookPen, Plus, Repeat, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
@@ -14,6 +14,7 @@ import {
   type InspectionType,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
+import { cn } from '@/lib/cn';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { useConfirm } from '@/lib/confirm';
@@ -23,6 +24,7 @@ import { Button } from '@/components/ui/Button';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 import { getTypeModule } from '@/inspection-types';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
+import { ItemPhotoStrip } from '@/components/ItemPhotos';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { InspectionStatusBadge } from '@/components/InspectionStatusBadge';
 
@@ -52,6 +54,9 @@ export function InspectionDetailPage() {
   const [generating, setGenerating] = useState(false);
   const [repeating, setRepeating] = useState(false);
   const [creatingFollowUp, setCreatingFollowUp] = useState(false);
+  // "Priložiť fotodokumentáciu" (change request 2.2) — on by default, and only
+  // shown at all when the inspection actually has photos.
+  const [includePhotos, setIncludePhotos] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,7 +119,7 @@ export function InspectionDetailPage() {
     setPdfError(null);
     setGenerating(true);
     try {
-      const res = await Inspections.generatePdf(id, csrfToken);
+      const res = await Inspections.generatePdf(id, csrfToken, includePhotos);
       const [detail, docs] = await Promise.all([
         Inspections.show(id),
         Inspections.documents(id),
@@ -196,6 +201,7 @@ export function InspectionDetailPage() {
   const { inspection: i, items } = data;
   const isDraft = i.status === 'draft';
   const module = getTypeModule(i.type);
+  const photoCount = items.reduce((n, it) => n + (it.photos?.length ?? 0), 0);
 
   return (
     <div className="flex flex-col gap-5">
@@ -336,6 +342,7 @@ export function InspectionDetailPage() {
                     deleting={deletingItemId === it.id}
                     onDelete={() => handleDeleteItem(it.id)}
                   />
+                  <ItemPhotoStrip photos={it.photos} />
                 </li>
               ))}
             </ul>
@@ -372,18 +379,30 @@ export function InspectionDetailPage() {
         onGenerate={handleGeneratePdf}
         finalized={!isDraft}
         pdfError={pdfError}
+        photoCount={photoCount}
+        includePhotos={includePhotos}
+        onIncludePhotosChange={setIncludePhotos}
       />
     </div>
   );
+}
+
+/** Plural forms for "N prístrojov má stav …". */
+function deviceCountPhrase(n: number): string {
+  if (n === 1) return '1 prístroj má';
+  if (n < 5) return `${n} prístroje majú`;
+  return `${n} prístrojov má`;
 }
 
 /**
  * Linked protocols (change request 2.1). Two things live here:
  *  - a "created from" back-link when this inspection is itself a follow-up draft;
  *  - existing follow-up drafts spawned from this inspection, and — when the
- *    items qualify — an offer to create the follow-up draft (PHP → Oprava/TS,
- *    Hydranty → TS hadíc). The disposal ("vyradenie") protocol for status-V
- *    prístroje is a separate document type still pending its template.
+ *    items qualify — offers to create them: PHP → Oprava/TS (status TS) and
+ *    PHP → Vyraďovací protokol (status V), Hydranty → TS hadíc.
+ *
+ * A PHP inspection can qualify for both of its follow-ups at once, so the
+ * offers are a list rather than a single one.
  */
 function FollowUpBlock({
   type,
@@ -400,25 +419,34 @@ function FollowUpBlock({
   creating: boolean;
   onCreate: (targetType: InspectionType) => void;
 }) {
-  // What follow-up can this type offer, and how many source items qualify?
-  let targetType: InspectionType | null = null;
-  let qualifying = 0;
-  let offerText = '';
+  const candidates: { targetType: InspectionType; qualifying: number; offerText: string }[] = [];
   if (type === 'php') {
-    qualifying = items.filter((it) => it.fields.status === 'TS').length;
-    targetType = 'oprava_ts_php';
-    offerText = `${qualifying} ${qualifying === 1 ? 'prístroj má' : qualifying < 5 ? 'prístroje majú' : 'prístrojov má'} stav „Tlaková skúška"`;
+    const forTest = items.filter((it) => it.fields.status === 'TS').length;
+    candidates.push({
+      targetType: 'oprava_ts_php',
+      qualifying: forTest,
+      offerText: `${deviceCountPhrase(forTest)} stav „Tlaková skúška"`,
+    });
+    const forDisposal = items.filter((it) => it.fields.status === 'V').length;
+    candidates.push({
+      targetType: 'vyradenie',
+      qualifying: forDisposal,
+      offerText: `${deviceCountPhrase(forDisposal)} stav „Vyradený"`,
+    });
   } else if (type === 'hydranty') {
-    qualifying = items.length;
-    targetType = 'ts_hadic';
-    offerText = `${qualifying} ${qualifying === 1 ? 'kontrolovaný hydrant' : 'kontrolovaných hydrantov'}`;
+    candidates.push({
+      targetType: 'ts_hadic',
+      qualifying: items.length,
+      offerText: `${items.length} ${items.length === 1 ? 'kontrolovaný hydrant' : 'kontrolovaných hydrantov'}`,
+    });
   }
 
   // Don't offer a follow-up that already exists for this source.
-  const alreadyMade = targetType !== null && followUps.some((f) => f.type === targetType);
-  const showOffer = targetType !== null && qualifying > 0 && !alreadyMade;
+  const offers = candidates.filter(
+    (c) => c.qualifying > 0 && !followUps.some((f) => f.type === c.targetType),
+  );
 
-  if (!sourceInspectionId && followUps.length === 0 && !showOffer) return null;
+  if (!sourceInspectionId && followUps.length === 0 && offers.length === 0) return null;
 
   return (
     <Card className="overflow-hidden">
@@ -461,23 +489,23 @@ function FollowUpBlock({
           </Link>
         ))}
 
-        {showOffer && targetType && (
-          <div className="rounded-xl border border-firol-200 bg-firol-50/60 p-3.5">
+        {offers.map((offer) => (
+          <div key={offer.targetType} className="rounded-xl border border-firol-200 bg-firol-50/60 p-3.5">
             <p className="text-sm text-ink-800">
-              {offerText} — vytvoriť koncept <strong>{INSPECTION_TYPE_LABELS[targetType]}</strong> s týmito
-              položkami?
+              {offer.offerText} — vytvoriť koncept{' '}
+              <strong>{INSPECTION_TYPE_LABELS[offer.targetType]}</strong> s týmito položkami?
             </p>
             <Button
               type="button"
               className="mt-3"
               loading={creating}
-              onClick={() => onCreate(targetType)}
+              onClick={() => onCreate(offer.targetType)}
               leftIcon={<Plus className="size-4" />}
             >
               Vytvoriť koncept
             </Button>
           </div>
-        )}
+        ))}
       </div>
     </Card>
   );
@@ -490,6 +518,9 @@ function DocumentsBlock({
   onGenerate,
   finalized,
   pdfError,
+  photoCount,
+  includePhotos,
+  onIncludePhotosChange,
 }: {
   documents: InspectionDocument[];
   canGenerate: boolean;
@@ -497,6 +528,9 @@ function DocumentsBlock({
   onGenerate: () => void;
   finalized: boolean;
   pdfError?: string | null;
+  photoCount: number;
+  includePhotos: boolean;
+  onIncludePhotosChange: (value: boolean) => void;
 }) {
   if (documents.length === 0) {
     return (
@@ -510,6 +544,14 @@ function DocumentsBlock({
             ? 'Po vygenerovaní sa kontrola uzamkne a dostane svoje číslo (napr. PHP-2026-001).'
             : 'Pre vygenerovanie pridaj aspoň jednu položku a skontroluj dátum kontroly.'}
         </p>
+        {photoCount > 0 && (
+          <IncludePhotosToggle
+            photoCount={photoCount}
+            checked={includePhotos}
+            disabled={generating}
+            onChange={onIncludePhotosChange}
+          />
+        )}
         <Button
           type="button"
           variant="primary"
@@ -568,6 +610,54 @@ function DocumentsBlock({
         ))}
       </ul>
     </Card>
+  );
+}
+
+/**
+ * "Priložiť fotodokumentáciu" (change request 2.2). Default on, so the common
+ * case is one tap; unticking produces the protocol without the appendix, which
+ * is exactly how it looked before photos existed.
+ */
+function IncludePhotosToggle({
+  photoCount,
+  checked,
+  disabled,
+  onChange,
+}: {
+  photoCount: number;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label
+      className={cn(
+        'flex w-full max-w-sm cursor-pointer items-center gap-3 rounded-2xl border px-3 py-2.5 text-left',
+        'transition-all duration-200',
+        checked
+          ? 'border-firol-300 bg-firol-50'
+          : 'border-ink-200 bg-white hover:border-ink-300',
+        disabled && 'pointer-events-none opacity-60',
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="size-4 shrink-0 accent-firol-500"
+      />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5 text-sm font-medium text-ink-900">
+          <Images className="size-3.5 text-firol-500" />
+          Priložiť fotodokumentáciu
+        </span>
+        <span className="mt-0.5 block text-xs text-ink-500">
+          {photoCount} {photoCount === 1 ? 'fotka' : photoCount < 5 ? 'fotky' : 'fotiek'} ako
+          samostatná príloha na konci protokolu.
+        </span>
+      </span>
+    </label>
   );
 }
 

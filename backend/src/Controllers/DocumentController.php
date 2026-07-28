@@ -16,6 +16,7 @@ use Firol\Mail\Templates\DocumentEmail;
 use Firol\Pdf\PdfRenderer;
 use Firol\Storage\Storage;
 use Firol\Support\Address;
+use Firol\Support\PhotoCaption;
 
 /**
  * Generates PDF protocols and serves the stored binaries back. Generation
@@ -70,6 +71,15 @@ final class DocumentController
         $payload = self::buildPayload($accountId, $userId, $inspection, $items);
         $stats   = $payload['stats'];
         $insType = (string) $inspection['type'];
+
+        // Photo appendix (change request 2.2). Default is "attach" whenever
+        // photos exist; the technician can opt out per generation by sending
+        // include_photos=false, which produces the protocol exactly as it
+        // looked before the feature existed.
+        $includePhotos = $req->jsonBool('include_photos') ?? true;
+        $payload['photos'] = $includePhotos
+            ? self::buildPhotoAppendix($inspectionId, $insType, $items)
+            : [];
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
@@ -184,7 +194,7 @@ final class DocumentController
             'SELECT invoice_company_name FROM accounts WHERE id = ?'
         );
         $accStmt->execute([$accountId]);
-        $brandName = (string) ($accStmt->fetchColumn() ?: 'Firol');
+        $brandName = (string) ($accStmt->fetchColumn() ?: 'POapp');
 
         $filename = ($doc['number'] ?? 'protocol') . '.pdf';
 
@@ -429,13 +439,20 @@ final class DocumentController
      */
     private static function loadInspectionForGenerate(?int $accountId, int $inspectionId): array
     {
+        // `source_number` is the protocol number of the inspection this one grew
+        // out of (change request 2.1) — printed as "Nadväzuje na kontrolu" on the
+        // vyraďovací protokol. NULL for documents created standalone.
         $sql = 'SELECT i.id, i.account_id, i.type, i.periodicity_months, i.executed_on, i.status,
-                       i.notes, i.inspector_user_id,
+                       i.notes, i.inspector_user_id, i.source_inspection_id,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
+                       c.approver AS company_approver,
                        i.facility_id, f.name AS facility_name,
                        f.street AS facility_street, f.postal_code AS facility_postal_code, f.city AS facility_city,
-                       f.contact_person AS facility_contact_person
+                       f.contact_person AS facility_contact_person,
+                       (SELECT d.number FROM documents d
+                         WHERE d.parent_type = "inspection" AND d.parent_id = i.source_inspection_id
+                         ORDER BY d.id DESC LIMIT 1) AS source_number
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
                 JOIN   facilities  f ON f.id = i.facility_id
@@ -470,6 +487,41 @@ final class DocumentController
                 'fields'   => json_decode((string) $r['fields'], true) ?? [],
             ];
         }, $rows);
+    }
+
+    /**
+     * Flattens every item's photos into the ordered list the appendix template
+     * renders, pairing each with the caption that identifies its item
+     * (change request 2.2). Items are already ordered by position, so the
+     * appendix follows the same order as the protocol body.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return list<array{caption: string, path: string, width: int, height: int}>
+     */
+    private static function buildPhotoAppendix(int $inspectionId, string $type, array $items): array
+    {
+        $pathsByItem = InspectionPhotoController::fullSizePathsByItem($inspectionId);
+        if ($pathsByItem === []) {
+            return [];
+        }
+
+        $appendix = [];
+        foreach ($items as $idx => $item) {
+            $photos = $pathsByItem[(int) $item['id']] ?? [];
+            if ($photos === []) {
+                continue;
+            }
+            $caption = PhotoCaption::build($type, $item['fields'] ?? [], $idx + 1);
+            foreach ($photos as $photo) {
+                $appendix[] = [
+                    'caption' => $caption,
+                    'path'    => $photo['path'],
+                    'width'   => $photo['width'],
+                    'height'  => $photo['height'],
+                ];
+            }
+        }
+        return $appendix;
     }
 
     /**
@@ -521,12 +573,16 @@ final class DocumentController
                 'periodicity_months' => (int) $inspection['periodicity_months'],
                 'notes'              => $inspection['notes'],
                 'status'             => $inspection['status'],
+                'source_number'      => $inspection['source_number'] ?? null,
             ],
             'company' => [
                 'name'    => $inspection['company_name'],
                 'ico'     => $inspection['company_ico'],
                 'address' => Address::format($inspection['company_street'], $inspection['company_postal_code'], $inspection['company_city']),
                 'city'    => $inspection['company_city'],
+                // Schvaľujúca osoba — printed on the Pokyn and the vyraďovací
+                // protokol (change request 2.3 / 2.1).
+                'approver' => $inspection['company_approver'] ?? null,
             ],
             'facility' => [
                 'name'           => $inspection['facility_name'],
@@ -767,7 +823,7 @@ final class DocumentController
         }
 
         return [
-            'name'          => $accRow['invoice_company_name'] ?? 'Firol',
+            'name'          => $accRow['invoice_company_name'] ?? 'POapp',
             'color'         => $accRow['theme_color'] ?: '#E8433A',
             'logo_data_uri' => $logoUri,
         ];

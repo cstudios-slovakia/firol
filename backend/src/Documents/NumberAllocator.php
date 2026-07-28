@@ -30,6 +30,9 @@ final class NumberAllocator
         'pu_udrzba'          => 'PU-UD',
         'nudzove_osvetlenie' => 'NO',
         'ts_hadic'           => 'TS-HAD',
+        // Change request 2.3 / 2.1 — two new document types.
+        'pokyn_zatva'        => 'ZAT',
+        'vyradenie'          => 'VYR',
         // Trainings: per spec, all 6 training types share the SKO prefix
         // and a single per-account+year sequence. The training type
         // itself is stored in the body, not encoded in the number.

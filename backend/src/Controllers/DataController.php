@@ -37,17 +37,21 @@ final class DataController
         $docPaths = self::docPathsForAccount($accountId, $pdo);
         $traineePaths = self::traineeSignaturePathsForAccount($accountId, $pdo);
 
+        $photoPaths = self::photoPathsForAccount($accountId, $pdo);
+
         // Remove documents rows first (no FK to inspections/trainings)
         $pdo->prepare('DELETE FROM documents WHERE account_id = ?')->execute([$accountId]);
 
         // Remove companies — FK cascades delete facilities, inspections,
-        // inspection_items, trainings, and trainees automatically.
+        // inspection_items, inspection_item_photos, trainings and trainees
+        // automatically.
         $pdo->prepare('DELETE FROM companies WHERE account_id = ?')->execute([$accountId]);
 
-        self::unlinkFiles(array_merge($docPaths, $traineePaths));
+        self::unlinkFiles(array_merge($docPaths, $traineePaths, $photoPaths));
 
         // Also clean up empty document year directories
         self::pruneDocumentDirs($accountId);
+        self::prunePhotoDirs($accountId);
 
         Response::json(['deleted' => $count]);
     }
@@ -70,12 +74,16 @@ final class DataController
         $docStmt->execute([$accountId]);
         $docPaths = $docStmt->fetchAll(PDO::FETCH_COLUMN);
 
+        $photoPaths = self::photoPathsForAccount($accountId, $pdo);
+
         $pdo->prepare("DELETE FROM documents WHERE account_id = ? AND parent_type = 'inspection'")->execute([$accountId]);
-        // inspection_items cascade automatically when inspections are deleted
+        // inspection_items — and their photos — cascade automatically when
+        // inspections are deleted; the files on disk are ours to remove.
         $pdo->prepare('DELETE FROM inspections WHERE account_id = ?')->execute([$accountId]);
 
-        self::unlinkFiles($docPaths);
+        self::unlinkFiles(array_merge($docPaths, $photoPaths));
         self::pruneDocumentDirs($accountId);
+        self::prunePhotoDirs($accountId);
 
         Response::json(['deleted' => $count]);
     }
@@ -126,7 +134,7 @@ final class DataController
 
         // ── Companies + Facilities ─────────────────────────────────────────────
         $compStmt = $pdo->prepare(
-            'SELECT id, name, ico, street, postal_code, city, contact, created_at
+            'SELECT id, name, ico, street, postal_code, city, contact, approver, created_at
              FROM   companies WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
         );
         $compStmt->execute([$accountId]);
@@ -168,9 +176,36 @@ final class DataController
                 "SELECT id, inspection_id, position, fields FROM inspection_items
                  WHERE  inspection_id IN ($insIds) ORDER BY inspection_id, position"
             );
+            // Photo documentation (change request 2.2). The bytes stay out of
+            // the JSON — a few hundred MB of base64 would make the export
+            // unusable — but every photo is listed with the authenticated URL
+            // it can be downloaded from, so nothing the technician recorded is
+            // invisible in their own export.
+            $photoStmt = $pdo->query(
+                "SELECT id, inspection_id, item_id, position, byte_size, width, height, created_at
+                 FROM   inspection_item_photos
+                 WHERE  inspection_id IN ($insIds)
+                 ORDER  BY item_id, position, id"
+            );
+            $photosByItem = [];
+            foreach ($photoStmt->fetchAll(PDO::FETCH_ASSOC) as $photo) {
+                $photosByItem[(int) $photo['item_id']][] = [
+                    'id'           => (int) $photo['id'],
+                    'position'     => (int) $photo['position'],
+                    'byte_size'    => (int) $photo['byte_size'],
+                    'width'        => (int) $photo['width'],
+                    'height'       => (int) $photo['height'],
+                    'created_at'   => $photo['created_at'],
+                    'download_url' => '/api/inspections/' . (int) $photo['inspection_id']
+                        . '/items/' . (int) $photo['item_id']
+                        . '/photos/' . (int) $photo['id'],
+                ];
+            }
+
             $itemsByIns = [];
             foreach ($itemStmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
                 $item['fields'] = json_decode((string) $item['fields'], true);
+                $item['photos'] = $photosByItem[(int) $item['id']] ?? [];
                 $itemsByIns[(int) $item['inspection_id']][] = $item;
             }
             foreach ($inspections as &$ins) {
@@ -239,6 +274,44 @@ final class DataController
         $s = $pdo->prepare('SELECT file_path FROM documents WHERE account_id = ?');
         $s->execute([$accountId]);
         return $s->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    /** @return list<string> */
+    /**
+     * Every stored photo derivative for the account (change request 2.2).
+     * The DB rows cascade away with their inspections, but the files on disk
+     * do not — and photos are by far the largest thing an account stores, so
+     * leaving them behind would quietly defeat the purge.
+     *
+     * @return list<string>
+     */
+    private static function photoPathsForAccount(int $accountId, \PDO $pdo): array
+    {
+        $s = $pdo->prepare(
+            'SELECT file_path, thumb_path FROM inspection_item_photos WHERE account_id = ?'
+        );
+        $s->execute([$accountId]);
+        $paths = [];
+        foreach ($s->fetchAll() as $row) {
+            $paths[] = (string) $row['file_path'];
+            $paths[] = (string) $row['thumb_path'];
+        }
+        return $paths;
+    }
+
+    /** Drop the account's now-empty photo directories. */
+    private static function prunePhotoDirs(int $accountId): void
+    {
+        $baseDir = Storage::root() . '/photos/' . $accountId;
+        if (!is_dir($baseDir)) return;
+        foreach (glob($baseDir . '/*', GLOB_ONLYDIR) ?: [] as $inspectionDir) {
+            if (empty(glob($inspectionDir . '/*') ?: [])) {
+                @rmdir($inspectionDir);
+            }
+        }
+        if (empty(glob($baseDir . '/*') ?: [])) {
+            @rmdir($baseDir);
+        }
     }
 
     /** @return list<string> */

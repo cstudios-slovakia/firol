@@ -1,12 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, CopyPlus, Edit2, FileSearch, Hash, ListChecks, MapPin,
-  NotebookPen, Save, Tag, Trash2, Wrench,
+  ArrowRight, Ban, CopyPlus, Edit2, FileSearch, Hash, ListChecks, MapPin,
+  Save, Tag, Trash2,
 } from 'lucide-react';
-import {
-  type OpravaTsPhpItemFields,
-} from '@/api/inspections';
+import { type VyradenieItemFields } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { ItemPhotoField, usePhotoStaging } from '@/components/ItemPhotos';
@@ -16,6 +14,7 @@ import { AutocompleteInput, PHP_COMMON_TYPES } from '@/components/ui/Autocomplet
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
+import { cn } from '@/lib/cn';
 import { consumeDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
 import { saveItemMessage, saveItemWithPhotos } from './saveItem';
 import type {
@@ -25,10 +24,23 @@ import type {
   Step2FormProps,
 } from './common';
 
-/** Fields carried into the next item by "Ďalší rovnaký" — never serial/location. */
-type OpravaSeed = { manufacturer: string; type: string; year: string };
+/**
+ * Typical reasons from the client's template. Offered as quick picks; the
+ * field stays free text so the technician can describe anything else.
+ */
+const COMMON_REASONS = [
+  'Neúspešná tlaková skúška',
+  'Neopraviteľná porucha',
+  'Mechanické poškodenie alebo korózia',
+  'Chýbajúce súčasti',
+  'Prekročená životnosť určená výrobcom',
+  'Nerentabilná oprava',
+];
 
-function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+/** Fields carried into the next item by "Ďalší rovnaký" — never serial/location. */
+type VyradenieSeed = { manufacturer: string; type: string; year: string; reason: string };
+
+function VyradenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -37,7 +49,7 @@ function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
   const [serial, setSerial] = useState('');
   const [year, setYear] = useState<string>('');
   const [location, setLocation] = useState('');
-  const [notes, setNotes] = useState('');
+  const [reason, setReason] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -47,29 +59,26 @@ function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<OpravaTsPhpItemFields>;
+      const f = initialItem.fields as Partial<VyradenieItemFields>;
       setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
       setExtType(typeof f.type === 'string' ? f.type : '');
       setSerial(typeof f.serial === 'string' ? f.serial : '');
       setYear(typeof f.year === 'number' ? String(f.year) : '');
       setLocation(typeof f.location === 'string' ? f.location : '');
-      setNotes(typeof f.notes === 'string' ? f.notes : '');
+      setReason(typeof f.reason === 'string' ? f.reason : '');
     } else {
-      // Carry identification over from "Ďalší rovnaký"; serial/location blank.
-      const seed = consumeDuplicateSeed<OpravaSeed>(inspectionId);
+      const seed = consumeDuplicateSeed<VyradenieSeed>(inspectionId);
       setManufacturer(seed?.manufacturer ?? '');
       setExtType(seed?.type ?? '');
       setSerial('');
       setYear(seed?.year ?? '');
       setLocation('');
-      setNotes('');
+      setReason(seed?.reason ?? '');
     }
   }, [initialItem, inspectionId]);
 
   function isPristine() {
-    return (
-      !manufacturer && !extType && !serial && !year && !location && !notes
-    );
+    return !manufacturer && !extType && !serial && !year && !location && !reason;
   }
 
   function handleGoToSummary(e: React.SyntheticEvent) {
@@ -88,7 +97,7 @@ function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
     if (!manufacturer.trim()) errs.manufacturer = 'Doplň výrobcu.';
     if (!extType.trim()) errs.extType = 'Doplň typ prístroja.';
     if (!serial.trim()) errs.serial = 'Doplň výrobné číslo.';
-    if (!location.trim()) errs.location = 'Doplň umiestnenie.';
+    if (!reason.trim()) errs.reason = 'Doplň dôvod vyradenia.';
     const yn = Number(year);
     if (!Number.isInteger(yn) || yn < 1900 || yn > 2200) errs.year = 'Rok výroby musí byť v rozsahu 1900–2200.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
@@ -96,13 +105,13 @@ function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
     setApiError(null);
     setSubmitting(true);
     try {
-      const fields: OpravaTsPhpItemFields = {
+      const fields: VyradenieItemFields = {
         manufacturer: manufacturer.trim(),
         type: extType.trim(),
         serial: serial.trim(),
         year: Number(year),
-        location: location.trim(),
-        notes: notes.trim() || null,
+        location: location.trim() || null,
+        reason: reason.trim(),
       };
       const saved = await saveItemWithPhotos({
         inspectionId,
@@ -112,7 +121,12 @@ function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
         photos,
       });
       if (duplicate) {
-        const seed: OpravaSeed = { manufacturer: manufacturer.trim(), type: extType.trim(), year: year.trim() };
+        const seed: VyradenieSeed = {
+          manufacturer: manufacturer.trim(),
+          type: extType.trim(),
+          year: year.trim(),
+          reason: reason.trim(),
+        };
         setDuplicateSeed(inspectionId, seed);
       }
       onSaved(action);
@@ -145,7 +159,7 @@ function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Výrobné číslo / séria" required error={fieldErrors.serial}>
+          <Field label="Č. výr. série / tlak. nádoby" required error={fieldErrors.serial}>
             {(p) => (
               <Input {...p} required leftIcon={<Hash className="size-4" />}
                 value={serial} onChange={(e) => { setSerial(e.target.value); if (fieldErrors.serial) setFieldErrors((prev) => { const n = { ...prev }; delete n.serial; return n; }); }}
@@ -157,28 +171,38 @@ function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
               <Input {...p} required type="number" inputMode="numeric" min={1900} max={2200}
                 leftIcon={<Hash className="size-4" />}
                 value={year} onChange={(e) => { setYear(e.target.value); if (fieldErrors.year) setFieldErrors((prev) => { const n = { ...prev }; delete n.year; return n; }); }}
-                placeholder="2024" />
+                placeholder="2018" />
             )}
           </Field>
         </div>
 
-        <Field label="Umiestnenie" required error={fieldErrors.location}>
+        <Field label="Umiestnenie" hint="Kde bol prístroj umiestnený pred vyradením.">
           {(p) => (
-            <AutocompleteInput {...p} required field="location" facilityId={facilityId} leftIcon={<MapPin className="size-4" />}
-              value={location} onChange={(v) => { setLocation(v); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
-              placeholder="Hala A, vchod" />
+            <AutocompleteInput {...p} field="location" facilityId={facilityId} leftIcon={<MapPin className="size-4" />}
+              value={location} onChange={setLocation} placeholder="Hala A, vchod" />
           )}
         </Field>
 
-        <Field label="Poznámky" hint="Voliteľné — postup servisu, použité diely, odporúčania.">
+        <Field label="Dôvod vyradenia" required error={fieldErrors.reason}>
           {(p) => (
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
-                <NotebookPen className="size-4" />
-              </span>
-              <textarea id={p.id} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
-                placeholder="Vymenený manometer, doplnené 4 kg prášku, stav OK po skúške."
-                className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
+            <div className="flex flex-col gap-2">
+              <Input {...p} required leftIcon={<Ban className="size-4" />}
+                value={reason}
+                onChange={(e) => { setReason(e.target.value); if (fieldErrors.reason) setFieldErrors((prev) => { const n = { ...prev }; delete n.reason; return n; }); }}
+                placeholder="Neúspešná tlaková skúška" />
+              <div className="flex flex-wrap gap-1.5">
+                {COMMON_REASONS.map((r) => (
+                  <button key={r} type="button" onClick={() => { setReason(r); setFieldErrors((prev) => { const n = { ...prev }; delete n.reason; return n; }); }}
+                    className={cn(
+                      'rounded-lg border px-2 py-1 text-xs transition-all duration-200 active:scale-[0.97]',
+                      reason === r
+                        ? 'border-firol-300 bg-firol-50 text-firol-700'
+                        : 'border-ink-200 bg-white text-ink-600 hover:border-firol-300 hover:text-firol-700',
+                    )}>
+                    {r}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </Field>
@@ -218,24 +242,17 @@ function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
   );
 }
 
-function OpravaItemRow({
-  inspectionId,
-  index,
-  item,
-  canEdit,
-  deleting,
-  onDelete,
-}: ItemRowProps) {
-  const f = item.fields as Partial<OpravaTsPhpItemFields>;
+function VyradenieItemRow({ inspectionId, index, item, canEdit, deleting, onDelete }: ItemRowProps) {
+  const f = item.fields as Partial<VyradenieItemFields>;
   return (
     <div className="px-4 py-3">
       <div className="flex items-center gap-3">
-        <span className="grid size-9 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-700 text-sm font-semibold">
+        <span className="grid size-9 shrink-0 place-items-center rounded-2xl bg-ink-100 text-ink-700 text-sm font-semibold">
           {index}
         </span>
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold text-ink-900">
-            <Wrench className="-mt-0.5 mr-1 inline size-3 text-ink-400" />
+            <Ban className="-mt-0.5 mr-1 inline size-3 text-ink-400" />
             {f.manufacturer} · {f.type}
           </h3>
           <p className="mt-0.5 truncate text-xs text-ink-500">
@@ -243,12 +260,19 @@ function OpravaItemRow({
             {f.serial}
             <span className="mx-1.5 text-ink-300">·</span>
             r. {f.year}
-            <span className="mx-1.5 text-ink-300">·</span>
-            <MapPin className="-mt-0.5 mr-1 inline size-3" />
-            {f.location}
+            {f.location && (
+              <>
+                <span className="mx-1.5 text-ink-300">·</span>
+                <MapPin className="-mt-0.5 mr-1 inline size-3" />
+                {f.location}
+              </>
+            )}
           </p>
-          {f.notes && (
-            <p className="mt-1.5 line-clamp-2 text-xs text-ink-600 italic">{f.notes}</p>
+          {f.reason && (
+            <p className="mt-1 line-clamp-2 text-xs text-ink-600">
+              <Ban className="-mt-0.5 mr-1 inline size-3 text-[var(--color-status-bad)]" />
+              {f.reason}
+            </p>
           )}
         </div>
         {canEdit && (
@@ -268,23 +292,25 @@ function OpravaItemRow({
   );
 }
 
-function OpravaStatsBar({ items }: StatsBarProps) {
+function VyradenieStatsBar({ items }: StatsBarProps) {
   if (items.length === 0) return null;
   return (
     <Card className="px-4 py-3">
-      <div className="flex items-center justify-between gap-2 text-sm">
+      <div className="flex items-center justify-between gap-2 text-xs">
         <span className="font-semibold uppercase tracking-wider text-ink-500">Štatistika</span>
-        <span className="text-ink-700">
-          Prístrojov spolu <span className="text-base font-semibold tabular-nums">{items.length}</span>
-        </span>
+        <span className="text-ink-500">spolu {items.length}</span>
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-ink-100 px-3 py-2 text-sm text-ink-700">
+        <span className="text-xs">Vyradených prístrojov</span>
+        <span className="text-base font-semibold tabular-nums">{items.length}</span>
       </div>
     </Card>
   );
 }
 
-export const opravaTsPhpModule: InspectionTypeModule = {
-  type: 'oprava_ts_php',
-  Step2Form: OpravaStep2Form,
-  ItemRow: OpravaItemRow,
-  StatsBar: OpravaStatsBar,
+export const vyradenieModule: InspectionTypeModule = {
+  type: 'vyradenie',
+  Step2Form: VyradenieStep2Form,
+  ItemRow: VyradenieItemRow,
+  StatsBar: VyradenieStatsBar,
 };
