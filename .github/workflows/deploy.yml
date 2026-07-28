@@ -53,6 +53,7 @@ jobs:
                      $ROOT/backend/storage/documents \
                      $ROOT/backend/storage/accounts \
                      $ROOT/backend/storage/trainings \
+                     $ROOT/backend/storage/photos \
                      $ROOT/backend/storage/mpdf-tmp
 
             # One-time cleanup of artifacts a previous (broken) deploy
@@ -64,11 +65,26 @@ jobs:
             # Ensure the backup script is executable.
             chmod +x $ROOT/scripts/backup-db.sh
 
+            # The backup directory must exist BEFORE the cron line runs.
+            # cron opens the `>> .../backup.log` redirect before executing
+            # the command, so a missing directory kills the whole line and
+            # backup-db.sh never reaches its own `mkdir -p`. Kept outside
+            # the webroot so dumps are never publicly reachable.
+            BACKUP_DIR=/usr/home/awgefy/db-backups
+            mkdir -p $BACKUP_DIR
+
             # Install the nightly DB backup cron job (idempotent — adds the
             # line only if it is not already present in the crontab).
-            CRON_CMD="0 2 * * * $ROOT/scripts/backup-db.sh >> /usr/home/awgefy/db-backups/backup.log 2>&1"
+            CRON_CMD="0 2 * * * $ROOT/scripts/backup-db.sh >> $BACKUP_DIR/backup.log 2>&1"
             ( crontab -l 2>/dev/null | grep -qF "$ROOT/scripts/backup-db.sh" ) \
               || ( crontab -l 2>/dev/null; echo "$CRON_CMD" ) | crontab -
+
+            # Nightly retention job — enforces the 12-month log retention the
+            # privacy policy publishes (change request 3.1). Runs after the
+            # backup so a rotated log is already captured in that night's dump.
+            PRUNE_CMD="30 2 * * * php $ROOT/backend/db/prune.php >> $BACKUP_DIR/prune.log 2>&1"
+            ( crontab -l 2>/dev/null | grep -qF "$ROOT/backend/db/prune.php" ) \
+              || ( crontab -l 2>/dev/null; echo "$PRUNE_CMD" ) | crontab -
 
       # Smoke-test the freshly deployed app from the GitHub runner. Fails
       # the workflow if /api/health doesn't return 200 — a stronger signal
