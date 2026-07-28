@@ -53,8 +53,10 @@ final class CalendarController
                            AND  s.facility_id = i.facility_id
                            AND  s.type        = i.type
                            AND  s.archived_at IS NULL
+                           AND  s.status      = "finalized"
                            AND  s.is_preventive_inspection = 1
-                           AND  s.id > i.id
+                           AND  (COALESCE(s.executed_on, "1000-01-01"), s.id)
+                              > (COALESCE(i.executed_on, "1000-01-01"), i.id)
                        )';
         $stmt = Db::pdo()->prepare($sql);
         $stmt->execute(['acct' => $accountId]);
