@@ -27,8 +27,12 @@ final class AdminController
         // and BillingController::trialEndUnix silently drops the trial when
         // the remaining window is shorter than that.
         'trial_days'                       => ['type' => 'int', 'min' => 0, 'max' => 365, 'forbid_range' => [1, 2]],
-        'price_monthly_eur'                => ['type' => 'int', 'min' => 0, 'max' => 9999],
-        'price_yearly_eur'                 => ['type' => 'int', 'min' => 0, 'max' => 99999],
+        'price_monthly_eur'                => ['type' => 'float', 'min' => 0, 'max' => 9999],
+        'price_yearly_eur'                 => ['type' => 'float', 'min' => 0, 'max' => 99999],
+        // VAT rate applied on top of the informative UI prices above — has no
+        // effect on Stripe billing (see STRIPE_PRICE_MONTHLY / _YEARLY), it only
+        // drives the "price incl. VAT" hint shown to the admin.
+        'vat_rate_percent'                 => ['type' => 'float', 'min' => 0, 'max' => 100],
         // Default number of technician seats (incl. the account admin) included
         // in the base plan for fresh accounts. Existing accounts keep their
         // per-account value; admins override individually if needed.
@@ -74,6 +78,15 @@ final class AdminController
                     Response::error("$key: trial dní musí byť 0 alebo aspoň 3 (Stripe vyžaduje minimálne 48 h)", 422);
                 }
                 $stmt->execute([$key, (string) $intVal]);
+            } elseif ($rule['type'] === 'float') {
+                if (!is_int($value) && !is_float($value) && !(is_string($value) && is_numeric($value))) {
+                    Response::error("$key must be a number", 422);
+                }
+                $floatVal = round((float) $value, 2);
+                if ($floatVal < $rule['min'] || $floatVal > $rule['max']) {
+                    Response::error("$key out of range ({$rule['min']}–{$rule['max']})", 422);
+                }
+                $stmt->execute([$key, sprintf('%.2f', $floatVal)]);
             }
         }
 

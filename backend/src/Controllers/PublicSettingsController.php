@@ -24,7 +24,8 @@ final class PublicSettingsController
                  'price_per_extra_technician_cents',
                  'max_self_service_technicians',
                  'price_monthly_eur',
-                 'price_yearly_eur'
+                 'price_yearly_eur',
+                 'vat_rate_percent'
              )"
         );
         $stmt->execute();
@@ -36,9 +37,18 @@ final class PublicSettingsController
             'max_self_service_technicians'     => 20,
             'price_monthly_eur'                => 19,
             'price_yearly_eur'                 => 199,
+            'vat_rate_percent'                 => 20,
+        ];
+        $floatKeys = [
+            'price_monthly_eur' => true,
+            'price_yearly_eur'  => true,
+            'vat_rate_percent'  => true,
         ];
         foreach ($stmt->fetchAll() as $row) {
-            $defaults[(string) $row['setting_key']] = (int) $row['setting_value'];
+            $key = (string) $row['setting_key'];
+            $defaults[$key] = isset($floatKeys[$key])
+                ? (float) $row['setting_value']
+                : (int) $row['setting_value'];
         }
 
         Response::json($defaults);

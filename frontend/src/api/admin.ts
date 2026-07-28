@@ -103,6 +103,7 @@ export type SystemSettings = {
   trial_days: string;
   price_monthly_eur: string;
   price_yearly_eur: string;
+  vat_rate_percent: string;
   default_included_technicians: string;
   price_per_extra_technician_cents: string;
   max_self_service_technicians: string;
@@ -112,6 +113,7 @@ export type SystemSettingsUpdate = Partial<{
   trial_days: number;
   price_monthly_eur: number;
   price_yearly_eur: number;
+  vat_rate_percent: number;
   default_included_technicians: number;
   price_per_extra_technician_cents: number;
   max_self_service_technicians: number;
