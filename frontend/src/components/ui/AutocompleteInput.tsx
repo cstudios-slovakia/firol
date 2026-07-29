@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Input } from '@/components/ui/Input';
 import { Inspections, type SuggestionField } from '@/api/inspections';
 import { cn } from '@/lib/cn';
+import { fold } from '@/lib/text';
 
 type Props = {
   /** Which historical field to draw suggestions from. */
@@ -74,16 +75,19 @@ export function AutocompleteInput({
     return () => document.removeEventListener('mousedown', onDocClick);
   }, []);
 
-  const q = value.trim().toLowerCase();
+  // Matching ignores case and diacritics throughout: "gloria" offers "Glória",
+  // "PE" offers "Peter". The backend folds the same way for the history lookup.
+  const q = fold(value.trim());
   const staticMatches = (staticOptions ?? []).filter(
-    (o) => q === '' || o.toLowerCase().includes(q),
+    (o) => q === '' || fold(o).includes(q),
   );
   // Static options first, then history values not already listed; drop an exact
   // match with the current value (nothing to suggest when it's already typed).
+  // Spelling variants of one value collapse to the first (= most used) of them.
   const options: string[] = [];
   for (const o of [...staticMatches, ...history]) {
-    if (!options.some((x) => x.toLowerCase() === o.toLowerCase())
-      && o.toLowerCase() !== q) {
+    const key = fold(o);
+    if (!options.some((x) => fold(x) === key) && key !== q) {
       options.push(o);
     }
   }

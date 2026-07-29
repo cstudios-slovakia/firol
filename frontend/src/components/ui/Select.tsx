@@ -3,6 +3,7 @@ import {
 } from 'react';
 import { Check, ChevronDown, Search } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { fold } from '@/lib/text';
 import { useDelayedMount } from '@/lib/useDelayedMount';
 
 export type SelectOption = {
@@ -37,10 +38,6 @@ type SelectProps = {
   /** Adds a search/filter input inside the dropdown. Ignores diacritics. */
   searchable?: boolean;
 };
-
-function stripDiacritics(s: string) {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-}
 
 /**
  * Fully custom dropdown — no native <select> involved. Renders a styled
@@ -101,11 +98,11 @@ export function Select({
   const filteredOptions = useMemo(() => {
     const mapped = options.map((o, i) => ({ option: o, originalIndex: i }));
     if (!searchable || !searchQuery.trim()) return mapped;
-    const norm = stripDiacritics(searchQuery.trim());
+    const norm = fold(searchQuery.trim());
     return mapped.filter(
       ({ option }) =>
-        stripDiacritics(option.label).includes(norm) ||
-        (option.description && stripDiacritics(option.description).includes(norm)),
+        fold(option.label).includes(norm) ||
+        (option.description && fold(option.description).includes(norm)),
     );
   }, [options, searchable, searchQuery]);
 
@@ -190,7 +187,7 @@ export function Select({
 
   function handleTypeahead(char: string) {
     const ta = typeaheadRef.current;
-    ta.buffer += char.toLowerCase();
+    ta.buffer += fold(char);
     if (ta.timer !== null) {
       window.clearTimeout(ta.timer);
     }
@@ -200,7 +197,7 @@ export function Select({
     }, 600);
 
     const found = filteredOptions.findIndex(
-      ({ option }) => !option.disabled && option.label.toLowerCase().startsWith(ta.buffer),
+      ({ option }) => !option.disabled && fold(option.label).startsWith(ta.buffer),
     );
     if (found >= 0) {
       setActiveIndex(found);

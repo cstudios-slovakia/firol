@@ -163,6 +163,11 @@ final class InspectionController
             Response::error('Invalid field', 422);
         }
         $val = "JSON_UNQUOTE(JSON_EXTRACT(ji.fields, '\$.$field'))";
+        // A JSON column is stored with the binary collation, which would make
+        // the prefix match case- and accent-sensitive ("pe" missing "Peter",
+        // "gloria" missing "Glória"). Compare through utf8mb4_unicode_ci so
+        // both are ignored — technicians type without accents on mobile.
+        $valCi = "CONVERT($val USING utf8mb4) COLLATE utf8mb4_unicode_ci";
 
         $q = trim((string) ($req->query('q') ?? ''));
         $facilityId = self::queryInt($req, 'facility_id');
@@ -181,7 +186,7 @@ final class InspectionController
                   AND  i.archived_at IS NULL
                   AND  $val IS NOT NULL
                   AND  $val <> ''
-                  AND  $val LIKE :like
+                  AND  $valCi LIKE :like
                 GROUP  BY val
                 ORDER  BY " . ($preferFacility ? 'same_fac DESC, ' : '') . "uses DESC, val ASC
                 LIMIT  20";
