@@ -280,11 +280,13 @@ $approver = trim((string) ($company['approver'] ?? ''));
   </tr>
   <tr>
     <td class="bl">Prevádzka</td>
-    <td class="bv"><?= $h($facility['name']) ?><?= !empty($facility['address']) ? '<br><span style="font-weight:normal;color:#555;">' . $h($facility['address']) . '</span>' : '' ?></td>
-    <?php // The link back to the source protocol is only printed when this
+    <?php // The "Nadväzuje na kontrolu" column is only printed when this
           // document grew out of a PHP inspection (change request 2.1). ?>
+    <td class="bv"<?= empty($inspection['source_number']) ? ' colspan="3"' : '' ?>><?= $h($facility['name']) ?><?= !empty($facility['address']) ? '<br><span style="font-weight:normal;color:#555;">' . $h($facility['address']) . '</span>' : '' ?></td>
+    <?php if (!empty($inspection['source_number'])): ?>
     <td class="bl">Nadväzuje na kontrolu</td>
-    <td class="bv"><?= !empty($inspection['source_number']) ? $h($inspection['source_number']) : '—' ?></td>
+    <td class="bv"><?= $h($inspection['source_number']) ?></td>
+    <?php endif ?>
   </tr>
 </table>
 
@@ -323,10 +325,6 @@ $approver = trim((string) ($company['approver'] ?? ''));
     <?php endforeach ?>
   </tbody>
 </table>
-
-<?php if (!empty($inspection['notes'])): ?>
-  <div class="notice"><strong>Poznámky:</strong> <?= nl2br($h($inspection['notes'])) ?></div>
-<?php endif ?>
 
 <h2>Vyhlásenie</h2>
 <div class="declaration">
