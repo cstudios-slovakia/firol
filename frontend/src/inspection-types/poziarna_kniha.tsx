@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle, ArrowRight, BookOpen, Calendar, Check, CheckCircle2, Edit2, ListChecks,
   NotebookPen, Plus, Save, Trash2, X,
 } from 'lucide-react';
 import {
+  Inspections,
   PK_ACTIVITIES,
   PK_ACTIVITY_LABELS,
   PK_RESULT_LABELS,
+  type InspectionPhoto,
   type PkActivity,
   type PkDefect,
   type PkResult,
@@ -15,7 +17,7 @@ import {
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
-import { ItemPhotoField, usePhotoStaging } from '@/components/ItemPhotos';
+import { ItemPhotoField, usePhotoStaging, type PhotoStaging } from '@/components/ItemPhotos';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -32,7 +34,7 @@ import type {
 } from './common';
 
 type CustomActivity = { id: number; label: string; checked: boolean };
-type DefectRow = { id: number; description: string; deadline: string };
+type DefectRow = { id: number; defectKey: string; description: string; deadline: string };
 
 function isPkActivity(s: unknown): s is PkActivity {
   return typeof s === 'string' && (PK_ACTIVITIES as string[]).includes(s);
@@ -43,6 +45,13 @@ function isPkResult(s: unknown): s is PkResult {
 
 let _nextId = 1;
 function nextId() { return _nextId++; }
+
+/** Stable id a nedostatok's photos attach to — persists across saves via `PkDefect.key`. */
+function newDefectKey() {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
@@ -62,8 +71,27 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   const [defectsError, setDefectsError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
   const toast = useToast();
-  const photos = usePhotoStaging(initialItem?.photos);
   const lastInputRef = useRef<HTMLInputElement | null>(null);
+  // Photos are scoped per nedostatok now, not to the item as a whole — each
+  // DefectPhotoField owns its own staging and registers it here so submit
+  // can commit every row's photos alongside the item save.
+  const photoStagingRef = useRef<Map<string, PhotoStaging>>(new Map());
+  const registerPhotoStaging = useCallback((key: string, staging: PhotoStaging) => {
+    photoStagingRef.current.set(key, staging);
+  }, []);
+
+  /** Best-effort delete of any already-uploaded photos for nedostatky that are about to disappear (removed row, or result switched away from "zistené nedostatky"). */
+  const cleanupDefectPhotos = useCallback((keys: string[]) => {
+    if (!editing || itemId === null) return;
+    for (const key of keys) {
+      const staging = photoStagingRef.current.get(key);
+      if (!staging) continue;
+      for (const photo of staging.existing) {
+        Inspections.deleteItemPhoto(inspectionId, itemId, photo.id, csrfToken).catch(() => {});
+      }
+      photoStagingRef.current.delete(key);
+    }
+  }, [editing, itemId, inspectionId, csrfToken]);
 
   useEffect(() => {
     if (initialItem) {
@@ -91,13 +119,14 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
       const fromDefects = Array.isArray(f.defects)
         ? (f.defects as PkDefect[]).map((d) => ({
             id: nextId(),
+            defectKey: typeof d.key === 'string' && d.key ? d.key : newDefectKey(),
             description: typeof d.description === 'string' ? d.description : '',
             deadline: typeof d.deadline === 'string' ? d.deadline : '',
           }))
         : [];
       const legacyFromNotes = resultVal === 'zistene_nedostatky' && fromDefects.length === 0 && typeof f.notes === 'string'
         ? f.notes.split('\n').map((l) => l.trim()).filter(Boolean).map((description) => ({
-            id: nextId(), description, deadline: legacyDeadline,
+            id: nextId(), defectKey: newDefectKey(), description, deadline: legacyDeadline,
           }))
         : [];
       setDefects([...fromDefects, ...legacyFromNotes]);
@@ -116,10 +145,12 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   }, [initialItem]);
 
   function addDefect() {
-    setDefects((prev) => [...prev, { id: nextId(), description: '', deadline: '' }]);
+    setDefects((prev) => [...prev, { id: nextId(), defectKey: newDefectKey(), description: '', deadline: '' }]);
     if (defectsError) setDefectsError(null);
   }
   function removeDefect(id: number) {
+    const row = defects.find((d) => d.id === id);
+    if (row) cleanupDefectPhotos([row.defectKey]);
     setDefects((prev) => prev.filter((d) => d.id !== id));
   }
   function updateDefect(id: number, changes: Partial<Pick<DefectRow, 'description' | 'deadline'>>) {
@@ -158,6 +189,8 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
     if (!isPreventive) {
       if (!notes.trim()) { setDefectsError('Doplň text zápisu.'); hasError = true; }
       if (hasError) return;
+      // A plain zápis has no nedostatky to attach photos to.
+      cleanupDefectPhotos(defects.map((d) => d.defectKey));
       setWorkspacesError(null);
       setActivitiesError(null);
       setDefectsError(null);
@@ -178,7 +211,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           itemId: editing ? itemId : null,
           fields,
           csrfToken,
-          photos,
+          photos: [],
         });
         onSaved('save-and-summary');
         toast.success(saveItemMessage(saved, 'Záznam uložený'));
@@ -196,14 +229,23 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
       setActivitiesError('Vyber aspoň jednu vykonanú činnosť alebo pridaj vlastnú pomocou tlačidla +.');
       hasError = true;
     }
-    const cleanedDefects = defects
-      .map((d) => ({ description: d.description.trim(), deadline: d.deadline.trim() || null }))
-      .filter((d) => d.description !== '');
+    const filledDefects = defects.filter((d) => d.description.trim() !== '');
+    const droppedDefectKeys = defects
+      .filter((d) => d.description.trim() === '')
+      .map((d) => d.defectKey);
+    const cleanedDefects = filledDefects.map((d) => ({
+      description: d.description.trim(),
+      deadline: d.deadline.trim() || null,
+      key: d.defectKey,
+    }));
     if (result === 'zistene_nedostatky' && cleanedDefects.length === 0) {
       setDefectsError('Pridaj aspoň jeden nedostatok s popisom.');
       hasError = true;
     }
     if (hasError) return;
+    // Rows with no description never made it into cleanedDefects — drop any
+    // photos they'd already picked up so they don't linger orphaned server-side.
+    if (droppedDefectKeys.length > 0) cleanupDefectPhotos(droppedDefectKeys);
     setWorkspacesError(null);
     setActivitiesError(null);
     setDefectsError(null);
@@ -226,7 +268,11 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
         itemId: editing ? itemId : null,
         fields,
         csrfToken,
-        photos,
+        photos: result === 'zistene_nedostatky'
+          ? filledDefects
+              .map((d) => photoStagingRef.current.get(d.defectKey))
+              .filter((p): p is PhotoStaging => !!p)
+          : [],
       });
       onSaved('save-and-summary');
       toast.success(saveItemMessage(saved, 'Záznam uložený'));
@@ -364,7 +410,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
         <Field label="Výsledok" required>
           {() => (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Výsledok záznamu">
-              <ResultButton value="bez_nedostatkov" active={result === 'bez_nedostatkov'} onClick={() => { setResult('bez_nedostatkov'); setDefects([]); setDefectsError(null); }} />
+              <ResultButton value="bez_nedostatkov" active={result === 'bez_nedostatkov'} onClick={() => { cleanupDefectPhotos(defects.map((d) => d.defectKey)); setResult('bez_nedostatkov'); setDefects([]); setDefectsError(null); }} />
               <ResultButton value="zistene_nedostatky" active={result === 'zistene_nedostatky'} onClick={() => { setResult('zistene_nedostatky'); if (defects.length === 0) addDefect(); }} />
             </div>
           )}
@@ -394,20 +440,40 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
                         <X className="size-3.5" />
                       </button>
                     </div>
-                    <textarea
-                      rows={2}
-                      value={d.description}
-                      onChange={(e) => updateDefect(d.id, { description: e.target.value })}
-                      placeholder="Popis nedostatku (napr. Hasiaci prístroj v Sklade B – chýba kontrolná nálepka.)"
-                      className="w-full rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200"
-                    />
-                    <div className="mt-2">
-                      <Input
-                        type="date"
-                        leftIcon={<Calendar className="size-4" />}
-                        value={d.deadline}
-                        onChange={(e) => updateDefect(d.id, { deadline: e.target.value })}
-                        aria-label="Termín odstránenia"
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                      <div className="min-w-0 flex-1">
+                        <label htmlFor={`pk-defect-desc-${d.id}`} className="mb-1 block text-xs font-medium text-ink-500">
+                          Popis nedostatku
+                        </label>
+                        <textarea
+                          id={`pk-defect-desc-${d.id}`}
+                          rows={2}
+                          value={d.description}
+                          onChange={(e) => updateDefect(d.id, { description: e.target.value })}
+                          placeholder="Napr. Hasiaci prístroj v Sklade B – chýba kontrolná nálepka."
+                          className="w-full rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200"
+                        />
+                      </div>
+                      <div className="shrink-0 sm:w-44">
+                        <label htmlFor={`pk-defect-deadline-${d.id}`} className="mb-1 block text-xs font-medium text-ink-500">
+                          Termín odstránenia
+                        </label>
+                        <Input
+                          id={`pk-defect-deadline-${d.id}`}
+                          type="date"
+                          leftIcon={<Calendar className="size-4" />}
+                          value={d.deadline}
+                          onChange={(e) => updateDefect(d.id, { deadline: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    {/* Indented and tinted so it reads as belonging to this nedostatok
+                        rather than to the item as a whole. */}
+                    <div className="ml-3 mt-3 rounded-xl border border-firol-200 bg-firol-50/50 p-3 sm:ml-6">
+                      <DefectPhotoField
+                        defectKey={d.defectKey}
+                        initialPhotos={initialItem?.photos}
+                        onRegister={registerPhotoStaging}
                       />
                     </div>
                   </div>
@@ -450,8 +516,6 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           )}
         </Field>
 
-        <ItemPhotoField photos={photos} />
-
         {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
             {apiError}
@@ -472,6 +536,33 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
         </div>
       </form>
     </Card>
+  );
+}
+
+/**
+ * Owns the photo staging for one nedostatok and registers it with the parent
+ * form so submit can commit it alongside the item save — `usePhotoStaging`
+ * can't live directly in `PkStep2Form` because the number of nedostatky (and
+ * therefore of staging instances needed) changes as rows are added/removed.
+ */
+function DefectPhotoField({
+  defectKey,
+  initialPhotos,
+  onRegister,
+}: {
+  defectKey: string;
+  initialPhotos: InspectionPhoto[] | undefined;
+  onRegister: (key: string, staging: PhotoStaging) => void;
+}) {
+  const photos = usePhotoStaging(initialPhotos, defectKey);
+  useEffect(() => {
+    onRegister(defectKey, photos);
+  }, [defectKey, photos, onRegister]);
+  return (
+    <ItemPhotoField
+      photos={photos}
+      helpText="Fotky sa pripoja k tomuto nedostatku v prílohe na konci protokolu."
+    />
   );
 }
 
@@ -641,4 +732,5 @@ export const poziarnaKnihaModule: InspectionTypeModule = {
   Step2Form: PkStep2Form,
   ItemRow: PkItemRow,
   StatsBar: PkStatsBar,
+  singleItem: true,
 };

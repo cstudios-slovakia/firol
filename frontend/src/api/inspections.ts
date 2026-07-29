@@ -188,6 +188,8 @@ export const PK_RESULT_LABELS: Record<PkResult, string> = {
 export type PkDefect = {
   description: string;
   deadline: string | null;
+  /** Stable identifier photo documentation attaches to. Optional for backward compat with records saved before per-nedostatok photos. */
+  key?: string;
 };
 
 export type PoziarnaKnihaItemFields = {
@@ -295,6 +297,8 @@ export type TsHadicItemFields = {
 export type InspectionPhoto = {
   id: number;
   item_id: number;
+  /** Which nedostatok (Požiarna kniha) this photo documents — null for whole-item photos. */
+  defect_key: string | null;
   position: number;
   byte_size: number;
   width: number;
@@ -483,9 +487,11 @@ export const Inspections = {
     itemId: number,
     photo: Blob,
     csrfToken: string | null,
+    defectKey?: string | null,
   ) => {
     const form = new FormData();
     form.append('photo', photo, `foto-${Date.now()}.jpg`);
+    if (defectKey) form.append('defect_key', defectKey);
     return api<{ photo: InspectionPhoto }>(
       `/api/inspections/${inspectionId}/items/${itemId}/photos`,
       { method: 'POST', body: form, csrfToken, label: 'Fotka k položke' },

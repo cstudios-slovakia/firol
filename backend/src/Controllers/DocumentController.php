@@ -17,6 +17,7 @@ use Firol\Pdf\PdfRenderer;
 use Firol\Storage\Storage;
 use Firol\Support\Address;
 use Firol\Support\PhotoCaption;
+use Firol\Support\PkDefects;
 
 /**
  * Generates PDF protocols and serves the stored binaries back. Generation
@@ -505,6 +506,12 @@ final class DocumentController
             return [];
         }
 
+        // Požiarna kniha's photos are scoped to a nedostatok, not to the item,
+        // so they are captioned and ordered by nedostatok instead.
+        if ($type === 'poziarna_kniha') {
+            return self::buildPkPhotoAppendix($items, $pathsByItem);
+        }
+
         $appendix = [];
         foreach ($items as $idx => $item) {
             $photos = $pathsByItem[(int) $item['id']] ?? [];
@@ -513,6 +520,61 @@ final class DocumentController
             }
             $caption = PhotoCaption::build($type, $item['fields'] ?? [], $idx + 1);
             foreach ($photos as $photo) {
+                $appendix[] = [
+                    'caption' => $caption,
+                    'path'    => $photo['path'],
+                    'width'   => $photo['width'],
+                    'height'  => $photo['height'],
+                ];
+            }
+        }
+        return $appendix;
+    }
+
+    /**
+     * Appendix entries for Požiarna kniha: its photos hang off a nedostatok
+     * (`defect_key`), so each one is captioned with that nedostatok's number
+     * and description — "Nedostatok č. 2 — …" — and the entries follow the
+     * order of the "Zistené nedostatky" table in the body.
+     *
+     * A photo whose defect_key no longer matches a row (nedostatok deleted
+     * after the photo was taken) is skipped: there is nothing left to caption
+     * it with, and it documents something the protocol no longer reports.
+     *
+     * @param list<array<string, mixed>> $items
+     * @param array<int, list<array{path: string, width: int, height: int, defect_key: ?string}>> $pathsByItem
+     * @return list<array{caption: string, path: string, width: int, height: int}>
+     */
+    private static function buildPkPhotoAppendix(array $items, array $pathsByItem): array
+    {
+        if (!isset($items[0])) {
+            return [];
+        }
+        $fields = $items[0]['fields'] ?? [];
+        // Mirrors the body's gate on the defect table, so photos can never be
+        // numbered against rows the protocol doesn't print.
+        if (!PkDefects::hasDefects($fields)) {
+            return [];
+        }
+
+        $byDefect = [];
+        foreach ($pathsByItem[(int) $items[0]['id']] ?? [] as $photo) {
+            if ($photo['defect_key'] === null) {
+                continue;
+            }
+            $byDefect[$photo['defect_key']][] = $photo;
+        }
+        if ($byDefect === []) {
+            return [];
+        }
+
+        $appendix = [];
+        foreach (PkDefects::rows($fields)['rows'] as $idx => $row) {
+            if ($row['key'] === null) {
+                continue;
+            }
+            $caption = PhotoCaption::buildForDefect($idx + 1, $row['description']);
+            foreach ($byDefect[$row['key']] ?? [] as $photo) {
                 $appendix[] = [
                     'caption' => $caption,
                     'path'    => $photo['path'],

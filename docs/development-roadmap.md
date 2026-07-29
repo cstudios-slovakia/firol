@@ -510,6 +510,16 @@ the numbered priority order). All items are now implemented on branch
   (`ZAT-RRRR-NNN`, 12-month cycle). Single-record document; the template text
   ships in `inspection-types/pokynZatvaTemplate.ts` and is stored *with* the
   document, so revising the default never alters an issued protocol.
+  - ✅ **Follow-up:** Požiarna kniha photos moved from the item as a whole to
+    each individual nedostatok — migration `031` adds a nullable
+    `defect_key` on `inspection_item_photos`, and each nedostatok gets a
+    stable client-generated key (`PkDefect.key`). The photos still go into
+    the shared end-of-protocol appendix like every other type (2.2.2: the
+    body is never touched); only the caption differs — "Nedostatok č. 2 — …"
+    instead of "Položka č. 3 — …". `Firol\Support\PkDefects` derives the
+    numbered defect rows for both the body table and the captions, so the two
+    can't drift. Photo docs no longer exist for "Bez zistených nedostatkov"
+    or a plain zápis — there's no nedostatok to attach them to.
 - ✅ **Vyraďovací protokol** — new inspection type `vyradenie`
   (`VYR-RRRR-NNN`). Non-cyclic: stored with `is_preventive_inspection = 0`
   so it never produces a calendar deadline or supersedes anything.

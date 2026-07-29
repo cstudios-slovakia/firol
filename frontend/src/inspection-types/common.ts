@@ -66,4 +66,10 @@ export type InspectionTypeModule = {
    * vyhovuje/nevyhovuje).
    */
   StatsBar: React.ComponentType<StatsBarProps>;
+  /**
+   * True for types that hold a single record rather than a list of items
+   * (požiarna kniha). Step 2 then drops the item numbering and the
+   * progress dots so the UI doesn't suggest more items can be added.
+   */
+  singleItem?: boolean;
 };

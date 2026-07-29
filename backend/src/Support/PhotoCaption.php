@@ -43,6 +43,24 @@ final class PhotoCaption
         return $caption;
     }
 
+    /**
+     * Požiarna kniha pairs photos with a nedostatok rather than with an item,
+     * so its captions name the nedostatok instead, e.g.
+     *
+     *   "Nedostatok č. 2 — poškodený tesniaci profil na dverách skladu"
+     *
+     * @param int $number 1-based row number in the "Zistené nedostatky" table.
+     */
+    public static function buildForDefect(int $number, string $description): string
+    {
+        $description = trim($description);
+        $caption = 'Nedostatok č. ' . $number;
+        if ($description !== '') {
+            $caption .= ' — ' . $description;
+        }
+        return $caption;
+    }
+
     /** The "which thing is this" half of the caption. */
     private static function identity(string $type, array $fields): string
     {
@@ -70,9 +88,6 @@ final class PhotoCaption
                 self::str($fields, 'hose_type'),
                 self::str($fields, 'location'),
             ],
-            'poziarna_kniha' => [
-                self::str($fields, 'workspaces'),
-            ],
             default => [],
         };
 
@@ -80,29 +95,11 @@ final class PhotoCaption
     }
 
     /**
-     * The "what is wrong with it" half. Požiarna kniha keeps its findings in a
-     * `defects` list rather than a single note, so it gets its own branch.
+     * The "what is wrong with it" half. Požiarna kniha never reaches here —
+     * its photos are captioned per nedostatok by buildForDefect().
      */
     private static function detail(string $type, array $fields): string
     {
-        if ($type === 'poziarna_kniha') {
-            $descriptions = [];
-            $defects = $fields['defects'] ?? [];
-            if (is_array($defects)) {
-                foreach ($defects as $d) {
-                    if (is_array($d) && isset($d['description']) && is_string($d['description'])) {
-                        $desc = trim($d['description']);
-                        if ($desc !== '') {
-                            $descriptions[] = $desc;
-                        }
-                    }
-                }
-            }
-            if ($descriptions !== []) {
-                return implode('; ', $descriptions);
-            }
-        }
-
         if ($type === 'hydranty') {
             $defects = self::str($fields, 'defects');
             if ($defects !== '') {

@@ -11,7 +11,13 @@
  * @var array  $inspector      fullname, certification_number, valid_from, valid_to, signature_data_uri
  * @var array  $items
  * @var array  $stats
+ *
+ * Photos are never part of this body — they are rendered in the shared
+ * "Príloha — Fotodokumentácia" appendix at the end of the PDF (change request
+ * 2.2.2), captioned with the number of the nedostatok they document.
  */
+use Firol\Support\PkDefects;
+
 $h = static fn(?string $v): string => htmlspecialchars((string) ($v ?? '—'), ENT_QUOTES, 'UTF-8');
 $brandColor = $brand['color'] ?? '#E8433A';
 
@@ -44,7 +50,7 @@ $miesto = ($city ? $city . ', ' : '') . $formatDate($inspection['executed_on'] ?
 
 $record = $items[0]['fields'] ?? [];
 $activeSlugs = is_array($record['activities'] ?? null) ? $record['activities'] : [];
-$result = (string) ($record['result'] ?? '');
+$hasDefects = PkDefects::hasDefects($record);
 $workspaces = (string) ($record['workspaces'] ?? '');
 $notes = (string) ($record['notes'] ?? '');
 // A plain fire-book entry (not a preventive inspection) carries no statutory
@@ -81,37 +87,13 @@ foreach ($customActivitiesArr as $ca) {
   $checkedActivities[] = (string) $ca;
 }
 
-// New shape: `defects` is a list of {description, deadline?} — each row
-// renders with its own deadline. Legacy records carry a single
-// `defect_deadline` plus free-text `notes`; we split notes line-by-line
-// and reuse the single deadline so old PDFs still render predictably.
-$legacyDeadline = isset($record['defect_deadline']) && is_string($record['defect_deadline'])
-  ? $record['defect_deadline']
-  : null;
-
-$defectRows = [];
+// Defect rows (and their numbering) come from the shared helper so the photo
+// captions in the appendix reference exactly the numbers printed here.
+$defects = PkDefects::rows($record);
+$defectRows = $defects['rows'];
 // True once the free-text note has been consumed as defect rows (legacy
 // records) so it isn't also printed again in the Poznámka section below.
-$notesUsedAsDefects = false;
-if (isset($record['defects']) && is_array($record['defects']) && $record['defects']) {
-  foreach ($record['defects'] as $d) {
-    if (!is_array($d))
-      continue;
-    $desc = isset($d['description']) && is_string($d['description']) ? trim($d['description']) : '';
-    if ($desc === '')
-      continue;
-    $dl = isset($d['deadline']) && is_string($d['deadline']) ? $d['deadline'] : null;
-    $defectRows[] = ['description' => $desc, 'deadline' => $dl];
-  }
-} elseif ($result === 'zistene_nedostatky') {
-  foreach (array_filter(array_map('trim', explode("\n", $notes))) as $line) {
-    $defectRows[] = ['description' => $line, 'deadline' => $legacyDeadline];
-  }
-  if (!$defectRows && $notes !== '') {
-    $defectRows[] = ['description' => $notes, 'deadline' => $legacyDeadline];
-  }
-  $notesUsedAsDefects = $defectRows !== [];
-}
+$notesUsedAsDefects = $defects['notes_used'];
 
 $contactLine = $facility['contact_person'] ?? '';
 ?>
@@ -435,7 +417,7 @@ $contactLine = $facility['contact_person'] ?? '';
   </table>
 <?php endif ?>
 
-<?php if ($result === 'zistene_nedostatky' && $defectRows): ?>
+<?php if ($hasDefects && $defectRows): ?>
   <h2>Zistené nedostatky</h2>
   <table class="defects">
     <thead>

@@ -33,9 +33,14 @@ export async function saveItemWithPhotos(args: {
   itemId: number | null;
   fields: ItemFields;
   csrfToken: string | null;
-  photos: PhotoStaging;
+  /**
+   * One staging per item (every module except Požiarna kniha), or one per
+   * nedostatok when photos are scoped to individual defects.
+   */
+  photos: PhotoStaging | PhotoStaging[];
 }): Promise<SaveItemResult> {
-  const { inspectionId, itemId, fields, csrfToken, photos } = args;
+  const { inspectionId, itemId, fields, csrfToken } = args;
+  const photosList = Array.isArray(args.photos) ? args.photos : [args.photos];
 
   let queued = false;
   let targetId = itemId;
@@ -58,13 +63,15 @@ export async function saveItemWithPhotos(args: {
 
   let photosFailed = 0;
   if (targetId !== null) {
-    const outcome = await photos.commit(inspectionId, targetId, csrfToken);
-    if (outcome.queued > 0) queued = true;
-    photosFailed = outcome.failed;
-  } else if (photos.total > 0) {
+    for (const photos of photosList) {
+      const outcome = await photos.commit(inspectionId, targetId, csrfToken);
+      if (outcome.queued > 0) queued = true;
+      photosFailed += outcome.failed;
+    }
+  } else {
     // Only reachable if the outbox entry vanished between enqueue and read —
     // report it rather than silently dropping the technician's photos.
-    photosFailed = photos.staged.length;
+    photosFailed = photosList.reduce((sum, p) => sum + (p.total > 0 ? p.staged.length : 0), 0);
   }
 
   return { queued, photosFailed };

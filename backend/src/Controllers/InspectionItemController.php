@@ -475,7 +475,15 @@ final class InspectionItemController
                 if (is_string($rawDl) && $rawDl !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawDl)) {
                     $deadline = $rawDl;
                 }
-                $defects[] = ['description' => $desc, 'deadline' => $deadline];
+                // Stable identifier so photos (change request — photo docs
+                // per nedostatok) stay attached to the same defect across
+                // edits. The client generates one; regenerate it here if a
+                // caller omits or mangles it rather than rejecting the save.
+                $rawKey = $d['key'] ?? null;
+                $key = is_string($rawKey) && preg_match('/^[A-Za-z0-9_-]{1,40}$/', $rawKey)
+                    ? $rawKey
+                    : bin2hex(random_bytes(8));
+                $defects[] = ['description' => $desc, 'deadline' => $deadline, 'key' => $key];
             }
         }
 

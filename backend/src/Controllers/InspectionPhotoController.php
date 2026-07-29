@@ -68,6 +68,17 @@ final class InspectionPhotoController
             Response::error('Nahratie fotky zlyhalo.', 422);
         }
 
+        // Optional — only Požiarna kniha nedostatky send this, to scope the
+        // photo to one defect within the item rather than the item as a
+        // whole. Every other type leaves it NULL (today's behaviour).
+        $defectKey = $_POST['defect_key'] ?? null;
+        if ($defectKey !== null) {
+            $defectKey = trim((string) $defectKey);
+            if ($defectKey === '' || !preg_match('/^[A-Za-z0-9_-]{1,40}$/', $defectKey)) {
+                Response::error('Neplatný identifikátor nedostatku.', 422);
+            }
+        }
+
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
         $mime  = $finfo ? finfo_file($finfo, $tmp) : false;
         if ($finfo) {
@@ -78,9 +89,9 @@ final class InspectionPhotoController
         }
 
         $countStmt = Db::pdo()->prepare(
-            'SELECT COUNT(*) FROM inspection_item_photos WHERE item_id = ?'
+            'SELECT COUNT(*) FROM inspection_item_photos WHERE item_id = ? AND defect_key <=> ?'
         );
-        $countStmt->execute([$itemId]);
+        $countStmt->execute([$itemId, $defectKey]);
         if ((int) $countStmt->fetchColumn() >= self::MAX_PER_ITEM) {
             Response::error(
                 'K položke je možné pripojiť najviac ' . self::MAX_PER_ITEM . ' fotiek.',
@@ -119,13 +130,14 @@ final class InspectionPhotoController
 
             $pdo->prepare(
                 'INSERT INTO inspection_item_photos
-                    (account_id, inspection_id, item_id, position,
+                    (account_id, inspection_id, item_id, defect_key, position,
                      file_path, thumb_path, byte_size, width, height)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             )->execute([
                 $accountId,
                 $inspectionId,
                 $itemId,
+                $defectKey,
                 $position,
                 $relFull,
                 $relThumb,
@@ -146,6 +158,7 @@ final class InspectionPhotoController
                 'id'            => $photoId,
                 'inspection_id' => $inspectionId,
                 'item_id'       => $itemId,
+                'defect_key'    => $defectKey,
                 'position'      => $position,
                 'byte_size'     => $meta['bytes'],
                 'width'         => $meta['width'],
@@ -244,7 +257,7 @@ final class InspectionPhotoController
     public static function byItemForInspection(int $inspectionId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT id, inspection_id, item_id, position, byte_size, width, height, created_at
+            'SELECT id, inspection_id, item_id, defect_key, position, byte_size, width, height, created_at
              FROM   inspection_item_photos
              WHERE  inspection_id = ?
              ORDER  BY item_id ASC, position ASC, id ASC'
@@ -262,12 +275,12 @@ final class InspectionPhotoController
      * Same grouping, but with the absolute file paths the PDF renderer needs
      * to embed the images. Kept separate so paths never leak into JSON.
      *
-     * @return array<int, list<array{path: string, width: int, height: int}>>
+     * @return array<int, list<array{path: string, width: int, height: int, defect_key: ?string}>>
      */
     public static function fullSizePathsByItem(int $inspectionId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT item_id, file_path, width, height
+            'SELECT item_id, defect_key, file_path, width, height
              FROM   inspection_item_photos
              WHERE  inspection_id = ?
              ORDER  BY item_id ASC, position ASC, id ASC'
@@ -284,9 +297,10 @@ final class InspectionPhotoController
                 continue;
             }
             $grouped[(int) $row['item_id']][] = [
-                'path'   => $abs,
-                'width'  => (int) $row['width'],
-                'height' => (int) $row['height'],
+                'path'       => $abs,
+                'width'      => (int) $row['width'],
+                'height'     => (int) $row['height'],
+                'defect_key' => $row['defect_key'] !== null ? (string) $row['defect_key'] : null,
             ];
         }
         return $grouped;
@@ -357,6 +371,7 @@ final class InspectionPhotoController
         return [
             'id'         => (int) $row['id'],
             'item_id'    => (int) $row['item_id'],
+            'defect_key' => isset($row['defect_key']) ? (string) $row['defect_key'] : null,
             'position'   => (int) $row['position'],
             'byte_size'  => (int) $row['byte_size'],
             'width'      => (int) $row['width'],

@@ -120,6 +120,7 @@ export function InspectionStep2Page() {
   }
 
   const FormComponent = module.Step2Form;
+  const singleItem = module.singleItem === true;
 
   return (
     <div className="flex flex-col gap-5">
@@ -133,10 +134,16 @@ export function InspectionStep2Page() {
 
       <header>
         <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">
-          Krok 2 · zadávanie položiek
+          {singleItem ? 'Krok 2 · zadávanie záznamu' : 'Krok 2 · zadávanie položiek'}
         </p>
         <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">
-          {editing ? `Upraviť položku č. ${currentIndex}` : `Položka č. ${currentIndex}`}
+          {singleItem
+            ? editing
+              ? 'Upraviť záznam'
+              : 'Záznam o prehliadke'
+            : editing
+              ? `Upraviť položku č. ${currentIndex}`
+              : `Položka č. ${currentIndex}`}
         </h1>
         <p className="mt-1 flex items-center gap-1.5 text-xs text-ink-500">
           <span className="font-medium text-ink-600">
@@ -151,13 +158,15 @@ export function InspectionStep2Page() {
         </p>
       </header>
 
-      <ProgressDots
-        total={totalForHeader}
-        currentIndex={currentIndex}
-        items={detail.items}
-        editingItemId={itemId}
-        inspectionId={inspectionId}
-      />
+      {!singleItem && (
+        <ProgressDots
+          total={totalForHeader}
+          currentIndex={currentIndex}
+          items={detail.items}
+          editingItemId={itemId}
+          inspectionId={inspectionId}
+        />
+      )}
 
       <FormComponent
         key={editing ? `edit-${itemId}` : `new-${detail.items.length}`}

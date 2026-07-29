@@ -469,9 +469,11 @@ export function autoOptimistic(
 
     if (method === 'POST') {
       const newId = mintTempId();
+      const defectKey = body instanceof FormData ? (body.get('defect_key') as string | null) : null;
       const placeholder: InspectionPhoto = {
         id: newId,
         item_id: itemId,
+        defect_key: defectKey,
         position: 0,
         byte_size: 0,
         width: 0,
