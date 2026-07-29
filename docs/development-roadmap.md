@@ -514,6 +514,10 @@ the numbered priority order). All items are now implemented on branch
   (`VYR-RRRR-NNN`). Non-cyclic: stored with `is_preventive_inspection = 0`
   so it never produces a calendar deadline or supersedes anything.
 - ✅ **2.4 Faster item entry** — autocomplete, "Ďalší rovnaký", PHP type list.
+  (Fixed on 29. 7. 2026: the duplicate seed was read destructively, so
+  StrictMode's double effect blanked the prefilled form in development. The
+  button is now also offered while editing an existing item — it saves the
+  changes and opens a new item carrying the same description.)
 - ✅ **2.5 Calendar** — migration `026`, `CalendarController`, Termíny block.
   (2.5.4 email button omitted — the spec allows a first version without it.)
 - ✅ **3.1 Terms & consent** — migration `030` (`users.terms_accepted_at`,

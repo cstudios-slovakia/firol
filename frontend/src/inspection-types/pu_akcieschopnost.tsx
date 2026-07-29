@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
-import { consumeDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
+import { clearDuplicateSeed, peekDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
 import { saveItemMessage, saveItemWithPhotos } from './saveItem';
 import type {
   InspectionTypeModule,
@@ -70,7 +70,7 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
       // "Ďalší rovnaký": carry kind + manufacturer; identifier/location fresh.
-      const seed = consumeDuplicateSeed<PuAkSeed>(inspectionId);
+      const seed = peekDuplicateSeed<PuAkSeed>(inspectionId);
       setKind(seed?.kind ?? 'dvere');
       setIdentifier('');
       setManufacturer(seed?.manufacturer ?? '');
@@ -126,6 +126,8 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
       if (duplicate) {
         const seed: PuAkSeed = { kind, manufacturer: manufacturer.trim() };
         setDuplicateSeed(inspectionId, seed);
+      } else {
+        clearDuplicateSeed(inspectionId);
       }
       onSaved(action);
       toast.success(saveItemMessage(saved));
@@ -215,13 +217,11 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
-          {!editing && (
-            <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
-              loading={submitting} leftIcon={<CopyPlus className="size-4" />}
-              title="Uloží a predvyplní ďalší uzáver rovnakého druhu a výrobcu.">
-              Ďalší rovnaký
-            </Button>
-          )}
+          <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
+            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            title="Uloží a predvyplní ďalší uzáver rovnakého druhu a výrobcu.">
+            Ďalší rovnaký
+          </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}

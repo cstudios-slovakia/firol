@@ -15,7 +15,7 @@ import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { cn } from '@/lib/cn';
-import { consumeDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
+import { clearDuplicateSeed, peekDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
 import { saveItemMessage, saveItemWithPhotos } from './saveItem';
 import type {
   InspectionTypeModule,
@@ -67,7 +67,7 @@ function VyradenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
       setLocation(typeof f.location === 'string' ? f.location : '');
       setReason(typeof f.reason === 'string' ? f.reason : '');
     } else {
-      const seed = consumeDuplicateSeed<VyradenieSeed>(inspectionId);
+      const seed = peekDuplicateSeed<VyradenieSeed>(inspectionId);
       setManufacturer(seed?.manufacturer ?? '');
       setExtType(seed?.type ?? '');
       setSerial('');
@@ -128,6 +128,8 @@ function VyradenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
           reason: reason.trim(),
         };
         setDuplicateSeed(inspectionId, seed);
+      } else {
+        clearDuplicateSeed(inspectionId);
       }
       onSaved(action);
       toast.success(saveItemMessage(saved));
@@ -225,13 +227,11 @@ function VyradenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
-          {!editing && (
-            <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
-              loading={submitting} leftIcon={<CopyPlus className="size-4" />}
-              title="Uloží a predvyplní ďalšiu položku rovnakými údajmi (okrem výr. čísla a umiestnenia).">
-              Ďalší rovnaký
-            </Button>
-          )}
+          <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
+            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            title="Uloží a predvyplní ďalšiu položku rovnakými údajmi (okrem výr. čísla a umiestnenia).">
+            Ďalší rovnaký
+          </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}

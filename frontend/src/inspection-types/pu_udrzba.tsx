@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
-import { consumeDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
+import { clearDuplicateSeed, peekDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
 import { saveItemMessage, saveItemWithPhotos } from './saveItem';
 import type {
   InspectionTypeModule,
@@ -39,8 +39,12 @@ function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
 }
 
-/** Carried into the next uzáver by "Ďalší rovnaký" — never the identifier. */
-type PuUdSeed = { kind: PuKind; manufacturer: string };
+/**
+ * Carried into the next uzáver by "Ďalší rovnaký": druh, výrobca and the
+ * performed-work text — the same maintenance is typically done on a run of
+ * identical uzávery. The identifier, location and result never carry.
+ */
+type PuUdSeed = { kind: PuKind; manufacturer: string; maintenance_work: string };
 
 function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
@@ -71,14 +75,14 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
       setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
-      // "Ďalší rovnaký": carry kind + manufacturer; identifier/location and the
-      // performed-work text always start fresh.
-      const seed = consumeDuplicateSeed<PuUdSeed>(inspectionId);
+      // "Ďalší rovnaký": carry kind + manufacturer + performed work;
+      // identifier and location always start fresh.
+      const seed = peekDuplicateSeed<PuUdSeed>(inspectionId);
       setKind(seed?.kind ?? 'dvere');
       setIdentifier('');
       setManufacturer(seed?.manufacturer ?? '');
       setLocation('');
-      setMaintenanceWork('');
+      setMaintenanceWork(seed?.maintenance_work ?? '');
       setResult('vyhovuje');
       setNotes('');
     }
@@ -129,8 +133,14 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
         photos,
       });
       if (duplicate) {
-        const seed: PuUdSeed = { kind, manufacturer: manufacturer.trim() };
+        const seed: PuUdSeed = {
+          kind,
+          manufacturer: manufacturer.trim(),
+          maintenance_work: maintenanceWork.trim(),
+        };
         setDuplicateSeed(inspectionId, seed);
+      } else {
+        clearDuplicateSeed(inspectionId);
       }
       onSaved(action);
       toast.success(saveItemMessage(saved));
@@ -234,13 +244,11 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
-          {!editing && (
-            <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
-              loading={submitting} leftIcon={<CopyPlus className="size-4" />}
-              title="Uloží a predvyplní ďalší uzáver rovnakého druhu a výrobcu.">
-              Ďalší rovnaký
-            </Button>
-          )}
+          <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
+            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            title="Uloží a predvyplní ďalší uzáver rovnakého druhu, výrobcu a s rovnakými vykonanými prácami (číslo a umiestnenie ostanú prázdne).">
+            Ďalší rovnaký
+          </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}

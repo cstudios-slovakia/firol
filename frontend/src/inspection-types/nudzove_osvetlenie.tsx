@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
-import { consumeDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
+import { clearDuplicateSeed, peekDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
 import { saveItemMessage, saveItemWithPhotos } from './saveItem';
 import type {
   InspectionTypeModule,
@@ -69,7 +69,7 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
     } else {
       // "Ďalší rovnaký": carry floor + luminaire type + manufacturer; the
       // evidence number, location and measured duration always start fresh.
-      const seed = consumeDuplicateSeed<NoSeed>(inspectionId);
+      const seed = peekDuplicateSeed<NoSeed>(inspectionId);
       setEvidNumber('');
       setFloor(seed?.floor ?? '');
       setLuminaireType(seed?.luminaire_type ?? '');
@@ -132,6 +132,8 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
       if (duplicate) {
         const seed: NoSeed = { floor: floor.trim(), luminaire_type: luminaireType.trim(), manufacturer: manufacturer.trim() };
         setDuplicateSeed(inspectionId, seed);
+      } else {
+        clearDuplicateSeed(inspectionId);
       }
       onSaved(action);
       toast.success(saveItemMessage(saved));
@@ -239,13 +241,11 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
-          {!editing && (
-            <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
-              loading={submitting} leftIcon={<CopyPlus className="size-4" />}
-              title="Uloží a predvyplní ďalšie svietidlo rovnakého typu (evid. číslo a doba svietenia ostanú prázdne).">
-              Ďalšie rovnaké
-            </Button>
-          )}
+          <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
+            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            title="Uloží a predvyplní ďalšie svietidlo rovnakého typu (evid. číslo a doba svietenia ostanú prázdne).">
+            Ďalšie rovnaké
+          </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}

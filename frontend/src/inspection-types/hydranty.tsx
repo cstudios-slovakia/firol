@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
-import { consumeDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
+import { clearDuplicateSeed, peekDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
 import { saveItemMessage, saveItemWithPhotos } from './saveItem';
 import type {
   InspectionTypeModule,
@@ -80,7 +80,7 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
     } else {
       // "Ďalší rovnaký": carry type + hose count only; measured HS/HD/Q and
       // defects/result always start fresh (2.4.2).
-      const seed = consumeDuplicateSeed<HydrantSeed>(inspectionId);
+      const seed = peekDuplicateSeed<HydrantSeed>(inspectionId);
       setHydrantType(seed?.type ?? 'DN52');
       setTypeOther(seed?.type_other ?? '');
       setLocation('');
@@ -153,6 +153,8 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
           hose_count: hoseCount,
         };
         setDuplicateSeed(inspectionId, seed);
+      } else {
+        clearDuplicateSeed(inspectionId);
       }
       onSaved(action);
       toast.success(saveItemMessage(saved));
@@ -266,13 +268,11 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
-          {!editing && (
-            <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
-              loading={submitting} leftIcon={<CopyPlus className="size-4" />}
-              title="Uloží a predvyplní ďalší hydrant rovnakým typom (namerané tlaky a prietok ostanú prázdne).">
-              Ďalší rovnaký
-            </Button>
-          )}
+          <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
+            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            title="Uloží a predvyplní ďalší hydrant rovnakým typom (namerané tlaky a prietok ostanú prázdne).">
+            Ďalší rovnaký
+          </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}

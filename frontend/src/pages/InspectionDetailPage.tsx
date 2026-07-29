@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 import { getTypeModule } from '@/inspection-types';
+import { clearDuplicateSeed } from '@/inspection-types/duplicateSeed';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { ItemPhotoStrip } from '@/components/ItemPhotos';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
@@ -57,6 +58,11 @@ export function InspectionDetailPage() {
   // "Priložiť fotodokumentáciu" (change request 2.2) — on by default, and only
   // shown at all when the inspection actually has photos.
   const [includePhotos, setIncludePhotos] = useState(true);
+
+  // Reaching the summary means the technician left the item-entry flow, so any
+  // pending "Ďalší rovnaký" prefill is dropped — the next item they add starts
+  // from a blank form rather than inheriting an item entered minutes ago.
+  useEffect(() => { clearDuplicateSeed(id); }, [id]);
 
   useEffect(() => {
     let cancelled = false;
