@@ -6,366 +6,205 @@ namespace Firol\Controllers;
 
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
-use Firol\Db;
+use Firol\Backup\BackupException;
+use Firol\Backup\Restorer;
+use Firol\Backup\Writer;
 use Firol\Http\Request;
 use Firol\Http\Response;
-use Firol\Storage\Storage;
-use Firol\Support\Address;
-use PDO;
+use Firol\Support\AccountPurge;
+use Throwable;
 
 /**
- * Bulk data operations: purge sections (companies / inspections / trainings)
- * and full-account JSON export. All mutations are scoped to the active tenant.
+ * Bulk data operations for the active tenant: the full-account backup archive
+ * (download + restore) and the sectional purges.
+ *
+ * The backup is a .zip — manifest JSON plus the actual photo, protocol and
+ * signature files. It used to be bare JSON that referenced photos by download
+ * URL, which meant a backup taken before a database wipe pointed at files that
+ * were no longer there. See {@see \Firol\Backup\Archive} for the layout.
  */
 final class DataController
 {
-    /**
-     * Wipes all companies (+ facilities, inspections, trainings, documents).
-     * FK cascades handle child rows; we handle document files on disk.
-     */
+    /** Wipes all companies (+ facilities, inspections, trainings, documents). */
     public static function purgeCompanies(Request $req): void
     {
         Csrf::require($req);
-        $accountId = Tenant::currentAccountId();
-        $pdo = Db::pdo();
-
-        $s = $pdo->prepare('SELECT COUNT(*) FROM companies WHERE account_id = ?');
-        $s->execute([$accountId]);
-        $count = (int) $s->fetchColumn();
-
-        // Collect file paths before deletion
-        $docPaths = self::docPathsForAccount($accountId, $pdo);
-        $traineePaths = self::traineeSignaturePathsForAccount($accountId, $pdo);
-
-        $photoPaths = self::photoPathsForAccount($accountId, $pdo);
-
-        // Remove documents rows first (no FK to inspections/trainings)
-        $pdo->prepare('DELETE FROM documents WHERE account_id = ?')->execute([$accountId]);
-
-        // Remove companies — FK cascades delete facilities, inspections,
-        // inspection_items, inspection_item_photos, trainings and trainees
-        // automatically.
-        $pdo->prepare('DELETE FROM companies WHERE account_id = ?')->execute([$accountId]);
-
-        self::unlinkFiles(array_merge($docPaths, $traineePaths, $photoPaths));
-
-        // Also clean up empty document year directories
-        self::pruneDocumentDirs($accountId);
-        self::prunePhotoDirs($accountId);
-
-        Response::json(['deleted' => $count]);
+        Response::json(['deleted' => AccountPurge::everything(Tenant::currentAccountId())]);
     }
 
-    /**
-     * Wipes all inspections (+ items + inspection documents) for the account.
-     * Companies, facilities, and trainings are preserved.
-     */
+    /** Wipes all inspections (+ items + photos + inspection protocols). */
     public static function purgeInspections(Request $req): void
     {
         Csrf::require($req);
-        $accountId = Tenant::currentAccountId();
-        $pdo = Db::pdo();
-
-        $s = $pdo->prepare('SELECT COUNT(*) FROM inspections WHERE account_id = ?');
-        $s->execute([$accountId]);
-        $count = (int) $s->fetchColumn();
-
-        $docStmt = $pdo->prepare("SELECT file_path FROM documents WHERE account_id = ? AND parent_type = 'inspection'");
-        $docStmt->execute([$accountId]);
-        $docPaths = $docStmt->fetchAll(PDO::FETCH_COLUMN);
-
-        $photoPaths = self::photoPathsForAccount($accountId, $pdo);
-
-        $pdo->prepare("DELETE FROM documents WHERE account_id = ? AND parent_type = 'inspection'")->execute([$accountId]);
-        // inspection_items — and their photos — cascade automatically when
-        // inspections are deleted; the files on disk are ours to remove.
-        $pdo->prepare('DELETE FROM inspections WHERE account_id = ?')->execute([$accountId]);
-
-        self::unlinkFiles(array_merge($docPaths, $photoPaths));
-        self::pruneDocumentDirs($accountId);
-        self::prunePhotoDirs($accountId);
-
-        Response::json(['deleted' => $count]);
+        Response::json(['deleted' => AccountPurge::inspections(Tenant::currentAccountId())]);
     }
 
-    /**
-     * Wipes all trainings (+ trainees + training documents) for the account.
-     * Companies, facilities, and inspections are preserved.
-     */
+    /** Wipes all trainings (+ trainees + training protocols). */
     public static function purgeTrainings(Request $req): void
     {
         Csrf::require($req);
-        $accountId = Tenant::currentAccountId();
-        $pdo = Db::pdo();
-
-        $s = $pdo->prepare('SELECT COUNT(*) FROM trainings WHERE account_id = ?');
-        $s->execute([$accountId]);
-        $count = (int) $s->fetchColumn();
-
-        $docStmt = $pdo->prepare("SELECT file_path FROM documents WHERE account_id = ? AND parent_type = 'training'");
-        $docStmt->execute([$accountId]);
-        $docPaths = $docStmt->fetchAll(PDO::FETCH_COLUMN);
-
-        $traineePaths = self::traineeSignaturePathsForAccount($accountId, $pdo);
-
-        $pdo->prepare("DELETE FROM documents WHERE account_id = ? AND parent_type = 'training'")->execute([$accountId]);
-        // trainees cascade automatically when trainings are deleted
-        $pdo->prepare('DELETE FROM trainings WHERE account_id = ?')->execute([$accountId]);
-
-        self::unlinkFiles(array_merge($docPaths, $traineePaths));
-        self::pruneDocumentDirs($accountId);
-
-        Response::json(['deleted' => $count]);
+        Response::json(['deleted' => AccountPurge::trainings(Tenant::currentAccountId())]);
     }
 
     /**
-     * Streams a full-account JSON export (companies, inspections, trainings
-     * with all child records). Does NOT include generated PDFs or signatures —
-     * those are accessible through the normal download endpoints.
+     * Streams the account backup archive.
+     *
+     * `?photos=0` / `?documents=0` leave those files out for a quick
+     * data-only snapshot; both default to on, because a backup that silently
+     * omits things is the failure mode this whole feature exists to fix.
      */
     public static function exportData(Request $req): void
     {
         $accountId = Tenant::currentAccountId();
-        $pdo = Db::pdo();
 
-        $accStmt = $pdo->prepare('SELECT id, invoice_company_name FROM accounts WHERE id = ?');
-        $accStmt->execute([$accountId]);
-        $acc = $accStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $withPhotos    = $req->query('photos') !== '0';
+        $withDocuments = $req->query('documents') !== '0';
 
-        // ── Companies + Facilities ─────────────────────────────────────────────
-        $compStmt = $pdo->prepare(
-            'SELECT id, name, ico, street, postal_code, city, contact, approver, created_at
-             FROM   companies WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
-        );
-        $compStmt->execute([$accountId]);
-        $companies = array_map([self::class, 'withCombinedAddress'], $compStmt->fetchAll(PDO::FETCH_ASSOC));
+        // Archiving a large photo library takes as long as it takes, and the
+        // client is waiting on a file — don't let PHP's default time limit cut
+        // a backup in half.
+        @set_time_limit(0);
 
-        $facStmt = $pdo->prepare(
-            'SELECT id, company_id, name, street, postal_code, city, contact_person, notes, created_at
-             FROM   facilities WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
-        );
-        $facStmt->execute([$accountId]);
-        $facByCompany = [];
-        foreach ($facStmt->fetchAll(PDO::FETCH_ASSOC) as $f) {
-            $facByCompany[(int) $f['company_id']][] = self::withCombinedAddress($f);
-        }
-        foreach ($companies as &$c) {
-            $c['id'] = (int) $c['id'];
-            $c['facilities'] = $facByCompany[$c['id']] ?? [];
-        }
-        unset($c);
-
-        // ── Inspections + Items ────────────────────────────────────────────────
-        $insStmt = $pdo->prepare(
-            'SELECT i.id, i.company_id, c.name AS company_name,
-                    i.facility_id, f.name AS facility_name,
-                    i.type, i.periodicity_months, i.executed_on,
-                    i.status, i.notes, i.created_at
-             FROM   inspections i
-             JOIN   companies  c ON c.id = i.company_id
-             JOIN   facilities f ON f.id = i.facility_id
-             WHERE  i.account_id = ? AND i.archived_at IS NULL
-             ORDER  BY COALESCE(i.executed_on, i.created_at) DESC, i.id DESC'
-        );
-        $insStmt->execute([$accountId]);
-        $inspections = $insStmt->fetchAll(PDO::FETCH_ASSOC);
-
-        if (!empty($inspections)) {
-            $insIds = implode(',', array_map(static fn($i) => (int) $i['id'], $inspections));
-            $itemStmt = $pdo->query(
-                "SELECT id, inspection_id, position, fields FROM inspection_items
-                 WHERE  inspection_id IN ($insIds) ORDER BY inspection_id, position"
-            );
-            // Photo documentation (change request 2.2). The bytes stay out of
-            // the JSON — a few hundred MB of base64 would make the export
-            // unusable — but every photo is listed with the authenticated URL
-            // it can be downloaded from, so nothing the technician recorded is
-            // invisible in their own export.
-            $photoStmt = $pdo->query(
-                "SELECT id, inspection_id, item_id, position, byte_size, width, height, created_at
-                 FROM   inspection_item_photos
-                 WHERE  inspection_id IN ($insIds)
-                 ORDER  BY item_id, position, id"
-            );
-            $photosByItem = [];
-            foreach ($photoStmt->fetchAll(PDO::FETCH_ASSOC) as $photo) {
-                $photosByItem[(int) $photo['item_id']][] = [
-                    'id'           => (int) $photo['id'],
-                    'position'     => (int) $photo['position'],
-                    'byte_size'    => (int) $photo['byte_size'],
-                    'width'        => (int) $photo['width'],
-                    'height'       => (int) $photo['height'],
-                    'created_at'   => $photo['created_at'],
-                    'download_url' => '/api/inspections/' . (int) $photo['inspection_id']
-                        . '/items/' . (int) $photo['item_id']
-                        . '/photos/' . (int) $photo['id'],
-                ];
-            }
-
-            $itemsByIns = [];
-            foreach ($itemStmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
-                $item['fields'] = json_decode((string) $item['fields'], true);
-                $item['photos'] = $photosByItem[(int) $item['id']] ?? [];
-                $itemsByIns[(int) $item['inspection_id']][] = $item;
-            }
-            foreach ($inspections as &$ins) {
-                $ins['id'] = (int) $ins['id'];
-                $ins['items'] = $itemsByIns[$ins['id']] ?? [];
-            }
-            unset($ins);
+        try {
+            $archive = Writer::build($accountId, $withPhotos, $withDocuments);
+        } catch (Throwable $e) {
+            error_log('[backup.export] ' . $e->getMessage());
+            Response::error('Zálohu sa nepodarilo vytvoriť. Skús to znova.', 500);
         }
 
-        // ── Trainings + Trainees ───────────────────────────────────────────────
-        $tStmt = $pdo->prepare(
-            'SELECT t.id, t.company_id, c.name AS company_name,
-                    t.facility_id, f.name AS facility_name,
-                    t.type, t.date, t.topics, t.duration_min, t.status, t.created_at
-             FROM   trainings t
-             JOIN   companies  c ON c.id = t.company_id
-             LEFT JOIN facilities f ON f.id = t.facility_id
-             WHERE  t.account_id = ? AND t.archived_at IS NULL
-             ORDER  BY COALESCE(t.date, t.created_at) DESC, t.id DESC'
-        );
-        $tStmt->execute([$accountId]);
-        $trainings = $tStmt->fetchAll(PDO::FETCH_ASSOC);
-
-        if (!empty($trainings)) {
-            $tIds = implode(',', array_map(static fn($t) => (int) $t['id'], $trainings));
-            $traineeStmt = $pdo->query(
-                "SELECT id, training_id, fullname, position, signed_at
-                 FROM   trainees WHERE training_id IN ($tIds) ORDER BY training_id, id"
-            );
-            $traineesByT = [];
-            foreach ($traineeStmt->fetchAll(PDO::FETCH_ASSOC) as $tr) {
-                $traineesByT[(int) $tr['training_id']][] = $tr;
-            }
-            foreach ($trainings as &$t) {
-                $t['id'] = (int) $t['id'];
-                $t['trainees'] = $traineesByT[$t['id']] ?? [];
-            }
-            unset($t);
+        // Keep streaming even if the browser looks gone, so the temp file is
+        // always unlinked below rather than left behind on the first flaky
+        // mobile connection.
+        ignore_user_abort(true);
+        while (ob_get_level() > 0) {
+            ob_end_clean();
         }
 
-        $payload = [
-            'exported_at' => date('c'),
-            'version'     => 1,
-            'account'     => [
-                'id'   => (int) ($acc['id'] ?? $accountId),
-                'name' => $acc['invoice_company_name'] ?? null,
-            ],
-            'companies'   => $companies,
-            'inspections' => $inspections,
-            'trainings'   => $trainings,
-        ];
-
-        $filename = 'firol-export-' . date('Y-m-d') . '.json';
-        header('Content-Type: application/json; charset=utf-8');
-        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Type: application/zip');
+        header('Content-Disposition: attachment; filename="' . $archive['filename'] . '"');
+        header('Content-Length: ' . (string) filesize($archive['path']));
         header('Cache-Control: no-store');
-        echo json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        header('X-Content-Type-Options: nosniff');
+
+        $handle = fopen($archive['path'], 'rb');
+        if (is_resource($handle)) {
+            // Chunked rather than readfile() so a multi-GB archive never has to
+            // fit in memory_limit.
+            while (!feof($handle)) {
+                echo (string) fread($handle, 1 << 20);
+                flush();
+            }
+            fclose($handle);
+        }
+        @unlink($archive['path']);
         exit;
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────────
-
-    /** @return list<string> */
-    private static function docPathsForAccount(int $accountId, \PDO $pdo): array
-    {
-        $s = $pdo->prepare('SELECT file_path FROM documents WHERE account_id = ?');
-        $s->execute([$accountId]);
-        return $s->fetchAll(PDO::FETCH_COLUMN);
-    }
-
-    /** @return list<string> */
     /**
-     * Every stored photo derivative for the account (change request 2.2).
-     * The DB rows cascade away with their inspections, but the files on disk
-     * do not — and photos are by far the largest thing an account stores, so
-     * leaving them behind would quietly defeat the purge.
+     * Restores a backup archive into the active account.
      *
-     * @return list<string>
+     * multipart/form-data: `file` (.zip, or a legacy .json export) and `mode`
+     * — `merge` (default, additive) or `replace` (wipe the account's data
+     * first, then write the backup back in whole).
      */
-    private static function photoPathsForAccount(int $accountId, \PDO $pdo): array
+    public static function restoreData(Request $req): void
     {
-        $s = $pdo->prepare(
-            'SELECT file_path, thumb_path FROM inspection_item_photos WHERE account_id = ?'
-        );
-        $s->execute([$accountId]);
-        $paths = [];
-        foreach ($s->fetchAll() as $row) {
-            $paths[] = (string) $row['file_path'];
-            $paths[] = (string) $row['thumb_path'];
-        }
-        return $paths;
-    }
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $userId    = Tenant::currentUserId();
 
-    /** Drop the account's now-empty photo directories. */
-    private static function prunePhotoDirs(int $accountId): void
-    {
-        $baseDir = Storage::root() . '/photos/' . $accountId;
-        if (!is_dir($baseDir)) return;
-        foreach (glob($baseDir . '/*', GLOB_ONLYDIR) ?: [] as $inspectionDir) {
-            if (empty(glob($inspectionDir . '/*') ?: [])) {
-                @rmdir($inspectionDir);
-            }
-        }
-        if (empty(glob($baseDir . '/*') ?: [])) {
-            @rmdir($baseDir);
-        }
-    }
+        $mode = ($_POST['mode'] ?? Restorer::MODE_MERGE) === Restorer::MODE_REPLACE
+            ? Restorer::MODE_REPLACE
+            : Restorer::MODE_MERGE;
 
-    /** @return list<string> */
-    private static function traineeSignaturePathsForAccount(int $accountId, \PDO $pdo): array
-    {
-        $s = $pdo->prepare(
-            'SELECT tr.signature_path FROM trainees tr
-             JOIN   trainings t ON t.id = tr.training_id
-             WHERE  t.account_id = ? AND tr.signature_path IS NOT NULL'
-        );
-        $s->execute([$accountId]);
-        return $s->fetchAll(PDO::FETCH_COLUMN);
-    }
+        $upload = self::takeUpload();
 
-    /** @param list<mixed> $paths */
-    private static function unlinkFiles(array $paths): void
-    {
-        $root = Storage::root();
-        foreach ($paths as $rel) {
-            if (!is_string($rel) || $rel === '') continue;
-            $abs = $root . '/' . $rel;
-            if (is_file($abs)) {
-                @unlink($abs);
-            }
-        }
-    }
+        @set_time_limit(0);
 
-    private static function pruneDocumentDirs(int $accountId): void
-    {
-        $baseDir = Storage::root() . '/documents/' . $accountId;
-        if (!is_dir($baseDir)) return;
-        foreach (glob($baseDir . '/*', GLOB_ONLYDIR) ?: [] as $yearDir) {
-            $files = glob($yearDir . '/*') ?: [];
-            if (empty($files)) {
-                @rmdir($yearDir);
-            }
+        // Response::* exits, which skips `finally` — so the temp copy is
+        // removed on every branch explicitly rather than in one place.
+        try {
+            $result = Restorer::run($accountId, $userId, $upload, $mode);
+        } catch (BackupException $e) {
+            // The user picked the wrong file, or one we can't read — say so.
+            @unlink($upload);
+            Response::error($e->getMessage(), 422);
+        } catch (Throwable $e) {
+            @unlink($upload);
+            error_log('[backup.restore] ' . $e::class . ': ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+            Response::error('Obnova zlyhala: ' . $e->getMessage(), 500);
         }
-        $remaining = glob($baseDir . '/*') ?: [];
-        if (empty($remaining)) {
-            @rmdir($baseDir);
-        }
+
+        @unlink($upload);
+        Response::json($result + ['mode' => $mode]);
     }
 
     /**
-     * Collapses the split address columns into a single `address` field so the
-     * export keeps the same shape the import expects.
-     *
-     * @param array<string, mixed> $row
-     * @return array<string, mixed>
+     * Validates the upload and moves it somewhere we control, returning the
+     * absolute path. Moved off the PHP temp dir because a restore can run for
+     * minutes and the request's temp file is only guaranteed for its lifetime.
      */
-    private static function withCombinedAddress(array $row): array
+    private static function takeUpload(): string
     {
-        $row['address'] = Address::format($row['street'] ?? null, $row['postal_code'] ?? null, $row['city'] ?? null);
-        unset($row['street'], $row['postal_code'], $row['city']);
-        return $row;
+        // An upload larger than post_max_size arrives with empty $_POST AND
+        // empty $_FILES, and PHP raises no error of its own — without this the
+        // user would just see "nahraj súbor" for a file they clearly picked.
+        if (($_SERVER['CONTENT_LENGTH'] ?? 0) > 0 && $_POST === [] && $_FILES === []) {
+            Response::error(
+                'Súbor je väčší, než server dovoľuje nahrať (limit ' . self::uploadLimit() . '). '
+                . 'Vyexportuj zálohu bez fotiek alebo bez PDF protokolov, alebo požiadaj o zvýšenie limitu.',
+                413,
+            );
+        }
+
+        $file = $_FILES['file'] ?? null;
+        $error = is_array($file) ? (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE) : UPLOAD_ERR_NO_FILE;
+
+        if ($error === UPLOAD_ERR_INI_SIZE || $error === UPLOAD_ERR_FORM_SIZE) {
+            Response::error(
+                'Súbor je väčší, než server dovoľuje nahrať (limit ' . self::uploadLimit() . ').',
+                413,
+            );
+        }
+        if (!is_array($file) || $error !== UPLOAD_ERR_OK) {
+            Response::error('Nahraj .zip súbor so zálohou.', 422);
+        }
+
+        $tmp = (string) ($file['tmp_name'] ?? '');
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            Response::error('Nahrávanie zlyhalo.', 422);
+        }
+
+        $extension = strtolower(pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION));
+        if (!in_array($extension, ['zip', 'json'], true)) {
+            Response::error('Očakávam .zip zálohu (alebo starší .json export).', 422);
+        }
+
+        $destination = \Firol\Storage\Storage::tempDir()
+            . '/restore-' . bin2hex(random_bytes(8)) . '.' . $extension;
+        if (!move_uploaded_file($tmp, $destination)) {
+            Response::error('Nahraný súbor sa nepodarilo uložiť.', 500);
+        }
+        return $destination;
+    }
+
+    /** The effective ceiling, so the error message names a real number. */
+    private static function uploadLimit(): string
+    {
+        $upload = (string) ini_get('upload_max_filesize');
+        $post   = (string) ini_get('post_max_size');
+        return self::toBytes($upload) <= self::toBytes($post) ? $upload : $post;
+    }
+
+    private static function toBytes(string $value): int
+    {
+        $value = trim($value);
+        $number = (int) $value;
+        return match (strtolower(substr($value, -1))) {
+            'g'     => $number * 1024 * 1024 * 1024,
+            'm'     => $number * 1024 * 1024,
+            'k'     => $number * 1024,
+            default => $number,
+        };
     }
 }

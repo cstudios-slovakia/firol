@@ -37,9 +37,18 @@ RUN apt-get update \
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
+# Upload limits are sized for the account backup archive (Settings → Správa
+# dát → Obnova zo zálohy), which carries every photo and PDF an account owns.
+# PHP's 2M default would reject any real backup. These are PHP_INI_PERDIR, so
+# they cannot be raised from code at request time — production sets the same
+# values via php_value in frontend/public/.htaccess.
 RUN { \
         echo 'memory_limit=512M'; \
         echo 'date.timezone=Europe/Bratislava'; \
+        echo 'upload_max_filesize=1024M'; \
+        echo 'post_max_size=1024M'; \
+        echo 'max_execution_time=900'; \
+        echo 'max_input_time=900'; \
     } > /usr/local/etc/php/conf.d/firol.ini
 
 WORKDIR /var/www/backend

@@ -178,6 +178,7 @@ $router->post('/api/trainings/{id}/generate-pdf',   [DocumentController::class, 
 $router->get('/api/trainings/{id}/documents',       [DocumentController::class, 'indexForTraining']);
 
 $router->get('/api/account/export',                [DataController::class, 'exportData']);
+$router->post('/api/account/restore',              [DataController::class, 'restoreData']);
 $router->delete('/api/account/data/companies',   [DataController::class, 'purgeCompanies']);
 $router->delete('/api/account/data/inspections', [DataController::class, 'purgeInspections']);
 $router->delete('/api/account/data/trainings',   [DataController::class, 'purgeTrainings']);

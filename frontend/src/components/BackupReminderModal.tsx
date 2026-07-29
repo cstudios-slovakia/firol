@@ -70,9 +70,10 @@ export function BackupReminderModal({ onProceed, onCancel }: Props) {
                 {/* Body */}
                 <div className="px-5 py-4">
                     <p className="text-sm text-ink-700">
-                        Stiahni si zálohu svojich dát — firmy, kontroly a
-                        školenia ako JSON súbor. Ak sa niečo pokazí, vieme z
-                        neho dáta obnoviť.
+                        Stiahni si zálohu účtu — firmy, kontroly a školenia
+                        vrátane fotiek a PDF protokolov, v jednom .zip archíve.
+                        Ak sa niečo pokazí, obnovíš z neho účet v Nastavenia →
+                        Správa dát.
                     </p>
                     {downloaded && (
                         <p className="mt-2 text-xs font-medium text-emerald-700">

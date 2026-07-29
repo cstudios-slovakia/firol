@@ -31,6 +31,11 @@ final class Storage
             if (!mkdir($path, 0775, true) && !is_dir($path)) {
                 throw new \RuntimeException("Cannot create dir: $path");
             }
+            // mkdir()'s mode is masked by the process umask (022 by default),
+            // which strips exactly the group-write bit the line above is for —
+            // so whichever of php-fpm/CLI created the directory first would own
+            // it outright and lock the other one out. chmod is not masked.
+            @chmod($path, 0775);
         }
     }
 
@@ -143,6 +148,20 @@ final class Storage
             }
         }
         @rmdir($dir);
+    }
+
+    /**
+     * Scratch directory for files we build then stream and delete — currently
+     * the account backup .zip. Inside the storage root (not sys_get_temp_dir)
+     * because a full backup can be hundreds of MB and shared hosting often
+     * puts /tmp on a small tmpfs; here it shares the same disk the photos it
+     * archives already live on.
+     */
+    public static function tempDir(): string
+    {
+        $dir = self::root() . '/tmp';
+        self::ensureDir($dir);
+        return $dir;
     }
 
     /**

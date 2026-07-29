@@ -523,6 +523,8 @@ the numbered priority order). All items are now implemented on branch
   never pre-ticked declaration gates the register button; a version mismatch
   raises the "new version" notice after login (`<TermsUpdateNotice>`).
 - ✅ **3.2 Data export** — verified, plus photos are now listed in the export.
+  (Superseded on 29. 7. 2026 — the export is a `.zip` carrying the actual
+  photo/PDF bytes and has a restore path; see "Backup archive & restore".)
 - ✅ **3.3 Landing page** — `landing-page.html` swapped.
 
 New company field `approver` ("schvaľujúca osoba", migration `029`) feeds the
@@ -534,6 +536,61 @@ redirect targeted a directory only the script itself created — see
 because an `ext-install` between `ext-configure gd` and `ext-install gd`
 deleted the configured source tree. `backend/db/prune.php` enforces the
 12-month log retention the privacy policy publishes.
+
+---
+
+## Backup archive & restore (29. 7. 2026) ✅
+
+The account export was JSON, and listed photos by *download URL* — so a backup
+taken before a database wipe pointed at files that no longer existed, and there
+was no import path for it at all (the Excel import is a different feature: bulk
+data entry, not disaster recovery). Both halves are now real.
+
+- **Export** is a `.zip` (`Firol\Backup\Writer`, layout documented on
+  `Firol\Backup\Archive`): `backup.json` manifest plus the actual bytes —
+  photos with their thumbnails, generated PDF protocols, trainee signatures.
+  Entries are keyed by original row id, not by storage path, because a restore
+  mints new ids and new paths anyway. Files are added straight off disk and
+  stored uncompressed (`CM_STORE`) — JPEG/PDF don't deflate, and re-deflating
+  them would make a large export crawl. Manifest version `2`; the response is
+  streamed in 1 MB chunks from a temp file under `storage/tmp/`, so RSS is flat
+  regardless of archive size.
+  `?photos=0` / `?documents=0` (checkboxes in the UI) drop those files for a
+  quick data-only snapshot; the UI names what such a backup will not restore.
+- **Restore** — `POST /api/account/restore`, `Firol\Backup\Restorer`. Two
+  modes, chosen by the user: **merge** (additive; a record already present is
+  skipped along with everything under it, so re-running is a no-op) and
+  **replace** (purge the account's data + files first, then write the backup
+  back in whole — the DB-wipe path). Merge keys: IČO (else name) for companies,
+  name for facilities, `facility|type|executed_on|created_at` for inspections,
+  `company|type|date|created_at` for trainings, `number` for documents.
+- Ids are never reused — old → new maps remap every FK, and
+  `source_inspection_id` is relinked in a second pass once all ids exist. What
+  *is* preserved verbatim: `created_at`, the record dates, and **document
+  numbers** (they're printed on protocols already in clients' hands).
+  `document_sequences` is bumped past every restored number, or the next
+  generated PDF would collide with the unique key on `(account, number)`.
+- Files are written inside the same try as the DB writes: a failure rolls back
+  *and* unlinks everything already written, so a failed restore leaves neither
+  orphaned rows nor orphaned files.
+- Legacy bare-`.json` v1 exports are still accepted (data only — that format
+  never carried bytes). Its combined `address` is split through
+  `Address::parse`, and missing `created_at` falls back to the record's own
+  date rather than `now()`, so re-uploading the same file stays idempotent.
+- The export now covers only what it can restore: protocols whose parent
+  inspection/training is archived or gone are excluded, so the counts in and
+  out match instead of looking like data loss.
+- `AccountPurge` (extracted from `DataController`) is the single wipe used by
+  both the Danger-zone purges and replace-mode restore.
+
+Ops changes alongside: PHP `upload_max_filesize` / `post_max_size` raised to
+1 GB (`docker/php/Dockerfile` for dev, `php_value` in
+`frontend/public/.htaccess` for prod — these are `PHP_INI_PERDIR` and cannot be
+set from code), nginx `client_max_body_size` to match, and `storage/tmp` is
+created + swept by `deploy.yml`. `Storage::ensureDir` now `chmod`s after
+`mkdir`, because the umask was stripping exactly the group-write bit the 0775
+was there for — whichever of php-fpm/CLI created a directory first would
+otherwise lock the other one out.
 
 ---
 

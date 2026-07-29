@@ -27,6 +27,17 @@ php_value memory_limit 256M
 # base64-encoded logo + signature, so bump it.
 php_value pcre.backtrack_limit 5000000
 
+# Account backup restore (Nastavenia → Správa dát → Obnova zo zálohy) uploads
+# one .zip holding every photo and PDF the account owns. The 2M default would
+# reject any real backup, and these are PHP_INI_PERDIR — they cannot be raised
+# from code, only here. The web server may impose its own body-size cap on top
+# (LimitRequestBody / client_max_body_size); if a large restore fails with a
+# 413 before PHP is reached, that is the knob to raise on the server.
+php_value upload_max_filesize 1024M
+php_value post_max_size 1024M
+php_value max_execution_time 900
+php_value max_input_time 900
+
 # API → PHP entry point
 
 RewriteRule ^api(/.*)?$ api.php [L,QSA]
