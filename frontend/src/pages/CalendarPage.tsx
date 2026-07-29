@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle, CalendarDays, CalendarPlus, ChevronLeft, ChevronRight,
   Pencil, Plus, Trash2, X,
@@ -16,7 +16,7 @@ import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import { useConfirm } from '@/lib/confirm';
 import {
-  daysUntil,
+  companiesForDay,
   effectiveDate,
   groupByFacility,
   type FacilityDeadlineGroup,
@@ -39,6 +39,10 @@ function iso(d: Date): string {
 function todayIso(): string {
   return iso(new Date());
 }
+/** `?den=YYYY-MM-DD` deep link (from the dashboard "Termíny" block). */
+function dayFromParam(value: string | null): string {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : todayIso();
+}
 
 /**
  * Calendar (change request 2.5). Monthly view that projects computed statutory
@@ -56,10 +60,15 @@ export function CalendarPage() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loaded, setLoaded] = useState(false);
 
-  const now = new Date();
-  const [viewYear, setViewYear] = useState(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState(now.getMonth());
-  const [selected, setSelected] = useState<string>(todayIso());
+  // Open on the day passed in the URL (deep link from the dashboard), else today.
+  const [searchParams] = useSearchParams();
+  const dayParam = searchParams.get('den');
+  const initialDay = dayFromParam(dayParam);
+  const initialDate = new Date(initialDay + 'T00:00:00');
+
+  const [viewYear, setViewYear] = useState(initialDate.getFullYear());
+  const [viewMonth, setViewMonth] = useState(initialDate.getMonth());
+  const [selected, setSelected] = useState<string>(initialDay);
   const [showEventForm, setShowEventForm] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
 
@@ -76,6 +85,16 @@ export function CalendarPage() {
   }
   useEffect(() => { void reload(); }, []);
 
+  // Follow the URL when it changes while the page stays mounted.
+  useEffect(() => {
+    if (!dayParam) return;
+    const day = dayFromParam(dayParam);
+    const d = new Date(day + 'T00:00:00');
+    setViewYear(d.getFullYear());
+    setViewMonth(d.getMonth());
+    setSelected(day);
+  }, [dayParam]);
+
   // Index deadlines (by their effective day) and events by ISO day.
   const byDay = useMemo(() => {
     const m = new Map<string, { deadlines: CalendarDeadline[]; events: CalendarEvent[] }>();
@@ -90,6 +109,17 @@ export function CalendarPage() {
   }, [deadlines, events]);
 
   const weeks = useMemo(() => buildMonthGrid(viewYear, viewMonth), [viewYear, viewMonth]);
+
+  // Mobile agenda: the days of the viewed month that carry anything, ascending.
+  const monthDays = useMemo(() => {
+    const rows: { day: string; deadlines: CalendarDeadline[]; events: CalendarEvent[] }[] = [];
+    for (const [day, info] of byDay) {
+      const d = new Date(day + 'T00:00:00');
+      if (d.getFullYear() !== viewYear || d.getMonth() !== viewMonth) continue;
+      rows.push({ day, deadlines: info.deadlines, events: info.events });
+    }
+    return rows.sort((a, b) => a.day.localeCompare(b.day));
+  }, [byDay, viewYear, viewMonth]);
 
   function shiftMonth(delta: number) {
     const d = new Date(viewYear, viewMonth + delta, 1);
@@ -155,7 +185,15 @@ export function CalendarPage() {
           </button>
         </div>
 
-        <div className="grid grid-cols-7 gap-1">
+        {/* Phones get a scrollable day list — a 7-column grid is too narrow for names. */}
+        <MonthDayList
+          days={monthDays}
+          selected={selected}
+          onSelect={setSelected}
+          className="sm:hidden"
+        />
+
+        <div className="hidden grid-cols-7 gap-1 sm:grid">
           {WEEKDAYS.map((w) => (
             <div key={w} className="py-1 text-center text-[11px] font-semibold uppercase text-ink-400">
               {w}
@@ -165,8 +203,7 @@ export function CalendarPage() {
             const dayIso = iso(cell.date);
             const inMonth = cell.date.getMonth() === viewMonth;
             const info = byDay.get(dayIso);
-            const facilityCount = info ? new Set(info.deadlines.map((d) => d.facility_id)).size : 0;
-            const overdue = info?.deadlines.some((d) => daysUntil(d.statutory_date) < 0) ?? false;
+            const companies = companiesForDay(info?.deadlines ?? []);
             const hasEvents = (info?.events.length ?? 0) > 0;
             const isSelected = dayIso === selected;
             const isToday = dayIso === todayIso();
@@ -176,30 +213,32 @@ export function CalendarPage() {
                 type="button"
                 onClick={() => setSelected(dayIso)}
                 className={[
-                  'flex min-h-[3.25rem] flex-col items-center gap-1 rounded-xl border px-1 py-1.5 transition-colors',
+                  'flex min-h-[3.25rem] w-full min-w-0 flex-col items-center gap-1 rounded-xl border px-1 py-1.5 text-left transition-colors',
                   isSelected ? 'border-firol-400 bg-firol-50' : 'border-transparent hover:bg-ink-50',
                   inMonth ? '' : 'opacity-40',
                 ].join(' ')}
               >
                 <span
                   className={[
-                    'grid size-6 place-items-center rounded-full text-xs',
+                    'grid size-6 shrink-0 place-items-center rounded-full text-xs',
                     isToday ? 'bg-firol-500 font-semibold text-white' : 'text-ink-700',
                   ].join(' ')}
                 >
                   {cell.date.getDate()}
                 </span>
-                <span className="flex items-center gap-0.5">
-                  {facilityCount > 0 && (
+                <span className="flex w-full min-w-0 flex-col items-center gap-0.5">
+                  {companies.map((c) => (
                     <span
+                      key={c.company_id}
+                      title={c.company_name}
                       className={[
-                        'rounded-full px-1 text-[10px] font-semibold text-white',
-                        overdue ? 'bg-status-bad' : 'bg-firol-400',
+                        'block w-full truncate rounded px-1 py-px text-[9px] font-semibold leading-tight text-white',
+                        c.overdue ? 'bg-status-bad' : 'bg-firol-400',
                       ].join(' ')}
                     >
-                      {facilityCount}
+                      {c.company_name}
                     </span>
-                  )}
+                  ))}
                   {hasEvents && <span className="size-1.5 rounded-full bg-emerald-500" />}
                 </span>
               </button>
@@ -231,6 +270,98 @@ export function CalendarPage() {
           onDeleteEvent={handleDeleteEvent}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Mobile replacement for the month grid: one scrollable row per day that has
+ * deadlines or events, with company names spelled out in full.
+ */
+function MonthDayList({
+  days,
+  selected,
+  onSelect,
+  className,
+}: {
+  days: { day: string; deadlines: CalendarDeadline[]; events: CalendarEvent[] }[];
+  selected: string;
+  onSelect: (day: string) => void;
+  className?: string;
+}) {
+  if (days.length === 0) {
+    return (
+      <p className={['py-6 text-center text-sm text-ink-400', className].filter(Boolean).join(' ')}>
+        Tento mesiac nemá žiadne termíny ani udalosti.
+      </p>
+    );
+  }
+
+  return (
+    <div
+      className={[
+        'max-h-[60vh] divide-y divide-ink-50 overflow-y-auto rounded-xl border border-ink-100',
+        className,
+      ].filter(Boolean).join(' ')}
+    >
+      {days.map(({ day, deadlines, events }) => {
+        const date = new Date(day + 'T00:00:00');
+        const companies = companiesForDay(deadlines);
+        const isSelected = day === selected;
+        const isToday = day === todayIso();
+        return (
+          <button
+            key={day}
+            type="button"
+            onClick={() => onSelect(day)}
+            className={[
+              'flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors',
+              isSelected ? 'bg-firol-50' : 'hover:bg-ink-50',
+            ].join(' ')}
+          >
+            <span className="flex w-9 shrink-0 flex-col items-center gap-0.5">
+              <span
+                className={[
+                  'grid size-7 place-items-center rounded-full text-sm',
+                  isToday ? 'bg-firol-500 font-semibold text-white' : 'font-medium text-ink-800',
+                ].join(' ')}
+              >
+                {date.getDate()}
+              </span>
+              <span className="text-[10px] font-semibold uppercase text-ink-400">
+                {WEEKDAYS[(date.getDay() + 6) % 7]}
+              </span>
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col gap-1 py-0.5">
+              {companies.map((c) => (
+                <span key={c.company_id} className="flex min-w-0 items-center gap-1.5">
+                  <span
+                    className={[
+                      'size-1.5 shrink-0 rounded-full',
+                      c.overdue ? 'bg-status-bad' : 'bg-firol-400',
+                    ].join(' ')}
+                  />
+                  <span
+                    className={[
+                      'truncate text-sm',
+                      c.overdue ? 'font-medium text-status-bad' : 'text-ink-800',
+                    ].join(' ')}
+                  >
+                    {c.company_name}
+                  </span>
+                </span>
+              ))}
+              {events.map((e) => (
+                <span key={e.id} className="flex min-w-0 items-center gap-1.5">
+                  <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
+                  <span className="truncate text-sm text-ink-600">{e.title}</span>
+                </span>
+              ))}
+            </span>
+            <ChevronRight className="mt-1 size-4 shrink-0 text-ink-300" />
+          </button>
+        );
+      })}
     </div>
   );
 }

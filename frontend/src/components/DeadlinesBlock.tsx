@@ -4,18 +4,22 @@ import type { CalendarDeadline } from '@/api/calendar';
 import type { InspectionType } from '@/api/inspections';
 import {
   bucketForDays,
+  daysUntil,
   groupByFacility,
   type DeadlineBucket,
   type FacilityDeadlineGroup,
 } from '@/lib/calendarGrouping';
 import { Card } from '@/components/ui/Card';
 
-/** Compact per-type labels for the deadline chips. */
+/**
+ * Compact per-type labels for the deadline chips — abbreviations of
+ * INSPECTION_TYPE_LABELS, never a different name for the same type.
+ */
 export const INSPECTION_TYPE_SHORT: Record<InspectionType, string> = {
   php: 'PHP',
   hydranty: 'Hydranty',
   oprava_ts_php: 'Oprava/TS',
-  poziarna_kniha: 'Preventívna prehliadka',
+  poziarna_kniha: 'Požiarna kniha',
   pu_akcieschopnost: 'PU — akcieschopnosť',
   pu_udrzba: 'PU — údržba',
   nudzove_osvetlenie: 'Núdzové osvetlenie',
@@ -42,7 +46,12 @@ export function DeadlinesBlock({
   deadlines: CalendarDeadline[];
   loaded: boolean;
 }) {
-  const groups = groupByFacility(deadlines);
+  // Filter before grouping: a facility's chips must list only the controls this
+  // block is about. Grouping the raw list would chip every control the facility
+  // has — a deadline a year out would then read as "po termíne" because the row
+  // is bucketed by the facility's nearest deadline.
+  const inWindow = deadlines.filter((d) => bucketForDays(daysUntil(d.statutory_date)) !== null);
+  const groups = groupByFacility(inWindow);
   const buckets: Record<DeadlineBucket, FacilityDeadlineGroup[]> = {
     overdue: [],
     soon: [],
@@ -110,7 +119,7 @@ function FacilityRow({ group, bucket }: { group: FacilityDeadlineGroup; bucket: 
         : `o ${days} dní`;
   return (
     <Link
-      to="/kalendar"
+      to={`/kalendar?den=${group.nearestDate}`}
       className="flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-ink-50"
     >
       <span className="mt-0.5 shrink-0 text-ink-300">
