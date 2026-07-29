@@ -770,6 +770,8 @@ final class InspectionController
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
+        /** @var list<string> $copiedFiles absolute paths written by clonePhotos() */
+        $copiedFiles = [];
 
         try {
             // executed_on is intentionally NULL — Step 3 forces the
@@ -791,19 +793,37 @@ final class InspectionController
                     ]);
             $newId = (int) $pdo->lastInsertId();
 
-            // Cloning items in a single INSERT … SELECT keeps positions in
-            // the original order without ferrying rows through PHP.
-            $pdo->prepare(
-                'INSERT INTO inspection_items (inspection_id, position, fields)
-                 SELECT ?, position, fields
+            // Row by row rather than INSERT … SELECT: cloning the photo
+            // documentation below needs to know which new item each source
+            // item became.
+            $srcItems = $pdo->prepare(
+                'SELECT id, position, fields
                  FROM   inspection_items
                  WHERE  inspection_id = ?
                  ORDER  BY position ASC, id ASC'
-            )->execute([$newId, $sourceId]);
+            );
+            $srcItems->execute([$sourceId]);
+            $insertItem = $pdo->prepare(
+                'INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)'
+            );
+            /** @var array<int, int> $itemIdMap source item id => cloned item id */
+            $itemIdMap = [];
+            foreach ($srcItems->fetchAll() as $srcItem) {
+                $insertItem->execute([$newId, $srcItem['position'], $srcItem['fields']]);
+                $itemIdMap[(int) $srcItem['id']] = (int) $pdo->lastInsertId();
+            }
+
+            $copiedFiles = self::clonePhotos($pdo, $sourceId, $newId, $accountId, $itemIdMap);
 
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
+            // The image files are outside the transaction, so undo them by hand.
+            foreach ($copiedFiles as $path) {
+                if (is_file($path)) {
+                    @unlink($path);
+                }
+            }
             throw $e;
         }
 
@@ -832,6 +852,102 @@ final class InspectionController
             'items' => $items,
             'source_id' => $sourceId,
         ], 201);
+    }
+
+    /**
+     * Clone the photo documentation of a repeated inspection, keeping each
+     * photo on the same item (and, for Požiarna kniha, the same nedostatok —
+     * `defect_key` travels with the item's `fields`, so the cloned defects
+     * still match their photos).
+     *
+     * The image files are copied, not shared: each protocol owns its photos,
+     * so deleting one in the repeat — or archiving the source — must never
+     * take the other protocol's image with it.
+     *
+     * @param array<int, int> $itemIdMap source item id => cloned item id
+     * @return list<string> absolute paths written, so a failed transaction can clean up
+     */
+    private static function clonePhotos(
+        PDO $pdo,
+        int $sourceId,
+        int $newId,
+        int $accountId,
+        array $itemIdMap,
+    ): array {
+        if (!$itemIdMap) {
+            return [];
+        }
+
+        $stmt = $pdo->prepare(
+            'SELECT item_id, defect_key, position, file_path, thumb_path, byte_size, width, height
+             FROM   inspection_item_photos
+             WHERE  inspection_id = ?
+             ORDER  BY item_id ASC, position ASC, id ASC'
+        );
+        $stmt->execute([$sourceId]);
+        $rows = $stmt->fetchAll();
+        if (!$rows) {
+            return [];
+        }
+
+        Storage::ensureDir(Storage::photoDir($accountId, $newId));
+
+        $insert = $pdo->prepare(
+            'INSERT INTO inspection_item_photos
+                (account_id, inspection_id, item_id, defect_key, position,
+                 file_path, thumb_path, byte_size, width, height)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+
+        $written = [];
+        foreach ($rows as $row) {
+            $newItemId = $itemIdMap[(int) $row['item_id']] ?? null;
+            if ($newItemId === null) {
+                continue;
+            }
+
+            $srcFull  = Storage::absolute((string) $row['file_path']);
+            $srcThumb = Storage::absolute((string) $row['thumb_path']);
+            if (!is_file($srcFull)) {
+                // A photo whose file went missing must not block the repeat —
+                // skip it the same way PDF generation does.
+                error_log('[repeat-photos] file missing: ' . $srcFull);
+                continue;
+            }
+
+            // Fresh unguessable token per copy, same as a real upload.
+            $token    = bin2hex(random_bytes(16));
+            $relFull  = Storage::photoRelative($accountId, $newId, $token);
+            $relThumb = Storage::photoThumbRelative($accountId, $newId, $token);
+            $absFull  = Storage::absolute($relFull);
+            $absThumb = Storage::absolute($relThumb);
+
+            if (!copy($srcFull, $absFull)) {
+                throw new \RuntimeException('Failed to copy photo: ' . $srcFull);
+            }
+            $written[] = $absFull;
+            // A missing thumbnail falls back to the full size rather than
+            // failing — re-encoding needs GD-JPEG, which isn't guaranteed.
+            if (!copy(is_file($srcThumb) ? $srcThumb : $srcFull, $absThumb)) {
+                throw new \RuntimeException('Failed to copy photo thumbnail: ' . $srcThumb);
+            }
+            $written[] = $absThumb;
+
+            $insert->execute([
+                $accountId,
+                $newId,
+                $newItemId,
+                $row['defect_key'],
+                (int) $row['position'],
+                $relFull,
+                $relThumb,
+                (int) $row['byte_size'],
+                (int) $row['width'],
+                (int) $row['height'],
+            ]);
+        }
+
+        return $written;
     }
 
     /**
