@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Audit\AuditLog;
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Storage\Storage;
 use PDO;
 
 final class InspectionController
@@ -582,6 +584,12 @@ final class InspectionController
         $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $row['account_id'] : $accountId;
 
+        // A finalized inspection is frozen: its date, periodicity and notes
+        // are printed on an issued protocol, so changing them here would make
+        // the record contradict the PDF. Unlock (which discards the protocol)
+        // is the only way back in.
+        self::assertUnlocked($row);
+
         $executedOn = $req->jsonString('executed_on');
         $notes = $req->jsonString('notes');
         $periodicityMonths = $req->jsonInt('periodicity_months');
@@ -624,6 +632,107 @@ final class InspectionController
         )->execute([$id, $scopeAccountId]);
 
         Response::noContent();
+    }
+
+    /**
+     * "Upraviť" — reopen a finalized inspection for editing.
+     *
+     * An inspection locks the moment its PDF is issued, because the protocol
+     * and the record it was rendered from must keep saying the same thing.
+     * Unlocking therefore *discards* the protocol: its documents rows and the
+     * PDF files are deleted, the frozen inspector/cert snapshot is cleared and
+     * the inspection drops back to `draft`.
+     *
+     * The discarded number is never handed out again — generating afresh takes
+     * the next one from the sequence and leaves a gap. That is deliberate: a
+     * copy of the old protocol may already sit in the customer's inbox, and two
+     * different documents sharing one number is far worse than a gap.
+     *
+     * Opakovať stays the right tool for re-issuing the same control on a new
+     * date; unlock is for fixing a protocol that was issued wrong.
+     */
+    public static function unlock(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $id = (int) $params['id'];
+
+        $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        // The inspection's own account, so an admin acting on a foreign-account
+        // record deletes that account's documents, not their session account's.
+        $accountId = (int) $row['account_id'];
+
+        if ($row['status'] !== 'finalized') {
+            Response::error('Kontrola nie je uzamknutá.', 422);
+        }
+
+        $pdo = Db::pdo();
+        $docsStmt = $pdo->prepare(
+            'SELECT number, file_path FROM documents
+             WHERE  account_id = ? AND parent_type = "inspection" AND parent_id = ?'
+        );
+        $docsStmt->execute([$accountId, $id]);
+        $docs = $docsStmt->fetchAll();
+
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare(
+                'DELETE FROM documents
+                 WHERE  account_id = ? AND parent_type = "inspection" AND parent_id = ?'
+            )->execute([$accountId, $id]);
+
+            $pdo->prepare(
+                'UPDATE inspections
+                 SET    status = "draft",
+                        effective_inspector_user_id = NULL,
+                        effective_cert_number       = NULL
+                 WHERE  id = ? AND account_id = ?'
+            )->execute([$id, $accountId]);
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        // Files are unlinked only after the commit: an orphaned PDF nobody
+        // links to is harmless, a missing file behind a live row is not.
+        foreach ($docs as $doc) {
+            $abs = Storage::documentAbsolute((string) $doc['file_path']);
+            if (is_file($abs) && !@unlink($abs)) {
+                error_log('[unlock-inspection] failed to delete PDF: ' . $abs);
+            }
+        }
+
+        // Destroying an issued, signed protocol is worth a trail.
+        AuditLog::record(
+            'inspection.unlock',
+            'inspections',
+            $id,
+            ['status' => 'finalized', 'documents' => array_column($docs, 'number')],
+            ['status' => 'draft'],
+        );
+
+        Response::json(['inspection' => self::shapeRow(self::loadOrFail($accountId, $id))]);
+    }
+
+    /**
+     * Guard for writes that must not touch an issued protocol. Mirrors the
+     * same check on items (InspectionItemController) and photos
+     * (InspectionPhotoController) — the UI hides these affordances once the
+     * inspection is locked, this is the server-side half of it.
+     *
+     * @param array<string, mixed> $row inspection row with `status`
+     */
+    private static function assertUnlocked(array $row): void
+    {
+        if (($row['status'] ?? '') === 'finalized') {
+            Response::error(
+                'Kontrola je uzamknutá — najprv ju odomkni tlačidlom „Upraviť".',
+                409,
+            );
+        }
     }
 
     /**

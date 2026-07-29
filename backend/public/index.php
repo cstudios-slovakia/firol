@@ -137,6 +137,9 @@ $router->get('/api/inspections/{id}',               [InspectionController::class
 $router->patch('/api/inspections/{id}',             [InspectionController::class, 'updateBasic']);
 $router->delete('/api/inspections/{id}',            [InspectionController::class, 'archive']);
 $router->post('/api/inspections/{id}/repeat',       [InspectionController::class, 'repeat']);
+// "Upraviť" on a locked inspection — discards the issued protocol and puts
+// the inspection back into draft so it can be corrected.
+$router->post('/api/inspections/{id}/unlock',       [InspectionController::class, 'unlock']);
 $router->post('/api/inspections/{id}/follow-up',     [InspectionController::class, 'followUp']);
 $router->post('/api/inspections/{id}/items',        [InspectionItemController::class, 'store']);
 $router->patch('/api/inspections/{id}/items/{item_id}',  [InspectionItemController::class, 'update']);

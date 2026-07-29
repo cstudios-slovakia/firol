@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, Warehouse } from 'lucide-react';
+import { ArrowLeft, Building2, Lock, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
   INSPECTION_TYPE_LABELS,
@@ -114,6 +114,13 @@ export function InspectionStep2Page() {
 
   const { inspection: i } = detail;
   const module = getTypeModule(i.type);
+
+  // A finalized inspection is frozen — the issued PDF was rendered from these
+  // items. The summary hides the edit affordances, this catches a bookmarked
+  // or back-button route into the form (the API refuses it too).
+  if (i.status !== 'draft') {
+    return <LockedNotice inspectionId={inspectionId} />;
+  }
 
   if (!module) {
     return <UnsupportedTypeNotice type={i.type} inspectionId={inspectionId} />;
@@ -240,6 +247,34 @@ function ProgressDots({
       <span className="ml-2 shrink-0 text-xs text-ink-500">
         {currentIndex} / {total}
       </span>
+    </div>
+  );
+}
+
+function LockedNotice({ inspectionId }: { inspectionId: number }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <Link to={`/inspections/${inspectionId}`} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <ArrowLeft className="size-4" />
+        Späť na súhrn
+      </Link>
+      <Card className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+        <div className="grid size-12 place-items-center rounded-2xl bg-ink-100 text-ink-500">
+          <Lock className="size-5" />
+        </div>
+        <h2 className="text-base font-semibold text-ink-900">Kontrola je uzamknutá</h2>
+        <p className="max-w-sm text-sm text-ink-500">
+          Kontrola má vystavený PDF protokol, preto sa jej záznamy už nedajú
+          meniť. Ak ju potrebuješ opraviť, odomkni ju tlačidlom „Upraviť" na
+          súhrne — pôvodný protokol sa pritom zruší.
+        </p>
+        <Link
+          to={`/inspections/${inspectionId}`}
+          className="inline-flex h-11 items-center gap-1.5 rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] transition-colors duration-200 hover:bg-firol-600"
+        >
+          Späť na súhrn
+        </Link>
+      </Card>
     </div>
   );
 }

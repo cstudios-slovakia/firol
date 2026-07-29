@@ -66,6 +66,7 @@ final class InspectionItemController
 
         $isAdmin = Admin::isAdmin(Tenant::currentUserId());
         $inspection = self::loadInspectionOrFail($isAdmin ? null : $accountId, $inspectionId);
+        self::assertEditable($inspection);
 
         // Požiarna kniha and the Pokyn — žatevné práce are conceptually
         // single-record documents; the schema supports many items but the
@@ -124,6 +125,7 @@ final class InspectionItemController
         $itemId = (int) $params['item_id'];
 
         $inspection = self::loadInspectionOrFail($isAdmin ? null : $accountId, $inspectionId);
+        self::assertEditable($inspection);
 
         self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
@@ -151,6 +153,7 @@ final class InspectionItemController
         $itemId = (int) $params['item_id'];
 
         $inspection = self::loadInspectionOrFail($isAdmin ? null : $accountId, $inspectionId);
+        self::assertEditable($inspection);
 
         self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
@@ -782,6 +785,24 @@ final class InspectionItemController
             Response::error('Inspection not found', 404);
         }
         return $row;
+    }
+
+    /**
+     * Items of a finalized inspection are frozen — the issued PDF was
+     * rendered from them and must keep matching the record. Reopening goes
+     * through "Upraviť" on the summary (InspectionController::unlock), which
+     * discards the protocol first. Same guard photos already carry.
+     *
+     * @param array<string, mixed> $inspection
+     */
+    private static function assertEditable(array $inspection): void
+    {
+        if (($inspection['status'] ?? '') === 'finalized') {
+            Response::error(
+                'Kontrola je uzamknutá — najprv ju odomkni tlačidlom „Upraviť".',
+                409,
+            );
+        }
     }
 
     private static function loadItemForInspectionOrFail(int $itemId, int $inspectionId): void

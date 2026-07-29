@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, Download, FileText,
-  GitBranch, History, Images, Link2, NotebookPen, Plus, Repeat, Warehouse,
+  GitBranch, History, Images, Link2, Lock, LockOpen, NotebookPen, Pencil, Plus, Repeat,
+  Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
@@ -54,6 +55,10 @@ export function InspectionDetailPage() {
   const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
   const [generating, setGenerating] = useState(false);
   const [repeating, setRepeating] = useState(false);
+  // "Upraviť" on a locked inspection asks first — unlocking throws the issued
+  // protocol away, so it never happens on a single tap.
+  const [unlockPrompt, setUnlockPrompt] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
   const [creatingFollowUp, setCreatingFollowUp] = useState(false);
   // "Priložiť fotodokumentáciu" (change request 2.2) — on by default, and only
   // shown at all when the inspection actually has photos.
@@ -102,6 +107,31 @@ export function InspectionDetailPage() {
       setError(offlineMessage(err, 'Opakovať sa nepodarilo.'));
     } finally {
       setRepeating(false);
+    }
+  }
+
+  /**
+   * Reopen a locked inspection for editing. The server deletes the issued
+   * protocol, so the documents list is refetched alongside the inspection —
+   * the PDF block goes back to offering "Generovať PDF protokol".
+   */
+  async function handleUnlock() {
+    setError(null);
+    setUnlocking(true);
+    try {
+      await Inspections.unlock(id, csrfToken);
+      const [detail, docs] = await Promise.all([
+        Inspections.show(id),
+        Inspections.documents(id).catch(() => ({ items: [] as InspectionDocument[] })),
+      ]);
+      setData(detail);
+      setDocuments(docs.items);
+      setUnlockPrompt(false);
+      toast.success('Kontrola odomknutá — pôvodný protokol bol zrušený.');
+    } catch (err) {
+      setError(offlineMessage(err, 'Kontrolu sa nepodarilo odomknúť.'));
+    } finally {
+      setUnlocking(false);
     }
   }
 
@@ -245,21 +275,102 @@ export function InspectionDetailPage() {
             ) : (
               <InspectionStatusBadge inspection={i} />
             )}
+            {!isDraft && (
+              <Badge tone="neutral">
+                <Lock className="size-3" />
+                Uzamknutá
+              </Badge>
+            )}
           </p>
         </div>
         {!isDraft ? (
-          <Button
-            type="button"
-            onClick={handleRepeat}
-            loading={repeating}
-            leftIcon={<Repeat className="size-4" />}
-            title="Vytvorí novú kontrolu s tými istými položkami a prázdnym dátumom"
-            className="shrink-0"
-          >
-            Opakovať
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              id="unlock-inspection"
+              variant="warn"
+              onClick={() => setUnlockPrompt((open) => !open)}
+              aria-expanded={unlockPrompt}
+              aria-controls="unlock-prompt"
+              leftIcon={<Pencil className="size-4" />}
+              title="Odomkne kontrolu na úpravy — vystavený protokol sa pritom zruší"
+            >
+              Upraviť
+            </Button>
+            <Button
+              type="button"
+              onClick={handleRepeat}
+              loading={repeating}
+              leftIcon={<Repeat className="size-4" />}
+              title="Vytvorí novú kontrolu s tými istými položkami a prázdnym dátumom"
+            >
+              Opakovať
+            </Button>
+          </div>
         ) : null}
       </header>
+
+      {!isDraft && !unlockPrompt && (
+        <Card className="flex items-start gap-3 bg-ink-50 px-4 py-3">
+          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white text-ink-500">
+            <Lock className="size-3.5" />
+          </span>
+          <p className="text-xs text-ink-600">
+            <span className="font-semibold text-ink-800">Kontrola je uzamknutá.</span>{' '}
+            Má vystavený PDF protokol, preto sa záznamy ani dátum už nedajú meniť.
+            Pre opravu použi „Upraviť", pre nový termín „Opakovať".
+          </p>
+        </Card>
+      )}
+
+      {!isDraft && unlockPrompt && (
+        <Card
+          id="unlock-prompt"
+          role="alertdialog"
+          aria-labelledby="unlock-prompt-title"
+          className="flex animate-fade-up flex-col gap-3 border-status-warn/40 bg-[var(--color-status-warn-bg)]/60 p-4"
+        >
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white text-status-warn">
+              <LockOpen className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <p id="unlock-prompt-title" className="text-sm font-semibold text-ink-900">
+                Odomknúť kontrolu?
+              </p>
+              <p className="mt-1 text-xs text-ink-600">
+                Kontrola je dokončená a má vystavený PDF protokol
+                {documents[0] ? ` ${documents[0].number}` : ''}. Odomknutím sa
+                protokol zruší a natrvalo odstráni — po úprave bude treba
+                vygenerovať nový, ktorý dostane nové číslo.
+              </p>
+              <p className="mt-1 text-xs text-ink-600">
+                Ak chceš len zopakovať kontrolu s novým dátumom, použi
+                „Opakovať" — pôvodný protokol tak zostane zachovaný.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={unlocking}
+              onClick={() => setUnlockPrompt(false)}
+            >
+              Zrušiť
+            </Button>
+            <Button
+              type="button"
+              variant="warn"
+              loading={unlocking}
+              onClick={handleUnlock}
+              leftIcon={<LockOpen className="size-4" />}
+            >
+              Odomknúť a upraviť
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {!isDraft && i.is_superseded && (
         <Card className="flex items-start gap-2.5 bg-ink-50 px-4 py-3 text-xs text-ink-600">
@@ -272,17 +383,39 @@ export function InspectionDetailPage() {
         </Card>
       )}
 
-      <Card className="flex flex-col gap-3 border-status-warn/30 bg-[var(--color-status-warn-bg)]/40 p-4">
+      {/* Locked inspections keep showing the date, but in a neutral tone:
+          nothing here is actionable any more, and the warn color belongs to
+          the unlock prompt above. */}
+      <Card
+        className={cn(
+          'flex flex-col gap-3 p-4',
+          isDraft
+            ? 'border-status-warn/30 bg-[var(--color-status-warn-bg)]/40'
+            : 'bg-ink-50/60',
+        )}
+      >
         <div className="flex items-start gap-3">
-          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white text-status-warn">
+          <span
+            className={cn(
+              'mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white',
+              isDraft ? 'text-status-warn' : 'text-ink-500',
+            )}
+          >
             <CalendarDays className="size-4" />
           </span>
           <div className="flex-1">
-            <p className="text-xs font-semibold uppercase tracking-wider text-status-warn">
+            <p
+              className={cn(
+                'text-xs font-semibold uppercase tracking-wider',
+                isDraft ? 'text-status-warn' : 'text-ink-500',
+              )}
+            >
               Dátum kontroly
             </p>
             <p className="mt-0.5 text-xs text-ink-600">
-              Zmeň dátum, ak opakuješ staršiu kontrolu — nový PDF protokol bude vystavený s týmto dátumom.
+              {isDraft
+                ? 'Zmeň dátum, ak opakuješ staršiu kontrolu — nový PDF protokol bude vystavený s týmto dátumom.'
+                : 'Dátum, s ktorým bol vystavený PDF protokol.'}
             </p>
           </div>
         </div>
@@ -292,7 +425,13 @@ export function InspectionDetailPage() {
           disabled={!isDraft || savingDate}
           onChange={(e) => setLocalDate(e.target.value)}
           aria-label="Dátum kontroly"
-          className="h-11 w-full min-w-0 appearance-none rounded-xl border border-status-warn/40 bg-white px-3 text-sm font-medium text-ink-900 transition-colors hover:border-status-warn focus:border-status-warn focus:outline-none focus:ring-2 focus:ring-status-warn/30 disabled:bg-ink-50 disabled:text-ink-500"
+          className={cn(
+            'h-11 w-full min-w-0 appearance-none rounded-xl border bg-white px-3 text-sm font-medium text-ink-900 transition-colors',
+            'disabled:bg-ink-50 disabled:text-ink-500',
+            isDraft
+              ? 'border-status-warn/40 hover:border-status-warn focus:border-status-warn focus:outline-none focus:ring-2 focus:ring-status-warn/30'
+              : 'border-ink-200',
+          )}
         />
         {isDraft && localDate && localDate !== savedDate && (
           <Button
@@ -344,7 +483,7 @@ export function InspectionDetailPage() {
                     inspectionId={id}
                     index={idx + 1}
                     item={it}
-                    canEdit={true}
+                    canEdit={isDraft}
                     deleting={deletingItemId === it.id}
                     onDelete={() => handleDeleteItem(it.id)}
                   />
@@ -383,7 +522,6 @@ export function InspectionDetailPage() {
         canGenerate={isDraft && items.length > 0 && !!i.executed_on}
         generating={generating}
         onGenerate={handleGeneratePdf}
-        finalized={!isDraft}
         pdfError={pdfError}
         photoCount={photoCount}
         includePhotos={includePhotos}
@@ -522,7 +660,6 @@ function DocumentsBlock({
   canGenerate,
   generating,
   onGenerate,
-  finalized,
   pdfError,
   photoCount,
   includePhotos,
@@ -532,7 +669,6 @@ function DocumentsBlock({
   canGenerate: boolean;
   generating: boolean;
   onGenerate: () => void;
-  finalized: boolean;
   pdfError?: string | null;
   photoCount: number;
   includePhotos: boolean;
@@ -585,9 +721,8 @@ function DocumentsBlock({
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-ink-900">PDF protokoly</h3>
           <p className="text-xs text-ink-500">
-            {finalized
-              ? 'Kontrola je uzamknutá. Pre nový dátum použi tlačidlo „Opakovať" hore.'
-              : `Vygenerované ${documents.length} ${documents.length === 1 ? 'protokol' : 'protokoly'}.`}
+            Vygenerované {documents.length}{' '}
+            {documents.length === 1 ? 'protokol' : 'protokoly'}.
           </p>
         </div>
       </div>

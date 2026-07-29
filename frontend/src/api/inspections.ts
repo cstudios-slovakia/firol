@@ -521,6 +521,18 @@ export const Inspections = {
       csrfToken,
       requireOnline: true,
     }),
+  /**
+   * Reopen a locked (finalized) inspection for editing. The server discards
+   * the issued PDF protocol — a fresh one gets a new number. Online only:
+   * there is nothing sensible to replay from an outbox once the document is
+   * gone.
+   */
+  unlock: (inspectionId: number, csrfToken: string | null) =>
+    api<{ inspection: Inspection }>(`/api/inspections/${inspectionId}/unlock`, {
+      method: 'POST',
+      csrfToken,
+      requireOnline: true,
+    }),
   repeat: (inspectionId: number, csrfToken: string | null) =>
     api<InspectionDetail & { source_id: number }>(
       `/api/inspections/${inspectionId}/repeat`,

@@ -553,6 +553,36 @@ deleted the configured source tree. `backend/db/prune.php` enforces the
 
 ---
 
+## Protocol lock & unlock (29. 7. 2026) ✅
+
+Generating the PDF already flipped an inspection to `finalized`, but the
+summary kept offering per-item edit and delete — the lock existed in the data
+model and nowhere in the UI. Now, for every inspection type:
+
+- The lock is stated where the state is read: an "Uzamknutá" badge with a lock
+  icon in the Step 3 header plus a one-line strip under it. The old sentence
+  buried in the "PDF protokoly" block is gone.
+- Items of a locked inspection carry no edit/delete affordance
+  (`canEdit={isDraft}`), the date input stays read-only and drops its warn
+  styling, and Step 2 refuses to open at all (`<LockedNotice>`) for a
+  bookmarked `/items/{id}` route.
+- **Upraviť** (warn-toned, left of *Opakovať*) opens an inline confirm banner
+  and posts `POST /api/inspections/{id}/unlock`. Unlocking *discards* the
+  protocol: the `documents` rows and the PDF files are deleted, the frozen
+  `effective_inspector_*` snapshot is cleared, and the inspection returns to
+  `draft`. Regenerating takes the next number from the sequence — the
+  discarded one is never reused, because a copy may already sit in the
+  customer's inbox and two documents sharing a number is worse than a gap in
+  it. Recorded to `audit_log` as `inspection.unlock`.
+- *Opakovať* remains the tool for re-issuing on a new date (source protocol
+  preserved); unlock is for correcting a protocol issued wrong.
+- Server-side half of the same rule: item create/update/delete
+  (`InspectionItemController::assertEditable`) and inspection
+  `updateBasic` now answer 409 on a finalized inspection, matching the guard
+  photos already had.
+
+---
+
 ## Backup archive & restore (29. 7. 2026) ✅
 
 The account export was JSON, and listed photos by *download URL* — so a backup
