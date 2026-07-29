@@ -1,7 +1,7 @@
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, Ban, BookOpen, ChevronRight, DoorClosed, Droplets, Flame,
-  Gauge, Lightbulb, ShieldCheck, Wheat, Wrench,
+  Gauge, Lightbulb, ShieldCheck, Wrench,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -88,14 +88,6 @@ const TYPES: TypeMeta[] = [
     description: 'Tlaková skúška požiarnych hadíc.',
     intervalLabel: '12 mes.',
     icon: <Gauge className="size-5" />,
-    enabled: true,
-  },
-  {
-    type: 'pokyn_zatva',
-    shortLabel: 'Pokyn — žatva',
-    description: 'Pokyn na ochranu pred požiarmi pri žatevných prácach.',
-    intervalLabel: 'raz ročne',
-    icon: <Wheat className="size-5" />,
     enabled: true,
   },
   {

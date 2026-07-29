@@ -30,12 +30,13 @@ import type {
   InspectionListItem,
   InspectionPhoto,
 } from '@/api/inspections';
-import type {
-  Training,
-  TrainingDetail,
-  TrainingListItem,
-  TrainingPayload,
-  Trainee,
+import {
+  isPokyn,
+  type Training,
+  type TrainingDetail,
+  type TrainingListItem,
+  type TrainingPayload,
+  type Trainee,
 } from '@/api/trainings';
 import type {
   Company,
@@ -122,12 +123,13 @@ export function inspectionCreateOptimistic(args: {
 
 export function trainingCreateOptimistic(args: {
   payload: TrainingPayload;
-  company: { id: number; name: string; ico: string | null };
+  company: { id: number; name: string; ico: string | null; approver: string | null };
   facility: { id: number; name: string } | null;
   trainer: { id: number; name: string; certification_number: string | null } | null;
 }): OptimisticSpec {
   const id = mintTempId();
   const ts = nowIso();
+  const fields = args.payload.fields ?? null;
   const training: Training = {
     id,
     type: args.payload.type,
@@ -140,19 +142,22 @@ export function trainingCreateOptimistic(args: {
     company_id: args.company.id,
     company_name: args.company.name,
     company_ico: args.company.ico,
+    company_approver: args.company.approver,
     facility_id: args.facility?.id ?? null,
     facility_name: args.facility?.name ?? null,
     trainer_id: args.trainer?.id ?? null,
     trainer_name: args.trainer?.name ?? null,
     trainer_certification_number: args.trainer?.certification_number ?? null,
     trainees_count: 0,
+    fields,
+    pokyn_year: fields?.year ?? null,
   };
   const detail: TrainingDetail = { training, trainees: [] };
   const listRow: TrainingListItem = { ...training };
   return {
     returns: { training },
     create: { clientId: id, idPath: 'training.id' },
-    label: 'Nové školenie',
+    label: isPokyn(args.payload.type) ? 'Nový pokyn' : 'Nové školenie',
     detail: args.facility ? `${args.company.name} · ${args.facility.name}` : args.company.name,
     patches: [
       seed(`/api/trainings/${id}`, detail),
@@ -378,7 +383,7 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
   const training = TRAINING_RE.exec(pathOnly);
   if (training) {
     const id = Number(training[1]);
-    const keys = ['date', 'duration_min', 'topics', 'trainer_id', 'facility_id', 'type'];
+    const keys = ['date', 'duration_min', 'topics', 'trainer_id', 'facility_id', 'type', 'fields'];
     return {
       label: 'Úprava školenia',
       patches: [

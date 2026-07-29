@@ -24,9 +24,20 @@ use Mpdf\Output\Destination;
  */
 final class PdfRenderer
 {
+    /**
+     * Trainings render the attendance protocol, except the Pokyn — žatevné
+     * práce, which is a training-tree document with its own layout (no
+     * attendee table, an editable instruction text instead).
+     *
+     * @param array<string, mixed> $payload
+     */
     public static function renderTraining(array $payload): string
     {
-        $html = self::renderTemplate(__DIR__ . '/templates/training.php', $payload);
+        $template = ($payload['training']['type'] ?? '') === 'pokyn_zatva'
+            ? 'pokyn_zatva.php'
+            : 'training.php';
+
+        $html = self::renderTemplate(__DIR__ . '/templates/' . $template, $payload);
         return self::buildPdf($html, $payload['number'] ?? 'firol');
     }
 
@@ -56,7 +67,6 @@ final class PdfRenderer
             'pu_udrzba'          => 'pu_udrzba.php',
             'nudzove_osvetlenie' => 'nudzove_osvetlenie.php',
             'ts_hadic'           => 'ts_hadic.php',
-            'pokyn_zatva'        => 'pokyn_zatva.php',
             'vyradenie'          => 'vyradenie.php',
             default => throw new \InvalidArgumentException("No renderer for type: $type"),
         };

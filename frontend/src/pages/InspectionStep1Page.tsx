@@ -28,7 +28,7 @@ import { cn } from '@/lib/cn';
 const KNOWN_TYPES: InspectionType[] = [
   'php', 'hydranty', 'oprava_ts_php', 'poziarna_kniha',
   'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'ts_hadic',
-  'pokyn_zatva', 'vyradenie',
+  'vyradenie',
 ];
 
 function isInspectionType(s: string | undefined): s is InspectionType {
@@ -529,11 +529,9 @@ function numericParam(raw: string | null): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** These two documents aren't "kontroly" — the date field says what they are. */
+/** The vyraďovací protokol isn't a "kontrola" — the date field says so. */
 function dateLabel(type: InspectionType): string {
   switch (type) {
-    case 'pokyn_zatva':
-      return 'Dátum vydania pokynu';
     case 'vyradenie':
       return 'Dátum vyradenia';
     default:
@@ -555,8 +553,6 @@ function stepTwoCta(type: InspectionType): string {
       return 'Pokračovať — zadanie hadíc';
     case 'nudzove_osvetlenie':
       return 'Pokračovať — zadanie svietidiel';
-    case 'pokyn_zatva':
-      return 'Pokračovať — text pokynu';
     case 'vyradenie':
       return 'Pokračovať — zadanie prístrojov';
     case 'poziarna_kniha':

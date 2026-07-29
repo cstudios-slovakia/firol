@@ -506,10 +506,6 @@ the numbered priority order). All items are now implemented on branch
   through the existing outbox when offline; a queued item's temp id is read
   back off the mutation so its photos attach correctly and are remapped on
   sync.
-- ✅ **2.3 Pokyn — žatevné práce** — new inspection type `pokyn_zatva`
-  (`ZAT-RRRR-NNN`, 12-month cycle). Single-record document; the template text
-  ships in `inspection-types/pokynZatvaTemplate.ts` and is stored *with* the
-  document, so revising the default never alters an issued protocol.
   - ✅ **Follow-up:** Požiarna kniha photos moved from the item as a whole to
     each individual nedostatok — migration `031` adds a nullable
     `defect_key` on `inspection_item_photos`, and each nedostatok gets a
@@ -520,6 +516,21 @@ the numbered priority order). All items are now implemented on branch
     numbered defect rows for both the body table and the captions, so the two
     can't drift. Photo docs no longer exist for "Bez zistených nedostatkov"
     or a plain zápis — there's no nedostatok to attach them to.
+- ✅ **2.3 Pokyn — žatevné práce** — a **training type** `pokyn_zatva`
+  (`ZAT-RRRR-NNN`), not an inspection type. 2.3 left the placement to us
+  ("k dokumentom/školeniam podľa uváženia"); it is an instruction issued once a
+  year to the client's own employees, so it sits next to the školenia rather
+  than among the protocols that record a control of a device. It is the one
+  training type with no attendee list: migration `032` adds `trainings.fields`
+  (JSON) carrying `{ year, approver, sections }`, and the detail page puts the
+  editable instruction text where the trainee list normally goes. The template
+  text ships in `lib/pokynZatvaTemplate.ts` and is stored *with* the document,
+  so revising the default never alters an issued Pokyn. It keeps its own ZAT
+  series — the SKO series stays for the six attendance-based trainings.
+  - ⚠️ Trade-off: trainings have no calendar layer, so the Pokyn no longer
+    produces a statutory deadline the way a 12-month inspection type did. If
+    the yearly reminder is wanted, it needs a deadline source over trainings
+    (or a custom `calendar_events` entry) — not currently implemented.
 - ✅ **Vyraďovací protokol** — new inspection type `vyradenie`
   (`VYR-RRRR-NNN`). Non-cyclic: stored with `is_preventive_inspection = 0`
   so it never produces a calendar deadline or supersedes anything.

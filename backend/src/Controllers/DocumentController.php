@@ -18,6 +18,7 @@ use Firol\Storage\Storage;
 use Firol\Support\Address;
 use Firol\Support\PhotoCaption;
 use Firol\Support\PkDefects;
+use Firol\Support\PokynZatva;
 
 /**
  * Generates PDF protocols and serves the stored binaries back. Generation
@@ -244,11 +245,14 @@ final class DocumentController
 
     /** Lists documents for a single inspection (used by the UI to show download links). */
     /**
-     * Generate the PDF protocol for a training. All trainings share the
-     * SKO number prefix and a single per-account+year sequence regardless
-     * of the training type (per spec — the type is recorded in the body).
-     * Training must be a draft with at least one trainee and a chosen
-     * trainer (otherwise the protocol can't be signed).
+     * Generate the PDF protocol for a training. The six attendance-based
+     * types share the SKO number prefix and a single per-account+year
+     * sequence regardless of the type (per spec — the type is recorded in the
+     * body); the Pokyn — žatevné práce keeps its own ZAT series.
+     *
+     * Training must be a draft with a chosen trainer (otherwise the document
+     * can't be signed) and, depending on the type, either at least one trainee
+     * or the instruction text.
      */
     public static function generateForTraining(Request $req, array $params): void
     {
@@ -259,37 +263,63 @@ final class DocumentController
 
         $training = self::loadTrainingForGenerate($isAdmin ? null : $accountId, $trainingId);
         $accountId = (int) $training['account_id'];
+        $isPokyn   = $training['type'] === TrainingController::TYPE_POKYN;
 
         if ($training['status'] === 'finalized') {
             Response::error(
-                'Školenie už je uzamknuté a má vystavený PDF protokol.',
+                $isPokyn
+                    ? 'Pokyn už je uzamknutý a má vystavený PDF dokument.'
+                    : 'Školenie už je uzamknuté a má vystavený PDF protokol.',
                 409,
             );
         }
         if ($training['date'] === null) {
-            Response::error('Doplň dátum školenia pred generovaním PDF.', 422);
+            Response::error(
+                $isPokyn
+                    ? 'Doplň dátum vydania pokynu pred generovaním PDF.'
+                    : 'Doplň dátum školenia pred generovaním PDF.',
+                422,
+            );
         }
         if ($training['trainer_id'] === null) {
-            Response::error('Vyber školiteľa pred generovaním PDF.', 422);
-        }
-
-        $trainees = self::loadTrainees($trainingId);
-        if (count($trainees) === 0) {
             Response::error(
-                'Pridaj aspoň jedného účastníka pred generovaním PDF.',
+                $isPokyn
+                    ? 'Vyber technika, ktorý pokyn vypracoval, pred generovaním PDF.'
+                    : 'Vyber školiteľa pred generovaním PDF.',
                 422,
             );
         }
 
+        // A Pokyn is an instruction addressed to the client's employees, not a
+        // session they sign in to — its precondition is the text, not a list.
+        $pokyn = null;
+        $trainees = [];
+        if ($isPokyn) {
+            $pokyn = PokynZatva::decode($training['fields']);
+            if ($pokyn === null) {
+                Response::error('Doplň text pokynu pred generovaním PDF.', 422);
+            }
+        } else {
+            $trainees = self::loadTrainees($trainingId);
+            if (count($trainees) === 0) {
+                Response::error(
+                    'Pridaj aspoň jedného účastníka pred generovaním PDF.',
+                    422,
+                );
+            }
+        }
+
         $year = (int) substr((string) $training['date'], 0, 4);
-        $payload = self::buildTrainingPayload($accountId, $training, $trainees);
+        $payload = self::buildTrainingPayload($accountId, $training, $trainees, $pokyn);
+
+        // Sequence bucket + documents.type: the Pokyn is its own document
+        // kind (ZAT), the six trainings share the 'skolenie' (SKO) bucket.
+        $documentType = $isPokyn ? TrainingController::TYPE_POKYN : 'skolenie';
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
         try {
-            // All training types share the SKO bucket; pass the literal
-            // 'skolenie' slug as the sequence type.
-            $allocated = NumberAllocator::allocate($accountId, 'skolenie', $year);
+            $allocated = NumberAllocator::allocate($accountId, $documentType, $year);
             $payload['number'] = $allocated['number'];
             $payload['generated_at'] = date('c');
 
@@ -306,11 +336,12 @@ final class DocumentController
                 'INSERT INTO documents
                     (account_id, parent_type, parent_id, type, number,
                      file_path, signed, signed_at)
-                 VALUES (?, "training", ?, "skolenie", ?, ?, 1, NOW())'
+                 VALUES (?, "training", ?, ?, ?, ?, 1, NOW())'
             );
             $insert->execute([
                 $accountId,
                 $trainingId,
+                $documentType,
                 $allocated['number'],
                 $relPath,
             ]);
@@ -926,7 +957,7 @@ final class DocumentController
         ];
     }
 
-    /** Spec-locked Slovak labels for the 6 training types. */
+    /** Spec-locked Slovak labels for the 6 training types + the Pokyn. */
     private const TRAINING_TYPE_LABELS = [
         'vstupne'      => 'Vstupné školenie vedúcich a ostatných zamestnancov',
         'opakovane'    => 'Opakované školenie vedúcich a ostatných zamestnancov',
@@ -934,14 +965,18 @@ final class DocumentController
         'zdrzujuca_sa' => 'Školenie osôb zdržujúcich sa na pracovisku',
         'hliadka_oph'  => 'Odborná príprava protipožiarnej hliadky pracoviska',
         'hliadka_opah' => 'Odborná príprava protipožiarnej asistenčnej hliadky',
+        'pokyn_zatva'  => 'Pokyn na zabezpečenie ochrany pred požiarmi pri žatevných prácach, '
+                          . 'pri zbere a skladovaní objemových krmovín',
     ];
 
     /** @return array<string, mixed> */
     private static function loadTrainingForGenerate(?int $accountId, int $trainingId): array
     {
         $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics, t.status,
+                       t.fields,
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
+                       c.approver AS company_approver,
                        t.facility_id, f.name AS facility_name,
                        f.street AS facility_street, f.postal_code AS facility_postal_code, f.city AS facility_city,
                        t.trainer_id, tr.fullname AS trainer_name,
@@ -989,14 +1024,16 @@ final class DocumentController
     }
 
     /**
-     * @param array<string, mixed>            $training
-     * @param list<array<string, mixed>>       $trainees
+     * @param array<string, mixed>       $training
+     * @param list<array<string, mixed>> $trainees  empty for the Pokyn
+     * @param array<string, mixed>|null  $pokyn     decoded trainings.fields, Pokyn only
      * @return array<string, mixed>
      */
     private static function buildTrainingPayload(
         int $accountId,
         array $training,
         array $trainees,
+        ?array $pokyn = null,
     ): array {
         $accStmt = Db::pdo()->prepare(
             'SELECT invoice_company_name, theme_color, logo_path FROM accounts WHERE id = ?'
@@ -1035,6 +1072,9 @@ final class DocumentController
                 'ico'     => $training['company_ico'],
                 'address' => Address::format($training['company_street'], $training['company_postal_code'], $training['company_city']),
                 'city'    => $training['company_city'],
+                // Schvaľujúca osoba — printed as "Schválil" on the Pokyn
+                // (change request 2.3).
+                'approver' => $training['company_approver'] ?? null,
             ],
             'facility' => [
                 'name'    => $training['facility_name'],
@@ -1047,6 +1087,8 @@ final class DocumentController
                 'signature_data_uri'   => $trainerSignatureUri,
             ],
             'trainees' => $traineesPayload,
+            // Pokyn only: year, approver override and the instruction text.
+            'pokyn' => $pokyn,
         ];
     }
 }

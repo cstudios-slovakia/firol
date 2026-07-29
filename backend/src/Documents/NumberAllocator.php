@@ -30,12 +30,15 @@ final class NumberAllocator
         'pu_udrzba'          => 'PU-UD',
         'nudzove_osvetlenie' => 'NO',
         'ts_hadic'           => 'TS-HAD',
-        // Change request 2.3 / 2.1 — two new document types.
-        'pokyn_zatva'        => 'ZAT',
+        // Change request 2.1 — vyraďovací protokol.
         'vyradenie'          => 'VYR',
-        // Trainings: per spec, all 6 training types share the SKO prefix
-        // and a single per-account+year sequence. The training type
-        // itself is stored in the body, not encoded in the number.
+        // Change request 2.3 — Pokyn — žatevné práce. Lives in the training
+        // tree but keeps its own series: it is a document for the client's
+        // employees, not one of the attendance-based trainings below.
+        'pokyn_zatva'        => 'ZAT',
+        // Trainings: per spec, all 6 attendance-based training types share
+        // the SKO prefix and a single per-account+year sequence. The training
+        // type itself is stored in the body, not encoded in the number.
         'skolenie'           => 'SKO',
     ];
 

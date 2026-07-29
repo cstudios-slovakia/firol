@@ -24,7 +24,6 @@ export const INSPECTION_TYPE_SHORT: Record<InspectionType, string> = {
   pu_udrzba: 'PU — údržba',
   nudzove_osvetlenie: 'Núdzové osvetlenie',
   ts_hadic: 'TS hadíc',
-  pokyn_zatva: 'Pokyn — žatva',
   vyradenie: 'Vyradenie PHP',
 };
 

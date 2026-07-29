@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, ArrowRight, Building2, CalendarDays, GraduationCap, Plus,
+  ArrowLeft, ArrowRight, Building2, CalendarDays, GraduationCap, Plus, Wheat,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type CompanyListItem, type FacilityListItem } from '@/api/companies';
 import { Team, type TeamMember } from '@/api/team';
 import {
+  isPokyn,
   TRAINING_TYPES,
   TRAINING_TYPE_LABELS,
   TRAINING_TYPE_SHORT,
@@ -15,6 +16,7 @@ import {
 } from '@/api/trainings';
 import { ApiError } from '@/lib/api';
 import { trainingCreateOptimistic } from '@/lib/offlineEntities';
+import { defaultPokynSections } from '@/lib/pokynZatvaTemplate';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -118,11 +120,15 @@ export function NewTrainingPage() {
     };
   }, [companyId, presetFacilityId]);
 
+  // The Pokyn is a document for the client's employees, not a session they
+  // attend — the same form, but the wording follows what is being issued.
+  const pokyn = isPokyn(type);
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const errs: typeof fieldErrors = {};
     if (!companyId) errs.company = 'Vyber firmu.';
-    if (!date) errs.date = 'Zadaj dátum školenia.';
+    if (!date) errs.date = pokyn ? 'Zadaj dátum vydania pokynu.' : 'Zadaj dátum školenia.';
     if (Object.keys(errs).length > 0) {
       setFieldErrors(errs);
       return;
@@ -137,20 +143,34 @@ export function NewTrainingPage() {
         facility_id: facilityId ?? undefined,
         date,
         trainer_id: trainerId ?? undefined,
+        // The Pokyn starts from the client's template text; the technician
+        // edits it on the detail page before generating the PDF.
+        fields: pokyn
+          ? {
+            year: Number(date.slice(0, 4)) || new Date().getFullYear(),
+            approver: null,
+            sections: defaultPokynSections(),
+          }
+          : undefined,
       };
       const company = (companies ?? []).find((c) => c.id === companyId);
       const facility = facilities.find((f) => f.id === facilityId);
       const trainer = (members ?? []).find((m) => m.id === trainerId);
       const optimistic = trainingCreateOptimistic({
         payload,
-        company: { id: companyId!, name: company?.name ?? '', ico: company?.ico ?? null },
+        company: {
+          id: companyId!,
+          name: company?.name ?? '',
+          ico: company?.ico ?? null,
+          approver: company?.approver ?? null,
+        },
         facility: facility ? { id: facility.id, name: facility.name } : null,
         trainer: trainer
           ? { id: trainer.id, name: trainer.fullname, certification_number: trainer.cert_general }
           : null,
       });
       const res = await Trainings.create(payload, csrfToken, optimistic);
-      toast.success('Školenie vytvorené');
+      toast.success(pokyn ? 'Pokyn vytvorený' : 'Školenie vytvorené');
       navigate(`/trainings/${res.training.id}`, { replace: true });
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
@@ -219,7 +239,7 @@ export function NewTrainingPage() {
 
       <header>
         <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">
-          Nové školenie
+          {pokyn ? 'Nový pokyn' : 'Nové školenie'}
         </p>
         <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">
           {TRAINING_TYPE_LABELS[type]}
@@ -228,9 +248,9 @@ export function NewTrainingPage() {
 
       <Card className="p-5">
         <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-          <Field label="Typ školenia" required>
+          <Field label="Typ dokumentu" required>
             {() => (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Typ školenia">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Typ dokumentu">
                 {TRAINING_TYPES.map((t) => (
                   <TypeButton key={t} value={t} active={type === t} onClick={() => setType(t)} />
                 ))}
@@ -272,7 +292,12 @@ export function NewTrainingPage() {
             )}
           </Field>
 
-          <Field label="Prevádzka" hint="Voliteľné — niektoré školenia sú pre celú firmu.">
+          <Field
+            label="Prevádzka"
+            hint={pokyn
+              ? 'Voliteľné — pokyn môže platiť pre celú firmu.'
+              : 'Voliteľné — niektoré školenia sú pre celú firmu.'}
+          >
             {(p) => (
               <Select
                 id={p.id}
@@ -305,7 +330,7 @@ export function NewTrainingPage() {
           </Field>
 
           <Field
-            label="Dátum školenia"
+            label={pokyn ? 'Dátum vydania pokynu' : 'Dátum školenia'}
             required
             hint={fieldErrors.date ? undefined : 'Zadaj manuálne, nemusí byť dnešný dátum.'}
             error={fieldErrors.date}
@@ -318,7 +343,7 @@ export function NewTrainingPage() {
           </Field>
 
           <Field
-            label="Školiteľ"
+            label={pokyn ? 'Vypracoval' : 'Školiteľ'}
             hint="Vyber z členov tímu. Podpis a číslo oprávnenia sa berú z jeho profilu."
           >
             {(p) => (
@@ -354,16 +379,20 @@ export function NewTrainingPage() {
 
           <div className="flex justify-end pt-1">
             <Button type="submit" loading={submitting} rightIcon={<ArrowRight className="size-4" />}>
-              Vytvoriť školenie
+              {pokyn ? 'Vytvoriť pokyn' : 'Vytvoriť školenie'}
             </Button>
           </div>
         </form>
       </Card>
 
       <Card className="flex items-start gap-3 bg-firol-50/50 px-3 py-3 text-xs text-ink-600">
-        <GraduationCap className="size-4 shrink-0 text-firol-500" />
+        {pokyn
+          ? <Wheat className="size-4 shrink-0 text-firol-500" />
+          : <GraduationCap className="size-4 shrink-0 text-firol-500" />}
         <span>
-          Po vytvorení doplníš účastníkov s ich podpismi. PDF protokol so zoznamom účastníkov vznikne v ďalšom kroku.
+          {pokyn
+            ? 'Text pokynu sa predvyplní zo šablóny — v ďalšom kroku ho upravíš a vygeneruješ PDF (napr. ZAT-2026-001).'
+            : 'Po vytvorení doplníš účastníkov s ich podpismi. PDF protokol so zoznamom účastníkov vznikne v ďalšom kroku.'}
         </span>
       </Card>
 
@@ -442,7 +471,9 @@ function TypeButton({
           ? 'border-firol-500 bg-firol-50 text-firol-700'
           : 'border-ink-200 bg-white text-ink-700 hover:border-firol-300')}>
       <div className="flex items-start gap-2">
-        <Building2 className={cn('mt-0.5 size-4 shrink-0', active ? 'text-firol-500' : 'text-ink-400')} />
+        {isPokyn(value)
+          ? <Wheat className={cn('mt-0.5 size-4 shrink-0', active ? 'text-firol-500' : 'text-ink-400')} />
+          : <Building2 className={cn('mt-0.5 size-4 shrink-0', active ? 'text-firol-500' : 'text-ink-400')} />}
         <div className="min-w-0">
           <p className="font-semibold">{TRAINING_TYPE_SHORT[value]}</p>
           <p className={cn('text-[11px] line-clamp-2', active ? 'text-firol-600' : 'text-ink-500')}>

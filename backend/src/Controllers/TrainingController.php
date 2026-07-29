@@ -11,6 +11,7 @@ use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Storage\Storage;
+use Firol\Support\PokynZatva;
 
 final class TrainingController
 {
@@ -22,7 +23,15 @@ final class TrainingController
         'zdrzujuca_sa',
         'hliadka_oph',
         'hliadka_opah',
+        // Change request 2.3 — not a školenie with an attendee list but a
+        // document issued to the client's employees once a year, so it lives
+        // here rather than among the inspection protocols. Its payload (year,
+        // schvaľujúca osoba, instruction text) is stored in `trainings.fields`.
+        self::TYPE_POKYN,
     ];
+
+    /** The one training type that carries a `fields` payload instead of trainees. */
+    public const TYPE_POKYN = 'pokyn_zatva';
 
     public static function index(Request $req): void
     {
@@ -33,8 +42,12 @@ final class TrainingController
         $facilityId = self::queryInt($req, 'facility_id');
         $type       = $req->query('type');
 
+        // The list never carries the Pokyn's full text — only the harvest year
+        // it covers, which is all a row needs to identify itself. The body is
+        // fetched with the detail.
         $sql = 'SELECT t.id, t.type, t.date, t.duration_min, t.topics, t.status,
                        t.created_at,
+                       JSON_UNQUOTE(JSON_EXTRACT(t.fields, \'$.year\')) AS pokyn_year,
                        t.company_id, c.name AS company_name,
                        t.facility_id, f.name AS facility_name,
                        t.trainer_id, tr.fullname AS trainer_name,
@@ -78,6 +91,15 @@ final class TrainingController
 
         $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
 
+        // A Pokyn has no attendee list — the trainees query would always come
+        // back empty, and the detail page renders the instruction text instead.
+        if ($row['type'] === self::TYPE_POKYN) {
+            Response::json([
+                'training' => self::shape($row),
+                'trainees' => [],
+            ]);
+        }
+
         $tStmt = Db::pdo()->prepare(
             'SELECT id, fullname, position, signature_path, signed_at,
                     created_at, updated_at
@@ -120,6 +142,10 @@ final class TrainingController
         if ($type === null || !in_array($type, self::TYPES, true)) {
             Response::error('Invalid training type', 422);
         }
+        // The Pokyn's text may be supplied at creation (the UI seeds it from
+        // the template) or filled in afterwards on the detail page — it is only
+        // required once the PDF is generated.
+        $fields = self::fieldsForType($req, $type, required: false);
         if ($companyId === null) {
             Response::error('Field required: company_id', 422);
         }
@@ -185,11 +211,12 @@ final class TrainingController
         Db::pdo()->prepare(
             'INSERT INTO trainings
                 (account_id, company_id, facility_id, type, date,
-                 trainer_id, topics, duration_min, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, "draft")'
+                 trainer_id, topics, duration_min, fields, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "draft")'
         )->execute([
             $accountId, $companyId, $facilityId, $type, $date,
             $trainerId, $topics, $durationMin,
+            $fields !== null ? json_encode($fields, JSON_UNESCAPED_UNICODE) : null,
         ]);
         $id = (int) Db::pdo()->lastInsertId();
 
@@ -211,9 +238,15 @@ final class TrainingController
         $trainerId   = $req->jsonInt('trainer_id');
         $topics      = $req->jsonString('topics');
         $durationMin = $req->jsonInt('duration_min');
+        $fields      = self::fieldsForType($req, (string) $existing['type'], required: false);
 
         if ($date !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
             Response::error('Invalid date (expected YYYY-MM-DD)', 422);
+        }
+        // A finalized training is the record of an issued document — its text
+        // must keep matching the PDF that carries its number.
+        if ($fields !== null && $existing['status'] === 'finalized') {
+            Response::error('Pokyn už je vystavený — jeho text sa nedá meniť.', 409);
         }
         if ($trainerId !== null) {
             if ($isAdmin) {
@@ -236,9 +269,14 @@ final class TrainingController
              SET    date         = COALESCE(?, date),
                     trainer_id   = COALESCE(?, trainer_id),
                     topics       = COALESCE(?, topics),
-                    duration_min = COALESCE(?, duration_min)
+                    duration_min = COALESCE(?, duration_min),
+                    fields       = COALESCE(?, fields)
              WHERE  id = ? AND account_id = ?'
-        )->execute([$date, $trainerId, $topics, $durationMin, $id, $scopeAccountId]);
+        )->execute([
+            $date, $trainerId, $topics, $durationMin,
+            $fields !== null ? json_encode($fields, JSON_UNESCAPED_UNICODE) : null,
+            $id, $scopeAccountId,
+        ]);
         unset($existing);
 
         Response::json(['training' => self::shape(self::loadOrFail($isAdmin ? null : $accountId, $id))]);
@@ -273,8 +311,9 @@ final class TrainingController
     private static function loadOrFail(?int $accountId, int $id): array
     {
         $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics,
-                       t.status, t.created_at, t.updated_at,
+                       t.fields, t.status, t.created_at, t.updated_at,
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
+                       c.approver AS company_approver,
                        t.facility_id, f.name AS facility_name,
                        t.trainer_id, tr.fullname AS trainer_name,
                        ip.cert_general AS trainer_certification_number,
@@ -312,8 +351,50 @@ final class TrainingController
         $row['trainer_id']     = $row['trainer_id'] !== null ? (int) $row['trainer_id'] : null;
         $row['duration_min']   = $row['duration_min'] !== null ? (int) $row['duration_min'] : null;
         $row['trainees_count'] = isset($row['trainees_count']) ? (int) $row['trainees_count'] : 0;
+        // `fields` reaches the client decoded (detail) — the list only carries
+        // the year it extracted, so the Pokyn's text never rides along there.
+        if (array_key_exists('fields', $row)) {
+            $row['fields'] = PokynZatva::decode($row['fields']);
+        }
+        if (array_key_exists('pokyn_year', $row)) {
+            $row['pokyn_year'] = $row['pokyn_year'] !== null ? (int) $row['pokyn_year'] : null;
+        }
         unset($row['account_id']);
         return $row;
+    }
+
+    /**
+     * Reads the per-type document payload off the request. Only pokyn_zatva
+     * has one; sending `fields` for a training with an attendee list is a
+     * client bug worth reporting rather than silently dropping.
+     *
+     * @return array<string, mixed>|null null when the request carries no payload
+     */
+    private static function fieldsForType(Request $req, string $type, bool $required): ?array
+    {
+        $raw = $req->json()['fields'] ?? null;
+
+        if ($type !== self::TYPE_POKYN) {
+            if ($raw !== null) {
+                Response::error('Tento typ školenia nemá text dokumentu.', 422);
+            }
+            return null;
+        }
+        if ($raw === null) {
+            if ($required) {
+                Response::error('Doplň text pokynu.', 422);
+            }
+            return null;
+        }
+        if (!is_array($raw)) {
+            Response::error('Field fields must be an object.', 422);
+        }
+
+        try {
+            return PokynZatva::validate($raw);
+        } catch (\DomainException $e) {
+            Response::error($e->getMessage(), 422);
+        }
     }
 
     private static function queryInt(Request $req, string $key): ?int

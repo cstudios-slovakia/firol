@@ -1,4 +1,4 @@
-import type { PokynSection } from '@/api/inspections';
+import type { PokynSection } from '@/api/trainings';
 
 /**
  * Default text of the "Pokyn na zabezpečenie ochrany pred požiarmi pri

@@ -74,9 +74,9 @@ final class InspectionController
         'pu_udrzba' => [12],
         'nudzove_osvetlenie' => [12],
         'ts_hadic' => [12],
-        // Vydáva sa raz ročne pred žatvou (change request 2.3), so the annual
-        // cycle is real and the calendar should surface next year's Pokyn.
-        'pokyn_zatva' => [12],
+        // Pokyn — žatevné práce is not here: it is a document issued to the
+        // client's employees, so it lives in the training tree (see
+        // TrainingController), not among the inspection types.
         // One-off document — a disposal has no recurrence (change request 2.1).
         'vyradenie' => [0],
     ];

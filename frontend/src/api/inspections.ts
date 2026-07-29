@@ -13,7 +13,6 @@ export type InspectionType =
   | 'pu_udrzba'
   | 'nudzove_osvetlenie'
   | 'ts_hadic'
-  | 'pokyn_zatva'
   | 'vyradenie';
 
 export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
@@ -25,7 +24,6 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   pu_udrzba: 'Požiarne uzávery — údržba',
   nudzove_osvetlenie: 'Núdzové osvetlenie',
   ts_hadic: 'Tlaková skúška hadíc',
-  pokyn_zatva: 'Pokyn — žatevné práce',
   vyradenie: 'Vyraďovací protokol PHP',
 };
 
@@ -38,8 +36,6 @@ export const INSPECTION_TYPE_PERIODICITIES: Record<InspectionType, number[]> = {
   pu_udrzba: [12],
   nudzove_osvetlenie: [12],
   ts_hadic: [12],
-  // Issued once a year before the harvest, so the annual cycle is real.
-  pokyn_zatva: [12],
   // One-off document — a disposal doesn't recur.
   vyradenie: [0],
 };
@@ -262,21 +258,6 @@ export type VyradenieItemFields = {
   reason: string;
 };
 
-/** One editable block of the Pokyn's instruction text. */
-export type PokynSection = { title: string; text: string };
-
-/**
- * Pokyn — žatevné práce (change request 2.3). A single-record document: the
- * harvest year it covers, an optional per-document approver override, and the
- * instruction text itself. The text is stored with the document so a issued
- * protocol keeps saying what it said, even if the default template changes.
- */
-export type PokynZatvaItemFields = {
-  year: number;
-  approver: string | null;
-  sections: PokynSection[];
-};
-
 export type TsHadicItemFields = {
   hose_type: string;
   location: string;
@@ -438,8 +419,7 @@ export const Inspections = {
       | PuUdrzbaItemFields
       | NudzoveOsvetlenieItemFields
       | TsHadicItemFields
-      | VyradenieItemFields
-      | PokynZatvaItemFields,
+      | VyradenieItemFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items`, {
@@ -459,8 +439,7 @@ export const Inspections = {
       | PuUdrzbaItemFields
       | NudzoveOsvetlenieItemFields
       | TsHadicItemFields
-      | VyradenieItemFields
-      | PokynZatvaItemFields,
+      | VyradenieItemFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items/${itemId}`, {

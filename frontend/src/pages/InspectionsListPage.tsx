@@ -70,7 +70,6 @@ const TYPE_CHIPS: [InspectionType, string][] = [
     ["pu_udrzba", "PU – údržba"],
     ["nudzove_osvetlenie", "Nú. osvetlenie"],
     ["ts_hadic", "TS hadíc"],
-    ["pokyn_zatva", "Pokyn — žatva"],
     ["vyradenie", "Vyradenie PHP"],
 ];
 

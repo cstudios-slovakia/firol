@@ -4,19 +4,20 @@
  * (change request 2.3).
  *
  * Layout follows docs/handoff/zmeny-2026-07/POapp_sablona_pokyn_zatva.docx in
- * the same house style as the other protocols. Unlike the inspection
- * protocols this document has no item table: the single record carries the
- * instruction text as an ordered list of sections, each of which the
- * technician may edit before generating.
+ * the same house style as the other protocols. It lives in the training tree
+ * (a document issued to the client's employees, not a control of a device) but
+ * has neither an attendee table nor an item table: the record carries the
+ * instruction text as an ordered list of sections, each of which the technician
+ * may edit before generating.
  *
  * @var string $number
  * @var string $generated_at
  * @var array  $brand          name, color, logo_data_uri
- * @var array  $inspection     executed_on, notes, status
+ * @var array  $training       type, training_type_label, date, topics, status
  * @var array  $company        name, ico, address, city, approver
  * @var array  $facility       name, address, city
- * @var array  $inspector      fullname, certification_number, signature_data_uri
- * @var array  $items          exactly one item: { fields: { year, approver, sections } }
+ * @var array  $trainer        fullname, certification_number, signature_data_uri
+ * @var array  $pokyn          year, approver, sections
  */
 $h = static fn(?string $v): string => htmlspecialchars((string) ($v ?? '—'), ENT_QUOTES, 'UTF-8');
 $brandColor = $brand['color'] ?? '#E8433A';
@@ -28,13 +29,16 @@ $formatDate = static function (?string $iso): string {
   return $ts ? date('j. n. Y', $ts) : $iso;
 };
 
-$fields   = $items[0]['fields'] ?? [];
-$year     = (int) ($fields['year'] ?? 0);
-$sections = is_array($fields['sections'] ?? null) ? $fields['sections'] : [];
+$year     = (int) ($pokyn['year'] ?? 0);
+$sections = is_array($pokyn['sections'] ?? null) ? $pokyn['sections'] : [];
+$issuedOn = $training['date'] ?? null;
 
 // Per-document override wins over the company's recorded schvaľujúca osoba.
-$approver = trim((string) ($fields['approver'] ?? '')) ?: trim((string) ($company['approver'] ?? ''));
+$approver = trim((string) ($pokyn['approver'] ?? '')) ?: trim((string) ($company['approver'] ?? ''));
 
+// A Pokyn may be issued for the whole company — the facility is optional here,
+// unlike on the inspection protocols.
+$facilityName = trim((string) ($facility['name'] ?? ''));
 $city = ($facility['city'] ?? '') ?: ($company['city'] ?? '');
 
 /**
@@ -285,7 +289,8 @@ $renderBody = static function (string $text) use ($h): string {
           </td>
           <td>
             <div class="hdr-company"><?= $h($company['name']) ?></div>
-            <div class="hdr-sub">Prevádzka: <?= $h($facility['name']) ?> | IČO: <?= $h($company['ico']) ?></div>
+            <div class="hdr-sub"><?php if ($facilityName !== ''): ?>Prevádzka: <?= $h($facilityName) ?> |
+            <?php endif ?>IČO: <?= $h($company['ico']) ?></div>
             <?php if (!empty($facility['address'])): ?>
               <div class="hdr-sub"><?= $h($facility['address']) ?></div><?php endif ?>
           </td>
@@ -295,7 +300,7 @@ $renderBody = static function (string $text) use ($h): string {
     <td width="43%" class="hdr-right">
       <div class="hdr-title">Pokyn na zabezpečenie ochrany pred požiarmi pri žatevných prácach</div>
       <div class="hdr-meta">Č. dokumentu: <?= $h($number) ?></div>
-      <div class="hdr-meta">Dátum vydania: <?= $formatDate($inspection['executed_on'] ?? null) ?></div>
+      <div class="hdr-meta">Dátum vydania: <?= $formatDate($issuedOn) ?></div>
     </td>
   </tr>
 </table>
@@ -319,14 +324,14 @@ $renderBody = static function (string $text) use ($h): string {
     <td class="bl">IČO</td>
     <td class="bv"><?= $h($company['ico']) ?></td>
     <td class="bl">Dátum vydania</td>
-    <td class="bv"><?= $formatDate($inspection['executed_on'] ?? null) ?></td>
+    <td class="bv"><?= $formatDate($issuedOn) ?></td>
   </tr>
   <tr>
     <td class="bl">Prevádzka</td>
-    <td class="bv"><?= $h($facility['name']) ?><?= !empty($facility['address']) ? '<br><span style="font-weight:normal;color:#555;">' . $h($facility['address']) . '</span>' : '' ?></td>
+    <td class="bv"><?= $facilityName !== '' ? $h($facilityName) : 'celá spoločnosť' ?><?= !empty($facility['address']) ? '<br><span style="font-weight:normal;color:#555;">' . $h($facility['address']) . '</span>' : '' ?></td>
     <td class="bl">Vypracoval</td>
-    <td class="bv"><?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?>, technik
-      PO, č. oprávnenia <?= $h($inspector['certification_number']) ?><?php endif ?></td>
+    <td class="bv"><?= $h($trainer['fullname']) ?><?php if (!empty($trainer['certification_number'])): ?>, technik
+      PO, č. oprávnenia <?= $h($trainer['certification_number']) ?><?php endif ?></td>
   </tr>
   <tr>
     <td class="bl">Schválil</td>
@@ -349,8 +354,8 @@ $renderBody = static function (string $text) use ($h): string {
   <div class="sect"><?= $renderBody($text) ?></div>
 <?php endforeach ?>
 
-<?php if (!empty($inspection['notes'])): ?>
-  <div class="scope"><strong>Poznámky:</strong> <?= nl2br($h($inspection['notes'])) ?></div>
+<?php if (!empty($training['topics'])): ?>
+  <div class="scope"><strong>Poznámky:</strong> <?= nl2br($h($training['topics'])) ?></div>
 <?php endif ?>
 
 <h2>Záver a podpisy</h2>
@@ -361,16 +366,16 @@ $renderBody = static function (string $text) use ($h): string {
     <th width="24%">Miesto a dátum</th>
   </tr>
   <tr>
-    <td><?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?><br><span
+    <td><?= $h($trainer['fullname']) ?><?php if (!empty($trainer['certification_number'])): ?><br><span
           style="font-size:8pt; color:#555;">technik PO, č. oprávnenia:
-          <?= $h($inspector['certification_number']) ?></span><?php endif ?></td>
+          <?= $h($trainer['certification_number']) ?></span><?php endif ?></td>
     <td><?= $approver !== '' ? $h($approver) : 'Štatutárny zástupca / zodpovedná osoba' ?></td>
-    <td><?= $h(($city ? $city . ', ' : '') . $formatDate($inspection['executed_on'] ?? null)) ?></td>
+    <td><?= $h(($city ? $city . ', ' : '') . $formatDate($issuedOn)) ?></td>
   </tr>
   <tr class="sig-row">
     <td>
-      <?php if (!empty($inspector['signature_data_uri'])): ?>
-        <img class="sig-img" src="<?= $h($inspector['signature_data_uri']) ?>" alt="">
+      <?php if (!empty($trainer['signature_data_uri'])): ?>
+        <img class="sig-img" src="<?= $h($trainer['signature_data_uri']) ?>" alt="">
       <?php endif ?>
       <div class="sig-line"></div>
     </td>
