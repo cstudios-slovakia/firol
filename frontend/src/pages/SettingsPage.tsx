@@ -2188,31 +2188,26 @@ function PurgeCard({
     onConfirm: () => void;
     busy: boolean;
 }) {
+    // Backup reminder and the "type VYMAZAŤ" confirmation are one modal — a
+    // separate box left behind on the page is easy to miss once the user has
+    // already dismissed the reminder.
     const [showReminder, setShowReminder] = useState(false);
-    const [open, setOpen] = useState(false);
-    const [keyword, setKeyword] = useState("");
-    const valid = keyword.trim() === CONFIRM_KEYWORD;
-
-    function reset() {
-        setOpen(false);
-        setKeyword("");
-    }
-
-    function onDeleteClick() {
-        setShowReminder(true);
-    }
-
-    function onReminderProceed() {
-        setShowReminder(false);
-        setOpen(true);
-    }
 
     return (
         <>
             {showReminder && (
                 <BackupReminderModal
-                    onProceed={onReminderProceed}
+                    onProceed={() => {
+                        setShowReminder(false);
+                        onConfirm();
+                    }}
                     onCancel={() => setShowReminder(false)}
+                    confirm={{
+                        keyword: CONFIRM_KEYWORD,
+                        label: "Potvrdiť vymazanie",
+                        detail: `${title} — ${detail}`,
+                        busy,
+                    }}
                 />
             )}
             <div className="rounded-2xl border border-red-200 bg-red-50/40 p-4">
@@ -2225,61 +2220,15 @@ function PurgeCard({
                         <p className="mt-0.5 text-xs text-ink-500">{description}</p>
                         <p className="mt-1 text-[11px] text-red-700/80">{detail}</p>
                     </div>
-                    {!open && (
-                        <button
-                            type="button"
-                            onClick={onDeleteClick}
-                            disabled={busy}
-                            className="shrink-0 rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
-                        >
-                            Vymazať
-                        </button>
-                    )}
+                    <button
+                        type="button"
+                        onClick={() => setShowReminder(true)}
+                        disabled={busy}
+                        className="shrink-0 rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+                    >
+                        Vymazať
+                    </button>
                 </div>
-
-                {open && (
-                    <div className="mt-4 flex flex-col gap-3 border-t border-red-200 pt-4">
-                        <p className="text-xs text-ink-700">
-                            Pre potvrdenie napíš{" "}
-                            <span className="font-mono font-bold text-red-700">
-                                {CONFIRM_KEYWORD}
-                            </span>{" "}
-                            do poľa nižšie:
-                        </p>
-                        <input
-                            type="text"
-                            value={keyword}
-                            onChange={(e) => setKeyword(e.target.value)}
-                            placeholder={CONFIRM_KEYWORD}
-                            autoComplete="off"
-                            spellCheck={false}
-                            className="w-full rounded-xl border border-red-200 bg-white px-3 py-2 font-mono text-sm text-ink-900 outline-none focus:border-red-400 focus:ring-2 focus:ring-red-200"
-                        />
-                        <div className="flex justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={reset}
-                                className="rounded-xl px-3 py-1.5 text-xs font-semibold text-ink-600 transition-colors hover:bg-ink-100"
-                            >
-                                Zrušiť
-                            </button>
-                            <Button
-                                type="button"
-                                disabled={!valid}
-                                loading={busy}
-                                onClick={() => {
-                                    if (valid) {
-                                        onConfirm();
-                                        reset();
-                                    }
-                                }}
-                                className="bg-red-600 hover:bg-red-700 focus-visible:ring-red-300"
-                            >
-                                Potvrdiť vymazanie
-                            </Button>
-                        </div>
-                    </div>
-                )}
             </div>
         </>
     );
