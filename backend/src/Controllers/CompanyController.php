@@ -28,7 +28,7 @@ final class CompanyController
         // tenant via the account_id condition on the parent query.
         // Admins get all companies across all accounts (no tenant filter).
         if ($isAdmin) {
-            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.approver,
+            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver,
                            c.account_id,
                            a.invoice_company_name AS account_name,
                            (SELECT COUNT(*) FROM facilities f
@@ -44,7 +44,7 @@ final class CompanyController
                     WHERE  c.archived_at IS NULL';
             $params = [];
         } else {
-            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.approver,
+            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver,
                            (SELECT COUNT(*) FROM facilities f
                              WHERE f.company_id = c.id AND f.archived_at IS NULL) AS facilities_count,
                            (SELECT MAX(i.executed_on) FROM inspections i
@@ -137,13 +137,13 @@ final class CompanyController
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
 
-        [$name, $ico, $addr, $contact, $approver] = self::readBody($req);
+        [$name, $ico, $addr, $contact, $contactEmail, $approver] = self::readBody($req);
 
         $stmt = Db::pdo()->prepare(
-            'INSERT INTO companies (account_id, name, ico, street, postal_code, city, contact, approver)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO companies (account_id, name, ico, street, postal_code, city, contact, contact_email, approver)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        $stmt->execute([$accountId, $name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $approver]);
+        $stmt->execute([$accountId, $name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $contactEmail, $approver]);
         $id = (int) Db::pdo()->lastInsertId();
 
         Response::json(['company' => self::shape(self::findOrFail($accountId, $id))], 201);
@@ -159,13 +159,13 @@ final class CompanyController
         $existing = self::findOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
-        [$name, $ico, $addr, $contact, $approver] = self::readBody($req);
+        [$name, $ico, $addr, $contact, $contactEmail, $approver] = self::readBody($req);
 
         $stmt = Db::pdo()->prepare(
-            'UPDATE companies SET name = ?, ico = ?, street = ?, postal_code = ?, city = ?, contact = ?, approver = ?
+            'UPDATE companies SET name = ?, ico = ?, street = ?, postal_code = ?, city = ?, contact = ?, contact_email = ?, approver = ?
              WHERE  id = ? AND account_id = ?'
         );
-        $stmt->execute([$name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $approver, $id, $scopeAccountId]);
+        $stmt->execute([$name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $contactEmail, $approver, $id, $scopeAccountId]);
 
         Response::json(['company' => self::shape(self::findOrFail($isAdmin ? null : $accountId, $id))]);
     }
@@ -189,7 +189,7 @@ final class CompanyController
     /**
      * @return array{
      *   0:string, 1:?string,
-     *   2:array{street:?string,postal_code:?string,city:?string}, 3:?string, 4:?string
+     *   2:array{street:?string,postal_code:?string,city:?string}, 3:?string, 4:?string, 5:?string
      * }
      */
     private static function readBody(Request $req): array
@@ -198,6 +198,9 @@ final class CompanyController
         $ico     = $req->jsonString('ico');
         $address = $req->jsonString('address');
         $contact = $req->jsonString('contact');
+        // Recipient of the calendar's client notice (change request 2.5.4) —
+        // a single address, unlike the free-text `contact` above.
+        $contactEmail = $req->jsonString('contact_email');
         // Schvaľujúca osoba — name and role in one field, printed on the
         // Pokyn and the vyraďovací protokol (change request 2.3 / 2.1).
         $approver = $req->jsonString('approver');
@@ -214,6 +217,15 @@ final class CompanyController
             }
         }
 
+        if ($contactEmail !== null) {
+            $contactEmail = trim($contactEmail);
+            if ($contactEmail === '') {
+                $contactEmail = null;
+            } elseif (!filter_var($contactEmail, FILTER_VALIDATE_EMAIL)) {
+                Response::error('Invalid contact_email', 422);
+            }
+        }
+
         // The edit form sends the structured parts; offline/import clients may
         // still send a single combined "Adresa" string.
         $addr = Address::resolve(
@@ -222,7 +234,7 @@ final class CompanyController
             $req->jsonString('city'),
             $address,
         );
-        return [$name, $ico, $addr, $contact, $approver !== '' ? $approver : null];
+        return [$name, $ico, $addr, $contact, $contactEmail, $approver !== '' ? $approver : null];
     }
 
     /** @return array<string, mixed> */
@@ -230,14 +242,14 @@ final class CompanyController
     {
         if ($accountId === null) {
             $stmt = Db::pdo()->prepare(
-                'SELECT id, account_id, name, ico, street, postal_code, city, contact, approver, created_at
+                'SELECT id, account_id, name, ico, street, postal_code, city, contact, contact_email, approver, created_at
                  FROM   companies
                  WHERE  id = ? AND archived_at IS NULL'
             );
             $stmt->execute([$id]);
         } else {
             $stmt = Db::pdo()->prepare(
-                'SELECT id, account_id, name, ico, street, postal_code, city, contact, approver, created_at
+                'SELECT id, account_id, name, ico, street, postal_code, city, contact, contact_email, approver, created_at
                  FROM   companies
                  WHERE  id = ? AND account_id = ? AND archived_at IS NULL'
             );

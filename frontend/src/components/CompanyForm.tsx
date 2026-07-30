@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Building2, Hash, MapPin, Phone, Mailbox, Map, UserCheck } from 'lucide-react';
+import { Building2, Hash, MapPin, Phone, Mailbox, Map, Mail, UserCheck } from 'lucide-react';
 import { Companies, type Company, type CompanyPayload } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { companyCreateOptimistic } from '@/lib/offlineEntities';
@@ -44,10 +44,12 @@ export function CompanyForm({
   const [postalCode, setPostalCode] = useState(initial?.postal_code ?? '');
   const [city, setCity] = useState(initial?.city ?? '');
   const [contact, setContact] = useState(initial?.contact ?? '');
+  const [contactEmail, setContactEmail] = useState(initial?.contact_email ?? '');
   const [approver, setApprover] = useState(initial?.approver ?? '');
 
   const [submitting, setSubmitting] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
@@ -56,7 +58,12 @@ export function CompanyForm({
       setNameError('Doplň názov firmy.');
       return;
     }
+    if (contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim())) {
+      setEmailError('Zadaj platnú e-mailovú adresu.');
+      return;
+    }
     setNameError(null);
+    setEmailError(null);
     setError(null);
     setSubmitting(true);
     const payload: CompanyPayload = {
@@ -66,6 +73,7 @@ export function CompanyForm({
       postal_code: postalCode.trim() || undefined,
       city: city.trim() || undefined,
       contact: contact.trim() || undefined,
+      contact_email: contactEmail.trim() || undefined,
       approver: approver.trim() || undefined,
     };
     try {
@@ -76,6 +84,7 @@ export function CompanyForm({
         postal_code: payload.postal_code ?? null,
         city: payload.city ?? null,
         contact: payload.contact ?? null,
+        contact_email: payload.contact_email ?? null,
         approver: payload.approver ?? null,
       });
       const res = mode === 'edit' && initial
@@ -174,6 +183,25 @@ export function CompanyForm({
             value={contact}
             onChange={(e) => setContact(e.target.value)}
             placeholder="info@firma.sk · +421 900 123 456"
+          />
+        )}
+      </Field>
+
+      <Field
+        label="Kontaktný e-mail"
+        hint="Voliteľné — adresát oznámenia o termíne kontroly z kalendára."
+        error={emailError}
+      >
+        {(p) => (
+          <Input
+            {...p}
+            type="email"
+            inputMode="email"
+            autoComplete="off"
+            leftIcon={<Mail className="size-4" />}
+            value={contactEmail}
+            onChange={(e) => { setContactEmail(e.target.value); if (emailError) setEmailError(null); }}
+            placeholder="info@firma.sk"
           />
         )}
       </Field>

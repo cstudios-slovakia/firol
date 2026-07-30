@@ -111,7 +111,7 @@ final class Writer
     private static function companies(int $accountId, PDO $pdo): array
     {
         $stmt = $pdo->prepare(
-            'SELECT id, name, ico, street, postal_code, city, contact, approver, created_at
+            'SELECT id, name, ico, street, postal_code, city, contact, contact_email, approver, created_at
              FROM   companies WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
         );
         $stmt->execute([$accountId]);

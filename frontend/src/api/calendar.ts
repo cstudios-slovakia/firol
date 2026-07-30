@@ -11,6 +11,8 @@ export type CalendarDeadline = {
   type: InspectionType;
   company_id: number;
   company_name: string;
+  /** Company contact e-mail — recipient of the client notice (2.5.4). */
+  company_email: string | null;
   facility_id: number;
   facility_name: string;
   /** Legal deadline — executed_on + periodicity. Not directly editable. */

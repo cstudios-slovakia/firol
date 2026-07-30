@@ -51,48 +51,54 @@ export function companiesForDay(deadlines: CalendarDeadline[]): DayCompany[] {
   return [...map.values()].sort((a, b) => a.company_name.localeCompare(b.company_name, 'sk'));
 }
 
-export type FacilityDeadlineGroup = {
+export type FacilityDayGroup = {
+  /** Stable React key — facility and day together identify the group. */
+  key: string;
   facility_id: number;
   facility_name: string;
   company_id: number;
   company_name: string;
+  /** Recipient of the group's client notice e-mail (2.5.4); null if unset. */
+  company_email: string | null;
+  /** The calendar day all deadlines in the group fall on. */
+  date: string;
   deadlines: CalendarDeadline[];
   /** Nearest statutory deadline in the group (min days, may be negative). */
   nearestDays: number;
-  /** Calendar day the nearest deadline renders on (planned date wins). */
-  nearestDate: string;
 };
 
 /**
- * Group deadlines by facility (one row per prevádzka, listing all its
- * controls) — the grouping the spec asks for in both the Prehľad block and the
- * monthly view. Groups are sorted by their nearest statutory deadline.
+ * Group deadlines by facility *and* calendar day: controls collapse into one
+ * row only when they are due at the same prevádzka on the same day. Deadlines
+ * of the same facility falling on different days stay separate rows, so every
+ * date the technician has to show up is visible on its own. Groups are sorted
+ * by their nearest statutory deadline.
  */
-export function groupByFacility(deadlines: CalendarDeadline[]): FacilityDeadlineGroup[] {
-  const map = new Map<number, FacilityDeadlineGroup>();
+export function groupByFacilityDay(deadlines: CalendarDeadline[]): FacilityDayGroup[] {
+  const map = new Map<string, FacilityDayGroup>();
   for (const d of deadlines) {
-    let g = map.get(d.facility_id);
+    const date = effectiveDate(d);
+    const key = `${d.facility_id}@${date}`;
+    let g = map.get(key);
     if (!g) {
       g = {
+        key,
         facility_id: d.facility_id,
         facility_name: d.facility_name,
         company_id: d.company_id,
         company_name: d.company_name,
+        company_email: d.company_email,
+        date,
         deadlines: [],
         nearestDays: Infinity,
-        nearestDate: effectiveDate(d),
       };
-      map.set(d.facility_id, g);
+      map.set(key, g);
     }
     g.deadlines.push(d);
-    const days = daysUntil(d.statutory_date);
-    if (days < g.nearestDays) {
-      g.nearestDays = days;
-      g.nearestDate = effectiveDate(d);
-    }
+    g.nearestDays = Math.min(g.nearestDays, daysUntil(d.statutory_date));
   }
   for (const g of map.values()) {
     g.deadlines.sort((a, b) => daysUntil(a.statutory_date) - daysUntil(b.statutory_date));
   }
-  return [...map.values()].sort((a, b) => a.nearestDays - b.nearestDays);
+  return [...map.values()].sort((a, b) => a.nearestDays - b.nearestDays || a.date.localeCompare(b.date));
 }

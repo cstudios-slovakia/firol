@@ -5,9 +5,9 @@ import type { InspectionType } from '@/api/inspections';
 import {
   bucketForDays,
   daysUntil,
-  groupByFacility,
+  groupByFacilityDay,
   type DeadlineBucket,
-  type FacilityDeadlineGroup,
+  type FacilityDayGroup,
 } from '@/lib/calendarGrouping';
 import { Card } from '@/components/ui/Card';
 
@@ -50,8 +50,8 @@ export function DeadlinesBlock({
   // has — a deadline a year out would then read as "po termíne" because the row
   // is bucketed by the facility's nearest deadline.
   const inWindow = deadlines.filter((d) => bucketForDays(daysUntil(d.statutory_date)) !== null);
-  const groups = groupByFacility(inWindow);
-  const buckets: Record<DeadlineBucket, FacilityDeadlineGroup[]> = {
+  const groups = groupByFacilityDay(inWindow);
+  const buckets: Record<DeadlineBucket, FacilityDayGroup[]> = {
     overdue: [],
     soon: [],
     upcoming: [],
@@ -96,7 +96,7 @@ export function DeadlinesBlock({
                 </div>
                 <div className="flex flex-col gap-1.5">
                   {buckets[b].map((g) => (
-                    <FacilityRow key={g.facility_id} group={g} bucket={b} />
+                    <FacilityRow key={g.key} group={g} bucket={b} />
                   ))}
                 </div>
               </div>
@@ -108,17 +108,28 @@ export function DeadlinesBlock({
   );
 }
 
-function FacilityRow({ group, bucket }: { group: FacilityDeadlineGroup; bucket: DeadlineBucket }) {
-  const days = group.nearestDays;
+/** Slovak day declension: 1 deň, 2–4 dni, 5+ dní. */
+function dayCount(n: number): string {
+  if (n === 1) return '1 deň';
+  if (n < 5) return `${n} dni`;
+  return `${n} dní`;
+}
+
+function FacilityRow({ group, bucket }: { group: FacilityDayGroup; bucket: DeadlineBucket }) {
+  // Count down to the day the row shows, not to the statutory date — with a
+  // planned date set the two differ, and "o 1 deň" next to today's date reads
+  // as a bug. The statutory date still decides the bucket.
+  const days = daysUntil(group.date);
   const when =
-    bucket === 'overdue'
-      ? `meškanie ${Math.abs(days)} dní`
-      : days === 0
-        ? 'dnes'
-        : `o ${days} dní`;
+    days < 0 ? `meškanie ${dayCount(-days)}` : days === 0 ? 'dnes' : `o ${dayCount(days)}`;
+  const dayLabel = new Date(group.date + 'T00:00:00').toLocaleDateString('sk-SK', {
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
+  });
   return (
     <Link
-      to={`/kalendar?den=${group.nearestDate}`}
+      to={`/kalendar?den=${group.date}`}
       className="flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-ink-50"
     >
       <span className="mt-0.5 shrink-0 text-ink-300">
@@ -143,7 +154,10 @@ function FacilityRow({ group, bucket }: { group: FacilityDeadlineGroup; bucket: 
           ))}
         </div>
       </div>
-      <span className={`shrink-0 text-xs font-medium ${BUCKET_META[bucket].text}`}>{when}</span>
+      <span className="shrink-0 text-right">
+        <span className={`block text-xs font-medium ${BUCKET_META[bucket].text}`}>{when}</span>
+        <span className="block text-[11px] text-ink-400">{dayLabel}</span>
+      </span>
       <ChevronRight className="size-4 shrink-0 text-ink-300" />
     </Link>
   );

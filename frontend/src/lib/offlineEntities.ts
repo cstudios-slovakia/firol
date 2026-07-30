@@ -173,6 +173,7 @@ export function companyCreateOptimistic(args: {
   postal_code: string | null;
   city: string | null;
   contact: string | null;
+  contact_email: string | null;
   approver: string | null;
 }): OptimisticSpec {
   const id = mintTempId();
@@ -186,6 +187,7 @@ export function companyCreateOptimistic(args: {
     postal_code: args.postal_code,
     city: args.city,
     contact: args.contact,
+    contact_email: args.contact_email,
     approver: args.approver,
     created_at: nowIso(),
   };
@@ -199,6 +201,7 @@ export function companyCreateOptimistic(args: {
     postal_code: args.postal_code,
     city: args.city,
     contact: args.contact,
+    contact_email: args.contact_email,
     approver: args.approver,
     facilities_count: 0,
     inspections_count: 0,
@@ -339,7 +342,7 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
   const company = COMPANY_RE.exec(pathOnly);
   if (company) {
     const id = Number(company[1]);
-    const keys = ['name', 'ico', 'street', 'postal_code', 'city', 'contact', 'approver'];
+    const keys = ['name', 'ico', 'street', 'postal_code', 'city', 'contact', 'contact_email', 'approver'];
     return {
       label: 'Úprava firmy',
       detail: typeof f.name === 'string' ? f.name : undefined,

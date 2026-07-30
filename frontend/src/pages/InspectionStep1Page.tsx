@@ -458,6 +458,7 @@ export function InspectionStep1Page() {
               postal_code: c.postal_code,
               city: c.city,
               contact: c.contact,
+              contact_email: c.contact_email,
               approver: c.approver,
               facilities_count: 0,
               inspections_count: 0,

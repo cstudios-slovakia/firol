@@ -540,7 +540,16 @@ the numbered priority order). All items are now implemented on branch
   button is now also offered while editing an existing item — it saves the
   changes and opens a new item carrying the same description.)
 - ✅ **2.5 Calendar** — migration `026`, `CalendarController`, Termíny block.
-  (2.5.4 email button omitted — the spec allows a first version without it.)
+  - ✅ **2.5.4 "Oznámiť klientovi e-mailom"** — added on 30. 7. 2026. Each
+    grouped event in the day agenda offers a `mailto:` link built by
+    `lib/clientNoticeEmail.ts`; the app never sends anything, it only hands the
+    pre-filled text to the technician's mail client so it stays editable. One
+    message per facility+day group covers every control due there, so a client
+    never gets several mails at once. Požiarna kniha is announced as
+    "preventívna protipožiarna prehliadka", every other type by the name of its
+    control. Recipient is the new company field `contact_email` (migration
+    `033`, optional) — with none recorded the message opens with an empty
+    recipient, and the button offers a link to fill it in.
 - ✅ **3.1 Terms & consent** — migration `030` (`users.terms_accepted_at`,
   `terms_version`), split by migration `034` into independent
   `vop_version`/`vop_accepted_at` and `privacy_version`/`privacy_accepted_at`
@@ -558,7 +567,10 @@ the numbered priority order). All items are now implemented on branch
 - ✅ **3.3 Landing page** — `landing-page.html` swapped.
 
 New company field `approver` ("schvaľujúca osoba", migration `029`) feeds the
-"Schválil" line on both new document types.
+"Schválil" line on both new document types. A second one, `contact_email`
+(migration `033`), is the recipient of the calendar's client notice — the
+free-text `contact` field could not serve as a `mailto:` address because it
+mixes a name, a phone number and sometimes an e-mail.
 
 Ops changes made alongside: the nightly DB backup cron never ran (its `>>`
 redirect targeted a directory only the script itself created — see

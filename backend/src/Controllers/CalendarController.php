@@ -42,7 +42,7 @@ final class CalendarController
         // defines the current deadline. Plain fire-book entries and drafts are
         // excluded (they carry no statutory cycle).
         $sql = 'SELECT i.id, i.type, i.executed_on, i.periodicity_months,
-                       i.company_id, c.name AS company_name,
+                       i.company_id, c.name AS company_name, c.contact_email AS company_email,
                        i.facility_id, f.name AS facility_name,
                        p.planned_date
                 FROM   inspections i
@@ -77,6 +77,10 @@ final class CalendarController
                 'type'          => (string) $r['type'],
                 'company_id'    => (int) $r['company_id'],
                 'company_name'  => (string) $r['company_name'],
+                // Recipient for the "Oznámiť klientovi e-mailom" button (2.5.4).
+                'company_email' => $r['company_email'] !== null && $r['company_email'] !== ''
+                    ? (string) $r['company_email']
+                    : null,
                 'facility_id'   => (int) $r['facility_id'],
                 'facility_name' => (string) $r['facility_name'],
                 'statutory_date' => $statutory,

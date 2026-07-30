@@ -203,8 +203,8 @@ final class Restorer
 
         $insertCompany = $this->pdo->prepare(
             'INSERT INTO companies
-                (account_id, name, ico, street, postal_code, city, contact, approver, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                (account_id, name, ico, street, postal_code, city, contact, contact_email, approver, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insertFacility = $this->pdo->prepare(
             'INSERT INTO facilities
@@ -236,6 +236,7 @@ final class Restorer
                     $addr['postal_code'],
                     $addr['city'],
                     $this->str($company, 'contact'),
+                    $this->str($company, 'contact_email'),
                     $this->str($company, 'approver'),
                     $this->createdAt($company),
                 ]);
