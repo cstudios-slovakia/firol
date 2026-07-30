@@ -272,7 +272,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
             {apiError}
           </div>
         )}
-        {Object.keys(fieldErrors).length > 0 && (
+        {Object.values(fieldErrors).some(Boolean) && (
           <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
             Formulár obsahuje nevyplnené povinné polia.
           </p>
