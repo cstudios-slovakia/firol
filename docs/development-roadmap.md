@@ -542,11 +542,16 @@ the numbered priority order). All items are now implemented on branch
 - ✅ **2.5 Calendar** — migration `026`, `CalendarController`, Termíny block.
   (2.5.4 email button omitted — the spec allows a first version without it.)
 - ✅ **3.1 Terms & consent** — migration `030` (`users.terms_accepted_at`,
-  `terms_version`). `Firol\Legal\Terms` is the single source of truth for the
-  published version; documents are static pages under `public/legal/`, so the
-  registration form can link to them before a session exists. Mandatory,
-  never pre-ticked declaration gates the register button; a version mismatch
-  raises the "new version" notice after login (`<TermsUpdateNotice>`).
+  `terms_version`), split by migration `034` into independent
+  `vop_version`/`vop_accepted_at` and `privacy_version`/`privacy_accepted_at`
+  pairs — the VOP and the privacy policy are separate legal instruments that
+  can be revised on independent schedules. `Firol\Legal\Terms` is the single
+  source of truth for both published versions; documents are static pages
+  under `public/legal/`, so the registration form can link to them before a
+  session exists. Mandatory, never pre-ticked declaration gates the register
+  button; a version mismatch on either document raises the "new version"
+  notice after login (`<TermsUpdateNotice>`), which acknowledges both at once
+  since it's a single combined action.
 - ✅ **3.2 Data export** — verified, plus photos are now listed in the export.
   (Superseded on 29. 7. 2026 — the export is a `.zip` carrying the actual
   photo/PDF bytes and has a restore path; see "Backup archive & restore".)

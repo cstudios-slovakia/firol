@@ -25,7 +25,9 @@ final class MeController
     /**
      * Record that the signed-in user has acknowledged the current version of
      * the legal documents (change request 3.1). Called from the in-app notice
-     * shown after login when the VOP have changed since their last consent.
+     * shown after login when the VOP and/or privacy policy changed since
+     * their last consent — the notice always covers both, so both are
+     * stamped as accepted together even if only one of the two changed.
      */
     public static function acceptTerms(Request $req): void
     {
@@ -33,8 +35,10 @@ final class MeController
 
         $userId = Tenant::currentUserId();
         Db::pdo()->prepare(
-            'UPDATE users SET terms_accepted_at = NOW(), terms_version = ? WHERE id = ?'
-        )->execute([Terms::VERSION, $userId]);
+            'UPDATE users SET vop_version = ?, vop_accepted_at = NOW(),
+                    privacy_version = ?, privacy_accepted_at = NOW()
+             WHERE id = ?'
+        )->execute([Terms::VOP_VERSION, Terms::PRIVACY_VERSION, $userId]);
 
         Response::json(AuthController::meSnapshot(Db::pdo(), $userId, Tenant::currentAccountId()));
     }

@@ -2,16 +2,16 @@ import { useState } from 'react';
 import { ExternalLink, ScrollText } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Button } from '@/components/ui/Button';
-import { LEGAL_PRIVACY_LABEL, LEGAL_VOP_LABEL } from '@/lib/legal';
 
 /**
  * "New version of the terms" notice (change request 3.1).
  *
  * Shown after login whenever the signed-in user's recorded consent doesn't
- * match the currently published version — either because the VOP were revised
- * or because the account predates consent tracking. Acknowledging stores the
- * new version against the user, so the notice appears exactly once per
- * revision.
+ * match the currently published version of the VOP and/or the privacy
+ * policy — the two are versioned independently, so a revision to either one
+ * (or an account that predates consent tracking) triggers it. Acknowledging
+ * stores both current versions against the user, so the notice appears
+ * exactly once per revision.
  *
  * Deliberately not a hard block: the VOP say a change takes effect after
  * 30 days' notice and that continued use constitutes agreement (čl. 11), so
@@ -26,7 +26,8 @@ export function TermsUpdateNotice() {
 
   if (!terms || !terms.needs_acceptance || dismissed) return null;
 
-  const firstTime = terms.accepted_version === null;
+  const firstTime = terms.vop.accepted_version === null && terms.privacy.accepted_version === null;
+  const outdatedDocs = [terms.vop, terms.privacy].filter((doc) => doc.needs_acceptance);
 
   async function handleAccept() {
     setSaving(true);
@@ -55,20 +56,22 @@ export function TermsUpdateNotice() {
           </span>
           <div className="min-w-0">
             <h2 id="terms-update-title" className="text-base font-semibold text-ink-900">
-              {firstTime ? 'Obchodné podmienky' : 'Nová verzia obchodných podmienok'}
+              {firstTime ? 'Obchodné podmienky' : 'Nová verzia dokumentov'}
             </h2>
             <p className="mt-1 text-sm text-ink-600">
               {firstTime
                 ? 'Prosíme, oboznám sa s aktuálnymi dokumentmi a potvrď to.'
-                : 'Aktualizovali sme dokumenty. Prosíme, prečítaj si ich a potvrď oboznámenie.'}
+                : outdatedDocs.length > 1
+                  ? 'Aktualizovali sme dokumenty nižšie. Prosíme, prečítaj si ich a potvrď oboznámenie.'
+                  : 'Aktualizovali sme dokument nižšie. Prosíme, prečítaj si ho a potvrď oboznámenie.'}
             </p>
-            <p className="mt-1 text-xs text-ink-400">{terms.label}</p>
           </div>
         </div>
 
         <ul className="mt-4 flex flex-col gap-2">
-          <LegalLink href={terms.vop_url} label={LEGAL_VOP_LABEL} />
-          <LegalLink href={terms.privacy_url} label={LEGAL_PRIVACY_LABEL} />
+          {outdatedDocs.map((doc) => (
+            <LegalLink key={doc.url} href={doc.url} label={doc.label} />
+          ))}
         </ul>
 
         {error && <p className="mt-3 text-xs text-status-bad">{error}</p>}

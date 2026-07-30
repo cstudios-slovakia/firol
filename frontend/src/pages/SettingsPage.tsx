@@ -2123,10 +2123,12 @@ export function SystemPage() {
 function LegalDocumentsCard() {
     const { terms } = useAuth();
     const docs = [
-        { href: terms?.vop_url ?? LEGAL_VOP_URL, label: LEGAL_VOP_LABEL,
-          hint: "Vrátane Zmluvy o spracúvaní osobných údajov (príloha)." },
-        { href: terms?.privacy_url ?? LEGAL_PRIVACY_URL, label: LEGAL_PRIVACY_LABEL,
-          hint: "Aké údaje spracúvame, komu ich sprístupňujeme a aké máte práva." },
+        { href: terms?.vop.url ?? LEGAL_VOP_URL, label: LEGAL_VOP_LABEL,
+          hint: "Vrátane Zmluvy o spracúvaní osobných údajov (príloha).",
+          acceptedAt: terms?.vop.accepted_at ?? null, acceptedVersion: terms?.vop.accepted_version ?? null },
+        { href: terms?.privacy.url ?? LEGAL_PRIVACY_URL, label: LEGAL_PRIVACY_LABEL,
+          hint: "Aké údaje spracúvame, komu ich sprístupňujeme a aké máte práva.",
+          acceptedAt: terms?.privacy.accepted_at ?? null, acceptedVersion: terms?.privacy.accepted_version ?? null },
     ];
 
     return (
@@ -2138,7 +2140,7 @@ function LegalDocumentsCard() {
                 <div className="min-w-0 flex-1">
                     <h2 className="text-sm font-semibold text-ink-900">Právne dokumenty</h2>
                     <p className="mt-0.5 text-xs text-ink-500">
-                        {terms?.label ?? "Aktuálne znenie obchodných podmienok a zásad ochrany údajov."}
+                        Aktuálne znenie obchodných podmienok a zásad ochrany údajov.
                     </p>
                 </div>
             </div>
@@ -2159,16 +2161,15 @@ function LegalDocumentsCard() {
                             </span>
                             <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform duration-150 group-hover:translate-x-0.5" />
                         </a>
+                        {doc.acceptedAt && (
+                            <p className="mt-1 pl-1 text-[11px] text-ink-400">
+                                Oboznámenie potvrdené {new Date(doc.acceptedAt.replace(" ", "T")).toLocaleDateString("sk-SK")}
+                                {doc.acceptedVersion ? ` (verzia ${doc.acceptedVersion})` : ""}.
+                            </p>
+                        )}
                     </li>
                 ))}
             </ul>
-
-            {terms?.accepted_at && (
-                <p className="mt-3 text-[11px] text-ink-400">
-                    Oboznámenie potvrdené {new Date(terms.accepted_at.replace(" ", "T")).toLocaleDateString("sk-SK")}
-                    {terms.accepted_version ? ` (verzia ${terms.accepted_version})` : ""}.
-                </p>
-            )}
         </section>
     );
 }

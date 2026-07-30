@@ -88,17 +88,19 @@ final class AuthController
                 // attributed to them.
                 $pdo->prepare(
                     'UPDATE users SET fullname = ?, phone = ?, password_hash = ?, is_pending = 0,
-                            terms_accepted_at = NOW(), terms_version = ?
+                            vop_version = ?, vop_accepted_at = NOW(),
+                            privacy_version = ?, privacy_accepted_at = NOW()
                      WHERE id = ?'
-                )->execute([$fullname, $phone, Password::hash($password), Terms::VERSION, $claimUserId]);
+                )->execute([$fullname, $phone, Password::hash($password), Terms::VOP_VERSION, Terms::PRIVACY_VERSION, $claimUserId]);
                 $userId = $claimUserId;
             } else {
                 $insertUser = $pdo->prepare(
                     'INSERT INTO users (fullname, email, phone, password_hash,
-                                        terms_accepted_at, terms_version)
-                     VALUES (?, ?, ?, ?, NOW(), ?)'
+                                        vop_version, vop_accepted_at,
+                                        privacy_version, privacy_accepted_at)
+                     VALUES (?, ?, ?, ?, ?, NOW(), ?, NOW())'
                 );
-                $insertUser->execute([$fullname, $email, $phone, Password::hash($password), Terms::VERSION]);
+                $insertUser->execute([$fullname, $email, $phone, Password::hash($password), Terms::VOP_VERSION, Terms::PRIVACY_VERSION]);
                 $userId = (int) $pdo->lastInsertId();
             }
 
@@ -327,7 +329,8 @@ final class AuthController
     public static function meSnapshot(PDO $pdo, int $userId, int $accountId): array
     {
         $userStmt = $pdo->prepare(
-            'SELECT id, fullname, email, phone, terms_accepted_at, terms_version
+            'SELECT id, fullname, email, phone,
+                    vop_version, vop_accepted_at, privacy_version, privacy_accepted_at
              FROM   users WHERE id = ?'
         );
         $userStmt->execute([$userId]);
@@ -384,11 +387,13 @@ final class AuthController
         // current VOP/privacy policy and show the "new version" notice when the
         // user's recorded consent is behind.
         $terms = Terms::snapshot(
-            $user['terms_version'] ?? null,
-            $user['terms_accepted_at'] ?? null,
+            $user['vop_version'] ?? null,
+            $user['vop_accepted_at'] ?? null,
+            $user['privacy_version'] ?? null,
+            $user['privacy_accepted_at'] ?? null,
         );
         if ($user) {
-            unset($user['terms_accepted_at'], $user['terms_version']);
+            unset($user['vop_version'], $user['vop_accepted_at'], $user['privacy_version'], $user['privacy_accepted_at']);
         }
 
         return [

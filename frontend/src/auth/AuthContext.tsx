@@ -46,21 +46,31 @@ export type Account = {
 };
 
 /**
- * Published legal documents and this user's recorded consent
- * (change request 3.1). `needs_acceptance` is true when the user never
- * consented or consented to an older revision — the app then shows the
- * "new version" notice after login.
+ * Published version + this user's recorded consent for one legal document.
  */
-export type TermsSnapshot = {
+export type LegalDocStatus = {
   version: string;
   effective_from: string;
-  /** e.g. "VOP v1.0, účinné 1. 7. 2026" */
+  /** e.g. "Všeobecné obchodné podmienky v1.0, účinné 1. 7. 2026" */
   label: string;
-  vop_url: string;
-  privacy_url: string;
+  url: string;
   accepted_version: string | null;
   accepted_at: string | null;
   needs_acceptance: boolean;
+};
+
+/**
+ * Published legal documents and this user's recorded consent
+ * (change request 3.1). The VOP and the privacy policy are versioned
+ * independently since they can be revised on independent schedules.
+ * `needs_acceptance` is true when either document is unconsented or the
+ * user consented to an older revision — the app then shows the "new
+ * version" notice after login.
+ */
+export type TermsSnapshot = {
+  needs_acceptance: boolean;
+  vop: LegalDocStatus;
+  privacy: LegalDocStatus;
 };
 
 type Snapshot = {
