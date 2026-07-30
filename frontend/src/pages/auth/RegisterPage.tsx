@@ -8,8 +8,13 @@ import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { ApiError, buildUrl } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { LEGAL_PRIVACY_URL, LEGAL_VOP_URL } from '@/lib/legal';
 import { useAuth, type RegistrationPlan } from '@/auth/AuthContext';
 import { AuthLayout } from './AuthLayout';
+
+function formatEur(n: number): string {
+  return n.toLocaleString('sk-SK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 export function RegisterPage() {
   const { register } = useAuth();
@@ -26,7 +31,8 @@ export function RegisterPage() {
   const [trialDays, setTrialDays] = useState<number | null>(null);
   const [priceMonthly, setPriceMonthly] = useState<number | null>(null);
   const [priceYearly, setPriceYearly] = useState<number | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<{ fullname?: string; email?: string; password?: string; passwordConfirm?: string; companyName?: string }>({});
+  const [vatPercent, setVatPercent] = useState<number | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ fullname?: string; email?: string; password?: string; passwordConfirm?: string; companyName?: string; terms?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -37,9 +43,15 @@ export function RegisterPage() {
         if (typeof data.trial_days === 'number') setTrialDays(data.trial_days);
         if (typeof data.price_monthly_eur === 'number') setPriceMonthly(data.price_monthly_eur);
         if (typeof data.price_yearly_eur === 'number') setPriceYearly(data.price_yearly_eur);
+        if (typeof data.vat_rate_percent === 'number') setVatPercent(data.vat_rate_percent);
       })
       .catch(() => {});
   }, []);
+
+  const priceMonthlyWithVat =
+    priceMonthly !== null && vatPercent !== null ? priceMonthly * (1 + vatPercent / 100) : null;
+  const priceYearlyWithVat =
+    priceYearly !== null && vatPercent !== null ? priceYearly * (1 + vatPercent / 100) : null;
 
   // Surface the mismatch only after the user has typed enough that they're
   // clearly past the "still typing the same thing" stage — saves one
@@ -47,6 +59,9 @@ export function RegisterPage() {
   const passwordMismatch =
     passwordConfirm.length > 0 && passwordConfirm !== password.slice(0, passwordConfirm.length);
   const passwordsMatch = password.length > 0 && password === passwordConfirm;
+  // Mandatory legal declaration (change request 3.1). Never pre-ticked, and
+  // the submit button stays disabled until it is checked.
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -56,6 +71,7 @@ export function RegisterPage() {
     if (!password) errs.password = 'Zadaj heslo.';
     if (password !== passwordConfirm) errs.passwordConfirm = 'Heslá sa nezhodujú. Skontroluj druhé pole.';
     if (!companyName.trim()) errs.companyName = 'Zadaj fakturačné meno spoločnosti.';
+    if (!termsAccepted) errs.terms = 'Bez potvrdenia vyhlásenia nie je možné vytvoriť účet.';
     if (Object.keys(errs).length > 0) {
       setFieldErrors(errs);
       return;
@@ -71,6 +87,7 @@ export function RegisterPage() {
         password,
         invoice_company_name: companyName,
         billing_period: plan,
+        terms_accepted: true,
       });
       // Trial users go straight into the app. Paid-plan users land on a dedicated
       // billing-details page that gates access to the app until they
@@ -90,7 +107,11 @@ export function RegisterPage() {
     <AuthLayout
       wide
       title="Registrácia"
-      subtitle="Vytvor si konto, vyber plán a vyplň fakturačné údaje — potom zaplatíš cez Stripe a okamžite získaš prístup."
+      subtitle={
+        <>
+          Vytvor si konto a vyber si plán. <strong className="font-semibold text-ink-700">Skúšobnú verziu spustíš hneď a bez platby</strong> — pri ročnom či mesačnom predplatnom zaplatíš cez Stripe a okamžite získaš plný prístup.
+        </>
+      }
       footer={
         <>
           Už máš konto?{' '}
@@ -187,7 +208,7 @@ export function RegisterPage() {
                 leftIcon={<Building2 className="size-4" />}
                 value={companyName}
                 onChange={(e) => { setCompanyName(e.target.value); if (fieldErrors.companyName) setFieldErrors((prev) => ({ ...prev, companyName: undefined })); }}
-                placeholder="Firol s. r. o."
+                placeholder="Vaša firma s. r. o."
               />
             )}
           </Field>
@@ -212,29 +233,40 @@ export function RegisterPage() {
                 active={plan === 'yearly'}
                 onClick={() => setPlan('yearly')}
                 label="Ročné"
-                price={priceYearly !== null ? `${priceYearly} €` : '— €'}
+                price={priceYearly !== null ? `${formatEur(priceYearly)} €` : '— €'}
+                priceWithVat={priceYearlyWithVat !== null ? `${formatEur(priceYearlyWithVat)} €` : null}
                 badge="−13 %"
               />
               <PeriodOption
                 active={plan === 'monthly'}
                 onClick={() => setPlan('monthly')}
                 label="Mesačné"
-                price={priceMonthly !== null ? `${priceMonthly} €` : '— €'}
+                price={priceMonthly !== null ? `${formatEur(priceMonthly)} €` : '— €'}
+                priceWithVat={priceMonthlyWithVat !== null ? `${formatEur(priceMonthlyWithVat)} €` : null}
               />
             </div>
             <p className="text-xs text-ink-400">
               {plan === 'trial'
-                ? `Skúšobné obdobie ${trialDays ?? '—'} dní bez platby. Predplatné si vyberieš neskôr v nastaveniach.`
+                ? `Skúšobné obdobie je ${trialDays ?? 14} dní bez platby. Predplatné si vieš aktivovať aj neskôr v nastaveniach.`
                 : 'V ďalšom kroku doplníš fakturačné údaje a presmerujeme ťa na bezpečnú platbu cez Stripe.'}
             </p>
           </div>
+
+          <TermsDeclaration
+            checked={termsAccepted}
+            error={fieldErrors.terms}
+            onChange={(v) => {
+              setTermsAccepted(v);
+              if (v) setFieldErrors((prev) => ({ ...prev, terms: undefined }));
+            }}
+          />
 
           {error && (
             <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
               {error}
             </div>
           )}
-          {Object.keys(fieldErrors).length > 0 && (
+          {Object.values(fieldErrors).some(Boolean) && (
             <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
               Formulár obsahuje nevyplnené povinné polia.
             </p>
@@ -243,7 +275,7 @@ export function RegisterPage() {
           <Button
             type="submit"
             loading={loading}
-            disabled={password.length === 0 || password !== passwordConfirm}
+            disabled={password.length === 0 || password !== passwordConfirm || !termsAccepted}
             className="mt-2 w-full"
           >
             {plan === 'trial' ? 'Spustiť skúšobnú verziu' : 'Pokračovať na fakturáciu'}
@@ -254,11 +286,74 @@ export function RegisterPage() {
   );
 }
 
+/**
+ * The declaration required above the registration CTA (change request 3.1).
+ *
+ * Wording is fixed by the client's legal counsel — do not paraphrase. The two
+ * document names are links that open in a new tab so the form state survives
+ * the user going off to read them.
+ */
+function TermsDeclaration({
+  checked,
+  error,
+  onChange,
+}: {
+  checked: boolean;
+  error?: string;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label
+        className={cn(
+          'flex cursor-pointer items-start gap-3 rounded-2xl border p-3.5 transition-all duration-200',
+          checked ? 'border-firol-300 bg-firol-50/60' : 'border-ink-200 bg-white hover:border-ink-300',
+          error && !checked && 'border-[var(--color-status-bad)]',
+        )}
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          required
+          aria-describedby="terms-declaration-text"
+          className="mt-0.5 size-4 shrink-0 accent-firol-500"
+        />
+        <span id="terms-declaration-text" className="text-xs leading-relaxed text-ink-700">
+          Vyhlasujem, že všetky mnou uvedené údaje sú pravdivé, a potvrdzujem, že som sa oboznámil so{' '}
+          <a
+            href={LEGAL_VOP_URL}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="font-medium text-firol-600 underline underline-offset-2 hover:text-firol-700"
+          >
+            Všeobecnými obchodnými podmienkami
+          </a>{' '}
+          a so{' '}
+          <a
+            href={LEGAL_PRIVACY_URL}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="font-medium text-firol-600 underline underline-offset-2 hover:text-firol-700"
+          >
+            Zásadami ochrany osobných údajov
+          </a>{' '}
+          a beriem ich na vedomie.
+        </span>
+      </label>
+      {error && <p className="text-xs text-status-bad">{error}</p>}
+    </div>
+  );
+}
+
 function PeriodOption({
   active,
   onClick,
   label,
   price,
+  priceWithVat,
   badge,
   icon,
 }: {
@@ -266,6 +361,7 @@ function PeriodOption({
   onClick: () => void;
   label: string;
   price: string;
+  priceWithVat?: string | null;
   badge?: string;
   icon?: React.ReactNode;
 }) {
@@ -296,7 +392,17 @@ function PeriodOption({
       >
         {label}
       </span>
-      <span className="text-base font-semibold text-ink-900">{price}</span>
+      <span className="text-base font-semibold text-ink-900">
+        {price}
+        {priceWithVat && (
+          <span className="ml-1 text-xs font-normal text-ink-400">bez DPH</span>
+        )}
+      </span>
+      {priceWithVat && (
+        <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-firol-100 px-1.5 py-0.5 text-[11px] font-semibold text-firol-700">
+          s DPH {priceWithVat}
+        </span>
+      )}
     </button>
   );
 }

@@ -45,12 +45,41 @@ export type Account = {
   admin_owned: boolean;
 };
 
+/**
+ * Published version + this user's recorded consent for one legal document.
+ */
+export type LegalDocStatus = {
+  version: string;
+  effective_from: string;
+  /** e.g. "Všeobecné obchodné podmienky v1.0, účinné 1. 7. 2026" */
+  label: string;
+  url: string;
+  accepted_version: string | null;
+  accepted_at: string | null;
+  needs_acceptance: boolean;
+};
+
+/**
+ * Published legal documents and this user's recorded consent
+ * (change request 3.1). The VOP and the privacy policy are versioned
+ * independently since they can be revised on independent schedules.
+ * `needs_acceptance` is true when either document is unconsented or the
+ * user consented to an older revision — the app then shows the "new
+ * version" notice after login.
+ */
+export type TermsSnapshot = {
+  needs_acceptance: boolean;
+  vop: LegalDocStatus;
+  privacy: LegalDocStatus;
+};
+
 type Snapshot = {
   user: User | null;
   accounts: Account[];
   activeAccountId: number;
   csrfToken: string;
   isAdmin: boolean;
+  terms?: TermsSnapshot;
 };
 
 export type AuthStatus = 'loading' | 'authed' | 'unauthed';
@@ -64,6 +93,8 @@ type RegisterPayload = {
   password: string;
   invoice_company_name: string;
   billing_period: RegistrationPlan;
+  /** Mandatory declaration from the registration form (change request 3.1). */
+  terms_accepted: true;
 };
 
 type AuthContextValue = {
@@ -73,11 +104,14 @@ type AuthContextValue = {
   activeAccountId: number | null;
   csrfToken: string | null;
   isAdmin: boolean;
+  terms: TermsSnapshot | null;
   login(email: string, password: string, remember?: boolean): Promise<void>;
   register(payload: RegisterPayload): Promise<string>;
   logout(): Promise<void>;
   switchAccount(accountId: number): Promise<void>;
   refresh(): Promise<void>;
+  /** Record that the user acknowledged the current version of the documents. */
+  acceptTerms(): Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -151,6 +185,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     apply(null);
   }, [apply, snap?.csrfToken]);
 
+  const acceptTerms = useCallback(async () => {
+    const data = await api<Snapshot>('/api/me/accept-terms', {
+      method: 'POST',
+      csrfToken: snap?.csrfToken,
+    });
+    apply(data);
+  }, [apply, snap?.csrfToken]);
+
   const switchAccount = useCallback(
     async (accountId: number) => {
       const data = await api<Snapshot>('/api/me/switch-account', {
@@ -171,13 +213,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       activeAccountId: snap?.activeAccountId ?? null,
       csrfToken: snap?.csrfToken ?? null,
       isAdmin: snap?.isAdmin ?? false,
+      terms: snap?.terms ?? null,
       login,
       register,
       logout,
       switchAccount,
       refresh,
+      acceptTerms,
     }),
-    [status, snap, login, register, logout, switchAccount, refresh],
+    [status, snap, login, register, logout, switchAccount, refresh, acceptTerms],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

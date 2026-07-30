@@ -1,4 +1,4 @@
-import { api, type OptimisticSpec } from '@/lib/api';
+import { api, buildUrl, type OptimisticSpec } from '@/lib/api';
 
 /**
  * Inspection types — locked slugs from docs/Firol base document.
@@ -12,7 +12,8 @@ export type InspectionType =
   | 'pu_akcieschopnost'
   | 'pu_udrzba'
   | 'nudzove_osvetlenie'
-  | 'ts_hadic';
+  | 'ts_hadic'
+  | 'vyradenie';
 
 export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   php: 'Hasiace prístroje (PHP)',
@@ -23,6 +24,7 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   pu_udrzba: 'Požiarne uzávery — údržba',
   nudzove_osvetlenie: 'Núdzové osvetlenie',
   ts_hadic: 'Tlaková skúška hadíc',
+  vyradenie: 'Vyraďovací protokol PHP',
 };
 
 export const INSPECTION_TYPE_PERIODICITIES: Record<InspectionType, number[]> = {
@@ -34,6 +36,8 @@ export const INSPECTION_TYPE_PERIODICITIES: Record<InspectionType, number[]> = {
   pu_udrzba: [12],
   nudzove_osvetlenie: [12],
   ts_hadic: [12],
+  // One-off document — a disposal doesn't recur.
+  vyradenie: [0],
 };
 
 export type InspectionStatus = 'draft' | 'finalized';
@@ -61,6 +65,14 @@ export type InspectionListItem = {
   // record is treated as "Nahradená" and never flags as overdue — a renewed
   // control (via Opakovať or a fresh manual one) supersedes the previous.
   is_superseded: boolean;
+  // Požiarna kniha only: false marks a plain fire-book entry (not a preventive
+  // inspection). Such an entry is outside the statutory cycle — it never flags
+  // as overdue and does not supersede the previous inspection. Always true for
+  // every other inspection type.
+  is_preventive_inspection: boolean;
+  // Set when this inspection is a follow-up draft the app pre-filled from
+  // another inspection (change request 2.1); null otherwise.
+  source_inspection_id: number | null;
 };
 
 export type Inspection = InspectionListItem & {
@@ -115,21 +127,12 @@ export type HydrantItemFields = {
   result: PassFailResult;
 };
 
-export type OpravaAction = 'tlakova_skuska' | 'oprava' | 'plnenie';
-export const OPRAVA_ACTIONS: OpravaAction[] = ['tlakova_skuska', 'oprava', 'plnenie'];
-export const OPRAVA_ACTION_LABELS: Record<OpravaAction, string> = {
-  tlakova_skuska: 'Tlaková skúška',
-  oprava: 'Oprava',
-  plnenie: 'Plnenie',
-};
-
 export type OpravaTsPhpItemFields = {
   manufacturer: string;
   type: string;
   serial: string;
   year: number;
   location: string;
-  actions: OpravaAction[];
   notes: string | null;
 };
 
@@ -181,9 +184,18 @@ export const PK_RESULT_LABELS: Record<PkResult, string> = {
 export type PkDefect = {
   description: string;
   deadline: string | null;
+  /** Stable identifier photo documentation attaches to. Optional for backward compat with records saved before per-nedostatok photos. */
+  key?: string;
 };
 
 export type PoziarnaKnihaItemFields = {
+  /**
+   * True = preventive fire inspection (statutory, advances the cycle).
+   * False = plain fire-book entry (e.g. a training note) — no preventive-
+   * inspection wording, does not supersede or shift the next-due term.
+   * Optional for backward compat with records saved before this split.
+   */
+  is_preventive?: boolean;
   workspaces: string;
   activities: PkActivity[];
   custom_activities: string[];
@@ -233,6 +245,19 @@ export type NudzoveOsvetlenieItemFields = {
   notes: string | null;
 };
 
+/**
+ * Vyraďovací protokol (change request 2.1) — one row per disposed
+ * extinguisher. Same identification block as a PHP item plus the reason.
+ */
+export type VyradenieItemFields = {
+  manufacturer: string;
+  type: string;
+  serial: string;
+  year: number;
+  location: string | null;
+  reason: string;
+};
+
 export type TsHadicItemFields = {
   hose_type: string;
   location: string;
@@ -240,22 +265,54 @@ export type TsHadicItemFields = {
   working_pressure: number;
   test_pressure: number;
   length: number;
-  year_of_manufacture: number;
+  year_of_manufacture: number | null;
   result: PassFailResult;
   notes: string | null;
+};
+
+/**
+ * One photo attached to an inspection item (change request 2.2). `url` and
+ * `thumb_url` are API paths — run them through `photoSrc()` before putting
+ * them in an <img>, so the production `/api.php?path=` prefix is applied.
+ */
+export type InspectionPhoto = {
+  id: number;
+  item_id: number;
+  /** Which nedostatok (Požiarna kniha) this photo documents — null for whole-item photos. */
+  defect_key: string | null;
+  position: number;
+  byte_size: number;
+  width: number;
+  height: number;
+  created_at: string;
+  url: string;
+  thumb_url: string;
+  /** Set only on locally-queued photos that haven't reached the server yet. */
+  pending?: boolean;
 };
 
 export type InspectionItem = {
   id: number;
   position: number;
   fields: Record<string, unknown>;
+  /** Absent on older cached payloads — treat as an empty list. */
+  photos?: InspectionPhoto[];
   created_at: string;
   updated_at: string;
+};
+
+/** A follow-up draft spawned from this inspection (change request 2.1). */
+export type FollowUpRef = {
+  id: number;
+  type: InspectionType;
+  status: InspectionStatus;
 };
 
 export type InspectionDetail = {
   inspection: Inspection;
   items: InspectionItem[];
+  /** Present on show(); follow-up drafts created from this inspection. */
+  follow_ups?: FollowUpRef[];
 };
 
 export type InspectionDocument = {
@@ -307,10 +364,22 @@ function buildQuery(filters: InspectionListFilters = {}): string {
   return parts.length > 0 ? `?${parts.join('&')}` : '';
 }
 
+export type SuggestionField = 'manufacturer' | 'type' | 'location';
+
 export const Inspections = {
   list: (filters?: InspectionListFilters) =>
     api<{ items: InspectionListItem[] }>(`/api/inspections${buildQuery(filters)}`),
   show: (id: number) => api<InspectionDetail>(`/api/inspections/${id}`),
+  /**
+   * Autocomplete values for a repetitive field (manufacturer / type /
+   * location), drawn from the account's own history (change request 2.4.1).
+   * Pass facilityId for `location` to float that facility's values to the top.
+   */
+  suggestions: (field: SuggestionField, q: string, facilityId?: number) => {
+    const parts = [`field=${field}`, `q=${encodeURIComponent(q)}`];
+    if (facilityId) parts.push(`facility_id=${facilityId}`);
+    return api<{ suggestions: string[] }>(`/api/inspections/suggestions?${parts.join('&')}`);
+  },
   createDraft: (
     body: InspectionDraftPayload,
     csrfToken: string | null,
@@ -326,6 +395,19 @@ export const Inspections = {
   archive: (id: number, csrfToken: string | null) =>
     api<void>(`/api/inspections/${id}`, { method: 'DELETE', csrfToken }),
 
+  /**
+   * Create (or return the existing) pre-filled follow-up draft from this
+   * inspection (change request 2.1). `created` is false when an earlier draft
+   * from the same source was returned instead of a new one.
+   */
+  createFollowUp: (id: number, targetType: InspectionType, csrfToken: string | null) =>
+    api<{ inspection_id: number; created: boolean }>(`/api/inspections/${id}/follow-up`, {
+      method: 'POST',
+      body: { target_type: targetType },
+      csrfToken,
+      requireOnline: true,
+    }),
+
   addItem: (
     inspectionId: number,
     fields:
@@ -336,7 +418,8 @@ export const Inspections = {
       | PuAkcieschopnostItemFields
       | PuUdrzbaItemFields
       | NudzoveOsvetlenieItemFields
-      | TsHadicItemFields,
+      | TsHadicItemFields
+      | VyradenieItemFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items`, {
@@ -355,7 +438,8 @@ export const Inspections = {
       | PuAkcieschopnostItemFields
       | PuUdrzbaItemFields
       | NudzoveOsvetlenieItemFields
-      | TsHadicItemFields,
+      | TsHadicItemFields
+      | VyradenieItemFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items/${itemId}`, {
@@ -369,8 +453,61 @@ export const Inspections = {
       csrfToken,
     }),
 
-  generatePdf: (inspectionId: number, csrfToken: string | null) =>
+  /**
+   * Attach one photo to an item (change request 2.2). One request per photo:
+   * a dropped field connection then retries a single shot instead of the whole
+   * batch, and each upload queues independently when offline.
+   *
+   * `itemId` may be a negative temp id when the item itself is still queued —
+   * the outbox rewrites the path once the item create syncs.
+   */
+  addItemPhoto: (
+    inspectionId: number,
+    itemId: number,
+    photo: Blob,
+    csrfToken: string | null,
+    defectKey?: string | null,
+  ) => {
+    const form = new FormData();
+    form.append('photo', photo, `foto-${Date.now()}.jpg`);
+    if (defectKey) form.append('defect_key', defectKey);
+    return api<{ photo: InspectionPhoto }>(
+      `/api/inspections/${inspectionId}/items/${itemId}/photos`,
+      { method: 'POST', body: form, csrfToken, label: 'Fotka k položke' },
+    );
+  },
+  deleteItemPhoto: (
+    inspectionId: number,
+    itemId: number,
+    photoId: number,
+    csrfToken: string | null,
+  ) =>
+    api<void>(`/api/inspections/${inspectionId}/items/${itemId}/photos/${photoId}`, {
+      method: 'DELETE',
+      csrfToken,
+      label: 'Zmazať fotku',
+    }),
+
+  /**
+   * `includePhotos` drives the "Priložiť fotodokumentáciu" choice (2.2). The
+   * server defaults it to true, so omitting it keeps the appendix whenever
+   * photos exist.
+   */
+  generatePdf: (inspectionId: number, csrfToken: string | null, includePhotos?: boolean) =>
     api<GeneratePdfResponse>(`/api/inspections/${inspectionId}/generate-pdf`, {
+      method: 'POST',
+      body: includePhotos === undefined ? undefined : { include_photos: includePhotos },
+      csrfToken,
+      requireOnline: true,
+    }),
+  /**
+   * Reopen a locked (finalized) inspection for editing. The server discards
+   * the issued PDF protocol — a fresh one gets a new number. Online only:
+   * there is nothing sensible to replay from an outbox once the document is
+   * gone.
+   */
+  unlock: (inspectionId: number, csrfToken: string | null) =>
+    api<{ inspection: Inspection }>(`/api/inspections/${inspectionId}/unlock`, {
       method: 'POST',
       csrfToken,
       requireOnline: true,
@@ -392,4 +529,13 @@ export const Inspections = {
 export function documentDownloadUrl(documentId: number): string {
   const base = import.meta.env.VITE_API_BASE_URL ?? '';
   return `${base}/api/documents/${documentId}/download`;
+}
+
+/**
+ * Turn a photo's API path into something an <img src> can use. `buildUrl`
+ * applies the production `/api.php?path=` prefix and folds the `?size=thumb`
+ * query into it correctly.
+ */
+export function photoSrc(photo: InspectionPhoto, size: 'thumb' | 'full' = 'thumb'): string {
+  return buildUrl(size === 'thumb' ? photo.thumb_url : photo.url);
 }

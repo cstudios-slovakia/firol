@@ -19,6 +19,8 @@ export type SubmitAction = 'save-and-next' | 'save-and-summary';
 
 export type Step2FormProps = {
   inspectionId: number;
+  /** Facility of the inspection — used to bias location autocomplete (2.4.1). */
+  facilityId: number;
   /** When set, the form opens in edit mode and prefills from this item. */
   initialItem: InspectionItem | null;
   /** CSRF token from AuthContext, threaded through via the parent. */
@@ -64,4 +66,10 @@ export type InspectionTypeModule = {
    * vyhovuje/nevyhovuje).
    */
   StatsBar: React.ComponentType<StatsBarProps>;
+  /**
+   * True for types that hold a single record rather than a list of items
+   * (požiarna kniha). Step 2 then drops the item numbering and the
+   * progress dots so the UI doesn't suggest more items can be added.
+   */
+  singleItem?: boolean;
 };

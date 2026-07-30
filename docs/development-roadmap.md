@@ -480,6 +480,192 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
 
 ---
 
+## Change request — `fixes-and-new-features.docx` (FIROL, 23. 7. 2026) ✅
+
+Client change request delivered in three parts. Requested order: Part 1
+(fixes) → Part 3 (terms, tied to the sales launch) → Part 2 (features, in
+the numbered priority order). All items are now implemented on branch
+`fixes-and-new-features`.
+
+- ✅ **Part 1** — 1.1 PDF notes · 1.2 drop oprava "Vykonané úkony" ·
+  1.3 registration copy · 1.4 TS hadíc year optional · 1.6 decimal-comma
+  amounts · 1.7 požiarna kniha preventive toggle (migration `024`).
+- ✅ **2.1 Linked protocols** — migration `025` (`source_inspection_id`),
+  `POST /api/inspections/{id}/follow-up`, `<FollowUpBlock>`. PHP → Oprava/TS
+  (status TS), PHP → **Vyraďovací protokol** (status V), Hydranty → TS hadíc.
+  A PHP inspection can qualify for both of its follow-ups at once.
+- ✅ **2.2 Photo documentation** — migration `028`
+  (`inspection_item_photos`). Photos hang off any inspection item, so one
+  table covers all types. Browser resizes to 1600px/q75 before upload (fast
+  on mobile data, and under PHP's `upload_max_filesize`); the server
+  re-encodes with GD as a backstop, which also strips EXIF/GPS. Full size +
+  400px thumbnail stored under `storage/photos/{account}/{inspection}/`.
+  Rendered as a separate "Príloha — Fotodokumentácia" section appended by
+  `PdfRenderer::renderForType()`, 2 per page — the body templates are
+  untouched, so every type got the appendix without edits. Uploads queue
+  through the existing outbox when offline; a queued item's temp id is read
+  back off the mutation so its photos attach correctly and are remapped on
+  sync.
+  - ✅ **Follow-up:** Požiarna kniha photos moved from the item as a whole to
+    each individual nedostatok — migration `031` adds a nullable
+    `defect_key` on `inspection_item_photos`, and each nedostatok gets a
+    stable client-generated key (`PkDefect.key`). The photos still go into
+    the shared end-of-protocol appendix like every other type (2.2.2: the
+    body is never touched); only the caption differs — "Nedostatok č. 2 — …"
+    instead of "Položka č. 3 — …". `Firol\Support\PkDefects` derives the
+    numbered defect rows for both the body table and the captions, so the two
+    can't drift. Photo docs no longer exist for "Bez zistených nedostatkov"
+    or a plain zápis — there's no nedostatok to attach them to.
+- ✅ **2.3 Pokyn — žatevné práce** — a **training type** `pokyn_zatva`
+  (`ZAT-RRRR-NNN`), not an inspection type. 2.3 left the placement to us
+  ("k dokumentom/školeniam podľa uváženia"); it is an instruction issued once a
+  year to the client's own employees, so it sits next to the školenia rather
+  than among the protocols that record a control of a device. It is the one
+  training type with no attendee list: migration `032` adds `trainings.fields`
+  (JSON) carrying `{ year, approver, sections }`, and the detail page puts the
+  editable instruction text where the trainee list normally goes. The template
+  text ships in `lib/pokynZatvaTemplate.ts` and is stored *with* the document,
+  so revising the default never alters an issued Pokyn. It keeps its own ZAT
+  series — the SKO series stays for the six attendance-based trainings.
+  - ⚠️ Trade-off: trainings have no calendar layer, so the Pokyn no longer
+    produces a statutory deadline the way a 12-month inspection type did. If
+    the yearly reminder is wanted, it needs a deadline source over trainings
+    (or a custom `calendar_events` entry) — not currently implemented.
+- ✅ **Vyraďovací protokol** — new inspection type `vyradenie`
+  (`VYR-RRRR-NNN`). Non-cyclic: stored with `is_preventive_inspection = 0`
+  so it never produces a calendar deadline or supersedes anything.
+- ✅ **2.4 Faster item entry** — autocomplete, "Ďalší rovnaký", PHP type list.
+  (Fixed on 29. 7. 2026: the duplicate seed was read destructively, so
+  StrictMode's double effect blanked the prefilled form in development. The
+  button is now also offered while editing an existing item — it saves the
+  changes and opens a new item carrying the same description.)
+- ✅ **2.5 Calendar** — migration `026`, `CalendarController`, Termíny block.
+  - ✅ **2.5.4 "Oznámiť klientovi e-mailom"** — added on 30. 7. 2026. Each
+    grouped event in the day agenda offers a `mailto:` link built by
+    `lib/clientNoticeEmail.ts`; the app never sends anything, it only hands the
+    pre-filled text to the technician's mail client so it stays editable. One
+    message per facility+day group covers every control due there, so a client
+    never gets several mails at once. Požiarna kniha is announced as
+    "preventívna protipožiarna prehliadka", every other type by the name of its
+    control. Recipient is the new company field `contact_email` (migration
+    `033`, optional) — with none recorded the message opens with an empty
+    recipient, and the button offers a link to fill it in.
+- ✅ **3.1 Terms & consent** — migration `030` (`users.terms_accepted_at`,
+  `terms_version`), split by migration `034` into independent
+  `vop_version`/`vop_accepted_at` and `privacy_version`/`privacy_accepted_at`
+  pairs — the VOP and the privacy policy are separate legal instruments that
+  can be revised on independent schedules. `Firol\Legal\Terms` is the single
+  source of truth for both published versions; documents are static pages
+  under `public/legal/`, so the registration form can link to them before a
+  session exists. Mandatory, never pre-ticked declaration gates the register
+  button; a version mismatch on either document raises the "new version"
+  notice after login (`<TermsUpdateNotice>`), which acknowledges both at once
+  since it's a single combined action.
+- ✅ **3.2 Data export** — verified, plus photos are now listed in the export.
+  (Superseded on 29. 7. 2026 — the export is a `.zip` carrying the actual
+  photo/PDF bytes and has a restore path; see "Backup archive & restore".)
+- ✅ **3.3 Landing page** — `landing-page.html` swapped.
+
+New company field `approver` ("schvaľujúca osoba", migration `029`) feeds the
+"Schválil" line on both new document types. A second one, `contact_email`
+(migration `033`), is the recipient of the calendar's client notice — the
+free-text `contact` field could not serve as a `mailto:` address because it
+mixes a name, a phone number and sometimes an e-mail.
+
+Ops changes made alongside: the nightly DB backup cron never ran (its `>>`
+redirect targeted a directory only the script itself created — see
+`deploy.yml`); and `docker/php/Dockerfile` built GD **without** JPEG support
+because an `ext-install` between `ext-configure gd` and `ext-install gd`
+deleted the configured source tree. `backend/db/prune.php` enforces the
+12-month log retention the privacy policy publishes.
+
+---
+
+## Protocol lock & unlock (29. 7. 2026) ✅
+
+Generating the PDF already flipped an inspection to `finalized`, but the
+summary kept offering per-item edit and delete — the lock existed in the data
+model and nowhere in the UI. Now, for every inspection type:
+
+- The lock is stated where the state is read: an "Uzamknutá" badge with a lock
+  icon in the Step 3 header plus a one-line strip under it. The old sentence
+  buried in the "PDF protokoly" block is gone.
+- Items of a locked inspection carry no edit/delete affordance
+  (`canEdit={isDraft}`), the date input stays read-only and drops its warn
+  styling, and Step 2 refuses to open at all (`<LockedNotice>`) for a
+  bookmarked `/items/{id}` route.
+- **Upraviť** (warn-toned, left of *Opakovať*) opens an inline confirm banner
+  and posts `POST /api/inspections/{id}/unlock`. Unlocking *discards* the
+  protocol: the `documents` rows and the PDF files are deleted, the frozen
+  `effective_inspector_*` snapshot is cleared, and the inspection returns to
+  `draft`. Regenerating takes the next number from the sequence — the
+  discarded one is never reused, because a copy may already sit in the
+  customer's inbox and two documents sharing a number is worse than a gap in
+  it. Recorded to `audit_log` as `inspection.unlock`.
+- *Opakovať* remains the tool for re-issuing on a new date (source protocol
+  preserved); unlock is for correcting a protocol issued wrong.
+- Server-side half of the same rule: item create/update/delete
+  (`InspectionItemController::assertEditable`) and inspection
+  `updateBasic` now answer 409 on a finalized inspection, matching the guard
+  photos already had.
+
+---
+
+## Backup archive & restore (29. 7. 2026) ✅
+
+The account export was JSON, and listed photos by *download URL* — so a backup
+taken before a database wipe pointed at files that no longer existed, and there
+was no import path for it at all (the Excel import is a different feature: bulk
+data entry, not disaster recovery). Both halves are now real.
+
+- **Export** is a `.zip` (`Firol\Backup\Writer`, layout documented on
+  `Firol\Backup\Archive`): `backup.json` manifest plus the actual bytes —
+  photos with their thumbnails, generated PDF protocols, trainee signatures.
+  Entries are keyed by original row id, not by storage path, because a restore
+  mints new ids and new paths anyway. Files are added straight off disk and
+  stored uncompressed (`CM_STORE`) — JPEG/PDF don't deflate, and re-deflating
+  them would make a large export crawl. Manifest version `2`; the response is
+  streamed in 1 MB chunks from a temp file under `storage/tmp/`, so RSS is flat
+  regardless of archive size.
+  `?photos=0` / `?documents=0` (checkboxes in the UI) drop those files for a
+  quick data-only snapshot; the UI names what such a backup will not restore.
+- **Restore** — `POST /api/account/restore`, `Firol\Backup\Restorer`. Two
+  modes, chosen by the user: **merge** (additive; a record already present is
+  skipped along with everything under it, so re-running is a no-op) and
+  **replace** (purge the account's data + files first, then write the backup
+  back in whole — the DB-wipe path). Merge keys: IČO (else name) for companies,
+  name for facilities, `facility|type|executed_on|created_at` for inspections,
+  `company|type|date|created_at` for trainings, `number` for documents.
+- Ids are never reused — old → new maps remap every FK, and
+  `source_inspection_id` is relinked in a second pass once all ids exist. What
+  *is* preserved verbatim: `created_at`, the record dates, and **document
+  numbers** (they're printed on protocols already in clients' hands).
+  `document_sequences` is bumped past every restored number, or the next
+  generated PDF would collide with the unique key on `(account, number)`.
+- Files are written inside the same try as the DB writes: a failure rolls back
+  *and* unlinks everything already written, so a failed restore leaves neither
+  orphaned rows nor orphaned files.
+- Legacy bare-`.json` v1 exports are still accepted (data only — that format
+  never carried bytes). Its combined `address` is split through
+  `Address::parse`, and missing `created_at` falls back to the record's own
+  date rather than `now()`, so re-uploading the same file stays idempotent.
+- The export now covers only what it can restore: protocols whose parent
+  inspection/training is archived or gone are excluded, so the counts in and
+  out match instead of looking like data loss.
+- `AccountPurge` (extracted from `DataController`) is the single wipe used by
+  both the Danger-zone purges and replace-mode restore.
+
+Ops changes alongside: PHP `upload_max_filesize` / `post_max_size` raised to
+1 GB (`docker/php/Dockerfile` for dev, `php_value` in
+`frontend/public/.htaccess` for prod — these are `PHP_INI_PERDIR` and cannot be
+set from code), nginx `client_max_body_size` to match, and `storage/tmp` is
+created + swept by `deploy.yml`. `Storage::ensureDir` now `chmod`s after
+`mkdir`, because the umask was stripping exactly the group-write bit the 0775
+was there for — whichever of php-fpm/CLI created a directory first would
+otherwise lock the other one out.
+
+---
+
 ## Open questions (must be answered before the relevant phase starts)
 - **Company entity:** base doc says only "name, IČO, address, contact".
   Proposed full set (need confirmation):

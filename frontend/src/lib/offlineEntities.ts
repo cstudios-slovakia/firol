@@ -28,13 +28,15 @@ import type {
   InspectionDraftPayload,
   InspectionItem,
   InspectionListItem,
+  InspectionPhoto,
 } from '@/api/inspections';
-import type {
-  Training,
-  TrainingDetail,
-  TrainingListItem,
-  TrainingPayload,
-  Trainee,
+import {
+  isPokyn,
+  type Training,
+  type TrainingDetail,
+  type TrainingListItem,
+  type TrainingPayload,
+  type Trainee,
 } from '@/api/trainings';
 import type {
   Company,
@@ -98,6 +100,12 @@ export function inspectionCreateOptimistic(args: {
     effective_cert_number: null,
     // Freshly created draft is always the newest for its facility + type.
     is_superseded: false,
+    // Defaults to a preventive inspection; the record form flips this to false
+    // for a plain fire-book entry once it is saved.
+    is_preventive_inspection: true,
+    // A manually created inspection has no source; follow-up drafts are made
+    // server-side (change request 2.1).
+    source_inspection_id: null,
   };
   const detail: InspectionDetail = { inspection, items: [] };
   const listRow: InspectionListItem = { ...inspection };
@@ -115,12 +123,13 @@ export function inspectionCreateOptimistic(args: {
 
 export function trainingCreateOptimistic(args: {
   payload: TrainingPayload;
-  company: { id: number; name: string; ico: string | null };
+  company: { id: number; name: string; ico: string | null; approver: string | null };
   facility: { id: number; name: string } | null;
   trainer: { id: number; name: string; certification_number: string | null } | null;
 }): OptimisticSpec {
   const id = mintTempId();
   const ts = nowIso();
+  const fields = args.payload.fields ?? null;
   const training: Training = {
     id,
     type: args.payload.type,
@@ -133,19 +142,22 @@ export function trainingCreateOptimistic(args: {
     company_id: args.company.id,
     company_name: args.company.name,
     company_ico: args.company.ico,
+    company_approver: args.company.approver,
     facility_id: args.facility?.id ?? null,
     facility_name: args.facility?.name ?? null,
     trainer_id: args.trainer?.id ?? null,
     trainer_name: args.trainer?.name ?? null,
     trainer_certification_number: args.trainer?.certification_number ?? null,
     trainees_count: 0,
+    fields,
+    pokyn_year: fields?.year ?? null,
   };
   const detail: TrainingDetail = { training, trainees: [] };
   const listRow: TrainingListItem = { ...training };
   return {
     returns: { training },
     create: { clientId: id, idPath: 'training.id' },
-    label: 'Nové školenie',
+    label: isPokyn(args.payload.type) ? 'Nový pokyn' : 'Nové školenie',
     detail: args.facility ? `${args.company.name} · ${args.facility.name}` : args.company.name,
     patches: [
       seed(`/api/trainings/${id}`, detail),
@@ -161,6 +173,8 @@ export function companyCreateOptimistic(args: {
   postal_code: string | null;
   city: string | null;
   contact: string | null;
+  contact_email: string | null;
+  approver: string | null;
 }): OptimisticSpec {
   const id = mintTempId();
   const address = formatAddress(args.street, args.postal_code, args.city);
@@ -173,6 +187,8 @@ export function companyCreateOptimistic(args: {
     postal_code: args.postal_code,
     city: args.city,
     contact: args.contact,
+    contact_email: args.contact_email,
+    approver: args.approver,
     created_at: nowIso(),
   };
   const detail: CompanyDetail = { company, facilities: [] };
@@ -185,6 +201,8 @@ export function companyCreateOptimistic(args: {
     postal_code: args.postal_code,
     city: args.city,
     contact: args.contact,
+    contact_email: args.contact_email,
+    approver: args.approver,
     facilities_count: 0,
     inspections_count: 0,
     last_inspection_at: null,
@@ -258,6 +276,7 @@ export function facilityCreateOptimistic(args: {
 // --- nested writes (items / trainees) -----------------------------------
 
 const ITEMS_RE = /^\/api\/inspections\/(-?\d+)\/items(?:\/(-?\d+))?$/;
+const PHOTOS_RE = /^\/api\/inspections\/(-?\d+)\/items\/(-?\d+)\/photos(?:\/(-?\d+))?$/;
 const TRAINEES_RE = /^\/api\/trainings\/(-?\d+)\/trainees(?:\/(-?\d+))?$/;
 
 // Top-level entity edits (PATCH /api/<resource>/<id>).
@@ -323,7 +342,7 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
   const company = COMPANY_RE.exec(pathOnly);
   if (company) {
     const id = Number(company[1]);
-    const keys = ['name', 'ico', 'street', 'postal_code', 'city', 'contact'];
+    const keys = ['name', 'ico', 'street', 'postal_code', 'city', 'contact', 'contact_email', 'approver'];
     return {
       label: 'Úprava firmy',
       detail: typeof f.name === 'string' ? f.name : undefined,
@@ -367,7 +386,7 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
   const training = TRAINING_RE.exec(pathOnly);
   if (training) {
     const id = Number(training[1]);
-    const keys = ['date', 'duration_min', 'topics', 'trainer_id', 'facility_id', 'type'];
+    const keys = ['date', 'duration_min', 'topics', 'trainer_id', 'facility_id', 'type', 'fields'];
     return {
       label: 'Úprava školenia',
       patches: [
@@ -428,6 +447,62 @@ export function autoOptimistic(
   if (method === 'PATCH') {
     const edit = topLevelEditOptimistic(pathOnly, body);
     if (edit) return edit;
+  }
+
+  // Photo documentation (change request 2.2). The blob itself is already
+  // persisted by the outbox; these patches only make the summary screen admit
+  // that photos are waiting, instead of showing an item with none.
+  const photoMatch = PHOTOS_RE.exec(pathOnly);
+  if (photoMatch) {
+    const inspectionId = Number(photoMatch[1]);
+    const itemId = Number(photoMatch[2]);
+    const photoId = photoMatch[3] !== undefined ? Number(photoMatch[3]) : null;
+    const detailPath = `/api/inspections/${inspectionId}`;
+
+    const patchItemPhotos = (
+      map: (photos: InspectionPhoto[]) => InspectionPhoto[],
+    ): CachePatch => ({
+      path: detailPath,
+      apply: (current) => {
+        const d = current as InspectionDetail | undefined;
+        if (!d) return undefined;
+        return {
+          ...d,
+          items: d.items.map((it) =>
+            it.id === itemId ? { ...it, photos: map(it.photos ?? []) } : it,
+          ),
+        };
+      },
+    });
+
+    if (method === 'POST') {
+      const newId = mintTempId();
+      const defectKey = body instanceof FormData ? (body.get('defect_key') as string | null) : null;
+      const placeholder: InspectionPhoto = {
+        id: newId,
+        item_id: itemId,
+        defect_key: defectKey,
+        position: 0,
+        byte_size: 0,
+        width: 0,
+        height: 0,
+        created_at: nowIso(),
+        url: '',
+        thumb_url: '',
+        pending: true,
+      };
+      return {
+        patches: [patchItemPhotos((photos) => [...photos, placeholder])],
+        label: 'Fotka k položke',
+      };
+    }
+
+    if (photoId !== null && method === 'DELETE') {
+      return {
+        patches: [patchItemPhotos((photos) => photos.filter((p) => p.id !== photoId))],
+        label: 'Zmazať fotku',
+      };
+    }
   }
 
   const itemMatch = ITEMS_RE.exec(pathOnly);

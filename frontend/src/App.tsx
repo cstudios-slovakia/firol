@@ -18,6 +18,7 @@ import { InspectionStep1Page } from '@/pages/InspectionStep1Page';
 import { InspectionStep2Page } from '@/pages/InspectionStep2Page';
 import { InspectionDetailPage } from '@/pages/InspectionDetailPage';
 import { InspectionsListPage } from '@/pages/InspectionsListPage';
+import { CalendarPage } from '@/pages/CalendarPage';
 import { TrainingsListPage } from '@/pages/TrainingsListPage';
 import { NewTrainingPage } from '@/pages/NewTrainingPage';
 import { TrainingDetailPage } from '@/pages/TrainingDetailPage';
@@ -86,6 +87,7 @@ export default function App() {
         <Route path="/facilities/:id" element={<FacilityDetailPage />} />
         <Route path="/facilities/:id/edit" element={<FacilityEditPage />} />
 
+        <Route path="/kalendar" element={<CalendarPage />} />
         <Route path="/inspections" element={<InspectionsListPage />} />
         <Route path="/inspections/new" element={<NewInspectionTypePicker />} />
         <Route path="/inspections/new/:type/step-1" element={<InspectionStep1Page />} />

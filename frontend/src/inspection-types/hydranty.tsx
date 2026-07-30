@@ -1,27 +1,29 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, Droplets, Edit2, Gauge, Hash,
+  AlertTriangle, ArrowRight, CheckCircle2, CopyPlus, Droplets, Edit2, Gauge, Hash,
   ListChecks, MapPin, NotebookPen, Save, Trash2,
 } from 'lucide-react';
 import {
   HYDRANT_TYPES,
-  Inspections,
   PASS_FAIL_LABELS,
   type HydrantItemFields,
   type HydrantTypeKind,
   type PassFailResult,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
-import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { ItemPhotoField, usePhotoStaging } from '@/components/ItemPhotos';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
+import { clearDuplicateSeed, peekDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
+import { saveItemMessage, saveItemWithPhotos } from './saveItem';
 import type {
   InspectionTypeModule,
   ItemRowProps,
@@ -36,7 +38,14 @@ function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
 }
 
-function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+/**
+ * Carried into the next hydrant by "Ďalší rovnaký": only the fixed
+ * configuration (type + hose count). Measured pressures (HS/HD) and flow (Q)
+ * are re-measured for every hydrant and never pre-filled (2.4.2).
+ */
+type HydrantSeed = { type: HydrantTypeKind; type_other: string; hose_count: string };
+
+function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -54,6 +63,7 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [apiError, setApiError] = useState<string | null>(null);
   const toast = useToast();
+  const photos = usePhotoStaging(initialItem?.photos);
 
   useEffect(() => {
     if (initialItem) {
@@ -68,17 +78,20 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
       setDefects(typeof f.defects === 'string' ? f.defects : '');
       setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
     } else {
-      setHydrantType('DN52');
-      setTypeOther('');
+      // "Ďalší rovnaký": carry type + hose count only; measured HS/HD/Q and
+      // defects/result always start fresh (2.4.2).
+      const seed = peekDuplicateSeed<HydrantSeed>(inspectionId);
+      setHydrantType(seed?.type ?? 'DN52');
+      setTypeOther(seed?.type_other ?? '');
       setLocation('');
-      setHoseCount('1');
+      setHoseCount(seed?.hose_count ?? '1');
       setHs('');
       setHd('');
       setQ('');
       setDefects('');
       setResult('vyhovuje');
     }
-  }, [initialItem]);
+  }, [initialItem, inspectionId]);
 
   function isPristine() {
     return (
@@ -93,7 +106,11 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
     void handleSubmit(e as FormEvent, 'save-and-summary');
   }
 
-  async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
+  async function handleSubmit(
+    e: FormEvent,
+    action: 'save-and-next' | 'save-and-summary',
+    duplicate = false,
+  ) {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (hydrantType === 'other' && !typeOther.trim()) errs.typeOther = 'Doplň označenie typu (alebo vyber štandardný DN).';
@@ -122,18 +139,26 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
         defects: defects.trim() || null,
         result,
       };
-      if (editing && itemId !== null) {
-        await Inspections.updateItem(inspectionId, itemId, fields, csrfToken);
+      const saved = await saveItemWithPhotos({
+        inspectionId,
+        itemId: editing ? itemId : null,
+        fields,
+        csrfToken,
+        photos,
+      });
+      if (duplicate) {
+        const seed: HydrantSeed = {
+          type: hydrantType,
+          type_other: hydrantType === 'other' ? typeOther.trim() : '',
+          hose_count: hoseCount,
+        };
+        setDuplicateSeed(inspectionId, seed);
       } else {
-        await Inspections.addItem(inspectionId, fields, csrfToken);
+        clearDuplicateSeed(inspectionId);
       }
       onSaved(action);
-      toast.success('Položka uložená');
+      toast.success(saveItemMessage(saved));
     } catch (err) {
-      if (handleOfflineSave(err, toast)) {
-        onSaved(action);
-        return;
-      }
       setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
@@ -165,8 +190,8 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
 
         <Field label="Umiestnenie" required error={fieldErrors.location}>
           {(p) => (
-            <Input {...p} required leftIcon={<MapPin className="size-4" />}
-              value={location} onChange={(e) => { setLocation(e.target.value); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
+            <AutocompleteInput {...p} required field="location" facilityId={facilityId} leftIcon={<MapPin className="size-4" />}
+              value={location} onChange={(v) => { setLocation(v); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
               placeholder="Vchod hala A, druhé poschodie" />
           )}
         </Field>
@@ -225,12 +250,14 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
           )}
         </Field>
 
+        <ItemPhotoField photos={photos} />
+
         {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
             {apiError}
           </div>
         )}
-        {Object.keys(fieldErrors).length > 0 && (
+        {Object.values(fieldErrors).some(Boolean) && (
           <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
             Formulár obsahuje nevyplnené povinné polia.
           </p>
@@ -240,6 +267,11 @@ function HydrantyStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: St
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
+          </Button>
+          <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
+            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            title="Uloží a predvyplní ďalší hydrant rovnakým typom (namerané tlaky a prietok ostanú prázdne).">
+            Ďalší rovnaký
           </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>

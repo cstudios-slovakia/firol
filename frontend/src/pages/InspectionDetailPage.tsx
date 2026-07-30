@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Building2, CalendarDays, ClipboardList, Download, FileText,
-  History, Plus, Repeat, Warehouse,
+  ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, Download, FileText,
+  GitBranch, History, Images, Link2, Lock, LockOpen, NotebookPen, Pencil, Plus, Repeat,
+  Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
@@ -11,8 +12,10 @@ import {
   documentDownloadUrl,
   type InspectionDetail,
   type InspectionDocument,
+  type InspectionType,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
+import { cn } from '@/lib/cn';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { useConfirm } from '@/lib/confirm';
@@ -21,7 +24,9 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 import { getTypeModule } from '@/inspection-types';
+import { clearDuplicateSeed } from '@/inspection-types/duplicateSeed';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
+import { ItemPhotoStrip } from '@/components/ItemPhotos';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { InspectionStatusBadge } from '@/components/InspectionStatusBadge';
 
@@ -50,6 +55,19 @@ export function InspectionDetailPage() {
   const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
   const [generating, setGenerating] = useState(false);
   const [repeating, setRepeating] = useState(false);
+  // "Upraviť" on a locked inspection asks first — unlocking throws the issued
+  // protocol away, so it never happens on a single tap.
+  const [unlockPrompt, setUnlockPrompt] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
+  const [creatingFollowUp, setCreatingFollowUp] = useState(false);
+  // "Priložiť fotodokumentáciu" (change request 2.2) — on by default, and only
+  // shown at all when the inspection actually has photos.
+  const [includePhotos, setIncludePhotos] = useState(true);
+
+  // Reaching the summary means the technician left the item-entry flow, so any
+  // pending "Ďalší rovnaký" prefill is dropped — the next item they add starts
+  // from a blank form rather than inheriting an item entered minutes ago.
+  useEffect(() => { clearDuplicateSeed(id); }, [id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,12 +110,52 @@ export function InspectionDetailPage() {
     }
   }
 
+  /**
+   * Reopen a locked inspection for editing. The server deletes the issued
+   * protocol, so the documents list is refetched alongside the inspection —
+   * the PDF block goes back to offering "Generovať PDF protokol".
+   */
+  async function handleUnlock() {
+    setError(null);
+    setUnlocking(true);
+    try {
+      await Inspections.unlock(id, csrfToken);
+      const [detail, docs] = await Promise.all([
+        Inspections.show(id),
+        Inspections.documents(id).catch(() => ({ items: [] as InspectionDocument[] })),
+      ]);
+      setData(detail);
+      setDocuments(docs.items);
+      setUnlockPrompt(false);
+      toast.success('Kontrola odomknutá — pôvodný protokol bol zrušený.');
+    } catch (err) {
+      setError(offlineMessage(err, 'Kontrolu sa nepodarilo odomknúť.'));
+    } finally {
+      setUnlocking(false);
+    }
+  }
+
+  async function handleCreateFollowUp(targetType: InspectionType) {
+    if (!data) return;
+    setError(null);
+    setCreatingFollowUp(true);
+    try {
+      const res = await Inspections.createFollowUp(id, targetType, csrfToken);
+      toast.success(res.created ? 'Koncept vytvorený' : 'Koncept už existoval — otváram ho');
+      navigate(`/inspections/${res.inspection_id}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Koncept sa nepodarilo vytvoriť.');
+    } finally {
+      setCreatingFollowUp(false);
+    }
+  }
+
   async function handleGeneratePdf() {
     if (!data) return;
     setPdfError(null);
     setGenerating(true);
     try {
-      const res = await Inspections.generatePdf(id, csrfToken);
+      const res = await Inspections.generatePdf(id, csrfToken, includePhotos);
       const [detail, docs] = await Promise.all([
         Inspections.show(id),
         Inspections.documents(id),
@@ -179,6 +237,7 @@ export function InspectionDetailPage() {
   const { inspection: i, items } = data;
   const isDraft = i.status === 'draft';
   const module = getTypeModule(i.type);
+  const photoCount = items.reduce((n, it) => n + (it.photos?.length ?? 0), 0);
 
   return (
     <div className="flex flex-col gap-5">
@@ -216,21 +275,102 @@ export function InspectionDetailPage() {
             ) : (
               <InspectionStatusBadge inspection={i} />
             )}
+            {!isDraft && (
+              <Badge tone="neutral">
+                <Lock className="size-3" />
+                Uzamknutá
+              </Badge>
+            )}
           </p>
         </div>
         {!isDraft ? (
-          <Button
-            type="button"
-            onClick={handleRepeat}
-            loading={repeating}
-            leftIcon={<Repeat className="size-4" />}
-            title="Vytvorí novú kontrolu s tými istými položkami a prázdnym dátumom"
-            className="shrink-0"
-          >
-            Opakovať
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              id="unlock-inspection"
+              variant="warn"
+              onClick={() => setUnlockPrompt((open) => !open)}
+              aria-expanded={unlockPrompt}
+              aria-controls="unlock-prompt"
+              leftIcon={<Pencil className="size-4" />}
+              title="Odomkne kontrolu na úpravy — vystavený protokol sa pritom zruší"
+            >
+              Upraviť
+            </Button>
+            <Button
+              type="button"
+              onClick={handleRepeat}
+              loading={repeating}
+              leftIcon={<Repeat className="size-4" />}
+              title="Vytvorí novú kontrolu s tými istými položkami a prázdnym dátumom"
+            >
+              Opakovať
+            </Button>
+          </div>
         ) : null}
       </header>
+
+      {!isDraft && !unlockPrompt && (
+        <Card className="flex items-start gap-3 bg-ink-50 px-4 py-3">
+          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white text-ink-500">
+            <Lock className="size-3.5" />
+          </span>
+          <p className="text-xs text-ink-600">
+            <span className="font-semibold text-ink-800">Kontrola je uzamknutá.</span>{' '}
+            Má vystavený PDF protokol, preto sa záznamy ani dátum už nedajú meniť.
+            Pre opravu použi „Upraviť", pre nový termín „Opakovať".
+          </p>
+        </Card>
+      )}
+
+      {!isDraft && unlockPrompt && (
+        <Card
+          id="unlock-prompt"
+          role="alertdialog"
+          aria-labelledby="unlock-prompt-title"
+          className="flex animate-fade-up flex-col gap-3 border-status-warn/40 bg-[var(--color-status-warn-bg)]/60 p-4"
+        >
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white text-status-warn">
+              <LockOpen className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <p id="unlock-prompt-title" className="text-sm font-semibold text-ink-900">
+                Odomknúť kontrolu?
+              </p>
+              <p className="mt-1 text-xs text-ink-600">
+                Kontrola je dokončená a má vystavený PDF protokol
+                {documents[0] ? ` ${documents[0].number}` : ''}. Odomknutím sa
+                protokol zruší a natrvalo odstráni — po úprave bude treba
+                vygenerovať nový, ktorý dostane nové číslo.
+              </p>
+              <p className="mt-1 text-xs text-ink-600">
+                Ak chceš len zopakovať kontrolu s novým dátumom, použi
+                „Opakovať" — pôvodný protokol tak zostane zachovaný.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={unlocking}
+              onClick={() => setUnlockPrompt(false)}
+            >
+              Zrušiť
+            </Button>
+            <Button
+              type="button"
+              variant="warn"
+              loading={unlocking}
+              onClick={handleUnlock}
+              leftIcon={<LockOpen className="size-4" />}
+            >
+              Odomknúť a upraviť
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {!isDraft && i.is_superseded && (
         <Card className="flex items-start gap-2.5 bg-ink-50 px-4 py-3 text-xs text-ink-600">
@@ -243,17 +383,39 @@ export function InspectionDetailPage() {
         </Card>
       )}
 
-      <Card className="flex flex-col gap-3 border-status-warn/30 bg-[var(--color-status-warn-bg)]/40 p-4">
+      {/* Locked inspections keep showing the date, but in a neutral tone:
+          nothing here is actionable any more, and the warn color belongs to
+          the unlock prompt above. */}
+      <Card
+        className={cn(
+          'flex flex-col gap-3 p-4',
+          isDraft
+            ? 'border-status-warn/30 bg-[var(--color-status-warn-bg)]/40'
+            : 'bg-ink-50/60',
+        )}
+      >
         <div className="flex items-start gap-3">
-          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white text-status-warn">
+          <span
+            className={cn(
+              'mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white',
+              isDraft ? 'text-status-warn' : 'text-ink-500',
+            )}
+          >
             <CalendarDays className="size-4" />
           </span>
           <div className="flex-1">
-            <p className="text-xs font-semibold uppercase tracking-wider text-status-warn">
+            <p
+              className={cn(
+                'text-xs font-semibold uppercase tracking-wider',
+                isDraft ? 'text-status-warn' : 'text-ink-500',
+              )}
+            >
               Dátum kontroly
             </p>
             <p className="mt-0.5 text-xs text-ink-600">
-              Zmeň dátum, ak opakuješ staršiu kontrolu — nový PDF protokol bude vystavený s týmto dátumom.
+              {isDraft
+                ? 'Zmeň dátum, ak opakuješ staršiu kontrolu — nový PDF protokol bude vystavený s týmto dátumom.'
+                : 'Dátum, s ktorým bol vystavený PDF protokol.'}
             </p>
           </div>
         </div>
@@ -263,7 +425,13 @@ export function InspectionDetailPage() {
           disabled={!isDraft || savingDate}
           onChange={(e) => setLocalDate(e.target.value)}
           aria-label="Dátum kontroly"
-          className="h-11 w-full min-w-0 appearance-none rounded-xl border border-status-warn/40 bg-white px-3 text-sm font-medium text-ink-900 transition-colors hover:border-status-warn focus:border-status-warn focus:outline-none focus:ring-2 focus:ring-status-warn/30 disabled:bg-ink-50 disabled:text-ink-500"
+          className={cn(
+            'h-11 w-full min-w-0 appearance-none rounded-xl border bg-white px-3 text-sm font-medium text-ink-900 transition-colors',
+            'disabled:bg-ink-50 disabled:text-ink-500',
+            isDraft
+              ? 'border-status-warn/40 hover:border-status-warn focus:border-status-warn focus:outline-none focus:ring-2 focus:ring-status-warn/30'
+              : 'border-ink-200',
+          )}
         />
         {isDraft && localDate && localDate !== savedDate && (
           <Button
@@ -276,6 +444,20 @@ export function InspectionDetailPage() {
           </Button>
         )}
       </Card>
+
+      {i.notes && (
+        <Card className="flex items-start gap-3 px-4 py-3">
+          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-ink-100 text-ink-500">
+            <NotebookPen className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">
+              Poznámky k prevádzke
+            </p>
+            <p className="mt-0.5 whitespace-pre-line text-sm text-ink-700">{i.notes}</p>
+          </div>
+        </Card>
+      )}
 
       {module && items.length > 0 && <module.StatsBar items={items} />}
 
@@ -301,10 +483,11 @@ export function InspectionDetailPage() {
                     inspectionId={id}
                     index={idx + 1}
                     item={it}
-                    canEdit={true}
+                    canEdit={isDraft}
                     deleting={deletingItemId === it.id}
                     onDelete={() => handleDeleteItem(it.id)}
                   />
+                  <ItemPhotoStrip photos={it.photos} />
                 </li>
               ))}
             </ul>
@@ -325,15 +508,150 @@ export function InspectionDetailPage() {
         </Card>
       )}
 
+      <FollowUpBlock
+        type={i.type}
+        items={items}
+        sourceInspectionId={i.source_inspection_id}
+        followUps={data.follow_ups ?? []}
+        creating={creatingFollowUp}
+        onCreate={handleCreateFollowUp}
+      />
+
       <DocumentsBlock
         documents={documents}
         canGenerate={isDraft && items.length > 0 && !!i.executed_on}
         generating={generating}
         onGenerate={handleGeneratePdf}
-        finalized={!isDraft}
         pdfError={pdfError}
+        photoCount={photoCount}
+        includePhotos={includePhotos}
+        onIncludePhotosChange={setIncludePhotos}
       />
     </div>
+  );
+}
+
+/** Plural forms for "N prístrojov má stav …". */
+function deviceCountPhrase(n: number): string {
+  if (n === 1) return '1 prístroj má';
+  if (n < 5) return `${n} prístroje majú`;
+  return `${n} prístrojov má`;
+}
+
+/**
+ * Linked protocols (change request 2.1). Two things live here:
+ *  - a "created from" back-link when this inspection is itself a follow-up draft;
+ *  - existing follow-up drafts spawned from this inspection, and — when the
+ *    items qualify — offers to create them: PHP → Oprava/TS (status TS) and
+ *    PHP → Vyraďovací protokol (status V), Hydranty → TS hadíc.
+ *
+ * A PHP inspection can qualify for both of its follow-ups at once, so the
+ * offers are a list rather than a single one.
+ */
+function FollowUpBlock({
+  type,
+  items,
+  sourceInspectionId,
+  followUps,
+  creating,
+  onCreate,
+}: {
+  type: InspectionType;
+  items: InspectionDetail['items'];
+  sourceInspectionId: number | null;
+  followUps: NonNullable<InspectionDetail['follow_ups']>;
+  creating: boolean;
+  onCreate: (targetType: InspectionType) => void;
+}) {
+  const candidates: { targetType: InspectionType; qualifying: number; offerText: string }[] = [];
+  if (type === 'php') {
+    const forTest = items.filter((it) => it.fields.status === 'TS').length;
+    candidates.push({
+      targetType: 'oprava_ts_php',
+      qualifying: forTest,
+      offerText: `${deviceCountPhrase(forTest)} stav „Tlaková skúška"`,
+    });
+    const forDisposal = items.filter((it) => it.fields.status === 'V').length;
+    candidates.push({
+      targetType: 'vyradenie',
+      qualifying: forDisposal,
+      offerText: `${deviceCountPhrase(forDisposal)} stav „Vyradený"`,
+    });
+  } else if (type === 'hydranty') {
+    candidates.push({
+      targetType: 'ts_hadic',
+      qualifying: items.length,
+      offerText: `${items.length} ${items.length === 1 ? 'kontrolovaný hydrant' : 'kontrolovaných hydrantov'}`,
+    });
+  }
+
+  // Don't offer a follow-up that already exists for this source.
+  const offers = candidates.filter(
+    (c) => c.qualifying > 0 && !followUps.some((f) => f.type === c.targetType),
+  );
+
+  if (!sourceInspectionId && followUps.length === 0 && offers.length === 0) return null;
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-3 border-b border-ink-100 px-4 py-3">
+        <div className="grid size-9 place-items-center rounded-2xl bg-firol-50 text-firol-600">
+          <GitBranch className="size-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold text-ink-900">Prepojené protokoly</h3>
+          <p className="text-xs text-ink-500">Nadväzujúce kontroly vytvorené z tejto kontroly.</p>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 px-4 py-3">
+        {sourceInspectionId && (
+          <Link
+            to={`/inspections/${sourceInspectionId}`}
+            className="inline-flex items-center gap-1.5 text-xs text-ink-500 hover:text-firol-600"
+          >
+            <Link2 className="size-3.5" />
+            Tento koncept vznikol z inej kontroly — zobraziť zdroj
+          </Link>
+        )}
+
+        {followUps.map((f) => (
+          <Link
+            key={f.id}
+            to={`/inspections/${f.id}`}
+            className="flex items-center gap-3 rounded-xl border border-ink-100 px-3 py-2.5 transition-colors hover:bg-ink-50"
+          >
+            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-firol-50 text-firol-600">
+              <ArrowRight className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-ink-900">{INSPECTION_TYPE_LABELS[f.type]}</p>
+              <p className="text-xs text-ink-500">
+                {f.status === 'draft' ? 'Rozpracovaný koncept' : 'Dokončená kontrola'}
+              </p>
+            </div>
+          </Link>
+        ))}
+
+        {offers.map((offer) => (
+          <div key={offer.targetType} className="rounded-xl border border-firol-200 bg-firol-50/60 p-3.5">
+            <p className="text-sm text-ink-800">
+              {offer.offerText} — vytvoriť koncept{' '}
+              <strong>{INSPECTION_TYPE_LABELS[offer.targetType]}</strong> s týmito položkami?
+            </p>
+            <Button
+              type="button"
+              className="mt-3"
+              loading={creating}
+              onClick={() => onCreate(offer.targetType)}
+              leftIcon={<Plus className="size-4" />}
+            >
+              Vytvoriť koncept
+            </Button>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -342,15 +660,19 @@ function DocumentsBlock({
   canGenerate,
   generating,
   onGenerate,
-  finalized,
   pdfError,
+  photoCount,
+  includePhotos,
+  onIncludePhotosChange,
 }: {
   documents: InspectionDocument[];
   canGenerate: boolean;
   generating: boolean;
   onGenerate: () => void;
-  finalized: boolean;
   pdfError?: string | null;
+  photoCount: number;
+  includePhotos: boolean;
+  onIncludePhotosChange: (value: boolean) => void;
 }) {
   if (documents.length === 0) {
     return (
@@ -364,6 +686,14 @@ function DocumentsBlock({
             ? 'Po vygenerovaní sa kontrola uzamkne a dostane svoje číslo (napr. PHP-2026-001).'
             : 'Pre vygenerovanie pridaj aspoň jednu položku a skontroluj dátum kontroly.'}
         </p>
+        {photoCount > 0 && (
+          <IncludePhotosToggle
+            photoCount={photoCount}
+            checked={includePhotos}
+            disabled={generating}
+            onChange={onIncludePhotosChange}
+          />
+        )}
         <Button
           type="button"
           variant="primary"
@@ -391,9 +721,8 @@ function DocumentsBlock({
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-ink-900">PDF protokoly</h3>
           <p className="text-xs text-ink-500">
-            {finalized
-              ? 'Kontrola je uzamknutá. Pre nový dátum použi tlačidlo „Opakovať" hore.'
-              : `Vygenerované ${documents.length} ${documents.length === 1 ? 'protokol' : 'protokoly'}.`}
+            Vygenerované {documents.length}{' '}
+            {documents.length === 1 ? 'protokol' : 'protokoly'}.
           </p>
         </div>
       </div>
@@ -422,6 +751,54 @@ function DocumentsBlock({
         ))}
       </ul>
     </Card>
+  );
+}
+
+/**
+ * "Priložiť fotodokumentáciu" (change request 2.2). Default on, so the common
+ * case is one tap; unticking produces the protocol without the appendix, which
+ * is exactly how it looked before photos existed.
+ */
+function IncludePhotosToggle({
+  photoCount,
+  checked,
+  disabled,
+  onChange,
+}: {
+  photoCount: number;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label
+      className={cn(
+        'flex w-full max-w-sm cursor-pointer items-center gap-3 rounded-2xl border px-3 py-2.5 text-left',
+        'transition-all duration-200',
+        checked
+          ? 'border-firol-300 bg-firol-50'
+          : 'border-ink-200 bg-white hover:border-ink-300',
+        disabled && 'pointer-events-none opacity-60',
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="size-4 shrink-0 accent-firol-500"
+      />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5 text-sm font-medium text-ink-900">
+          <Images className="size-3.5 text-firol-500" />
+          Priložiť fotodokumentáciu
+        </span>
+        <span className="mt-0.5 block text-xs text-ink-500">
+          {photoCount} {photoCount === 1 ? 'fotka' : photoCount < 5 ? 'fotky' : 'fotiek'} ako
+          samostatná príloha na konci protokolu.
+        </span>
+      </span>
+    </label>
   );
 }
 

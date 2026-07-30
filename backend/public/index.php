@@ -21,6 +21,7 @@ use Firol\Controllers\AdminController;
 use Firol\Controllers\AdminPanelController;
 use Firol\Controllers\AuthController;
 use Firol\Controllers\BillingController;
+use Firol\Controllers\CalendarController;
 use Firol\Controllers\CompanyController;
 use Firol\Controllers\FacilityController;
 use Firol\Controllers\DocumentController;
@@ -28,6 +29,7 @@ use Firol\Controllers\FeedbackController;
 use Firol\Controllers\ImportController;
 use Firol\Controllers\InspectionController;
 use Firol\Controllers\InspectionItemController;
+use Firol\Controllers\InspectionPhotoController;
 use Firol\Controllers\InspectorProfileController;
 use Firol\Controllers\InviteController;
 use Firol\Controllers\TeamController;
@@ -69,6 +71,7 @@ $router->post('/api/auth/password-reset/confirm', [AuthController::class, 'passw
 
 $router->get('/api/me',                  [MeController::class, 'show']);
 $router->post('/api/me/switch-account',  [MeController::class, 'switchAccount']);
+$router->post('/api/me/accept-terms',    [MeController::class, 'acceptTerms']);
 
 $router->get('/api/account',             [AccountController::class, 'show']);
 $router->patch('/api/account',           [AccountController::class, 'update']);
@@ -128,15 +131,36 @@ $router->delete('/api/facilities/{id}',             [FacilityController::class, 
 
 $router->get('/api/inspections',                    [InspectionController::class, 'index']);
 $router->post('/api/inspections',                   [InspectionController::class, 'store']);
+// Must precede /api/inspections/{id} — {id} would otherwise swallow "suggestions".
+$router->get('/api/inspections/suggestions',        [InspectionController::class, 'suggestions']);
 $router->get('/api/inspections/{id}',               [InspectionController::class, 'show']);
 $router->patch('/api/inspections/{id}',             [InspectionController::class, 'updateBasic']);
 $router->delete('/api/inspections/{id}',            [InspectionController::class, 'archive']);
 $router->post('/api/inspections/{id}/repeat',       [InspectionController::class, 'repeat']);
+// "Upraviť" on a locked inspection — discards the issued protocol and puts
+// the inspection back into draft so it can be corrected.
+$router->post('/api/inspections/{id}/unlock',       [InspectionController::class, 'unlock']);
+$router->post('/api/inspections/{id}/follow-up',     [InspectionController::class, 'followUp']);
 $router->post('/api/inspections/{id}/items',        [InspectionItemController::class, 'store']);
 $router->patch('/api/inspections/{id}/items/{item_id}',  [InspectionItemController::class, 'update']);
 $router->delete('/api/inspections/{id}/items/{item_id}', [InspectionItemController::class, 'destroy']);
+
+// Photo documentation (change request 2.2) — one photo per request so a
+// dropped field connection retries a single shot, not a whole batch.
+$router->post('/api/inspections/{id}/items/{item_id}/photos', [InspectionPhotoController::class, 'store']);
+$router->get('/api/inspections/{id}/items/{item_id}/photos/{photo_id}', [InspectionPhotoController::class, 'download']);
+$router->delete('/api/inspections/{id}/items/{item_id}/photos/{photo_id}', [InspectionPhotoController::class, 'destroy']);
+
 $router->post('/api/inspections/{id}/generate-pdf',  [DocumentController::class, 'generateForInspection']);
 $router->get('/api/inspections/{id}/documents',      [DocumentController::class, 'indexForInspection']);
+
+// Calendar (change request 2.5) — computed deadlines + planned dates + events.
+$router->get('/api/calendar',                        [CalendarController::class, 'index']);
+$router->patch('/api/calendar/plans/{inspection_id}', [CalendarController::class, 'setPlan']);
+$router->delete('/api/calendar/plans/{inspection_id}', [CalendarController::class, 'deletePlan']);
+$router->post('/api/calendar/events',                [CalendarController::class, 'createEvent']);
+$router->patch('/api/calendar/events/{id}',          [CalendarController::class, 'updateEvent']);
+$router->delete('/api/calendar/events/{id}',         [CalendarController::class, 'deleteEvent']);
 $router->get('/api/documents/{id}/download',         [DocumentController::class, 'download']);
 $router->post('/api/documents/{id}/email',           [DocumentController::class, 'emailDocument']);
 
@@ -157,6 +181,7 @@ $router->post('/api/trainings/{id}/generate-pdf',   [DocumentController::class, 
 $router->get('/api/trainings/{id}/documents',       [DocumentController::class, 'indexForTraining']);
 
 $router->get('/api/account/export',                [DataController::class, 'exportData']);
+$router->post('/api/account/restore',              [DataController::class, 'restoreData']);
 $router->delete('/api/account/data/companies',   [DataController::class, 'purgeCompanies']);
 $router->delete('/api/account/data/inspections', [DataController::class, 'purgeInspections']);
 $router->delete('/api/account/data/trainings',   [DataController::class, 'purgeTrainings']);
@@ -180,6 +205,9 @@ $router->post('/api/import/trainings',           [ImportController::class, 'impo
  * - GET / HEAD             — reads are always allowed
  * - /api/auth/*            — must be able to log in/out + reset password
  * - /api/me/switch-account — must be able to escape to another tenant
+ * - /api/me/accept-terms   — the new-VOP notice must be dismissible even in
+ *                            read-only mode, or an expired user is stuck
+ *                            behind it with no way to acknowledge
  * - /api/billing/*         — Phase 6b: paying must always work
  * - PATCH /api/account     — saving invoice details is a prerequisite for
  *                            checkout; blocking it would deadlock an expired
@@ -191,7 +219,7 @@ $method = $request->method();
 $path   = rtrim($request->path(), '/') ?: '/';
 $isMutation = !in_array($method, ['GET', 'HEAD'], true);
 $isWhitelisted = (bool) preg_match(
-    '#^/api/(auth/|me/switch-account|billing/|admin/|feedback|invites/)#',
+    '#^/api/(auth/|me/switch-account|me/accept-terms|billing/|admin/|feedback|invites/)#',
     $path,
 ) || ($path === '/api/account' && $method === 'PATCH');
 if ($isMutation && !$isWhitelisted) {

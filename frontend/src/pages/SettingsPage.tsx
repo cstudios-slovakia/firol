@@ -20,16 +20,21 @@ import {
     CreditCard,
     Database,
     Download,
+    ExternalLink,
+    FileArchive,
     FileSignature,
     FileSpreadsheet,
     GraduationCap,
     Hash,
+    History,
+    Image,
     ImagePlus,
     MailPlus,
     MessageSquarePlus,
     Palette,
     Phone,
     RotateCcw,
+    ScrollText,
     Shield,
     ShieldCheck,
     ShieldOff,
@@ -41,8 +46,14 @@ import {
     UsersRound,
 } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
+import {
+    LEGAL_PRIVACY_LABEL,
+    LEGAL_PRIVACY_URL,
+    LEGAL_VOP_LABEL,
+    LEGAL_VOP_URL,
+} from "@/lib/legal";
 import { AccountApi, type Account } from "@/api/account";
-import { DataApi } from "@/api/data";
+import { DataApi, type RestoreMode, type RestoreResult } from "@/api/data";
 import { ImportApi, type ImportKind, type ImportResult } from "@/api/import";
 import { BackupReminderModal } from "@/components/BackupReminderModal";
 import { InstallAppCard } from "@/components/InstallAppCard";
@@ -120,7 +131,7 @@ const MENU_ITEMS = [
         to: "/settings/data",
         label: "Správa dát",
         description:
-            "Export zálohy, hromadné vymazanie firiem, kontrol alebo školení.",
+            "Záloha a obnova účtu, import z Excelu, hromadné vymazanie dát.",
         icon: Database,
         color: "text-slate-600",
         bg: "bg-slate-50",
@@ -828,7 +839,7 @@ function BrandingSection() {
                                 leftIcon={<Building2 className="size-4" />}
                                 value={companyName}
                                 onChange={(e) => setCompanyName(e.target.value)}
-                                placeholder="Firol s.r.o."
+                                placeholder="Vaša firma s.r.o."
                             />
                         )}
                     </Field>
@@ -2098,7 +2109,68 @@ export function SystemPage() {
         <>
             <SectionBack label="Systémové" />
             <InstallAppCard />
+            <LegalDocumentsCard />
         </>
+    );
+}
+
+/**
+ * The published legal documents, reachable from inside the app
+ * (change request 3.1). Links come from /api/me so they always point at the
+ * version the account's consent is measured against; the static constants are
+ * the fallback if the snapshot hasn't loaded yet.
+ */
+function LegalDocumentsCard() {
+    const { terms } = useAuth();
+    const docs = [
+        { href: terms?.vop.url ?? LEGAL_VOP_URL, label: LEGAL_VOP_LABEL,
+          hint: "Vrátane Zmluvy o spracúvaní osobných údajov (príloha).",
+          acceptedAt: terms?.vop.accepted_at ?? null, acceptedVersion: terms?.vop.accepted_version ?? null },
+        { href: terms?.privacy.url ?? LEGAL_PRIVACY_URL, label: LEGAL_PRIVACY_LABEL,
+          hint: "Aké údaje spracúvame, komu ich sprístupňujeme a aké máte práva.",
+          acceptedAt: terms?.privacy.accepted_at ?? null, acceptedVersion: terms?.privacy.accepted_version ?? null },
+    ];
+
+    return (
+        <section className="mt-4 rounded-2xl border border-ink-100 bg-white p-4">
+            <div className="flex items-center gap-3">
+                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600">
+                    <ScrollText className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                    <h2 className="text-sm font-semibold text-ink-900">Právne dokumenty</h2>
+                    <p className="mt-0.5 text-xs text-ink-500">
+                        Aktuálne znenie obchodných podmienok a zásad ochrany údajov.
+                    </p>
+                </div>
+            </div>
+
+            <ul className="mt-3 flex flex-col gap-2">
+                {docs.map((doc) => (
+                    <li key={doc.href}>
+                        <a
+                            href={doc.href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group flex items-center gap-3 rounded-xl border border-ink-100 px-3 py-2.5 transition-[background-color,transform] duration-150 hover:bg-ink-50 hover:-translate-y-px"
+                        >
+                            <ExternalLink className="size-4 shrink-0 text-ink-400" />
+                            <span className="min-w-0 flex-1">
+                                <span className="block text-sm font-medium text-ink-900">{doc.label}</span>
+                                <span className="mt-0.5 block text-xs text-ink-500">{doc.hint}</span>
+                            </span>
+                            <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform duration-150 group-hover:translate-x-0.5" />
+                        </a>
+                        {doc.acceptedAt && (
+                            <p className="mt-1 pl-1 text-[11px] text-ink-400">
+                                Oboznámenie potvrdené {new Date(doc.acceptedAt.replace(" ", "T")).toLocaleDateString("sk-SK")}
+                                {doc.acceptedVersion ? ` (verzia ${doc.acceptedVersion})` : ""}.
+                            </p>
+                        )}
+                    </li>
+                ))}
+            </ul>
+        </section>
     );
 }
 
@@ -2117,31 +2189,26 @@ function PurgeCard({
     onConfirm: () => void;
     busy: boolean;
 }) {
+    // Backup reminder and the "type VYMAZAŤ" confirmation are one modal — a
+    // separate box left behind on the page is easy to miss once the user has
+    // already dismissed the reminder.
     const [showReminder, setShowReminder] = useState(false);
-    const [open, setOpen] = useState(false);
-    const [keyword, setKeyword] = useState("");
-    const valid = keyword.trim() === CONFIRM_KEYWORD;
-
-    function reset() {
-        setOpen(false);
-        setKeyword("");
-    }
-
-    function onDeleteClick() {
-        setShowReminder(true);
-    }
-
-    function onReminderProceed() {
-        setShowReminder(false);
-        setOpen(true);
-    }
 
     return (
         <>
             {showReminder && (
                 <BackupReminderModal
-                    onProceed={onReminderProceed}
+                    onProceed={() => {
+                        setShowReminder(false);
+                        onConfirm();
+                    }}
                     onCancel={() => setShowReminder(false)}
+                    confirm={{
+                        keyword: CONFIRM_KEYWORD,
+                        label: "Potvrdiť vymazanie",
+                        detail: `${title} — ${detail}`,
+                        busy,
+                    }}
                 />
             )}
             <div className="rounded-2xl border border-red-200 bg-red-50/40 p-4">
@@ -2154,61 +2221,15 @@ function PurgeCard({
                         <p className="mt-0.5 text-xs text-ink-500">{description}</p>
                         <p className="mt-1 text-[11px] text-red-700/80">{detail}</p>
                     </div>
-                    {!open && (
-                        <button
-                            type="button"
-                            onClick={onDeleteClick}
-                            disabled={busy}
-                            className="shrink-0 rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
-                        >
-                            Vymazať
-                        </button>
-                    )}
+                    <button
+                        type="button"
+                        onClick={() => setShowReminder(true)}
+                        disabled={busy}
+                        className="shrink-0 rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+                    >
+                        Vymazať
+                    </button>
                 </div>
-
-                {open && (
-                    <div className="mt-4 flex flex-col gap-3 border-t border-red-200 pt-4">
-                        <p className="text-xs text-ink-700">
-                            Pre potvrdenie napíš{" "}
-                            <span className="font-mono font-bold text-red-700">
-                                {CONFIRM_KEYWORD}
-                            </span>{" "}
-                            do poľa nižšie:
-                        </p>
-                        <input
-                            type="text"
-                            value={keyword}
-                            onChange={(e) => setKeyword(e.target.value)}
-                            placeholder={CONFIRM_KEYWORD}
-                            autoComplete="off"
-                            spellCheck={false}
-                            className="w-full rounded-xl border border-red-200 bg-white px-3 py-2 font-mono text-sm text-ink-900 outline-none focus:border-red-400 focus:ring-2 focus:ring-red-200"
-                        />
-                        <div className="flex justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={reset}
-                                className="rounded-xl px-3 py-1.5 text-xs font-semibold text-ink-600 transition-colors hover:bg-ink-100"
-                            >
-                                Zrušiť
-                            </button>
-                            <Button
-                                type="button"
-                                disabled={!valid}
-                                loading={busy}
-                                onClick={() => {
-                                    if (valid) {
-                                        onConfirm();
-                                        reset();
-                                    }
-                                }}
-                                className="bg-red-600 hover:bg-red-700 focus-visible:ring-red-300"
-                            >
-                                Potvrdiť vymazanie
-                            </Button>
-                        </div>
-                    </div>
-                )}
             </div>
         </>
     );
@@ -2220,6 +2241,10 @@ function DataSection() {
     const [busyCompanies, setBusyCompanies] = useState(false);
     const [busyInspections, setBusyInspections] = useState(false);
     const [busyTrainings, setBusyTrainings] = useState(false);
+    // Both on by default — a backup that silently omits things is the failure
+    // mode this feature exists to fix; leaving them out is an explicit choice.
+    const [withPhotos, setWithPhotos] = useState(true);
+    const [withDocuments, setWithDocuments] = useState(true);
 
     async function purge(
         action: () => Promise<{ deleted: number }>,
@@ -2240,13 +2265,19 @@ function DataSection() {
     }
 
     function downloadExport() {
-        const url = DataApi.exportUrl();
+        const url = DataApi.exportUrl({
+            photos: withPhotos,
+            documents: withDocuments,
+        });
         const a = document.createElement("a");
         a.href = url;
         a.download = "";
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        toast.success(
+            "Záloha sa pripravuje — veľký archív môže chvíľu trvať, kým sa začne sťahovať.",
+        );
     }
 
     return (
@@ -2255,49 +2286,91 @@ function DataSection() {
             <Card className="overflow-hidden">
                 <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-slate-50/80 to-transparent px-5 py-4">
                     <div className="grid size-11 place-items-center rounded-2xl bg-slate-700 text-white shadow-[var(--shadow-glow)]">
-                        <Download className="size-5" />
+                        <FileArchive className="size-5" />
                     </div>
                     <div className="min-w-0 flex-1">
                         <h2 className="text-base font-semibold text-ink-900">
-                            Export / záloha dát
+                            Záloha dát (.zip)
                         </h2>
                         <p className="text-xs text-ink-500">
-                            Stiahni všetky firmy, kontroly a školenia ako JSON
-                            súbor. Vhodné ako osobná záloha pred hromadnými
-                            zmenami.
+                            Kompletná záloha účtu — dáta, fotky aj vygenerované
+                            PDF protokoly v jednom archíve.
                         </p>
                     </div>
                 </div>
-                <div className="px-5 py-5">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                        <div className="min-w-0 flex-1 text-sm text-ink-600">
-                            <p>
-                                Export obsahuje{" "}
-                                <strong className="text-ink-800">
-                                    firmy, prevádzky, kontroly, školenia
-                                </strong>{" "}
-                                vrátane všetkých položiek a účastníkov. PDF
-                                protokoly nie sú súčasťou exportu — sú
-                                dostupné cez tlačidlo stiahnutia pri každej
-                                kontrole.
-                            </p>
-                            <p className="mt-2 text-xs text-ink-400">
-                                Súbor si ulož na bezpečné miesto (napr. Google
-                                Drive alebo e-mail). Ak omylom zmažeš dáta,
-                                vieme ich z tohto súboru obnoviť.
-                            </p>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={downloadExport}
-                            className="flex shrink-0 items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
-                        >
-                            <Download className="size-4" />
-                            Stiahnuť zálohu
-                        </button>
+                <div className="flex flex-col gap-4 px-5 py-5">
+                    <div className="min-w-0 text-sm text-ink-600">
+                        <p>
+                            Archív obsahuje{" "}
+                            <strong className="text-ink-800">
+                                firmy, prevádzky, kontroly, školenia
+                            </strong>{" "}
+                            vrátane všetkých položiek a účastníkov, a k tomu
+                            skutočné súbory —{" "}
+                            <strong className="text-ink-800">
+                                fotodokumentáciu, PDF protokoly a podpisy
+                                účastníkov
+                            </strong>
+                            . Zo zálohy sa dá účet obnoviť aj vtedy, keď sa
+                            stratí celá databáza.
+                        </p>
+                        <p className="mt-2 text-xs text-ink-400">
+                            Súbor si ulož na bezpečné miesto (napr. Google Drive
+                            alebo externý disk). Obnovu spustíš nižšie cez
+                            „Obnova zo zálohy".
+                        </p>
                     </div>
+
+                    <fieldset className="rounded-2xl border border-ink-100 bg-ink-50/40 px-4 py-3">
+                        <legend className="px-1 text-xs font-semibold text-ink-500">
+                            Čo zabaliť
+                        </legend>
+                        <div className="flex flex-col gap-2">
+                            <ExportToggle
+                                checked={withPhotos}
+                                onChange={setWithPhotos}
+                                icon={<Image className="size-4" />}
+                                label="Fotodokumentácia"
+                                hint="Fotky pri položkách kontrol. Bez nich je archív malý, ale fotky sa z neho nedajú obnoviť."
+                            />
+                            <ExportToggle
+                                checked={withDocuments}
+                                onChange={setWithDocuments}
+                                icon={<ScrollText className="size-4" />}
+                                label="PDF protokoly"
+                                hint="Vygenerované a podpísané protokoly presne tak, ako boli vydané klientovi."
+                            />
+                        </div>
+                        {(!withPhotos || !withDocuments) && (
+                            <p className="mt-2.5 flex items-start gap-2 text-xs text-amber-700">
+                                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                                Takáto záloha je neúplná — po obnove budú
+                                záznamy bez{" "}
+                                {[
+                                    !withPhotos ? "fotiek" : null,
+                                    !withDocuments ? "PDF protokolov" : null,
+                                ]
+                                    .filter(Boolean)
+                                    .join(" a ")}
+                                .
+                            </p>
+                        )}
+                    </fieldset>
+
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        leftIcon={<Download className="size-4" />}
+                        onClick={downloadExport}
+                        className="sm:self-start"
+                    >
+                        Stiahnuť zálohu
+                    </Button>
                 </div>
             </Card>
+
+            {/* Obnova zo zálohy */}
+            <RestoreCard />
 
             {/* Import z Excelu */}
             <Card className="overflow-hidden">
@@ -2388,6 +2461,296 @@ function DataSection() {
                 </div>
             </Card>
         </div>
+    );
+}
+
+function ExportToggle({
+    checked,
+    onChange,
+    icon,
+    label,
+    hint,
+}: {
+    checked: boolean;
+    onChange: (v: boolean) => void;
+    icon: React.ReactNode;
+    label: string;
+    hint: string;
+}) {
+    return (
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl px-2 py-1.5 transition-colors hover:bg-white/70">
+            <input
+                type="checkbox"
+                checked={checked}
+                onChange={(e) => onChange(e.target.checked)}
+                className="mt-0.5 size-4 shrink-0 accent-firol-500"
+            />
+            <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 text-sm font-medium text-ink-800">
+                    <span className="text-ink-400">{icon}</span>
+                    {label}
+                </span>
+                <span className="mt-0.5 block text-xs text-ink-500">{hint}</span>
+            </span>
+        </label>
+    );
+}
+
+// ─── Obnova zo zálohy ─────────────────────────────────────────────────────────
+
+const RESTORE_LABELS: Record<string, string> = {
+    companies: "firiem",
+    facilities: "prevádzok",
+    inspections: "kontrol",
+    items: "položiek",
+    photos: "fotiek",
+    trainings: "školení",
+    trainees: "účastníkov",
+    documents: "PDF protokolov",
+};
+
+const RESTORE_MODES: {
+    value: RestoreMode;
+    title: string;
+    description: string;
+}[] = [
+    {
+        value: "merge",
+        title: "Doplniť",
+        description:
+            "Doplní iba to, čo v účte chýba. Existujúce záznamy sa nechajú tak, ako sú — nič sa nepremaže. Obnovu môžeš spustiť opakovane.",
+    },
+    {
+        value: "replace",
+        title: "Nahradiť všetko",
+        description:
+            "Najprv zmaže všetky firmy, kontroly, školenia, fotky a protokoly v účte a potom nahrá zálohu. Presná kópia zálohy — pre prípad, že je databáza poškodená.",
+    },
+];
+
+function RestoreCard() {
+    const { csrfToken } = useAuth();
+    const toast = useToast();
+    const confirm = useConfirm();
+    const fileRef = useRef<HTMLInputElement>(null);
+    const [mode, setMode] = useState<RestoreMode>("merge");
+    const [busy, setBusy] = useState(false);
+    const [progress, setProgress] = useState(0);
+    const [result, setResult] = useState<RestoreResult | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    async function onPick(file: File | undefined) {
+        if (!file) return;
+
+        if (mode === "replace") {
+            const ok = await confirm({
+                title: "Nahradiť všetky dáta v účte?",
+                description:
+                    "Všetky firmy, prevádzky, kontroly, školenia, fotky aj PDF protokoly sa nenávratne zmažú a nahradia obsahom zálohy. Táto operácia sa nedá vrátiť späť.",
+                confirmLabel: "Zmazať a obnoviť",
+            });
+            if (!ok) {
+                if (fileRef.current) fileRef.current.value = "";
+                return;
+            }
+        }
+
+        setBusy(true);
+        setProgress(0);
+        setResult(null);
+        setError(null);
+        try {
+            const res = await DataApi.restore(file, mode, csrfToken, setProgress);
+            setResult(res);
+            const total = Object.values(res.restored).reduce((a, b) => a + b, 0);
+            if (total === 0) {
+                toast.success("Záloha je už celá v účte — nič nové na obnovenie.");
+            } else {
+                toast.success("Obnova zo zálohy dokončená.");
+            }
+        } catch (err) {
+            const msg = offlineMessage(err, "Obnova zlyhala.");
+            setError(msg);
+            toast.error(msg);
+        } finally {
+            setBusy(false);
+            if (fileRef.current) fileRef.current.value = "";
+        }
+    }
+
+    return (
+        <Card className="overflow-hidden">
+            <div className="flex items-center gap-3 border-b border-ink-100 bg-gradient-to-br from-firol-50/70 to-transparent px-5 py-4">
+                <div className="grid size-11 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
+                    <History className="size-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                    <h2 className="text-base font-semibold text-ink-900">
+                        Obnova zo zálohy
+                    </h2>
+                    <p className="text-xs text-ink-500">
+                        Nahraj .zip zálohu stiahnutú vyššie a vráť dáta,
+                        fotky aj protokoly späť do účtu.
+                    </p>
+                </div>
+            </div>
+
+            <div className="flex flex-col gap-4 px-5 py-5">
+                <div className="flex flex-col gap-2">
+                    <p className="text-xs font-semibold text-ink-500">
+                        Ako naložiť s dátami, ktoré už v účte sú
+                    </p>
+                    {RESTORE_MODES.map((option) => (
+                        <label
+                            key={option.value}
+                            className={cn(
+                                "flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 transition-all duration-200",
+                                // The brand colour is itself red, so a selected
+                                // "Doplniť" tinted with it would look exactly as
+                                // alarming as the destructive option. Only the
+                                // wipe turns the card red; the safe choice stays
+                                // neutral and lets the radio show the selection.
+                                mode === option.value
+                                    ? option.value === "replace"
+                                        ? "border-red-300 bg-red-50/70 ring-1 ring-red-200"
+                                        : "border-ink-300 bg-ink-50/80"
+                                    : "border-ink-100 hover:border-ink-200 hover:bg-ink-50/50",
+                            )}
+                        >
+                            <input
+                                type="radio"
+                                name="restore-mode"
+                                value={option.value}
+                                checked={mode === option.value}
+                                onChange={() => setMode(option.value)}
+                                disabled={busy}
+                                className={cn(
+                                    "mt-0.5 size-4 shrink-0",
+                                    option.value === "replace"
+                                        ? "accent-red-500"
+                                        : "accent-ink-600",
+                                )}
+                            />
+                            <span className="min-w-0 flex-1">
+                                <span className="flex items-center gap-1.5 text-sm font-semibold text-ink-800">
+                                    {option.value === "replace" && (
+                                        <AlertTriangle className="size-3.5 text-red-500" />
+                                    )}
+                                    {option.title}
+                                </span>
+                                <span className="mt-0.5 block text-xs text-ink-500">
+                                    {option.description}
+                                </span>
+                                {option.value === "replace" && mode === "replace" && (
+                                    <span className="mt-2 block rounded-lg bg-red-100/70 px-2.5 py-1.5 text-xs font-medium text-red-800">
+                                        Nevratné. Pred pokračovaním sa ťa ešte raz
+                                        opýtame.
+                                    </span>
+                                )}
+                            </span>
+                        </label>
+                    ))}
+                </div>
+
+                <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".zip,.json,application/zip,application/json"
+                    className="hidden"
+                    onChange={(e) => onPick(e.target.files?.[0])}
+                />
+                <Button
+                    type="button"
+                    variant={mode === "replace" ? "danger" : "primary"}
+                    leftIcon={<UploadCloud className="size-4" />}
+                    onClick={() => fileRef.current?.click()}
+                    loading={busy}
+                    className="sm:self-start"
+                >
+                    {busy ? "Obnovujem…" : "Vybrať zálohu a obnoviť"}
+                </Button>
+
+                {busy && (
+                    <div>
+                        <div className="h-2 overflow-hidden rounded-full bg-ink-100">
+                            <div
+                                className="h-full rounded-full bg-firol-500 transition-[width] duration-300"
+                                style={{ width: `${Math.max(progress, 4)}%` }}
+                            />
+                        </div>
+                        <p className="mt-1.5 text-xs text-ink-500">
+                            {progress < 100
+                                ? `Nahrávam súbor… ${progress} %`
+                                : "Súbor nahraný — spracúvam zálohu. Pri veľkom archíve to môže trvať aj niekoľko minút."}
+                        </p>
+                    </div>
+                )}
+
+                <p className="flex items-start gap-2 rounded-xl border border-ink-100 bg-ink-50/40 px-3 py-2 text-xs text-ink-600">
+                    <FileArchive className="mt-0.5 size-3.5 shrink-0 text-ink-400" />
+                    <span>
+                        Obnova nikdy neprepíše záznam, ktorý v účte už je — v
+                        režime „Doplniť" ho preskočí. Starší .json export sa dá
+                        nahrať tiež, obnoví však iba dáta: fotky ani PDF v ňom
+                        nikdy neboli.
+                    </span>
+                </p>
+
+                {error && (
+                    <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
+                        {error}
+                    </div>
+                )}
+
+                {result && (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 text-sm text-emerald-800">
+                        <p className="flex items-center gap-2 font-semibold">
+                            <CheckCircle2 className="size-4" />
+                            Obnova dokončená
+                        </p>
+                        <ul className="mt-1.5 flex flex-wrap gap-2">
+                            {Object.entries(result.restored)
+                                .filter(([, v]) => v > 0)
+                                .map(([k, v]) => (
+                                    <li key={k}>
+                                        <Badge tone="ok">
+                                            {v} {RESTORE_LABELS[k] ?? k}
+                                        </Badge>
+                                    </li>
+                                ))}
+                            {Object.values(result.restored).every((v) => v === 0) && (
+                                <li className="text-xs">
+                                    Nič nové — všetko zo zálohy už v účte bolo.
+                                </li>
+                            )}
+                        </ul>
+                        {Object.values(result.skipped).some((v) => v > 0) && (
+                            <p className="mt-2 text-xs text-emerald-700">
+                                Preskočené (už existovali):{" "}
+                                {Object.entries(result.skipped)
+                                    .filter(([, v]) => v > 0)
+                                    .map(([k, v]) => `${v} ${RESTORE_LABELS[k] ?? k}`)
+                                    .join(", ")}
+                                .
+                            </p>
+                        )}
+                        {result.warnings.length > 0 && (
+                            <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto pr-1">
+                                {result.warnings.map((w, i) => (
+                                    <li
+                                        key={i}
+                                        className="flex items-start gap-1.5 text-xs text-amber-800"
+                                    >
+                                        <AlertTriangle className="mt-0.5 size-3 shrink-0" />
+                                        {w}
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+                )}
+            </div>
+        </Card>
     );
 }
 

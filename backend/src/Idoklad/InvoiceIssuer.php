@@ -210,7 +210,7 @@ final class InvoiceIssuer
         }
 
         $payload = [
-            'CompanyName'     => $row['invoice_company_name'] ?? 'Klient Firol',
+            'CompanyName'     => $row['invoice_company_name'] ?? 'Klient POapp',
             'Street'          => $row['invoice_street']       ?? '',
             'PostalCode'      => $row['invoice_postal_code']  ?? '',
             'City'            => $row['invoice_city']         ?? '',
@@ -244,7 +244,7 @@ final class InvoiceIssuer
                 $period = ' (' . date('d.m.Y', $start) . ' – ' . date('d.m.Y', $end) . ')';
             }
         }
-        return 'Firol — predplatné' . $period;
+        return 'POapp — predplatné' . $period;
     }
 
     /** iDoklad CurrencyId enum: 1=CZK, 2=EUR, 3=USD … (live list via /Currencies). */

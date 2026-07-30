@@ -31,7 +31,7 @@ final class InvoiceFallbackEmail
 
         $bodyHtml = <<<HTML
 <p style="margin:0 0 16px 0;">Ahoj,</p>
-<p style="margin:0 0 16px 0;">tvoja platba za predplatné Firol pre <strong>{$accEsc}</strong> vo výške <strong>{$amount}&nbsp;{$cur}</strong> bola úspešne prijatá.</p>
+<p style="margin:0 0 16px 0;">tvoja platba za predplatné POapp pre <strong>{$accEsc}</strong> vo výške <strong>{$amount}&nbsp;{$cur}</strong> bola úspešne prijatá.</p>
 <p style="margin:0 0 16px 0;">Riadnu slovenskú faktúru ti pošleme dodatočne — pri jej automatickom vystavení nastal problém na strane účtovného systému a náš tím to už rieši. Tvoj prístup do aplikácie zostáva neprerušený.</p>
 HTML
             . $hostedBlock
@@ -39,14 +39,14 @@ HTML
 <p style="margin:24px 0 0 0;font-size:13px;color:#7a8494;">V prípade otázok napíš na podporu — radi pomôžeme.</p>
 HTML;
 
-        $text = "Platba prijatá — Firol\n\n"
+        $text = "Platba prijatá — POapp\n\n"
               . "Tvoja platba pre {$accountName} vo výške {$amount} {$cur} bola úspešne prijatá.\n"
               . "Slovenskú faktúru ti pošleme dodatočne — automatické vystavenie zlyhalo a tím to rieši."
               . $hostedText;
 
         return new Message(
             to:      $to,
-            subject: 'Potvrdenie platby — Firol (faktúra príde dodatočne)',
+            subject: 'Potvrdenie platby — POapp (faktúra príde dodatočne)',
             html:    Layout::render('Potvrdenie platby', 'Platba úspešne prijatá', $bodyHtml, "Platba {$amount} {$cur} prijatá, faktúra príde dodatočne."),
             text:    $text,
         );

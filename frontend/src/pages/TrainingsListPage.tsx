@@ -12,8 +12,10 @@ import {
     User,
     Users,
     Warehouse,
+    Wheat,
 } from "lucide-react";
 import {
+    isPokyn,
     TRAINING_TYPE_LABELS,
     TRAINING_TYPE_SHORT,
     TRAINING_TYPES,
@@ -117,7 +119,7 @@ export function TrainingsListPage() {
                         Školenia
                     </h1>
                     <p className="mt-0.5 text-sm text-ink-500">
-                        Záznamy zo školení s podpismi účastníkov.
+                        Záznamy zo školení a pokyny vydané zamestnancom klienta.
                     </p>
                 </div>
                 {!isReadOnly && (
@@ -288,7 +290,9 @@ function TrainingRow({
                     to={`/trainings/${it.id}`}
                     className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)] transition-colors hover:bg-firol-600"
                 >
-                    <GraduationCap className="size-5" />
+                    {isPokyn(it.type)
+                        ? <Wheat className="size-5" />
+                        : <GraduationCap className="size-5" />}
                 </Link>
 
                 <div className="min-w-0 flex-1">
@@ -330,9 +334,18 @@ function TrainingRow({
                             </>
                         )}
                         <span className="mx-1.5 text-ink-300">·</span>
-                        <Users className="-mt-0.5 mr-1 inline size-3" />
-                        {it.trainees_count}{" "}
-                        {it.trainees_count === 1 ? "účastník" : "účastníkov"}
+                        {isPokyn(it.type) ? (
+                            <>
+                                <Wheat className="-mt-0.5 mr-1 inline size-3" />
+                                {`žatva ${it.pokyn_year ?? "—"}`}
+                            </>
+                        ) : (
+                            <>
+                                <Users className="-mt-0.5 mr-1 inline size-3" />
+                                {it.trainees_count}{" "}
+                                {it.trainees_count === 1 ? "účastník" : "účastníkov"}
+                            </>
+                        )}
                     </p>
                 </div>
 

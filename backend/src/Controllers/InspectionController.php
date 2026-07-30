@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Audit\AuditLog;
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Storage\Storage;
 use PDO;
 
 final class InspectionController
@@ -20,18 +22,41 @@ final class InspectionController
      * account). The validity status (platná / blíži sa / po termíne) is
      * derived on the frontend; a superseded record drops out of the overdue
      * bucket so a renewed control no longer flags "po termíne". This covers
-     * both the "Opakovať" flow and a manually re-created inspection — any
-     * newer row wins, even a still-open draft (higher id = created later).
+     * both the "Opakovať" flow and a manually re-created inspection.
      * Correlates on the outer alias `i`.
+     *
+     * Three conditions a row must meet to supersede an older one:
+     *   - it is finalized. A draft carries no validity of its own, so it must
+     *     never invalidate a finished inspection — otherwise merely starting
+     *     a repeat would mark the still-valid protocol "Nahradená".
+     *   - it is newer *by execution date*, not by id. Inspection dates are
+     *     always entered manually, so a backdated record created later has a
+     *     higher id while covering an earlier cycle; `id` only breaks ties
+     *     between two inspections executed on the same day.
+     *   - it is itself a cycle-advancing inspection
+     *     (`is_preventive_inspection = 1`). A plain požiarna kniha entry
+     *     (is_preventive_inspection = 0) must never supersede the previous
+     *     preventive inspection — otherwise a routine note would mask a
+     *     missed statutory inspection (change request 1.7).
+     *
+     * Drafts are never superseded themselves (`i.status = 'finalized'`) — a
+     * concept is judged by its own status, not against the finalized record.
+     *
+     * `executed_on` is nullable, so both sides are coalesced to a floor date
+     * to keep the row comparison from collapsing to NULL.
      */
-    private const SUPERSEDED_EXPR = 'EXISTS(
+    private const SUPERSEDED_EXPR = "EXISTS(
                            SELECT 1 FROM inspections s
-                           WHERE  s.account_id  = i.account_id
+                           WHERE  i.status      = 'finalized'
+                             AND  s.account_id  = i.account_id
                              AND  s.facility_id = i.facility_id
                              AND  s.type        = i.type
                              AND  s.archived_at IS NULL
-                             AND  s.id          > i.id
-                       ) AS is_superseded';
+                             AND  s.status      = 'finalized'
+                             AND  s.is_preventive_inspection = 1
+                             AND  (COALESCE(s.executed_on, '1000-01-01'), s.id)
+                                > (COALESCE(i.executed_on, '1000-01-01'), i.id)
+                       ) AS is_superseded";
 
     /**
      * Allowed periodicities per inspection type. Source of truth: locked
@@ -49,7 +74,23 @@ final class InspectionController
         'pu_udrzba' => [12],
         'nudzove_osvetlenie' => [12],
         'ts_hadic' => [12],
+        // Pokyn — žatevné práce is not here: it is a document issued to the
+        // client's employees, so it lives in the training tree (see
+        // TrainingController), not among the inspection types.
+        // One-off document — a disposal has no recurrence (change request 2.1).
+        'vyradenie' => [0],
     ];
+
+    /**
+     * Types that record a one-off event rather than advancing a statutory
+     * cycle. Stored with `is_preventive_inspection = 0`, which is the same
+     * mechanism a plain požiarna kniha entry uses (change request 1.7): it
+     * keeps them out of the calendar's deadline computation and stops them
+     * superseding anything.
+     *
+     * @var list<string>
+     */
+    private const NON_CYCLIC_TYPES = ['vyradenie'];
 
     public static function index(Request $req): void
     {
@@ -61,6 +102,7 @@ final class InspectionController
         $type = $req->query('type');
 
         $sql = 'SELECT i.id, i.type, i.periodicity_months, i.executed_on,
+                       i.is_preventive_inspection, i.source_inspection_id,
                        i.status, i.notes, i.created_at,
                        i.company_id, c.name AS company_name,
                        i.facility_id, f.name AS facility_name,
@@ -102,6 +144,70 @@ final class InspectionController
         Response::json(['items' => $items]);
     }
 
+    /**
+     * Autocomplete suggestions for repetitive item fields (manufacturer / type
+     * / location) drawn from the account's own history — so a technician
+     * entering ten prístroje of the same make types it once, not ten times
+     * (change request 2.4.1). Distinct values are ranked by how often they were
+     * used; for `location`, values from the given facility float to the top.
+     */
+    public static function suggestions(Request $req): void
+    {
+        $accountId = Tenant::currentAccountId();
+
+        // Whitelist the JSON key so it can be safely interpolated into the
+        // JSON path (never user-controlled beyond this fixed set — so no SQL
+        // injection is possible). Kept out of a bound param on purpose: the
+        // same expression appears several times and reusing a named
+        // placeholder is not portable across PDO emulation settings.
+        $field = (string) $req->query('field');
+        if (!in_array($field, ['manufacturer', 'type', 'location'], true)) {
+            Response::error('Invalid field', 422);
+        }
+        $val = "JSON_UNQUOTE(JSON_EXTRACT(ji.fields, '\$.$field'))";
+        // A JSON column is stored with the binary collation, which would make
+        // the prefix match case- and accent-sensitive ("pe" missing "Peter",
+        // "gloria" missing "Glória"). Compare through utf8mb4_unicode_ci so
+        // both are ignored — technicians type without accents on mobile.
+        $valCi = "CONVERT($val USING utf8mb4) COLLATE utf8mb4_unicode_ci";
+
+        $q = trim((string) ($req->query('q') ?? ''));
+        $facilityId = self::queryInt($req, 'facility_id');
+
+        // LIKE-escape the prefix so %/_ typed by the user match literally.
+        $like = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
+
+        $preferFacility = $field === 'location' && $facilityId !== null;
+
+        $sql = "SELECT $val AS val"
+             . ($preferFacility ? ', MAX(i.facility_id = :fid) AS same_fac' : '')
+             . ", COUNT(*) AS uses
+                FROM   inspection_items ji
+                JOIN   inspections i ON i.id = ji.inspection_id
+                WHERE  i.account_id = :acct
+                  AND  i.archived_at IS NULL
+                  AND  $val IS NOT NULL
+                  AND  $val <> ''
+                  AND  $valCi LIKE :like
+                GROUP  BY val
+                ORDER  BY " . ($preferFacility ? 'same_fac DESC, ' : '') . "uses DESC, val ASC
+                LIMIT  20";
+
+        $params = ['acct' => $accountId, 'like' => $like];
+        if ($preferFacility) {
+            $params['fid'] = $facilityId;
+        }
+
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
+        $values = array_values(array_filter(array_map(
+            static fn ($r): string => (string) $r['val'],
+            $stmt->fetchAll(),
+        ), static fn (string $v): bool => $v !== ''));
+
+        Response::json(['suggestions' => $values]);
+    }
+
     public static function show(Request $req, array $params): void
     {
         $accountId = Tenant::currentAccountId();
@@ -118,20 +224,245 @@ final class InspectionController
         );
         $itemsStmt->execute([$id]);
         $rawItems = $itemsStmt->fetchAll();
-        $items = array_map(static function (array $r): array {
+        // Photo documentation (change request 2.2) — fetched in one query for
+        // the whole inspection and zipped onto the items below, so a protocol
+        // with 40 items still costs a single extra round trip.
+        $photosByItem = InspectionPhotoController::byItemForInspection($id);
+        $items = array_map(static function (array $r) use ($photosByItem): array {
             return [
                 'id' => (int) $r['id'],
                 'position' => (int) $r['position'],
                 'fields' => json_decode((string) $r['fields'], true) ?? [],
+                'photos' => $photosByItem[(int) $r['id']] ?? [],
                 'created_at' => $r['created_at'],
                 'updated_at' => $r['updated_at'],
             ];
         }, $rawItems);
 
+        // Follow-up drafts spawned from this inspection (change request 2.1),
+        // so the detail view can show "nadväzujúci koncept existuje" and link.
+        $fuStmt = Db::pdo()->prepare(
+            'SELECT id, type, status FROM inspections
+             WHERE  source_inspection_id = ? AND archived_at IS NULL
+             ORDER  BY id ASC'
+        );
+        $fuStmt->execute([$id]);
+        $followUps = array_map(static function (array $r): array {
+            return [
+                'id' => (int) $r['id'],
+                'type' => (string) $r['type'],
+                'status' => (string) $r['status'],
+            ];
+        }, $fuStmt->fetchAll());
+
         Response::json([
             'inspection' => self::shapeRow($row),
             'items' => $items,
+            'follow_ups' => $followUps,
         ]);
+    }
+
+    /**
+     * Create a pre-filled DRAFT of a follow-up control off the back of this
+     * inspection (change request 2.1):
+     *   php      → oprava_ts_php   (prístroje with status "TS")
+     *   php      → vyradenie       (prístroje with status "V")
+     *   hydranty → ts_hadic        (hoses from the checked hydrants)
+     * The draft is never finalized — the technician opens it later, enters the
+     * real results and date, and generates the protocol. Re-triggering the
+     * offer for the same source returns the existing draft (no duplicate).
+     */
+    public static function followUp(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $sourceId = (int) $params['id'];
+
+        $source = self::loadOrFail($isAdmin ? null : $accountId, $sourceId);
+        $accountId = (int) $source['account_id'];
+        $sourceType = (string) $source['type'];
+
+        $targetType = $req->jsonString('target_type');
+        $allowed = [
+            'php'      => ['oprava_ts_php', 'vyradenie'],
+            'hydranty' => ['ts_hadic'],
+        ];
+        if (
+            !isset($allowed[$sourceType])
+            || $targetType === null
+            || !in_array($targetType, $allowed[$sourceType], true)
+        ) {
+            Response::error('Pre tento typ kontroly nie je dostupný nadväzujúci koncept.', 422);
+        }
+
+        // Pull source items and map them to the target type's field shape.
+        $itemsStmt = Db::pdo()->prepare(
+            'SELECT fields FROM inspection_items
+             WHERE  inspection_id = ? ORDER BY position ASC, id ASC'
+        );
+        $itemsStmt->execute([$sourceId]);
+        $sourceItems = array_map(
+            static fn (array $r): array => json_decode((string) $r['fields'], true) ?: [],
+            $itemsStmt->fetchAll(),
+        );
+
+        $mapped = match ($targetType) {
+            'oprava_ts_php' => self::mapPhpToOprava($sourceItems),
+            'vyradenie'     => self::mapPhpToVyradenie($sourceItems),
+            default         => self::mapHydrantyToTsHadic($sourceItems),
+        };
+
+        if ($mapped === []) {
+            Response::error('Zdrojová kontrola neobsahuje položky pre nadväzujúci koncept.', 422);
+        }
+
+        $pdo = Db::pdo();
+
+        // Idempotency: if a draft already grew from THIS source, return it
+        // instead of creating a second one.
+        $existing = $pdo->prepare(
+            'SELECT id FROM inspections
+             WHERE  source_inspection_id = ? AND type = ? AND status = "draft"
+                AND archived_at IS NULL
+             ORDER  BY id DESC LIMIT 1'
+        );
+        $existing->execute([$sourceId, $targetType]);
+        $existingId = $existing->fetchColumn();
+        if ($existingId !== false) {
+            Response::json(['inspection_id' => (int) $existingId, 'created' => false], 200);
+        }
+
+        $periodicity = self::TYPE_PERIODICITIES[$targetType][0];
+
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare(
+                'INSERT INTO inspections
+                    (account_id, company_id, facility_id, source_inspection_id, type,
+                     periodicity_months, executed_on, inspector_user_id, status, notes,
+                     is_preventive_inspection)
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, "draft", NULL, ?)'
+            )->execute([
+                $accountId,
+                $source['company_id'],
+                $source['facility_id'],
+                $sourceId,
+                $targetType,
+                $periodicity,
+                $source['inspector_user_id'],
+                in_array($targetType, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
+            ]);
+            $newId = (int) $pdo->lastInsertId();
+
+            $ins = $pdo->prepare(
+                'INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)'
+            );
+            foreach ($mapped as $pos => $fields) {
+                $ins->execute([$newId, $pos + 1, json_encode($fields, JSON_UNESCAPED_UNICODE)]);
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        Response::json(['inspection_id' => $newId, 'created' => true], 201);
+    }
+
+    /**
+     * PHP items with status "TS" (na tlakovú skúšku) → Oprava/plnenie/TS PHP
+     * draft items. Carries identification only; the standard scope of work is
+     * fixed on that protocol and the note starts blank.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return list<array<string, mixed>>
+     */
+    private static function mapPhpToOprava(array $items): array
+    {
+        $out = [];
+        foreach ($items as $f) {
+            if (($f['status'] ?? null) !== 'TS') {
+                continue;
+            }
+            $out[] = [
+                'manufacturer' => (string) ($f['manufacturer'] ?? ''),
+                'type'         => (string) ($f['type'] ?? ''),
+                'serial'       => (string) ($f['serial'] ?? ''),
+                'year'         => (int) ($f['year'] ?? 0),
+                'location'     => (string) ($f['location'] ?? ''),
+                'notes'        => null,
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * PHP items with status "V" (vyradený) → vyraďovací protokol draft items
+     * (change request 2.1). The technician's note from the inspection becomes
+     * the starting reason for disposal — it is usually already the reason
+     * ("neúspešná tlaková skúška", "korózia") — and stays editable.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return list<array<string, mixed>>
+     */
+    private static function mapPhpToVyradenie(array $items): array
+    {
+        $out = [];
+        foreach ($items as $f) {
+            if (($f['status'] ?? null) !== 'V') {
+                continue;
+            }
+            $note = trim((string) ($f['notes'] ?? ''));
+            $out[] = [
+                'manufacturer' => (string) ($f['manufacturer'] ?? ''),
+                'type'         => (string) ($f['type'] ?? ''),
+                'serial'       => (string) ($f['serial'] ?? ''),
+                'year'         => (int) ($f['year'] ?? 0),
+                'location'     => (string) ($f['location'] ?? ''),
+                'reason'       => $note !== '' ? $note : 'Neopraviteľná porucha',
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Hydrant items → Tlaková skúška hadíc draft items. One hose row per hose
+     * on the hydrant (hose_count), carrying the hydrant's type/DN as the hose
+     * type and the hydrant location. Measured pressures/length are left blank
+     * for the technician to fill when the test is actually performed.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return list<array<string, mixed>>
+     */
+    private static function mapHydrantyToTsHadic(array $items): array
+    {
+        $out = [];
+        foreach ($items as $f) {
+            $type = (string) ($f['type'] ?? '');
+            if ($type === 'other') {
+                $type = (string) ($f['type_other'] ?? '');
+            }
+            $location = (string) ($f['location'] ?? '');
+            $count = (int) ($f['hose_count'] ?? 0);
+            // A hydrant with no hoses still yields one row so the technician can
+            // record the test; otherwise one row per hose.
+            $rows = max(1, $count);
+            for ($n = 0; $n < $rows; $n++) {
+                $out[] = [
+                    'hose_type'           => $type,
+                    'location'            => $location,
+                    'manufacturer'        => '',
+                    'working_pressure'    => null,
+                    'test_pressure'       => null,
+                    'length'              => null,
+                    'year_of_manufacture' => null,
+                    'result'              => 'vyhovuje',
+                    'notes'               => null,
+                ];
+            }
+        }
+        return $out;
     }
 
     public static function store(Request $req): void
@@ -220,8 +551,9 @@ final class InspectionController
         $stmt = Db::pdo()->prepare(
             'INSERT INTO inspections
                 (account_id, company_id, facility_id, type, periodicity_months,
-                 executed_on, inspector_user_id, status, notes)
-             VALUES (?, ?, ?, ?, ?, ?, ?, "draft", ?)'
+                 executed_on, inspector_user_id, status, notes,
+                 is_preventive_inspection)
+             VALUES (?, ?, ?, ?, ?, ?, ?, "draft", ?, ?)'
         );
         $stmt->execute([
             $accountId,
@@ -232,6 +564,7 @@ final class InspectionController
             $executedOn,
             $inspectorUserId,
             $notes,
+            in_array($type, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
         ]);
         $id = (int) Db::pdo()->lastInsertId();
 
@@ -250,6 +583,12 @@ final class InspectionController
 
         $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $row['account_id'] : $accountId;
+
+        // A finalized inspection is frozen: its date, periodicity and notes
+        // are printed on an issued protocol, so changing them here would make
+        // the record contradict the PDF. Unlock (which discards the protocol)
+        // is the only way back in.
+        self::assertUnlocked($row);
 
         $executedOn = $req->jsonString('executed_on');
         $notes = $req->jsonString('notes');
@@ -296,6 +635,107 @@ final class InspectionController
     }
 
     /**
+     * "Upraviť" — reopen a finalized inspection for editing.
+     *
+     * An inspection locks the moment its PDF is issued, because the protocol
+     * and the record it was rendered from must keep saying the same thing.
+     * Unlocking therefore *discards* the protocol: its documents rows and the
+     * PDF files are deleted, the frozen inspector/cert snapshot is cleared and
+     * the inspection drops back to `draft`.
+     *
+     * The discarded number is never handed out again — generating afresh takes
+     * the next one from the sequence and leaves a gap. That is deliberate: a
+     * copy of the old protocol may already sit in the customer's inbox, and two
+     * different documents sharing one number is far worse than a gap.
+     *
+     * Opakovať stays the right tool for re-issuing the same control on a new
+     * date; unlock is for fixing a protocol that was issued wrong.
+     */
+    public static function unlock(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $id = (int) $params['id'];
+
+        $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        // The inspection's own account, so an admin acting on a foreign-account
+        // record deletes that account's documents, not their session account's.
+        $accountId = (int) $row['account_id'];
+
+        if ($row['status'] !== 'finalized') {
+            Response::error('Kontrola nie je uzamknutá.', 422);
+        }
+
+        $pdo = Db::pdo();
+        $docsStmt = $pdo->prepare(
+            'SELECT number, file_path FROM documents
+             WHERE  account_id = ? AND parent_type = "inspection" AND parent_id = ?'
+        );
+        $docsStmt->execute([$accountId, $id]);
+        $docs = $docsStmt->fetchAll();
+
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare(
+                'DELETE FROM documents
+                 WHERE  account_id = ? AND parent_type = "inspection" AND parent_id = ?'
+            )->execute([$accountId, $id]);
+
+            $pdo->prepare(
+                'UPDATE inspections
+                 SET    status = "draft",
+                        effective_inspector_user_id = NULL,
+                        effective_cert_number       = NULL
+                 WHERE  id = ? AND account_id = ?'
+            )->execute([$id, $accountId]);
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        // Files are unlinked only after the commit: an orphaned PDF nobody
+        // links to is harmless, a missing file behind a live row is not.
+        foreach ($docs as $doc) {
+            $abs = Storage::documentAbsolute((string) $doc['file_path']);
+            if (is_file($abs) && !@unlink($abs)) {
+                error_log('[unlock-inspection] failed to delete PDF: ' . $abs);
+            }
+        }
+
+        // Destroying an issued, signed protocol is worth a trail.
+        AuditLog::record(
+            'inspection.unlock',
+            'inspections',
+            $id,
+            ['status' => 'finalized', 'documents' => array_column($docs, 'number')],
+            ['status' => 'draft'],
+        );
+
+        Response::json(['inspection' => self::shapeRow(self::loadOrFail($accountId, $id))]);
+    }
+
+    /**
+     * Guard for writes that must not touch an issued protocol. Mirrors the
+     * same check on items (InspectionItemController) and photos
+     * (InspectionPhotoController) — the UI hides these affordances once the
+     * inspection is locked, this is the server-side half of it.
+     *
+     * @param array<string, mixed> $row inspection row with `status`
+     */
+    private static function assertUnlocked(array $row): void
+    {
+        if (($row['status'] ?? '') === 'finalized') {
+            Response::error(
+                'Kontrola je uzamknutá — najprv ju odomkni tlačidlom „Upraviť".',
+                409,
+            );
+        }
+    }
+
+    /**
      * "Opakovať" — clone a finalized inspection into a fresh draft so the
      * technician can re-issue the protocol with a new date and minor edits
      * (items copied verbatim). The source inspection and its document
@@ -330,6 +770,8 @@ final class InspectionController
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
+        /** @var list<string> $copiedFiles absolute paths written by clonePhotos() */
+        $copiedFiles = [];
 
         try {
             // executed_on is intentionally NULL — Step 3 forces the
@@ -337,32 +779,51 @@ final class InspectionController
             $pdo->prepare(
                 'INSERT INTO inspections
                     (account_id, company_id, facility_id, type, periodicity_months,
-                     executed_on, inspector_user_id, status, notes)
-                 VALUES (?, ?, ?, ?, ?, NULL, ?, "draft", ?)'
+                     is_preventive_inspection, executed_on, inspector_user_id, status, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, "draft", ?)'
             )->execute([
                         $accountId,
                         $source['company_id'],
                         $source['facility_id'],
                         $source['type'],
                         $source['periodicity_months'],
+                        !empty($source['is_preventive_inspection']) ? 1 : 0,
                         $source['inspector_user_id'],
                         $source['notes'],
                     ]);
             $newId = (int) $pdo->lastInsertId();
 
-            // Cloning items in a single INSERT … SELECT keeps positions in
-            // the original order without ferrying rows through PHP.
-            $pdo->prepare(
-                'INSERT INTO inspection_items (inspection_id, position, fields)
-                 SELECT ?, position, fields
+            // Row by row rather than INSERT … SELECT: cloning the photo
+            // documentation below needs to know which new item each source
+            // item became.
+            $srcItems = $pdo->prepare(
+                'SELECT id, position, fields
                  FROM   inspection_items
                  WHERE  inspection_id = ?
                  ORDER  BY position ASC, id ASC'
-            )->execute([$newId, $sourceId]);
+            );
+            $srcItems->execute([$sourceId]);
+            $insertItem = $pdo->prepare(
+                'INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)'
+            );
+            /** @var array<int, int> $itemIdMap source item id => cloned item id */
+            $itemIdMap = [];
+            foreach ($srcItems->fetchAll() as $srcItem) {
+                $insertItem->execute([$newId, $srcItem['position'], $srcItem['fields']]);
+                $itemIdMap[(int) $srcItem['id']] = (int) $pdo->lastInsertId();
+            }
+
+            $copiedFiles = self::clonePhotos($pdo, $sourceId, $newId, $accountId, $itemIdMap);
 
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
+            // The image files are outside the transaction, so undo them by hand.
+            foreach ($copiedFiles as $path) {
+                if (is_file($path)) {
+                    @unlink($path);
+                }
+            }
             throw $e;
         }
 
@@ -391,6 +852,102 @@ final class InspectionController
             'items' => $items,
             'source_id' => $sourceId,
         ], 201);
+    }
+
+    /**
+     * Clone the photo documentation of a repeated inspection, keeping each
+     * photo on the same item (and, for Požiarna kniha, the same nedostatok —
+     * `defect_key` travels with the item's `fields`, so the cloned defects
+     * still match their photos).
+     *
+     * The image files are copied, not shared: each protocol owns its photos,
+     * so deleting one in the repeat — or archiving the source — must never
+     * take the other protocol's image with it.
+     *
+     * @param array<int, int> $itemIdMap source item id => cloned item id
+     * @return list<string> absolute paths written, so a failed transaction can clean up
+     */
+    private static function clonePhotos(
+        PDO $pdo,
+        int $sourceId,
+        int $newId,
+        int $accountId,
+        array $itemIdMap,
+    ): array {
+        if (!$itemIdMap) {
+            return [];
+        }
+
+        $stmt = $pdo->prepare(
+            'SELECT item_id, defect_key, position, file_path, thumb_path, byte_size, width, height
+             FROM   inspection_item_photos
+             WHERE  inspection_id = ?
+             ORDER  BY item_id ASC, position ASC, id ASC'
+        );
+        $stmt->execute([$sourceId]);
+        $rows = $stmt->fetchAll();
+        if (!$rows) {
+            return [];
+        }
+
+        Storage::ensureDir(Storage::photoDir($accountId, $newId));
+
+        $insert = $pdo->prepare(
+            'INSERT INTO inspection_item_photos
+                (account_id, inspection_id, item_id, defect_key, position,
+                 file_path, thumb_path, byte_size, width, height)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+
+        $written = [];
+        foreach ($rows as $row) {
+            $newItemId = $itemIdMap[(int) $row['item_id']] ?? null;
+            if ($newItemId === null) {
+                continue;
+            }
+
+            $srcFull  = Storage::absolute((string) $row['file_path']);
+            $srcThumb = Storage::absolute((string) $row['thumb_path']);
+            if (!is_file($srcFull)) {
+                // A photo whose file went missing must not block the repeat —
+                // skip it the same way PDF generation does.
+                error_log('[repeat-photos] file missing: ' . $srcFull);
+                continue;
+            }
+
+            // Fresh unguessable token per copy, same as a real upload.
+            $token    = bin2hex(random_bytes(16));
+            $relFull  = Storage::photoRelative($accountId, $newId, $token);
+            $relThumb = Storage::photoThumbRelative($accountId, $newId, $token);
+            $absFull  = Storage::absolute($relFull);
+            $absThumb = Storage::absolute($relThumb);
+
+            if (!copy($srcFull, $absFull)) {
+                throw new \RuntimeException('Failed to copy photo: ' . $srcFull);
+            }
+            $written[] = $absFull;
+            // A missing thumbnail falls back to the full size rather than
+            // failing — re-encoding needs GD-JPEG, which isn't guaranteed.
+            if (!copy(is_file($srcThumb) ? $srcThumb : $srcFull, $absThumb)) {
+                throw new \RuntimeException('Failed to copy photo thumbnail: ' . $srcThumb);
+            }
+            $written[] = $absThumb;
+
+            $insert->execute([
+                $accountId,
+                $newId,
+                $newItemId,
+                $row['defect_key'],
+                (int) $row['position'],
+                $relFull,
+                $relThumb,
+                (int) $row['byte_size'],
+                (int) $row['width'],
+                (int) $row['height'],
+            ]);
+        }
+
+        return $written;
     }
 
     /**
@@ -453,6 +1010,7 @@ final class InspectionController
     private static function loadOrFail(?int $accountId, int $id): array
     {
         $sql = 'SELECT i.id, i.account_id, i.type, i.periodicity_months,
+                       i.is_preventive_inspection, i.source_inspection_id,
                        i.executed_on, i.status, i.notes,
                        i.created_at, i.updated_at,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
@@ -499,6 +1057,10 @@ final class InspectionController
         $row['effective_inspector_name'] = $row['effective_inspector_name'] ?? null;
         $row['effective_cert_number'] = $row['effective_cert_number'] ?? null;
         $row['is_superseded'] = (bool) ($row['is_superseded'] ?? false);
+        $row['is_preventive_inspection'] = (bool) ($row['is_preventive_inspection'] ?? true);
+        $row['source_inspection_id'] = isset($row['source_inspection_id'])
+            ? (int) $row['source_inspection_id']
+            : null;
         unset($row['account_id']);
         return $row;
     }

@@ -10,6 +10,10 @@ export type CompanyListItem = {
   postal_code: string | null;
   city: string | null;
   contact: string | null;
+  /** Recipient of the calendar's client notice e-mail (2.5.4). Optional. */
+  contact_email: string | null;
+  /** Schvaľujúca osoba — name and role, printed on documents (2.3 / 2.1). */
+  approver: string | null;
   facilities_count: number;
   inspections_count: number;
   last_inspection_at: string | null;
@@ -28,6 +32,10 @@ export type Company = {
   postal_code: string | null;
   city: string | null;
   contact: string | null;
+  /** Recipient of the calendar's client notice e-mail (2.5.4). Optional. */
+  contact_email: string | null;
+  /** Schvaľujúca osoba — name and role, printed on documents (2.3 / 2.1). */
+  approver: string | null;
   created_at?: string;
 };
 
@@ -61,6 +69,8 @@ export type CompanyPayload = {
   postal_code?: string;
   city?: string;
   contact?: string;
+  contact_email?: string;
+  approver?: string;
 };
 
 export const Companies = {

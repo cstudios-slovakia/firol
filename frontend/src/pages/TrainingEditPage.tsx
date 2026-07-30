@@ -6,6 +6,7 @@ import {
 import { useAuth } from '@/auth/AuthContext';
 import { Team, type TeamMember } from '@/api/team';
 import {
+  isPokyn,
   TRAINING_TYPE_LABELS,
   Trainings,
   type Training,
@@ -115,6 +116,9 @@ export function TrainingEditPage() {
   }
 
   const noMembers = members !== null && members.length === 0;
+  // The Pokyn's own text is edited on the detail page — this form only carries
+  // the header data both kinds of document share.
+  const pokyn = training !== null && isPokyn(training.type);
 
   return (
     <div className="flex flex-col gap-4">
@@ -124,7 +128,9 @@ export function TrainingEditPage() {
       </Link>
 
       <header>
-        <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">Upraviť školenie</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">
+          {pokyn ? 'Upraviť pokyn' : 'Upraviť školenie'}
+        </p>
         <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">
           {training ? TRAINING_TYPE_LABELS[training.type] : ''}
         </h1>
@@ -147,7 +153,7 @@ export function TrainingEditPage() {
       <Card className="p-5">
         <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
           <Field
-            label="Dátum školenia"
+            label={pokyn ? 'Dátum vydania pokynu' : 'Dátum školenia'}
             required
             hint={dateError ? undefined : 'Zadaj manuálne, nemusí byť dnešný dátum.'}
             error={dateError}
@@ -160,7 +166,7 @@ export function TrainingEditPage() {
           </Field>
 
           <Field
-            label="Školiteľ"
+            label={pokyn ? 'Vypracoval' : 'Školiteľ'}
             hint={
               noMembers
                 ? 'V tíme zatiaľ nie je žiadny aktívny technik.'

@@ -28,6 +28,7 @@ import { cn } from '@/lib/cn';
 const KNOWN_TYPES: InspectionType[] = [
   'php', 'hydranty', 'oprava_ts_php', 'poziarna_kniha',
   'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'ts_hadic',
+  'vyradenie',
 ];
 
 function isInspectionType(s: string | undefined): s is InspectionType {
@@ -51,6 +52,9 @@ export function InspectionStep1Page() {
   const type = typeParam;
   const allowedPeriodicities = INSPECTION_TYPE_PERIODICITIES[type];
   const periodicityFixed = allowedPeriodicities.length === 1;
+  // A periodicity of 0 marks a one-off document (vyraďovací protokol) — it has
+  // no recurrence to choose, so the whole field is hidden.
+  const recurring = allowedPeriodicities[0] !== 0;
 
   // Optional context coming from the company/facility detail screens.
   const presetCompanyId = numericParam(searchParams.get('company_id'));
@@ -332,7 +336,7 @@ export function InspectionStep1Page() {
           </Field>
 
           <Field
-            label="Dátum vykonania kontroly"
+            label={dateLabel(type)}
             required
             hint={fieldErrors.date ? undefined : 'Zadaj manuálne, nemusí byť dnešný dátum.'}
             error={fieldErrors.date}
@@ -349,6 +353,7 @@ export function InspectionStep1Page() {
             )}
           </Field>
 
+          {recurring && (
           <Field
             label="Periodicita"
             hint={periodicityFixed
@@ -383,6 +388,7 @@ export function InspectionStep1Page() {
               </div>
             )}
           </Field>
+          )}
 
           <Field label="Kontrolu vykonal">
             {() => (
@@ -417,7 +423,7 @@ export function InspectionStep1Page() {
               {error}
             </div>
           )}
-          {Object.keys(fieldErrors).length > 0 && (
+          {Object.values(fieldErrors).some(Boolean) && (
             <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
               Formulár obsahuje nevyplnené povinné polia.
             </p>
@@ -452,6 +458,8 @@ export function InspectionStep1Page() {
               postal_code: c.postal_code,
               city: c.city,
               contact: c.contact,
+              contact_email: c.contact_email,
+              approver: c.approver,
               facilities_count: 0,
               inspections_count: 0,
               last_inspection_at: null,
@@ -522,6 +530,16 @@ function numericParam(raw: string | null): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/** The vyraďovací protokol isn't a "kontrola" — the date field says so. */
+function dateLabel(type: InspectionType): string {
+  switch (type) {
+    case 'vyradenie':
+      return 'Dátum vyradenia';
+    default:
+      return 'Dátum vykonania kontroly';
+  }
+}
+
 function stepTwoCta(type: InspectionType): string {
   switch (type) {
     case 'php':
@@ -536,6 +554,8 @@ function stepTwoCta(type: InspectionType): string {
       return 'Pokračovať — zadanie hadíc';
     case 'nudzove_osvetlenie':
       return 'Pokračovať — zadanie svietidiel';
+    case 'vyradenie':
+      return 'Pokračovať — zadanie prístrojov';
     case 'poziarna_kniha':
     default:
       return 'Pokračovať — záznam činností';

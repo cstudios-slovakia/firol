@@ -16,6 +16,9 @@ use Firol\Mail\Templates\DocumentEmail;
 use Firol\Pdf\PdfRenderer;
 use Firol\Storage\Storage;
 use Firol\Support\Address;
+use Firol\Support\PhotoCaption;
+use Firol\Support\PkDefects;
+use Firol\Support\PokynZatva;
 
 /**
  * Generates PDF protocols and serves the stored binaries back. Generation
@@ -70,6 +73,15 @@ final class DocumentController
         $payload = self::buildPayload($accountId, $userId, $inspection, $items);
         $stats   = $payload['stats'];
         $insType = (string) $inspection['type'];
+
+        // Photo appendix (change request 2.2). Default is "attach" whenever
+        // photos exist; the technician can opt out per generation by sending
+        // include_photos=false, which produces the protocol exactly as it
+        // looked before the feature existed.
+        $includePhotos = $req->jsonBool('include_photos') ?? true;
+        $payload['photos'] = $includePhotos
+            ? self::buildPhotoAppendix($inspectionId, $insType, $items)
+            : [];
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
@@ -184,7 +196,7 @@ final class DocumentController
             'SELECT invoice_company_name FROM accounts WHERE id = ?'
         );
         $accStmt->execute([$accountId]);
-        $brandName = (string) ($accStmt->fetchColumn() ?: 'Firol');
+        $brandName = (string) ($accStmt->fetchColumn() ?: 'POapp');
 
         $filename = ($doc['number'] ?? 'protocol') . '.pdf';
 
@@ -233,11 +245,14 @@ final class DocumentController
 
     /** Lists documents for a single inspection (used by the UI to show download links). */
     /**
-     * Generate the PDF protocol for a training. All trainings share the
-     * SKO number prefix and a single per-account+year sequence regardless
-     * of the training type (per spec — the type is recorded in the body).
-     * Training must be a draft with at least one trainee and a chosen
-     * trainer (otherwise the protocol can't be signed).
+     * Generate the PDF protocol for a training. The six attendance-based
+     * types share the SKO number prefix and a single per-account+year
+     * sequence regardless of the type (per spec — the type is recorded in the
+     * body); the Pokyn — žatevné práce keeps its own ZAT series.
+     *
+     * Training must be a draft with a chosen trainer (otherwise the document
+     * can't be signed) and, depending on the type, either at least one trainee
+     * or the instruction text.
      */
     public static function generateForTraining(Request $req, array $params): void
     {
@@ -248,37 +263,63 @@ final class DocumentController
 
         $training = self::loadTrainingForGenerate($isAdmin ? null : $accountId, $trainingId);
         $accountId = (int) $training['account_id'];
+        $isPokyn   = $training['type'] === TrainingController::TYPE_POKYN;
 
         if ($training['status'] === 'finalized') {
             Response::error(
-                'Školenie už je uzamknuté a má vystavený PDF protokol.',
+                $isPokyn
+                    ? 'Pokyn už je uzamknutý a má vystavený PDF dokument.'
+                    : 'Školenie už je uzamknuté a má vystavený PDF protokol.',
                 409,
             );
         }
         if ($training['date'] === null) {
-            Response::error('Doplň dátum školenia pred generovaním PDF.', 422);
+            Response::error(
+                $isPokyn
+                    ? 'Doplň dátum vydania pokynu pred generovaním PDF.'
+                    : 'Doplň dátum školenia pred generovaním PDF.',
+                422,
+            );
         }
         if ($training['trainer_id'] === null) {
-            Response::error('Vyber školiteľa pred generovaním PDF.', 422);
-        }
-
-        $trainees = self::loadTrainees($trainingId);
-        if (count($trainees) === 0) {
             Response::error(
-                'Pridaj aspoň jedného účastníka pred generovaním PDF.',
+                $isPokyn
+                    ? 'Vyber technika, ktorý pokyn vypracoval, pred generovaním PDF.'
+                    : 'Vyber školiteľa pred generovaním PDF.',
                 422,
             );
         }
 
+        // A Pokyn is an instruction addressed to the client's employees, not a
+        // session they sign in to — its precondition is the text, not a list.
+        $pokyn = null;
+        $trainees = [];
+        if ($isPokyn) {
+            $pokyn = PokynZatva::decode($training['fields']);
+            if ($pokyn === null) {
+                Response::error('Doplň text pokynu pred generovaním PDF.', 422);
+            }
+        } else {
+            $trainees = self::loadTrainees($trainingId);
+            if (count($trainees) === 0) {
+                Response::error(
+                    'Pridaj aspoň jedného účastníka pred generovaním PDF.',
+                    422,
+                );
+            }
+        }
+
         $year = (int) substr((string) $training['date'], 0, 4);
-        $payload = self::buildTrainingPayload($accountId, $training, $trainees);
+        $payload = self::buildTrainingPayload($accountId, $training, $trainees, $pokyn);
+
+        // Sequence bucket + documents.type: the Pokyn is its own document
+        // kind (ZAT), the six trainings share the 'skolenie' (SKO) bucket.
+        $documentType = $isPokyn ? TrainingController::TYPE_POKYN : 'skolenie';
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
         try {
-            // All training types share the SKO bucket; pass the literal
-            // 'skolenie' slug as the sequence type.
-            $allocated = NumberAllocator::allocate($accountId, 'skolenie', $year);
+            $allocated = NumberAllocator::allocate($accountId, $documentType, $year);
             $payload['number'] = $allocated['number'];
             $payload['generated_at'] = date('c');
 
@@ -295,11 +336,12 @@ final class DocumentController
                 'INSERT INTO documents
                     (account_id, parent_type, parent_id, type, number,
                      file_path, signed, signed_at)
-                 VALUES (?, "training", ?, "skolenie", ?, ?, 1, NOW())'
+                 VALUES (?, "training", ?, ?, ?, ?, 1, NOW())'
             );
             $insert->execute([
                 $accountId,
                 $trainingId,
+                $documentType,
                 $allocated['number'],
                 $relPath,
             ]);
@@ -429,13 +471,20 @@ final class DocumentController
      */
     private static function loadInspectionForGenerate(?int $accountId, int $inspectionId): array
     {
+        // `source_number` is the protocol number of the inspection this one grew
+        // out of (change request 2.1) — printed as "Nadväzuje na kontrolu" on the
+        // vyraďovací protokol. NULL for documents created standalone.
         $sql = 'SELECT i.id, i.account_id, i.type, i.periodicity_months, i.executed_on, i.status,
-                       i.notes, i.inspector_user_id,
+                       i.notes, i.inspector_user_id, i.source_inspection_id,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
+                       c.approver AS company_approver,
                        i.facility_id, f.name AS facility_name,
                        f.street AS facility_street, f.postal_code AS facility_postal_code, f.city AS facility_city,
-                       f.contact_person AS facility_contact_person
+                       f.contact_person AS facility_contact_person,
+                       (SELECT d.number FROM documents d
+                         WHERE d.parent_type = "inspection" AND d.parent_id = i.source_inspection_id
+                         ORDER BY d.id DESC LIMIT 1) AS source_number
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
                 JOIN   facilities  f ON f.id = i.facility_id
@@ -470,6 +519,102 @@ final class DocumentController
                 'fields'   => json_decode((string) $r['fields'], true) ?? [],
             ];
         }, $rows);
+    }
+
+    /**
+     * Flattens every item's photos into the ordered list the appendix template
+     * renders, pairing each with the caption that identifies its item
+     * (change request 2.2). Items are already ordered by position, so the
+     * appendix follows the same order as the protocol body.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return list<array{caption: string, path: string, width: int, height: int}>
+     */
+    private static function buildPhotoAppendix(int $inspectionId, string $type, array $items): array
+    {
+        $pathsByItem = InspectionPhotoController::fullSizePathsByItem($inspectionId);
+        if ($pathsByItem === []) {
+            return [];
+        }
+
+        // Požiarna kniha's photos are scoped to a nedostatok, not to the item,
+        // so they are captioned and ordered by nedostatok instead.
+        if ($type === 'poziarna_kniha') {
+            return self::buildPkPhotoAppendix($items, $pathsByItem);
+        }
+
+        $appendix = [];
+        foreach ($items as $idx => $item) {
+            $photos = $pathsByItem[(int) $item['id']] ?? [];
+            if ($photos === []) {
+                continue;
+            }
+            $caption = PhotoCaption::build($type, $item['fields'] ?? [], $idx + 1);
+            foreach ($photos as $photo) {
+                $appendix[] = [
+                    'caption' => $caption,
+                    'path'    => $photo['path'],
+                    'width'   => $photo['width'],
+                    'height'  => $photo['height'],
+                ];
+            }
+        }
+        return $appendix;
+    }
+
+    /**
+     * Appendix entries for Požiarna kniha: its photos hang off a nedostatok
+     * (`defect_key`), so each one is captioned with that nedostatok's number
+     * and description — "Nedostatok č. 2 — …" — and the entries follow the
+     * order of the "Zistené nedostatky" table in the body.
+     *
+     * A photo whose defect_key no longer matches a row (nedostatok deleted
+     * after the photo was taken) is skipped: there is nothing left to caption
+     * it with, and it documents something the protocol no longer reports.
+     *
+     * @param list<array<string, mixed>> $items
+     * @param array<int, list<array{path: string, width: int, height: int, defect_key: ?string}>> $pathsByItem
+     * @return list<array{caption: string, path: string, width: int, height: int}>
+     */
+    private static function buildPkPhotoAppendix(array $items, array $pathsByItem): array
+    {
+        if (!isset($items[0])) {
+            return [];
+        }
+        $fields = $items[0]['fields'] ?? [];
+        // Mirrors the body's gate on the defect table, so photos can never be
+        // numbered against rows the protocol doesn't print.
+        if (!PkDefects::hasDefects($fields)) {
+            return [];
+        }
+
+        $byDefect = [];
+        foreach ($pathsByItem[(int) $items[0]['id']] ?? [] as $photo) {
+            if ($photo['defect_key'] === null) {
+                continue;
+            }
+            $byDefect[$photo['defect_key']][] = $photo;
+        }
+        if ($byDefect === []) {
+            return [];
+        }
+
+        $appendix = [];
+        foreach (PkDefects::rows($fields)['rows'] as $idx => $row) {
+            if ($row['key'] === null) {
+                continue;
+            }
+            $caption = PhotoCaption::buildForDefect($idx + 1, $row['description']);
+            foreach ($byDefect[$row['key']] ?? [] as $photo) {
+                $appendix[] = [
+                    'caption' => $caption,
+                    'path'    => $photo['path'],
+                    'width'   => $photo['width'],
+                    'height'  => $photo['height'],
+                ];
+            }
+        }
+        return $appendix;
     }
 
     /**
@@ -521,12 +666,16 @@ final class DocumentController
                 'periodicity_months' => (int) $inspection['periodicity_months'],
                 'notes'              => $inspection['notes'],
                 'status'             => $inspection['status'],
+                'source_number'      => $inspection['source_number'] ?? null,
             ],
             'company' => [
                 'name'    => $inspection['company_name'],
                 'ico'     => $inspection['company_ico'],
                 'address' => Address::format($inspection['company_street'], $inspection['company_postal_code'], $inspection['company_city']),
                 'city'    => $inspection['company_city'],
+                // Schvaľujúca osoba — printed on the Pokyn and the vyraďovací
+                // protokol (change request 2.3 / 2.1).
+                'approver' => $inspection['company_approver'] ?? null,
             ],
             'facility' => [
                 'name'           => $inspection['facility_name'],
@@ -644,20 +793,8 @@ final class DocumentController
                 }
                 return $stats;
             case 'oprava_ts_php':
-                // Counts how many items had each action performed. An item
-                // can contribute to multiple buckets (tlakova_skuska +
-                // plnenie are typically combined on the same prístroj).
-                $stats += ['tlakova_skuska' => 0, 'oprava' => 0, 'plnenie' => 0];
-                foreach ($items as $it) {
-                    $actions = $it['fields']['actions'] ?? [];
-                    if (is_array($actions)) {
-                        foreach ($actions as $a) {
-                            if (isset($stats[$a])) {
-                                $stats[$a]++;
-                            }
-                        }
-                    }
-                }
+                // Standard scope of performed work is fixed on the protocol,
+                // so only the number of serviced prístroje matters here.
                 return $stats;
             case 'poziarna_kniha':
                 // Single-record protocol — total is always 0 or 1; the
@@ -779,7 +916,7 @@ final class DocumentController
         }
 
         return [
-            'name'          => $accRow['invoice_company_name'] ?? 'Firol',
+            'name'          => $accRow['invoice_company_name'] ?? 'POapp',
             'color'         => $accRow['theme_color'] ?: '#E8433A',
             'logo_data_uri' => $logoUri,
         ];
@@ -820,7 +957,7 @@ final class DocumentController
         ];
     }
 
-    /** Spec-locked Slovak labels for the 6 training types. */
+    /** Spec-locked Slovak labels for the 6 training types + the Pokyn. */
     private const TRAINING_TYPE_LABELS = [
         'vstupne'      => 'Vstupné školenie vedúcich a ostatných zamestnancov',
         'opakovane'    => 'Opakované školenie vedúcich a ostatných zamestnancov',
@@ -828,14 +965,18 @@ final class DocumentController
         'zdrzujuca_sa' => 'Školenie osôb zdržujúcich sa na pracovisku',
         'hliadka_oph'  => 'Odborná príprava protipožiarnej hliadky pracoviska',
         'hliadka_opah' => 'Odborná príprava protipožiarnej asistenčnej hliadky',
+        'pokyn_zatva'  => 'Pokyn na zabezpečenie ochrany pred požiarmi pri žatevných prácach, '
+                          . 'pri zbere a skladovaní objemových krmovín',
     ];
 
     /** @return array<string, mixed> */
     private static function loadTrainingForGenerate(?int $accountId, int $trainingId): array
     {
         $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics, t.status,
+                       t.fields,
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
+                       c.approver AS company_approver,
                        t.facility_id, f.name AS facility_name,
                        f.street AS facility_street, f.postal_code AS facility_postal_code, f.city AS facility_city,
                        t.trainer_id, tr.fullname AS trainer_name,
@@ -883,14 +1024,16 @@ final class DocumentController
     }
 
     /**
-     * @param array<string, mixed>            $training
-     * @param list<array<string, mixed>>       $trainees
+     * @param array<string, mixed>       $training
+     * @param list<array<string, mixed>> $trainees  empty for the Pokyn
+     * @param array<string, mixed>|null  $pokyn     decoded trainings.fields, Pokyn only
      * @return array<string, mixed>
      */
     private static function buildTrainingPayload(
         int $accountId,
         array $training,
         array $trainees,
+        ?array $pokyn = null,
     ): array {
         $accStmt = Db::pdo()->prepare(
             'SELECT invoice_company_name, theme_color, logo_path FROM accounts WHERE id = ?'
@@ -929,6 +1072,9 @@ final class DocumentController
                 'ico'     => $training['company_ico'],
                 'address' => Address::format($training['company_street'], $training['company_postal_code'], $training['company_city']),
                 'city'    => $training['company_city'],
+                // Schvaľujúca osoba — printed as "Schválil" on the Pokyn
+                // (change request 2.3).
+                'approver' => $training['company_approver'] ?? null,
             ],
             'facility' => [
                 'name'    => $training['facility_name'],
@@ -941,6 +1087,8 @@ final class DocumentController
                 'signature_data_uri'   => $trainerSignatureUri,
             ],
             'trainees' => $traineesPayload,
+            // Pokyn only: year, approver override and the instruction text.
+            'pokyn' => $pokyn,
         ];
     }
 }

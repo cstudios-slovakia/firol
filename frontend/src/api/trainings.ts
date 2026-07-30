@@ -6,10 +6,12 @@ export type TrainingType =
   | 'opp_mimo'
   | 'zdrzujuca_sa'
   | 'hliadka_oph'
-  | 'hliadka_opah';
+  | 'hliadka_opah'
+  | 'pokyn_zatva';
 
 export const TRAINING_TYPES: TrainingType[] = [
   'vstupne', 'opakovane', 'opp_mimo', 'zdrzujuca_sa', 'hliadka_oph', 'hliadka_opah',
+  'pokyn_zatva',
 ];
 
 export const TRAINING_TYPE_LABELS: Record<TrainingType, string> = {
@@ -19,6 +21,9 @@ export const TRAINING_TYPE_LABELS: Record<TrainingType, string> = {
   zdrzujuca_sa: 'Školenie osôb zdržujúcich sa na pracovisku',
   hliadka_oph: 'Odborná príprava protipožiarnej hliadky pracoviska',
   hliadka_opah: 'Odborná príprava protipožiarnej asistenčnej hliadky',
+  pokyn_zatva:
+    'Pokyn na zabezpečenie ochrany pred požiarmi pri žatevných prácach, '
+    + 'pri zbere a skladovaní objemových krmovín',
 };
 
 export const TRAINING_TYPE_SHORT: Record<TrainingType, string> = {
@@ -28,6 +33,33 @@ export const TRAINING_TYPE_SHORT: Record<TrainingType, string> = {
   zdrzujuca_sa: 'Zdržujúce sa osoby',
   hliadka_oph: 'Príprava OPH',
   hliadka_opah: 'Príprava OPAH',
+  pokyn_zatva: 'Pokyn — žatva',
+};
+
+/**
+ * The one type that is a document for the client's employees rather than a
+ * session they attend: no trainee list, an editable instruction text instead,
+ * and its own ZAT-RRRR-NNN number series (change request 2.3).
+ */
+export const POKYN_ZATVA: TrainingType = 'pokyn_zatva';
+
+export function isPokyn(type: TrainingType): boolean {
+  return type === POKYN_ZATVA;
+}
+
+/** One editable block of the Pokyn's instruction text. */
+export type PokynSection = { title: string; text: string };
+
+/**
+ * Payload of a Pokyn — the harvest year it covers, an optional per-document
+ * override of the company's schvaľujúca osoba, and the instruction text. The
+ * text lives with the document, so an issued Pokyn keeps saying what it said
+ * even after the default template is revised.
+ */
+export type PokynZatvaFields = {
+  year: number;
+  approver: string | null;
+  sections: PokynSection[];
 };
 
 export type TrainingStatus = 'draft' | 'finalized';
@@ -47,12 +79,18 @@ export type TrainingListItem = {
   trainer_id: number | null;
   trainer_name: string | null;
   trainees_count: number;
+  // Pokyn only — the harvest year, so a list row can name itself without
+  // dragging the whole instruction text along.
+  pokyn_year: number | null;
 };
 
 export type Training = TrainingListItem & {
   updated_at: string;
   company_ico: string | null;
+  company_approver: string | null;
   trainer_certification_number: string | null;
+  /** Pokyn only; null for the six attendance-based training types. */
+  fields: PokynZatvaFields | null;
 };
 
 export type Trainee = {
@@ -96,6 +134,8 @@ export type TrainingPayload = {
   trainer_id?: number | null;
   topics?: string | null;
   duration_min?: number | null;
+  /** Pokyn only — seeded from the template at creation, editable afterwards. */
+  fields?: PokynZatvaFields | null;
 };
 
 export type TrainingUpdatePayload = {
@@ -103,6 +143,7 @@ export type TrainingUpdatePayload = {
   trainer_id?: number | null;
   topics?: string | null;
   duration_min?: number | null;
+  fields?: PokynZatvaFields | null;
 };
 
 export type TrainingListFilters = {

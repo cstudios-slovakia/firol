@@ -1,26 +1,28 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, Edit2, FileSearch, Hash, ListChecks,
+  AlertTriangle, ArrowRight, CheckCircle2, CopyPlus, Edit2, FileSearch, Hash, ListChecks,
   MapPin, NotebookPen, Save, Tag, Trash2,
 } from 'lucide-react';
 import {
-  Inspections,
   PHP_STATUS_LABELS,
   PHP_STATUS_TONES,
   type PhpItemFields,
   type PhpStatus,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
-import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { ItemPhotoField, usePhotoStaging } from '@/components/ItemPhotos';
+import { saveItemMessage, saveItemWithPhotos } from './saveItem';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { AutocompleteInput, PHP_COMMON_TYPES } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
+import { clearDuplicateSeed, peekDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
 import type {
   InspectionTypeModule,
   ItemRowProps,
@@ -32,7 +34,10 @@ function isPhpStatus(s: unknown): s is PhpStatus {
   return s === 'A' || s === 'TS' || s === 'O' || s === 'V';
 }
 
-function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+/** Fields carried into the next item by "Ďalší rovnaký" — never serial/location. */
+type PhpSeed = { manufacturer: string; type: string; year: string; status: PhpStatus };
+
+function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -48,6 +53,7 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [apiError, setApiError] = useState<string | null>(null);
   const toast = useToast();
+  const photos = usePhotoStaging(initialItem?.photos);
 
   useEffect(() => {
     if (initialItem) {
@@ -60,15 +66,18 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
       setStatus(isPhpStatus(f.status) ? f.status : 'A');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
-      setManufacturer('');
-      setExtType('');
+      // Carry over identification from the previous item when the technician
+      // used "Ďalší rovnaký" — serial and location always start blank (2.4.2).
+      const seed = peekDuplicateSeed<PhpSeed>(inspectionId);
+      setManufacturer(seed?.manufacturer ?? '');
+      setExtType(seed?.type ?? '');
       setSerial('');
-      setYear('');
+      setYear(seed?.year ?? '');
       setLocation('');
-      setStatus('A');
+      setStatus(seed?.status ?? 'A');
       setNotes('');
     }
-  }, [initialItem]);
+  }, [initialItem, inspectionId]);
 
   function isPristine() {
     return (
@@ -83,7 +92,11 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
     void handleSubmit(e as FormEvent, 'save-and-summary');
   }
 
-  async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
+  async function handleSubmit(
+    e: FormEvent,
+    action: 'save-and-next' | 'save-and-summary',
+    duplicate = false,
+  ) {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (!manufacturer.trim()) errs.manufacturer = 'Doplň výrobcu.';
@@ -106,18 +119,27 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
         status,
         notes: notes.trim() || null,
       };
-      if (editing && itemId !== null) {
-        await Inspections.updateItem(inspectionId, itemId, fields, csrfToken);
+      const saved = await saveItemWithPhotos({
+        inspectionId,
+        itemId: editing ? itemId : null,
+        fields,
+        csrfToken,
+        photos,
+      });
+      if (duplicate) {
+        const seed: PhpSeed = {
+          manufacturer: manufacturer.trim(),
+          type: extType.trim(),
+          year: year.trim(),
+          status,
+        };
+        setDuplicateSeed(inspectionId, seed);
       } else {
-        await Inspections.addItem(inspectionId, fields, csrfToken);
+        clearDuplicateSeed(inspectionId);
       }
       onSaved(action);
-      toast.success('Položka uložená');
+      toast.success(saveItemMessage(saved));
     } catch (err) {
-      if (handleOfflineSave(err, toast)) {
-        onSaved(action);
-        return;
-      }
       setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
@@ -130,15 +152,15 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Výrobca" required error={fieldErrors.manufacturer}>
             {(p) => (
-              <Input {...p} required leftIcon={<Tag className="size-4" />}
-                value={manufacturer} onChange={(e) => { setManufacturer(e.target.value); if (fieldErrors.manufacturer) setFieldErrors((prev) => { const n = { ...prev }; delete n.manufacturer; return n; }); }}
+              <AutocompleteInput {...p} required field="manufacturer" leftIcon={<Tag className="size-4" />}
+                value={manufacturer} onChange={(v) => { setManufacturer(v); if (fieldErrors.manufacturer) setFieldErrors((prev) => { const n = { ...prev }; delete n.manufacturer; return n; }); }}
                 placeholder="Gloria" />
             )}
           </Field>
           <Field label="Typ" required hint={fieldErrors.extType ? undefined : 'Napr. P6, CO2-5, P9'} error={fieldErrors.extType}>
             {(p) => (
-              <Input {...p} required leftIcon={<FileSearch className="size-4" />}
-                value={extType} onChange={(e) => { setExtType(e.target.value); if (fieldErrors.extType) setFieldErrors((prev) => { const n = { ...prev }; delete n.extType; return n; }); }}
+              <AutocompleteInput {...p} required field="type" staticOptions={PHP_COMMON_TYPES} leftIcon={<FileSearch className="size-4" />}
+                value={extType} onChange={(v) => { setExtType(v); if (fieldErrors.extType) setFieldErrors((prev) => { const n = { ...prev }; delete n.extType; return n; }); }}
                 placeholder="P6" />
             )}
           </Field>
@@ -164,8 +186,8 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
 
         <Field label="Umiestnenie" required hint={fieldErrors.location ? undefined : 'Kde sa prístroj nachádza v prevádzke.'} error={fieldErrors.location}>
           {(p) => (
-            <Input {...p} required leftIcon={<MapPin className="size-4" />}
-              value={location} onChange={(e) => { setLocation(e.target.value); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
+            <AutocompleteInput {...p} required field="location" facilityId={facilityId} leftIcon={<MapPin className="size-4" />}
+              value={location} onChange={(v) => { setLocation(v); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
               placeholder="Hala A, vchod" />
           )}
         </Field>
@@ -193,12 +215,14 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
           )}
         </Field>
 
+        <ItemPhotoField photos={photos} />
+
         {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
             {apiError}
           </div>
         )}
-        {Object.keys(fieldErrors).length > 0 && (
+        {Object.values(fieldErrors).some(Boolean) && (
           <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
             Formulár obsahuje nevyplnené povinné polia.
           </p>
@@ -208,6 +232,11 @@ function RphpStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
+          </Button>
+          <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
+            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            title="Uloží a predvyplní ďalšiu položku rovnakými údajmi (okrem výr. čísla a umiestnenia).">
+            Ďalší rovnaký
           </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>

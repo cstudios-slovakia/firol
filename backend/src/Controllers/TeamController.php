@@ -210,7 +210,7 @@ final class TeamController
              WHERE  u.id = ? AND a.id = ?'
         );
         $ctx->execute([Tenant::currentUserId(), $accountId]);
-        $row = $ctx->fetch() ?: ['inviter_name' => 'Kolega', 'account_name' => 'Firol'];
+        $row = $ctx->fetch() ?: ['inviter_name' => 'Kolega', 'account_name' => 'POapp'];
 
         \Firol\Mail\Mailer::send(
             \Firol\Mail\Templates\InviteEmail::build(

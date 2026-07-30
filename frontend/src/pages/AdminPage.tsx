@@ -14,6 +14,7 @@ import {
     Loader2,
     MessageSquarePlus,
     Pencil,
+    Percent,
     Phone,
     Power,
     PowerOff,
@@ -219,7 +220,11 @@ function FeedbackRow({
                             </>
                         )}
                         <span className="text-ink-300">·</span>
-                        <span>{new Date(item.created_at.replace(' ', 'T')).toLocaleString("sk-SK")}</span>
+                        <span>
+                            {new Date(
+                                item.created_at.replace(" ", "T"),
+                            ).toLocaleString("sk-SK")}
+                        </span>
                     </p>
                     <p className="mt-2 whitespace-pre-wrap break-words text-sm text-ink-900">
                         {item.message}
@@ -462,9 +467,7 @@ function AccountsSection() {
         try {
             await AdminPanel.setUserActive(accountId, u.id, next, csrfToken);
             patchUser(accountId, u.id, { is_active: next });
-            toast.success(
-                next ? "Technik aktivovaný" : "Technik deaktivovaný",
-            );
+            toast.success(next ? "Technik aktivovaný" : "Technik deaktivovaný");
         } catch (err) {
             toast.error(
                 err instanceof ApiError ? err.message : "Operácia zlyhala.",
@@ -647,7 +650,13 @@ function AccountRow({
                         {account.subscription_end_date && (
                             <>
                                 <span className="text-ink-300">·</span>
-                                <span>do {new Date(account.subscription_end_date + "T00:00:00").toLocaleDateString("sk-SK")}</span>
+                                <span>
+                                    do{" "}
+                                    {new Date(
+                                        account.subscription_end_date +
+                                            "T00:00:00",
+                                    ).toLocaleDateString("sk-SK")}
+                                </span>
                             </>
                         )}
                         {account.stripe_status &&
@@ -711,7 +720,9 @@ function AccountRow({
                                     key={u.id}
                                     user={u}
                                     isMain={u.id === account.main_user_id}
-                                    onSaved={(patch) => onUserSaved(u.id, patch)}
+                                    onSaved={(patch) =>
+                                        onUserSaved(u.id, patch)
+                                    }
                                     onDelete={() => onUserDelete(u)}
                                     onToggleAdmin={() => onToggleAdmin(u)}
                                     onToggleActive={() => onToggleActive(u)}
@@ -807,7 +818,9 @@ function AccountInvoices({ accountId }: { accountId: number }) {
                             className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm"
                         >
                             <span className="font-mono text-xs text-ink-500">
-                                {new Date(inv.issued_at).toLocaleDateString("sk-SK")}
+                                {new Date(inv.issued_at).toLocaleDateString(
+                                    "sk-SK",
+                                )}
                             </span>
                             <span className="min-w-0 flex-1 truncate font-medium text-ink-800">
                                 {inv.document_number ?? (
@@ -817,11 +830,13 @@ function AccountInvoices({ accountId }: { accountId: number }) {
                                 )}
                             </span>
                             <span className="font-semibold text-ink-900">
-                                {(inv.amount_cents / 100).toFixed(2)} {inv.currency}
+                                {(inv.amount_cents / 100).toFixed(2)}{" "}
+                                {inv.currency}
                             </span>
                             <Badge
                                 tone={
-                                    inv.status === "issued" || inv.status === "paid"
+                                    inv.status === "issued" ||
+                                    inv.status === "paid"
                                         ? "ok"
                                         : inv.status === "error"
                                           ? "warn"
@@ -1236,6 +1251,15 @@ function UserEditForm({
     );
 }
 
+/**
+ * Parse a EUR amount typed by an admin. Accepts both the dot and the comma
+ * as decimal separator (e.g. "24.60" or "24,60") — Slovak users routinely
+ * type prices with a comma. Returns NaN for unparseable input.
+ */
+function parseEurAmount(raw: string): number {
+    return Number(String(raw).trim().replace(",", "."));
+}
+
 function AdminSettingsSection() {
     const { csrfToken } = useAuth();
     const toast = useToast();
@@ -1246,6 +1270,7 @@ function AdminSettingsSection() {
     const [trialDays, setTrialDays] = useState("");
     const [priceMonthly, setMonthly] = useState("");
     const [priceYearly, setYearly] = useState("");
+    const [vatPercent, setVatPercent] = useState("");
     const [defaultIncluded, setDefaultIncluded] = useState("");
     const [extraTechEur, setExtraTechEur] = useState("");
     const [maxSelfService, setMaxSelfService] = useState("");
@@ -1259,6 +1284,7 @@ function AdminSettingsSection() {
                 setTrialDays(res.settings.trial_days);
                 setMonthly(res.settings.price_monthly_eur);
                 setYearly(res.settings.price_yearly_eur);
+                setVatPercent(res.settings.vat_rate_percent);
                 setDefaultIncluded(res.settings.default_included_technicians);
                 // Persist as cents on the backend; display as EUR (×.×× allowed).
                 const cents = Number(
@@ -1282,12 +1308,13 @@ function AdminSettingsSection() {
         e.preventDefault();
         setSaving(true);
         try {
-            const extraCents = Math.round(Number(extraTechEur) * 100);
+            const extraCents = Math.round(parseEurAmount(extraTechEur) * 100);
             const res = await Admin.updateSettings(
                 {
                     trial_days: Number(trialDays),
-                    price_monthly_eur: Number(priceMonthly),
-                    price_yearly_eur: Number(priceYearly),
+                    price_monthly_eur: parseEurAmount(priceMonthly),
+                    price_yearly_eur: parseEurAmount(priceYearly),
+                    vat_rate_percent: parseEurAmount(vatPercent),
                     default_included_technicians: Number(defaultIncluded),
                     price_per_extra_technician_cents: Number.isFinite(
                         extraCents,
@@ -1311,6 +1338,23 @@ function AdminSettingsSection() {
 
     if (loading) return <CardBlockSkeleton rows={4} />;
     if (!settings) return null;
+
+    const vatValue = parseEurAmount(vatPercent);
+    const monthlyValue = parseEurAmount(priceMonthly);
+    const yearlyValue = parseEurAmount(priceYearly);
+    const monthlyWithVat =
+        Number.isFinite(monthlyValue) && Number.isFinite(vatValue)
+            ? monthlyValue * (1 + vatValue / 100)
+            : null;
+    const yearlyWithVat =
+        Number.isFinite(yearlyValue) && Number.isFinite(vatValue)
+            ? yearlyValue * (1 + vatValue / 100)
+            : null;
+    const formatEur = (n: number) =>
+        n.toLocaleString("sk-SK", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        });
 
     return (
         <Card className="overflow-hidden border-firol-200">
@@ -1347,14 +1391,13 @@ function AdminSettingsSection() {
                         />
                     )}
                 </Field>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <Field label="Cena mesačne (EUR)">
                         {(p) => (
                             <Input
                                 {...p}
-                                type="number"
-                                inputMode="numeric"
-                                min={0}
+                                type="text"
+                                inputMode="decimal"
                                 value={priceMonthly}
                                 onChange={(e) => setMonthly(e.target.value)}
                             />
@@ -1364,15 +1407,40 @@ function AdminSettingsSection() {
                         {(p) => (
                             <Input
                                 {...p}
-                                type="number"
-                                inputMode="numeric"
-                                min={0}
+                                type="text"
+                                inputMode="decimal"
                                 value={priceYearly}
                                 onChange={(e) => setYearly(e.target.value)}
                             />
                         )}
                     </Field>
+                    <Field label="DPH (%)">
+                        {(p) => (
+                            <Input
+                                {...p}
+                                type="text"
+                                inputMode="decimal"
+                                leftIcon={<Percent className="size-4" />}
+                                value={vatPercent}
+                                onChange={(e) => setVatPercent(e.target.value)}
+                            />
+                        )}
+                    </Field>
                 </div>
+                <p className="text-xs text-ink-500">
+                    S DPH:{" "}
+                    <strong>
+                        {monthlyWithVat !== null
+                            ? `${formatEur(monthlyWithVat)} € / mesiac`
+                            : "— € / mesiac"}
+                    </strong>
+                    {" · "}
+                    <strong>
+                        {yearlyWithVat !== null
+                            ? `${formatEur(yearlyWithVat)} € / rok`
+                            : "— € / rok"}
+                    </strong>
+                </p>
                 <p className="text-xs text-ink-400">
                     Pozn.: ceny tu sú len informatívne pre UI/copy. Skutočné
                     sumy účtuje Stripe podľa <code>STRIPE_PRICE_MONTHLY</code> /{" "}
@@ -1406,14 +1474,15 @@ function AdminSettingsSection() {
                                 />
                             )}
                         </Field>
-                        <Field label="Cena za extra (EUR / mesiac)">
+                        <Field
+                            label="Cena za extra (EUR / mesiac)"
+                            hint="Povolená je aj desatinná čiarka (napr. 3,90)."
+                        >
                             {(p) => (
                                 <Input
                                     {...p}
-                                    type="number"
+                                    type="text"
                                     inputMode="decimal"
-                                    min={0}
-                                    step="0.01"
                                     value={extraTechEur}
                                     onChange={(e) =>
                                         setExtraTechEur(e.target.value)

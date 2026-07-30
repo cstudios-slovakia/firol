@@ -8,6 +8,7 @@
  * which means the caller's normal error path should run.
  */
 import { ApiError, OfflineQueuedError } from './api';
+import { db } from './db';
 
 type ToastLike = { success: (m: string) => void };
 
@@ -20,6 +21,23 @@ export function handleOfflineSave(err: unknown, toast: ToastLike): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * The temp id a queued create will resolve to, read back off the outbox entry.
+ *
+ * Needed because an offline create rejects with `OfflineQueuedError` rather
+ * than returning the new record, yet a caller may still have children to
+ * attach — photos belonging to an inspection item that hasn't synced (change
+ * request 2.2). Posting them against the temp id is safe: the queue rewrites
+ * that path segment to the real id once the parent create replays.
+ *
+ * Returns null when the error isn't a queued create.
+ */
+export async function queuedClientId(err: unknown): Promise<number | null> {
+  if (!(err instanceof OfflineQueuedError)) return null;
+  const entry = await db.mutations.get(err.mutationId);
+  return entry?.clientId ?? null;
 }
 
 /**

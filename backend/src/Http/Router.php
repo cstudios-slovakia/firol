@@ -25,6 +25,7 @@ final class Router
 
     public function get(string $pattern, callable $handler): void    { $this->add('GET',    $pattern, $handler); }
     public function post(string $pattern, callable $handler): void   { $this->add('POST',   $pattern, $handler); }
+    public function put(string $pattern, callable $handler): void    { $this->add('PUT',    $pattern, $handler); }
     public function patch(string $pattern, callable $handler): void  { $this->add('PATCH',  $pattern, $handler); }
     public function delete(string $pattern, callable $handler): void { $this->add('DELETE', $pattern, $handler); }
 

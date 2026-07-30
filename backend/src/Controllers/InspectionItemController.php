@@ -32,9 +32,6 @@ final class InspectionItemController
     /** Common pass/fail enum reused across hydranty / PU / NO / TS-HAD. */
     private const RESULT_ENUM = ['vyhovuje', 'nevyhovuje'];
 
-    /** Service actions that may be checked on an Oprava+TS PHP item. */
-    private const OPRAVA_TS_ACTIONS = ['tlakova_skuska', 'oprava', 'plnenie'];
-
     /**
      * Predefined activity slugs for Požiarna kniha entries. Custom activities
      * are stored as free-text strings in `custom_activities`.
@@ -69,11 +66,12 @@ final class InspectionItemController
 
         $isAdmin = Admin::isAdmin(Tenant::currentUserId());
         $inspection = self::loadInspectionOrFail($isAdmin ? null : $accountId, $inspectionId);
+        self::assertEditable($inspection);
 
-        // Požiarna kniha is conceptually a single-record protocol; the
-        // schema supports many items but the domain doesn't, so block it
-        // at the controller. The UI enforces this too — this is the
-        // belt-and-braces server-side check.
+        // Požiarna kniha is conceptually a single-record document; the schema
+        // supports many items but the domain doesn't, so block it at the
+        // controller. The UI enforces this too — this is the belt-and-braces
+        // server-side check.
         if ($inspection['type'] === 'poziarna_kniha') {
             $existing = Db::pdo()->prepare(
                 'SELECT COUNT(*) FROM inspection_items WHERE inspection_id = ?'
@@ -105,6 +103,7 @@ final class InspectionItemController
             )->execute([$inspectionId, $position, json_encode($fields, JSON_UNESCAPED_UNICODE)]);
 
             $itemId = (int) $pdo->lastInsertId();
+            self::syncPreventiveFlag($pdo, $inspection['type'], $inspectionId, $fields);
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
@@ -125,6 +124,7 @@ final class InspectionItemController
         $itemId = (int) $params['item_id'];
 
         $inspection = self::loadInspectionOrFail($isAdmin ? null : $accountId, $inspectionId);
+        self::assertEditable($inspection);
 
         self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
@@ -138,6 +138,8 @@ final class InspectionItemController
             $inspectionId,
         ]);
 
+        self::syncPreventiveFlag(Db::pdo(), $inspection['type'], $inspectionId, $fields);
+
         Response::json(['item' => self::loadItem($itemId)]);
     }
 
@@ -150,6 +152,7 @@ final class InspectionItemController
         $itemId = (int) $params['item_id'];
 
         $inspection = self::loadInspectionOrFail($isAdmin ? null : $accountId, $inspectionId);
+        self::assertEditable($inspection);
 
         self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
@@ -162,6 +165,25 @@ final class InspectionItemController
         // rows on every delete.
 
         Response::noContent();
+    }
+
+    /**
+     * Mirror the požiarna kniha record's preventive/plain flag onto the parent
+     * inspection row so the supersession query (which runs in SQL) can filter
+     * on it. Only požiarna kniha carries the split; every other type is always
+     * a cycle-advancing inspection and keeps the column's default of 1.
+     *
+     * @param array<string, mixed> $fields
+     */
+    private static function syncPreventiveFlag(\PDO $pdo, string $type, int $inspectionId, array $fields): void
+    {
+        if ($type !== 'poziarna_kniha') {
+            return;
+        }
+        $isPreventive = ($fields['is_preventive'] ?? true) ? 1 : 0;
+        $pdo->prepare(
+            'UPDATE inspections SET is_preventive_inspection = ? WHERE id = ?'
+        )->execute([$isPreventive, $inspectionId]);
     }
 
     /**
@@ -182,6 +204,7 @@ final class InspectionItemController
             'pu_udrzba'          => self::validatePuUdrzbaFields($body),
             'nudzove_osvetlenie' => self::validateNudzoveOsvetlenieFields($body),
             'ts_hadic'           => self::validateTsHadicFields($body),
+            'vyradenie'          => self::validateVyradenieFields($body),
             default => self::failValidation("Items for type '$type' are not supported yet."),
         };
     }
@@ -223,11 +246,46 @@ final class InspectionItemController
     }
 
     /**
+     * Vyraďovací protokol (change request 2.1). One row per hasiaci prístroj
+     * taken out of service: the same identification block as a PHP inspection
+     * item, plus the reason. The reason is free text — the UI offers the
+     * template's typical reasons as quick picks but the technician may write
+     * their own, exactly as the spec asks.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private static function validateVyradenieFields(array $body): array
+    {
+        $manufacturer = self::stringField($body, 'manufacturer', required: true, max: 80);
+        $extType      = self::stringField($body, 'type', required: true, max: 40);
+        $serial       = self::stringField($body, 'serial', required: true, max: 80);
+        $location     = self::stringField($body, 'location', required: false, max: 191);
+        $reason       = self::stringField($body, 'reason', required: true, max: 300);
+
+        $year = $body['year'] ?? null;
+        if (is_string($year) && ctype_digit($year)) {
+            $year = (int) $year;
+        }
+        if (!is_int($year) || $year < 1900 || $year > 2200) {
+            self::failValidation('Field year must be an integer year (1900–2200).');
+        }
+
+        return [
+            'manufacturer' => $manufacturer,
+            'type'         => $extType,
+            'serial'       => $serial,
+            'year'         => $year,
+            'location'     => $location,
+            'reason'       => $reason,
+        ];
+    }
+
+    /**
      * Oprava + plnenie + TS PHP. Same identification block as PHP
-     * (manufacturer/type/serial/year/location) plus a multi-select of
-     * service actions performed during the visit. At least one action
-     * must be checked — otherwise the item is meaningless on this kind
-     * of protocol.
+     * (manufacturer/type/serial/year/location) plus a free-text note.
+     * The PDF lists a fixed standard scope of performed work, so no
+     * per-item "actions" selection is stored.
      *
      * @param array<string, mixed> $body
      * @return array<string, mixed>
@@ -248,30 +306,12 @@ final class InspectionItemController
             self::failValidation('Field year must be an integer year (1900–2200).');
         }
 
-        $actionsRaw = $body['actions'] ?? null;
-        if (!is_array($actionsRaw)) {
-            self::failValidation('Field actions must be an array.');
-        }
-        $actions = [];
-        foreach ($actionsRaw as $a) {
-            if (!is_string($a) || !in_array($a, self::OPRAVA_TS_ACTIONS, true)) {
-                self::failValidation('Each action must be one of: tlakova_skuska, oprava, plnenie.');
-            }
-            if (!in_array($a, $actions, true)) {
-                $actions[] = $a;
-            }
-        }
-        if (count($actions) === 0) {
-            self::failValidation('Vyber aspoň jeden vykonaný úkon (tlaková skúška, oprava alebo plnenie).');
-        }
-
         return [
             'manufacturer' => $manufacturer,
             'type'         => $extType,
             'serial'       => $serial,
             'year'         => $year,
             'location'     => $location,
-            'actions'      => $actions,
             'notes'        => $notes,
         ];
     }
@@ -288,6 +328,29 @@ final class InspectionItemController
      */
     private static function validatePoziarnaKnihaFields(array $body): array
     {
+        // A record is either a preventive fire inspection (default, statutory)
+        // or a plain fire-book entry (e.g. a note about a completed training).
+        // The plain entry needs no workspaces/activities/defects — only its
+        // text — and never carries the preventive-inspection legal wording.
+        // Defaults to true so old records (and clients that omit the flag)
+        // keep the previous behaviour. See change request 1.7.
+        $isPreventive = array_key_exists('is_preventive', $body)
+            ? (bool) $body['is_preventive']
+            : true;
+
+        if (!$isPreventive) {
+            $notes = self::stringField($body, 'notes', required: true, max: 1000);
+            return [
+                'is_preventive'     => false,
+                'workspaces'        => '',
+                'activities'        => [],
+                'custom_activities' => [],
+                'result'            => 'bez_nedostatkov',
+                'defects'           => [],
+                'notes'             => $notes,
+            ];
+        }
+
         $workspaces = self::stringField($body, 'workspaces', required: true, max: 500);
         $notes      = self::stringField($body, 'notes', required: false, max: 1000);
 
@@ -351,11 +414,20 @@ final class InspectionItemController
                 if (is_string($rawDl) && $rawDl !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawDl)) {
                     $deadline = $rawDl;
                 }
-                $defects[] = ['description' => $desc, 'deadline' => $deadline];
+                // Stable identifier so photos (change request — photo docs
+                // per nedostatok) stay attached to the same defect across
+                // edits. The client generates one; regenerate it here if a
+                // caller omits or mangles it rather than rejecting the save.
+                $rawKey = $d['key'] ?? null;
+                $key = is_string($rawKey) && preg_match('/^[A-Za-z0-9_-]{1,40}$/', $rawKey)
+                    ? $rawKey
+                    : bin2hex(random_bytes(8));
+                $defects[] = ['description' => $desc, 'deadline' => $deadline, 'key' => $key];
             }
         }
 
         return [
+            'is_preventive'     => true,
             'workspaces'        => $workspaces,
             'activities'        => $activities,
             'custom_activities' => $customActivities,
@@ -489,7 +561,16 @@ final class InspectionItemController
         $workingPressure   = self::float($body, 'working_pressure',   min: 0, max: 50);
         $testPressure      = self::float($body, 'test_pressure',      min: 0, max: 50);
         $length            = self::float($body, 'length',             min: 0.1, max: 9999);
-        $yearOfManufacture = (int) self::float($body, 'year_of_manufacture', min: 1900, max: (float) date('Y'));
+
+        // Year of manufacture is optional — old hoses are commonly tested with
+        // no known production year. Accept null/empty and only validate a range
+        // when a value is provided.
+        $yearRaw = $body['year_of_manufacture'] ?? null;
+        if ($yearRaw === null || $yearRaw === '') {
+            $yearOfManufacture = null;
+        } else {
+            $yearOfManufacture = (int) self::float($body, 'year_of_manufacture', min: 1900, max: (float) date('Y'));
+        }
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
@@ -640,6 +721,24 @@ final class InspectionItemController
             Response::error('Inspection not found', 404);
         }
         return $row;
+    }
+
+    /**
+     * Items of a finalized inspection are frozen — the issued PDF was
+     * rendered from them and must keep matching the record. Reopening goes
+     * through "Upraviť" on the summary (InspectionController::unlock), which
+     * discards the protocol first. Same guard photos already carry.
+     *
+     * @param array<string, mixed> $inspection
+     */
+    private static function assertEditable(array $inspection): void
+    {
+        if (($inspection['status'] ?? '') === 'finalized') {
+            Response::error(
+                'Kontrola je uzamknutá — najprv ju odomkni tlačidlom „Upraviť".',
+                409,
+            );
+        }
     }
 
     private static function loadItemForInspectionOrFail(int $itemId, int $inspectionId): void

@@ -1,10 +1,12 @@
-import { AlertTriangle, CheckCircle2, Clock, History } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, History, NotebookPen } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import {
     getInspectionStatus,
     type InspectionStatusKind,
 } from "@/lib/inspectionStatus";
 import type { InspectionListItem } from "@/api/inspections";
+
+const POZIARNA_KNIHA_TYPE = "poziarna_kniha";
 
 type Tone = "neutral" | "ok" | "warn" | "bad";
 
@@ -16,6 +18,7 @@ const META: Record<
     soon: { tone: "warn", label: "Blíži sa", Icon: Clock },
     overdue: { tone: "bad", label: "Po termíne", Icon: AlertTriangle },
     superseded: { tone: "neutral", label: "Nahradená", Icon: History },
+    entry: { tone: "neutral", label: "Zápis", Icon: NotebookPen },
 };
 
 /**
@@ -31,7 +34,12 @@ export function InspectionStatusBadge({
 }: {
     inspection: Pick<
         InspectionListItem,
-        "status" | "executed_on" | "periodicity_months" | "is_superseded"
+        | "type"
+        | "status"
+        | "executed_on"
+        | "periodicity_months"
+        | "is_superseded"
+        | "is_preventive_inspection"
     >;
     showDays?: boolean;
     className?: string;
@@ -45,11 +53,25 @@ export function InspectionStatusBadge({
             ? ` · ${Math.abs(days)} dní`
             : "";
 
+    // Požiarna kniha distinguishes a preventive inspection ("Prehliadka") from
+    // a plain fire-book entry ("Zápis"); the latter is already covered by
+    // the "entry" status kind above, so only the preventive case needs its
+    // own label alongside the validity badge.
+    const showPrehliadkaLabel =
+        kind !== "entry" && inspection.type === POZIARNA_KNIHA_TYPE;
+
     return (
-        <Badge tone={tone} className={className}>
-            <Icon className="size-3" />
-            {label}
-            {suffix}
-        </Badge>
+        <>
+            {showPrehliadkaLabel && (
+                <Badge tone="brand" className={className}>
+                    Prehliadka
+                </Badge>
+            )}
+            <Badge tone={tone} className={className}>
+                <Icon className="size-3" />
+                {label}
+                {suffix}
+            </Badge>
+        </>
     );
 }

@@ -34,6 +34,33 @@ import { Spinner } from "@/components/ui/Spinner";
 
 const PAGE_SIZE = 10;
 
+/**
+ * List sections, rendered (and paginated) in this order. Drafts are their own
+ * group — a concept is unfinished work, not a valid inspection — and sit above
+ * "Platné" so they stay reachable without paging past every finalized record.
+ */
+type GroupKey = "overdue" | "soon" | "drafts" | "valid";
+
+const SECTIONS: { key: GroupKey; label: string; color: string }[] = [
+    { key: "overdue", label: "Po termíne", color: "var(--color-status-bad)" },
+    { key: "soon", label: "Blíži sa termín", color: "var(--color-status-warn)" },
+    { key: "drafts", label: "Koncepty", color: "var(--color-ink-400)" },
+    { key: "valid", label: "Platné", color: "var(--color-status-ok)" },
+];
+
+/** Which section an inspection belongs to — also the unit of the validity filter. */
+function groupKeyFor(it: InspectionListItem): GroupKey {
+    const { kind } = getInspectionStatus(it);
+    if (kind === "draft") {
+        // A concept has no validity yet — it never counts as platná.
+        return "drafts";
+    }
+    if (kind === "overdue") return "overdue";
+    if (kind === "soon") return "soon";
+    // valid, superseded ("nahradená") and plain entries ("zápis").
+    return "valid";
+}
+
 const TYPE_CHIPS: [InspectionType, string][] = [
     ["php", "PHP"],
     ["hydranty", "Hydranty"],
@@ -43,6 +70,7 @@ const TYPE_CHIPS: [InspectionType, string][] = [
     ["pu_udrzba", "PU – údržba"],
     ["nudzove_osvetlenie", "Nú. osvetlenie"],
     ["ts_hadic", "TS hadíc"],
+    ["vyradenie", "Vyradenie PHP"],
 ];
 
 export function InspectionsListPage() {
@@ -55,6 +83,7 @@ export function InspectionsListPage() {
     const [error, setError] = useState<string | null>(null);
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState<InspectionType | "">("");
+    const [statusFilter, setStatusFilter] = useState<GroupKey | "">("");
     const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
     const [deleting, setDeleting] = useState(false);
     const [repeatingId, setRepeatingId] = useState<number | null>(null);
@@ -79,7 +108,9 @@ export function InspectionsListPage() {
         };
     }, []);
 
-    const filtered = useMemo(() => {
+    // Search + type only. The validity chips count against this set, so their
+    // numbers stay stable while switching between them.
+    const searched = useMemo(() => {
         if (!items) return null;
         const q = query.trim().toLowerCase();
         return items.filter((it) => {
@@ -95,38 +126,58 @@ export function InspectionsListPage() {
         });
     }, [items, query, typeFilter]);
 
+    const statusCounts = useMemo(() => {
+        if (!searched) return null;
+        const counts: Record<GroupKey, number> = {
+            overdue: 0,
+            soon: 0,
+            drafts: 0,
+            valid: 0,
+        };
+        for (const it of searched) counts[groupKeyFor(it)] += 1;
+        return counts;
+    }, [searched]);
+
+    const filtered = useMemo(() => {
+        if (!searched) return null;
+        if (!statusFilter) return searched;
+        return searched.filter((it) => groupKeyFor(it) === statusFilter);
+    }, [searched, statusFilter]);
+
     const grouped = useMemo(() => {
         if (!filtered) return null;
+        // A missing execution date sorts to the top of its section in both
+        // orders — it is the one thing the technician still has to fill in.
         const byDaysAsc = (a: InspectionListItem, b: InspectionListItem) => {
-            const da = daysUntilNext(a.executed_on, a.periodicity_months) ?? 0;
-            const db = daysUntilNext(b.executed_on, b.periodicity_months) ?? 0;
+            const da =
+                daysUntilNext(a.executed_on, a.periodicity_months) ?? -Infinity;
+            const db =
+                daysUntilNext(b.executed_on, b.periodicity_months) ?? -Infinity;
             return da - db;
         };
         const byDateDesc = (a: InspectionListItem, b: InspectionListItem) => {
-            if (!a.executed_on && !b.executed_on) return 0;
-            if (!a.executed_on) return 1;
-            if (!b.executed_on) return -1;
-            return b.executed_on.localeCompare(a.executed_on);
-        };
-        const overdue: InspectionListItem[] = [];
-        const soon: InspectionListItem[] = [];
-        const valid: InspectionListItem[] = [];
-        for (const it of filtered) {
-            const { kind } = getInspectionStatus(it);
-            if (kind === "overdue") {
-                overdue.push(it);
-            } else if (kind === "soon") {
-                soon.push(it);
-            } else {
-                // valid, superseded ("nahradená") and drafts all live here.
-                valid.push(it);
+            if (a.executed_on && b.executed_on) {
+                const byDate = b.executed_on.localeCompare(a.executed_on);
+                if (byDate !== 0) return byDate;
+            } else if (a.executed_on !== b.executed_on) {
+                return a.executed_on ? 1 : -1;
             }
-        }
-        return {
-            overdue: overdue.sort(byDaysAsc),
-            soon: soon.sort(byDaysAsc),
-            valid: valid.sort(byDateDesc),
+            // Same date (or both undated): newest record first, so an
+            // inspection never renders above the one that superseded it.
+            return b.id - a.id;
         };
+        const groups: Record<GroupKey, InspectionListItem[]> = {
+            overdue: [],
+            soon: [],
+            drafts: [],
+            valid: [],
+        };
+        for (const it of filtered) groups[groupKeyFor(it)].push(it);
+        groups.overdue.sort(byDaysAsc);
+        groups.soon.sort(byDaysAsc);
+        groups.drafts.sort(byDateDesc);
+        groups.valid.sort(byDateDesc);
+        return groups;
     }, [filtered]);
 
     const totalItems = filtered?.length ?? 0;
@@ -134,25 +185,26 @@ export function InspectionsListPage() {
 
     useEffect(() => {
         setPage(1);
-    }, [query, typeFilter]);
+    }, [query, typeFilter, statusFilter]);
 
-    // Paginate across the ordered groups (overdue → soon → valid) so each
-    // page holds at most PAGE_SIZE rows; section headers render only for the
-    // items that fall on the current page.
+    // Paginate across the ordered groups so each page holds at most PAGE_SIZE
+    // rows; section headers render only for the items that fall on the current
+    // page.
     const pageIds = useMemo(() => {
         if (!grouped) return null;
-        const ordered = [...grouped.overdue, ...grouped.soon, ...grouped.valid];
+        const ordered = SECTIONS.flatMap((s) => grouped[s.key]);
         const slice = ordered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
         return new Set(slice.map((it) => it.id));
     }, [grouped, page]);
 
     const pagedGroups = useMemo(() => {
         if (!grouped || !pageIds) return null;
-        return {
-            overdue: grouped.overdue.filter((it) => pageIds.has(it.id)),
-            soon: grouped.soon.filter((it) => pageIds.has(it.id)),
-            valid: grouped.valid.filter((it) => pageIds.has(it.id)),
-        };
+        return Object.fromEntries(
+            SECTIONS.map((s) => [
+                s.key,
+                grouped[s.key].filter((it) => pageIds.has(it.id)),
+            ]),
+        ) as Record<GroupKey, InspectionListItem[]>;
     }, [grouped, pageIds]);
 
     async function handleDelete() {
@@ -256,6 +308,56 @@ export function InspectionsListPage() {
                             </button>
                         ))}
                     </div>
+                    <div className="h-px bg-ink-100" />
+                    {/* Validity filter — same buckets as the list sections. */}
+                    <div className="flex gap-1.5 overflow-x-auto px-3 py-2.5 [&::-webkit-scrollbar]:hidden">
+                        <button
+                            type="button"
+                            onClick={() => setStatusFilter("")}
+                            className={cn(
+                                "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-all duration-150",
+                                statusFilter === ""
+                                    ? "bg-ink-800 text-white scale-[1.04]"
+                                    : "bg-ink-100 text-ink-600 hover:bg-ink-200",
+                            )}
+                        >
+                            Všetky stavy
+                        </button>
+                        {SECTIONS.map(({ key, label, color }) => {
+                            const count = statusCounts?.[key] ?? 0;
+                            const active = statusFilter === key;
+                            return (
+                                <button
+                                    key={key}
+                                    type="button"
+                                    disabled={count === 0 && !active}
+                                    onClick={() =>
+                                        setStatusFilter(active ? "" : key)
+                                    }
+                                    className={cn(
+                                        "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all duration-150",
+                                        active
+                                            ? "bg-ink-800 text-white scale-[1.04]"
+                                            : "bg-ink-100 text-ink-600 hover:bg-ink-200 disabled:opacity-40 disabled:hover:bg-ink-100",
+                                    )}
+                                >
+                                    <span
+                                        className="size-2 shrink-0 rounded-full"
+                                        style={{ backgroundColor: color }}
+                                    />
+                                    {label}
+                                    <span
+                                        className={cn(
+                                            "tabular-nums",
+                                            active ? "text-white/70" : "text-ink-400",
+                                        )}
+                                    >
+                                        {count}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
             )}
 
@@ -298,59 +400,33 @@ export function InspectionsListPage() {
                 </Card>
             )}
 
-            {pagedGroups && (pagedGroups.overdue.length > 0 || pagedGroups.soon.length > 0 || pagedGroups.valid.length > 0) && (
+            {pagedGroups && SECTIONS.some((s) => pagedGroups[s.key].length > 0) && (
                 <>
                     <div className="flex flex-col gap-5">
-                        {pagedGroups.overdue.length > 0 && (
-                            <section>
-                                <div className="mb-2 flex items-center gap-2">
-                                    <span className="size-2 rounded-full bg-[var(--color-status-bad)]" />
-                                    <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-status-bad)]">
-                                        Po termíne
-                                    </h2>
-                                </div>
-                                <ul className="flex flex-col gap-2">
-                                    {pagedGroups.overdue.map((it) => (
-                                        <li key={it.id}>
-                                            <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
-                                        </li>
-                                    ))}
-                                </ul>
-                            </section>
-                        )}
-                        {pagedGroups.soon.length > 0 && (
-                            <section>
-                                <div className="mb-2 flex items-center gap-2">
-                                    <span className="size-2 rounded-full bg-[var(--color-status-warn)]" />
-                                    <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-status-warn)]">
-                                        Blíži sa termín
-                                    </h2>
-                                </div>
-                                <ul className="flex flex-col gap-2">
-                                    {pagedGroups.soon.map((it) => (
-                                        <li key={it.id}>
-                                            <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
-                                        </li>
-                                    ))}
-                                </ul>
-                            </section>
-                        )}
-                        {pagedGroups.valid.length > 0 && (
-                            <section>
-                                <div className="mb-2 flex items-center gap-2">
-                                    <span className="size-2 rounded-full bg-[var(--color-status-ok)]" />
-                                    <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-status-ok)]">
-                                        Platné
-                                    </h2>
-                                </div>
-                                <ul className="flex flex-col gap-2">
-                                    {pagedGroups.valid.map((it) => (
-                                        <li key={it.id}>
-                                            <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
-                                        </li>
-                                    ))}
-                                </ul>
-                            </section>
+                        {SECTIONS.map(({ key, label, color }) =>
+                            pagedGroups[key].length === 0 ? null : (
+                                <section key={key}>
+                                    <div className="mb-2 flex items-center gap-2">
+                                        <span
+                                            className="size-2 rounded-full"
+                                            style={{ backgroundColor: color }}
+                                        />
+                                        <h2
+                                            className="text-xs font-semibold uppercase tracking-wide"
+                                            style={{ color }}
+                                        >
+                                            {label}
+                                        </h2>
+                                    </div>
+                                    <ul className="flex flex-col gap-2">
+                                        {pagedGroups[key].map((it) => (
+                                            <li key={it.id}>
+                                                <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </section>
+                            ),
                         )}
                     </div>
                     <Pagination

@@ -377,10 +377,12 @@ $bulletItems = [];
 foreach ($items as $idx => $it) {
   $f = $it['fields'];
   $st = (string) ($f['status'] ?? '');
-  if ($st === 'A')
+  $hasNote = !empty($f['notes']);
+  // Non-OK items are always listed; OK (A) items only when the technician wrote a note.
+  if ($st === 'A' && !$hasNote)
     continue;
   $label = 'HP č. ' . ($idx + 1) . ' (' . ($f['type'] ?? '') . ', ' . ($f['serial'] ?? '') . ')';
-  $note = !empty($f['notes']) ? (string) $f['notes'] : ($statusLabels[$st] ?? $st);
+  $note = $hasNote ? (string) $f['notes'] : ($statusLabels[$st] ?? $st);
   $bulletItems[] = ['label' => $label, 'note' => $note];
 }
 ?>

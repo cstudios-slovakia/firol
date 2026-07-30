@@ -2,7 +2,7 @@ import { forwardRef } from 'react';
 import { cn } from '@/lib/cn';
 import { Spinner } from './Spinner';
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-outline';
+type Variant = 'primary' | 'secondary' | 'ghost' | 'warn' | 'danger' | 'danger-outline';
 type Size = 'sm' | 'md' | 'lg';
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -20,6 +20,11 @@ const variants: Record<Variant, string> = {
     'bg-white text-ink-800 border border-ink-200 hover:border-ink-300 hover:bg-ink-50 active:bg-ink-100',
   ghost:
     'bg-transparent text-ink-600 hover:bg-ink-100 active:bg-ink-200',
+  // Reserved for actions that undo something already issued (unlocking a
+  // finalized protocol) — heavier than secondary, not destructive enough
+  // for danger.
+  warn:
+    'bg-status-warn text-white hover:brightness-110 active:brightness-95',
   danger:
     'bg-status-bad text-white hover:brightness-110 active:brightness-95',
   'danger-outline':

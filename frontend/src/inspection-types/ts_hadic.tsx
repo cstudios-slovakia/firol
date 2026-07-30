@@ -1,24 +1,26 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowRight, Building2, CheckCircle2, Edit2, Gauge,
+  AlertTriangle, ArrowRight, Building2, CheckCircle2, CopyPlus, Edit2, Gauge,
   ListChecks, MapPin, NotebookPen, Ruler, Save, Trash2,
 } from 'lucide-react';
 import {
-  Inspections,
   type PassFailResult,
   type TsHadicItemFields,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
-import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { ItemPhotoField, usePhotoStaging } from '@/components/ItemPhotos';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
+import { clearDuplicateSeed, peekDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
+import { saveItemMessage, saveItemWithPhotos } from './saveItem';
 import type {
   InspectionTypeModule,
   ItemRowProps,
@@ -35,7 +37,19 @@ function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
 }
 
-function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+/**
+ * Carried into the next hose by "Ďalší rovnaký": the hose's own description
+ * (type, manufacturer, length, production year). The pressures are read off
+ * the test itself and always start blank, as does the result.
+ */
+type TsHadicSeed = {
+  hose_type: string;
+  manufacturer: string;
+  length: string;
+  year_of_manufacture: string;
+};
+
+function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -53,6 +67,7 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [apiError, setApiError]       = useState<string | null>(null);
   const toast = useToast();
+  const photos = usePhotoStaging(initialItem?.photos);
 
   useEffect(() => {
     if (initialItem) {
@@ -67,12 +82,16 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
       setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
-      setHoseType(''); setLocation(''); setManufacturer('');
+      // "Ďalší rovnaký": carry the hose description (type, manufacturer,
+      // length, year); the pressures, location and result always start
+      // blank/default (2.4.2).
+      const seed = peekDuplicateSeed<TsHadicSeed>(inspectionId);
+      setHoseType(seed?.hose_type ?? ''); setLocation(''); setManufacturer(seed?.manufacturer ?? '');
       setWorkingPressure(''); setTestPressure('');
-      setLength(''); setYearOfManufacture('');
+      setLength(seed?.length ?? ''); setYearOfManufacture(seed?.year_of_manufacture ?? '');
       setResult('vyhovuje'); setNotes('');
     }
-  }, [initialItem]);
+  }, [initialItem, inspectionId]);
 
   function clearErr(key: string) {
     setFieldErrors((prev) => { const n = { ...prev }; delete n[key]; return n; });
@@ -90,7 +109,11 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
     void handleSubmit(e as FormEvent, 'save-and-summary');
   }
 
-  async function handleSubmit(e: FormEvent, action: 'save-and-next' | 'save-and-summary') {
+  async function handleSubmit(
+    e: FormEvent,
+    action: 'save-and-next' | 'save-and-summary',
+    duplicate = false,
+  ) {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (!hoseType.trim()) errs.hoseType = 'Doplň typ / priemer hadice (napr. DN33, C52).';
@@ -105,8 +128,10 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
     const len = Number(length);
     if (!length || !Number.isFinite(len) || len <= 0 || len > 9999)
       errs.length = 'Dĺžka musí byť kladné číslo (v metroch).';
+    // Year of manufacture is optional — old hoses are commonly tested with
+    // no known production year. Only validate the range when a value is given.
     const year = Number(yearOfManufacture);
-    if (!yearOfManufacture || !Number.isInteger(year) || year < 1900 || year > new Date().getFullYear())
+    if (yearOfManufacture && (!Number.isInteger(year) || year < 1900 || year > new Date().getFullYear()))
       errs.yearOfManufacture = 'Zadaj platný rok výroby.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
@@ -120,19 +145,31 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
         working_pressure:    wp,
         test_pressure:       tp,
         length:              len,
-        year_of_manufacture: year,
+        year_of_manufacture: yearOfManufacture ? year : null,
         result,
         notes: notes.trim() || null,
       };
-      if (editing && itemId !== null) {
-        await Inspections.updateItem(inspectionId, itemId, fields, csrfToken);
+      const saved = await saveItemWithPhotos({
+        inspectionId,
+        itemId: editing ? itemId : null,
+        fields,
+        csrfToken,
+        photos,
+      });
+      if (duplicate) {
+        const seed: TsHadicSeed = {
+          hose_type: hoseType.trim(),
+          manufacturer: manufacturer.trim(),
+          length: length.trim(),
+          year_of_manufacture: yearOfManufacture.trim(),
+        };
+        setDuplicateSeed(inspectionId, seed);
       } else {
-        await Inspections.addItem(inspectionId, fields, csrfToken);
+        clearDuplicateSeed(inspectionId);
       }
       onSaved(action);
-      toast.success('Položka uložená');
+      toast.success(saveItemMessage(saved));
     } catch (err) {
-      if (handleOfflineSave(err, toast)) { onSaved(action); return; }
       setApiError(err instanceof ApiError ? err.message : 'Niečo sa pokazilo.');
     } finally {
       setSubmitting(false);
@@ -153,16 +190,16 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
 
         <Field label="Umiestnenie" required error={fieldErrors.location}>
           {(p) => (
-            <Input {...p} required leftIcon={<MapPin className="size-4" />}
-              value={location} onChange={(e) => { setLocation(e.target.value); clearErr('location'); }}
+            <AutocompleteInput {...p} required field="location" facilityId={facilityId} leftIcon={<MapPin className="size-4" />}
+              value={location} onChange={(v) => { setLocation(v); clearErr('location'); }}
               placeholder="Chodba — 2. poschodie" />
           )}
         </Field>
 
         <Field label="Výrobca" required error={fieldErrors.manufacturer}>
           {(p) => (
-            <Input {...p} required leftIcon={<Building2 className="size-4" />}
-              value={manufacturer} onChange={(e) => { setManufacturer(e.target.value); clearErr('manufacturer'); }}
+            <AutocompleteInput {...p} required field="manufacturer" leftIcon={<Building2 className="size-4" />}
+              value={manufacturer} onChange={(v) => { setManufacturer(v); clearErr('manufacturer'); }}
               placeholder="PYROSTOP s.r.o." />
           )}
         </Field>
@@ -195,9 +232,9 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
                 placeholder="20" />
             )}
           </Field>
-          <Field label="Rok výroby" required error={fieldErrors.yearOfManufacture}>
+          <Field label="Rok výroby" hint={fieldErrors.yearOfManufacture ? undefined : 'Voliteľné — ak nie je známy, nechaj prázdne.'} error={fieldErrors.yearOfManufacture}>
             {(p) => (
-              <Input {...p} required type="number" inputMode="numeric" step={1} min={1900} max={new Date().getFullYear()}
+              <Input {...p} type="number" inputMode="numeric" step={1} min={1900} max={new Date().getFullYear()}
                 leftIcon={<Ruler className="size-4" />}
                 value={yearOfManufacture} onChange={(e) => { setYearOfManufacture(e.target.value); clearErr('yearOfManufacture'); }}
                 placeholder="2021" />
@@ -228,12 +265,14 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
           )}
         </Field>
 
+        <ItemPhotoField photos={photos} />
+
         {apiError && (
           <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
             {apiError}
           </div>
         )}
-        {Object.keys(fieldErrors).length > 0 && (
+        {Object.values(fieldErrors).some(Boolean) && (
           <p className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
             Formulár obsahuje nevyplnené povinné polia.
           </p>
@@ -243,6 +282,11 @@ function TsHadicStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Ste
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
+          </Button>
+          <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
+            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            title="Uloží a predvyplní ďalšiu hadicu rovnakým popisom (namerané tlaky a umiestnenie ostanú prázdne).">
+            Ďalšia rovnaká
           </Button>
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>

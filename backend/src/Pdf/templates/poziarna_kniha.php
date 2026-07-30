@@ -11,7 +11,13 @@
  * @var array  $inspector      fullname, certification_number, valid_from, valid_to, signature_data_uri
  * @var array  $items
  * @var array  $stats
+ *
+ * Photos are never part of this body — they are rendered in the shared
+ * "Príloha — Fotodokumentácia" appendix at the end of the PDF (change request
+ * 2.2.2), captioned with the number of the nedostatok they document.
  */
+use Firol\Support\PkDefects;
+
 $h = static fn(?string $v): string => htmlspecialchars((string) ($v ?? '—'), ENT_QUOTES, 'UTF-8');
 $brandColor = $brand['color'] ?? '#E8433A';
 
@@ -44,9 +50,13 @@ $miesto = ($city ? $city . ', ' : '') . $formatDate($inspection['executed_on'] ?
 
 $record = $items[0]['fields'] ?? [];
 $activeSlugs = is_array($record['activities'] ?? null) ? $record['activities'] : [];
-$result = (string) ($record['result'] ?? '');
+$hasDefects = PkDefects::hasDefects($record);
 $workspaces = (string) ($record['workspaces'] ?? '');
 $notes = (string) ($record['notes'] ?? '');
+// A plain fire-book entry (not a preventive inspection) carries no statutory
+// prehliadka wording — only its free-text body. Defaults to true so records
+// saved before the split still render as preventive inspections (req 1.7).
+$isPreventive = !array_key_exists('is_preventive', $record) || $record['is_preventive'] !== false;
 $activityLabels = [
   'visual_check' => 'Vizuálna kontrola priestorov spoločnosti',
   'php_check' => 'Kontrola stavu, označenia a dostupnosti PHP',
@@ -77,33 +87,13 @@ foreach ($customActivitiesArr as $ca) {
   $checkedActivities[] = (string) $ca;
 }
 
-// New shape: `defects` is a list of {description, deadline?} — each row
-// renders with its own deadline. Legacy records carry a single
-// `defect_deadline` plus free-text `notes`; we split notes line-by-line
-// and reuse the single deadline so old PDFs still render predictably.
-$legacyDeadline = isset($record['defect_deadline']) && is_string($record['defect_deadline'])
-  ? $record['defect_deadline']
-  : null;
-
-$defectRows = [];
-if (isset($record['defects']) && is_array($record['defects']) && $record['defects']) {
-  foreach ($record['defects'] as $d) {
-    if (!is_array($d))
-      continue;
-    $desc = isset($d['description']) && is_string($d['description']) ? trim($d['description']) : '';
-    if ($desc === '')
-      continue;
-    $dl = isset($d['deadline']) && is_string($d['deadline']) ? $d['deadline'] : null;
-    $defectRows[] = ['description' => $desc, 'deadline' => $dl];
-  }
-} elseif ($result === 'zistene_nedostatky') {
-  foreach (array_filter(array_map('trim', explode("\n", $notes))) as $line) {
-    $defectRows[] = ['description' => $line, 'deadline' => $legacyDeadline];
-  }
-  if (!$defectRows && $notes !== '') {
-    $defectRows[] = ['description' => $notes, 'deadline' => $legacyDeadline];
-  }
-}
+// Defect rows (and their numbering) come from the shared helper so the photo
+// captions in the appendix reference exactly the numbers printed here.
+$defects = PkDefects::rows($record);
+$defectRows = $defects['rows'];
+// True once the free-text note has been consumed as defect rows (legacy
+// records) so it isn't also printed again in the Poznámka section below.
+$notesUsedAsDefects = $defects['notes_used'];
 
 $contactLine = $facility['contact_person'] ?? '';
 ?>
@@ -401,14 +391,21 @@ $contactLine = $facility['contact_person'] ?? '';
   </tr>
 </table>
 
-<h2>Úvodný záznam</h2>
-<div class="legal-box">Vykonaná preventívna protipožiarna prehliadka všetkých pracovísk v pôsobnosti spoločnosti v
-  zmysle zákona č. 314/2001 Z. z. v platnom znení a vyhlášky MV SR č. 121/2002 Z. z. v platnom znení.</div>
-<?php if ($workspaces): ?>
-  <div class="workspaces-line">Bola vykonaná vizuálna prehliadka pracovísk: <?= $h($workspaces) ?></div>
+<?php if ($isPreventive): ?>
+  <h2>Úvodný záznam</h2>
+  <div class="legal-box">Vykonaná preventívna protipožiarna prehliadka všetkých pracovísk v pôsobnosti spoločnosti v
+    zmysle zákona č. 314/2001 Z. z. v platnom znení a vyhlášky MV SR č. 121/2002 Z. z. v platnom znení.</div>
+  <?php if ($workspaces): ?>
+    <div class="workspaces-line">Bola vykonaná vizuálna prehliadka pracovísk: <?= $h($workspaces) ?></div>
+  <?php endif ?>
+<?php else: ?>
+  <h2>Zápis do požiarnej knihy</h2>
+  <?php if ($notes !== ''): ?>
+    <div class="workspaces-line"><?= nl2br($h($notes)) ?></div>
+  <?php endif ?>
 <?php endif ?>
 
-<?php if ($checkedActivities): ?>
+<?php if ($isPreventive && $checkedActivities): ?>
   <h2>Vykonané činnosti</h2>
   <table class="activities">
     <?php foreach ($checkedActivities as $label): ?>
@@ -420,7 +417,7 @@ $contactLine = $facility['contact_person'] ?? '';
   </table>
 <?php endif ?>
 
-<?php if ($result === 'zistene_nedostatky' && $defectRows): ?>
+<?php if ($hasDefects && $defectRows): ?>
   <h2>Zistené nedostatky</h2>
   <table class="defects">
     <thead>
@@ -440,6 +437,11 @@ $contactLine = $facility['contact_person'] ?? '';
       <?php endforeach ?>
     </tbody>
   </table>
+<?php endif ?>
+
+<?php if ($isPreventive && $notes !== '' && !$notesUsedAsDefects): ?>
+  <h2>Poznámka</h2>
+  <div class="workspaces-line"><?= nl2br($h($notes)) ?></div>
 <?php endif ?>
 
 <h2>Záver</h2>

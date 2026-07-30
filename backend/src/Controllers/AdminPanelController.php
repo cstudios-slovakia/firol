@@ -12,6 +12,7 @@ use Firol\Billing\SeatSync;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Storage\Storage;
 
 /**
  * App-admin endpoints. The /admin page consumes these to browse every
@@ -371,10 +372,15 @@ final class AdminPanelController
         $snapRow = $snap->fetch() ?: null;
 
         // FK cascades handle account_users, companies, facilities,
-        // inspections, items, documents, sequences, inspector_profiles,
-        // trainings, trainees and invoices.
+        // inspections, items, item photos, documents, sequences,
+        // inspector_profiles, trainings, trainees and invoices.
         $pdo->prepare('DELETE FROM accounts WHERE id = ?')->execute([$id]);
         AuditLog::record('account.delete', 'accounts', $id, $snapRow ?: null, null);
+
+        // Photo files don't cascade. They're the bulk of an account's storage
+        // (change request 2.2), so drop the whole tree rather than leaving
+        // gigabytes orphaned behind a deleted tenant.
+        Storage::purgeAccountPhotos($id);
 
         // Delete users that had no other account membership.
         if ($userIds !== []) {

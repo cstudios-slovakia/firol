@@ -21,9 +21,9 @@ export type ImportResult = {
 };
 
 const KIND_FILENAME: Record<ImportKind, string> = {
-  companies:   'Firol-import-firmy.xlsx',
-  inspections: 'Firol-import-kontroly.xlsx',
-  trainings:   'Firol-import-skolenia.xlsx',
+  companies:   'POapp-import-firmy.xlsx',
+  inspections: 'POapp-import-kontroly.xlsx',
+  trainings:   'POapp-import-skolenia.xlsx',
 };
 
 export const ImportApi = {

@@ -19,14 +19,17 @@ import {
     type TrainingListItem,
     TRAINING_TYPE_SHORT,
 } from "@/api/trainings";
+import { Calendar, type CalendarDeadline } from "@/api/calendar";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { DeadlinesBlock } from "@/components/DeadlinesBlock";
 
 export function DashboardPage() {
     const { user } = useAuth();
     const [companies, setCompanies] = useState<CompanyListItem[]>([]);
     const [inspections, setInspections] = useState<InspectionListItem[]>([]);
     const [trainings, setTrainings] = useState<TrainingListItem[]>([]);
+    const [deadlines, setDeadlines] = useState<CalendarDeadline[]>([]);
     const [loaded, setLoaded] = useState(false);
 
     useEffect(() => {
@@ -38,6 +41,11 @@ export function DashboardPage() {
                 setLoaded(true);
             })
             .catch(() => setLoaded(true));
+        // Deadlines are a non-blocking side fetch — a failure just leaves the
+        // Termíny block empty rather than breaking the dashboard.
+        Calendar.get()
+            .then((data) => setDeadlines(data.deadlines))
+            .catch(() => undefined);
     }, []);
 
     const firstName = user?.fullname.split(" ")[0] ?? "";
@@ -73,6 +81,9 @@ export function DashboardPage() {
             </div>
 
             <div className="flex flex-col gap-4">
+                <div className="animate-fade-up" style={{ animationDelay: '40ms' }}>
+                    <DeadlinesBlock deadlines={deadlines} loaded={loaded} />
+                </div>
                 <div className="animate-fade-up" style={{ animationDelay: '80ms' }}>
                     <InspectionsWidget
                         items={inspections.slice(0, 4)}

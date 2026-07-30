@@ -12,6 +12,7 @@ use Firol\Auth\Session;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Legal\Terms;
 use Firol\Stripe\StripeClient;
 use PDO;
 
@@ -25,6 +26,9 @@ final class AuthController
         $password            = $req->jsonString('password');
         $invoiceCompanyName  = $req->jsonString('invoice_company_name');
         $billingPeriod       = $req->jsonString('billing_period');
+        // Mandatory legal declaration (change request 3.1). Never defaulted to
+        // true: an unticked box must fail here even if the UI is bypassed.
+        $termsAccepted       = $req->jsonBool('terms_accepted') ?? false;
 
         if ($fullname === null || $fullname === '')           { Response::error('Field required: fullname',             422); }
         if ($email === null || !self::isValidEmail($email))   { Response::error('Field required or invalid: email',     422); }
@@ -36,6 +40,13 @@ final class AuthController
         }
         if ($billingPeriod !== 'monthly' && $billingPeriod !== 'yearly' && $billingPeriod !== 'trial') {
             Response::error('billing_period must be "trial", "monthly" or "yearly"', 422);
+        }
+        if ($termsAccepted !== true) {
+            Response::error(
+                'Bez potvrdenia vyhlásenia a oboznámenia sa s VOP a Zásadami ochrany osobných údajov nie je možné vytvoriť účet.',
+                422,
+                ['code' => 'terms_not_accepted'],
+            );
         }
 
         $pdo = Db::pdo();
@@ -76,15 +87,20 @@ final class AuthController
                 // every inspection already pointing at this user id stays
                 // attributed to them.
                 $pdo->prepare(
-                    'UPDATE users SET fullname = ?, phone = ?, password_hash = ?, is_pending = 0
+                    'UPDATE users SET fullname = ?, phone = ?, password_hash = ?, is_pending = 0,
+                            vop_version = ?, vop_accepted_at = NOW(),
+                            privacy_version = ?, privacy_accepted_at = NOW()
                      WHERE id = ?'
-                )->execute([$fullname, $phone, Password::hash($password), $claimUserId]);
+                )->execute([$fullname, $phone, Password::hash($password), Terms::VOP_VERSION, Terms::PRIVACY_VERSION, $claimUserId]);
                 $userId = $claimUserId;
             } else {
                 $insertUser = $pdo->prepare(
-                    'INSERT INTO users (fullname, email, phone, password_hash) VALUES (?, ?, ?, ?)'
+                    'INSERT INTO users (fullname, email, phone, password_hash,
+                                        vop_version, vop_accepted_at,
+                                        privacy_version, privacy_accepted_at)
+                     VALUES (?, ?, ?, ?, ?, NOW(), ?, NOW())'
                 );
-                $insertUser->execute([$fullname, $email, $phone, Password::hash($password)]);
+                $insertUser->execute([$fullname, $email, $phone, Password::hash($password), Terms::VOP_VERSION, Terms::PRIVACY_VERSION]);
                 $userId = (int) $pdo->lastInsertId();
             }
 
@@ -312,7 +328,11 @@ final class AuthController
      */
     public static function meSnapshot(PDO $pdo, int $userId, int $accountId): array
     {
-        $userStmt = $pdo->prepare('SELECT id, fullname, email, phone FROM users WHERE id = ?');
+        $userStmt = $pdo->prepare(
+            'SELECT id, fullname, email, phone,
+                    vop_version, vop_accepted_at, privacy_version, privacy_accepted_at
+             FROM   users WHERE id = ?'
+        );
         $userStmt->execute([$userId]);
         $user = $userStmt->fetch();
 
@@ -363,12 +383,26 @@ final class AuthController
             return $a;
         }, $accountsRaw);
 
+        // Legal documents block (change request 3.1) — lets the UI link to the
+        // current VOP/privacy policy and show the "new version" notice when the
+        // user's recorded consent is behind.
+        $terms = Terms::snapshot(
+            $user['vop_version'] ?? null,
+            $user['vop_accepted_at'] ?? null,
+            $user['privacy_version'] ?? null,
+            $user['privacy_accepted_at'] ?? null,
+        );
+        if ($user) {
+            unset($user['vop_version'], $user['vop_accepted_at'], $user['privacy_version'], $user['privacy_accepted_at']);
+        }
+
         return [
             'user'            => $user ?: null,
             'accounts'        => $accounts,
             'activeAccountId' => $accountId,
             'csrfToken'       => Csrf::token(),
             'isAdmin'         => \Firol\Auth\Admin::isAdmin($userId),
+            'terms'           => $terms,
         ];
     }
 }

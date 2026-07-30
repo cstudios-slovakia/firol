@@ -13,6 +13,8 @@ namespace Firol\Storage;
  * Layout (relative to root()):
  *   signatures/{account_id}/{user_id}.png
  *   documents/{account_id}/{year}/{number}.pdf
+ *   photos/{account_id}/{inspection_id}/{token}.jpg      (full size)
+ *   photos/{account_id}/{inspection_id}/{token}_t.jpg    (thumbnail)
  */
 final class Storage
 {
@@ -29,6 +31,11 @@ final class Storage
             if (!mkdir($path, 0775, true) && !is_dir($path)) {
                 throw new \RuntimeException("Cannot create dir: $path");
             }
+            // mkdir()'s mode is masked by the process umask (022 by default),
+            // which strips exactly the group-write bit the line above is for —
+            // so whichever of php-fpm/CLI created the directory first would own
+            // it outright and lock the other one out. chmod is not masked.
+            @chmod($path, 0775);
         }
     }
 
@@ -75,6 +82,86 @@ final class Storage
     public static function documentAbsolute(string $relativePath): string
     {
         return self::root() . '/' . $relativePath;
+    }
+
+    /**
+     * Directory holding one inspection's item photos (change request 2.2).
+     * Grouped per inspection so deleting/archiving a protocol is a single
+     * recursive unlink, and so a single directory never holds more than one
+     * protocol's worth of files.
+     */
+    public static function photoDir(int $accountId, int $inspectionId): string
+    {
+        return self::root() . "/photos/$accountId/$inspectionId";
+    }
+
+    public static function photoRelative(int $accountId, int $inspectionId, string $token): string
+    {
+        return "photos/$accountId/$inspectionId/$token.jpg";
+    }
+
+    public static function photoThumbRelative(int $accountId, int $inspectionId, string $token): string
+    {
+        return "photos/$accountId/$inspectionId/{$token}_t.jpg";
+    }
+
+    /**
+     * Resolve a stored relative path to an absolute one. Shared by photos and
+     * documents — the stored path always comes from our own writers, never
+     * from user input, but the traversal guard keeps that assumption honest.
+     */
+    public static function absolute(string $relativePath): string
+    {
+        if (str_contains($relativePath, '..')) {
+            throw new \InvalidArgumentException('Path traversal in storage path.');
+        }
+        return self::root() . '/' . $relativePath;
+    }
+
+    /**
+     * Recursively delete an account's photo tree (change request 2.2).
+     *
+     * The DB rows cascade away with the account, but photos are the one kind
+     * of file large enough that leaving them orphaned actually costs storage —
+     * a deleted account could otherwise keep gigabytes on disk forever.
+     */
+    public static function purgeAccountPhotos(int $accountId): void
+    {
+        self::removeTree(self::root() . "/photos/$accountId");
+    }
+
+    private static function removeTree(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+        $entries = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($entries as $entry) {
+            /** @var \SplFileInfo $entry */
+            if ($entry->isDir()) {
+                @rmdir($entry->getPathname());
+            } else {
+                @unlink($entry->getPathname());
+            }
+        }
+        @rmdir($dir);
+    }
+
+    /**
+     * Scratch directory for files we build then stream and delete — currently
+     * the account backup .zip. Inside the storage root (not sys_get_temp_dir)
+     * because a full backup can be hundreds of MB and shared hosting often
+     * puts /tmp on a small tmpfs; here it shares the same disk the photos it
+     * archives already live on.
+     */
+    public static function tempDir(): string
+    {
+        $dir = self::root() . '/tmp';
+        self::ensureDir($dir);
+        return $dir;
     }
 
     /**

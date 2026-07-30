@@ -4,11 +4,12 @@ import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Briefcase, Building2, CalendarDays, CheckCircle2, Clock,
   Download, Edit2, FileText, GraduationCap, Plus, Trash2, User, Users,
-  Warehouse,
+  Warehouse, Wheat,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import {
+  isPokyn,
   TRAINING_TYPE_LABELS,
   Trainings,
   // SIGNATURE DISABLED — traineeSignatureUrl,
@@ -31,6 +32,7 @@ import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleto
 // SIGNATURE DISABLED — import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
+import { PokynSectionsEditor } from '@/components/PokynSectionsEditor';
 
 export function TrainingDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
@@ -88,7 +90,9 @@ export function TrainingDetailPage() {
     try {
       const res = await Trainings.generatePdf(id, csrfToken);
       await refreshDetail();
-      toast.success('PDF protokol vygenerovaný');
+      toast.success(
+        isPokyn(data.training.type) ? 'PDF pokyn vygenerovaný' : 'PDF protokol vygenerovaný',
+      );
       window.open(trainingDocumentDownloadUrl(res.document.id), '_blank', 'noopener');
     } catch (err) {
       setPdfError(offlineMessage(err, 'PDF sa nepodarilo vygenerovať.'));
@@ -188,6 +192,9 @@ export function TrainingDetailPage() {
 
   const { training: t, trainees } = data;
   const isDraft = t.status === 'draft';
+  // A Pokyn has no attendee list — the instruction text takes that slot, and
+  // the wording around it follows the document rather than a session.
+  const pokyn = isPokyn(t.type);
 
   return (
     <div className="flex flex-col gap-5">
@@ -202,11 +209,11 @@ export function TrainingDetailPage() {
         <div className="bg-gradient-to-br from-firol-50/60 to-transparent px-5 pt-5">
           <div className="flex items-start gap-3">
             <div className="grid size-12 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
-              <GraduationCap className="size-5" />
+              {pokyn ? <Wheat className="size-5" /> : <GraduationCap className="size-5" />}
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-firol-500">
-                Školenie
+                {pokyn ? 'Pokyn' : 'Školenie'}
               </p>
               <h1 className="text-lg font-semibold tracking-tight text-ink-900">
                 {TRAINING_TYPE_LABELS[t.type]}
@@ -216,7 +223,9 @@ export function TrainingDetailPage() {
                   {isDraft ? 'Rozpracované' : 'Dokončené'}
                 </Badge>
                 <span className="text-xs text-ink-500">
-                  {trainees.length} {trainees.length === 1 ? 'účastník' : 'účastníkov'}
+                  {pokyn
+                    ? `Žatevné práce v roku ${t.fields?.year ?? t.pokyn_year ?? '—'}`
+                    : `${trainees.length} ${trainees.length === 1 ? 'účastník' : 'účastníkov'}`}
                 </span>
               </div>
             </div>
@@ -246,15 +255,18 @@ export function TrainingDetailPage() {
               </Link>
             </DetailRow>
           )}
-          <DetailRow icon={<CalendarDays className="size-4" />} label="Dátum školenia">
+          <DetailRow
+            icon={<CalendarDays className="size-4" />}
+            label={pokyn ? 'Dátum vydania' : 'Dátum školenia'}
+          >
             {t.date ? new Date(t.date + 'T00:00:00').toLocaleDateString('sk-SK') : '—'}
           </DetailRow>
-          {t.duration_min !== null && (
+          {!pokyn && t.duration_min !== null && (
             <DetailRow icon={<Clock className="size-4" />} label="Dĺžka">
               {t.duration_min} min
             </DetailRow>
           )}
-          <DetailRow icon={<User className="size-4" />} label="Školiteľ">
+          <DetailRow icon={<User className="size-4" />} label={pokyn ? 'Vypracoval' : 'Školiteľ'}>
             {t.trainer_name ?? <span className="text-ink-400 italic">— nenastavené —</span>}
             {t.trainer_certification_number && (
               <span className="ml-2 text-xs text-ink-500">{t.trainer_certification_number}</span>
@@ -263,72 +275,90 @@ export function TrainingDetailPage() {
         </dl>
       </Card>
 
-      <section>
-        <header className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-500">
-            Účastníci ({trainees.length})
-          </h2>
-          {isDraft && !showAddForm && !isReadOnly && (
-            <button
-              type="button"
-              onClick={() => setShowAddForm(true)}
-              className="inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
-            >
-              <Plus className="size-3.5" />
-              Pridať účastníka
-            </button>
-          )}
-        </header>
-
-        {showAddForm && !isReadOnly && (
-          <AddTraineeForm
-            onCancel={() => setShowAddForm(false)}
-            onSubmit={handleAdd}
-            submitting={adding}
+      {pokyn ? (
+        <section>
+          <header className="mb-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-500">
+              Text pokynu
+            </h2>
+          </header>
+          <PokynSectionsEditor
+            trainingId={id}
+            fields={t.fields}
+            companyApprover={t.company_approver}
+            csrfToken={csrfToken}
+            editable={isDraft && !isReadOnly}
+            onSaved={refreshDetail}
           />
-        )}
+        </section>
+      ) : (
+        <section>
+          <header className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-500">
+              Účastníci ({trainees.length})
+            </h2>
+            {isDraft && !showAddForm && !isReadOnly && (
+              <button
+                type="button"
+                onClick={() => setShowAddForm(true)}
+                className="inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+              >
+                <Plus className="size-3.5" />
+                Pridať účastníka
+              </button>
+            )}
+          </header>
 
-        {error && data && (
-          <Card className="mb-2 px-3 py-2 text-sm text-status-bad">{error}</Card>
-        )}
+          {showAddForm && !isReadOnly && (
+            <AddTraineeForm
+              onCancel={() => setShowAddForm(false)}
+              onSubmit={handleAdd}
+              submitting={adding}
+            />
+          )}
 
-        {trainees.length === 0 ? (
-          !showAddForm && (
-            <Card className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-              <div className="grid size-12 place-items-center rounded-2xl bg-firol-50 text-firol-500">
-                <Users className="size-5" />
-              </div>
-              <p className="text-sm text-ink-700">Zatiaľ žiadny účastník.</p>
-              <p className="max-w-xs text-xs text-ink-500">
-                Po pridaní prvého účastníka uvidíš tu jeho podpis a v ďalšom kroku vznikne PDF protokol.
-              </p>
-            </Card>
-          )
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {trainees.map((tr, idx) => (
-              <li key={tr.id}>
-                <TraineeRow
-                  index={idx + 1}
-                  trainee={tr}
-                  canEdit={isDraft && !isReadOnly}
-                  deleting={deletingId === tr.id}
-                  onDelete={() => handleDelete(tr.id)}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+          {error && data && (
+            <Card className="mb-2 px-3 py-2 text-sm text-status-bad">{error}</Card>
+          )}
+
+          {trainees.length === 0 ? (
+            !showAddForm && (
+              <Card className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+                <div className="grid size-12 place-items-center rounded-2xl bg-firol-50 text-firol-500">
+                  <Users className="size-5" />
+                </div>
+                <p className="text-sm text-ink-700">Zatiaľ žiadny účastník.</p>
+                <p className="max-w-xs text-xs text-ink-500">
+                  Po pridaní prvého účastníka uvidíš tu jeho podpis a v ďalšom kroku vznikne PDF protokol.
+                </p>
+              </Card>
+            )
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {trainees.map((tr, idx) => (
+                <li key={tr.id}>
+                  <TraineeRow
+                    index={idx + 1}
+                    trainee={tr}
+                    canEdit={isDraft && !isReadOnly}
+                    deleting={deletingId === tr.id}
+                    onDelete={() => handleDelete(tr.id)}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       <DocumentsBlock
         documents={documents}
         canGenerate={
           !isReadOnly &&
           isDraft &&
-          trainees.length > 0 &&
           !!t.date &&
-          t.trainer_id !== null
+          t.trainer_id !== null &&
+          (pokyn ? (t.fields?.sections.length ?? 0) > 0 : trainees.length > 0)
         }
         canGenerateHint={cannotGenerateHint(t, trainees, isDraft)}
         generating={generating}
@@ -336,6 +366,7 @@ export function TrainingDetailPage() {
         finalized={!isDraft}
         isReadOnly={isReadOnly}
         pdfError={pdfError}
+        pokyn={pokyn}
       />
     </div>
   );
@@ -347,6 +378,12 @@ function cannotGenerateHint(
   isDraft: boolean,
 ): string | null {
   if (!isDraft) return null;
+  if (isPokyn(t.type)) {
+    if (!t.date) return 'Doplň dátum vydania pokynu.';
+    if (t.trainer_id === null) return 'Priraď technika, ktorý pokyn vypracoval.';
+    if ((t.fields?.sections.length ?? 0) === 0) return 'Ulož text pokynu.';
+    return null;
+  }
   if (!t.date) return 'Doplň dátum školenia.';
   if (t.trainer_id === null) return 'Priraď školiteľa zo zoznamu technikov.';
   if (trainees.length === 0) return 'Pridaj aspoň jedného účastníka.';
@@ -362,6 +399,7 @@ function DocumentsBlock({
   finalized,
   isReadOnly,
   pdfError,
+  pokyn,
 }: {
   documents: TrainingDocument[];
   canGenerate: boolean;
@@ -371,6 +409,7 @@ function DocumentsBlock({
   finalized: boolean;
   isReadOnly: boolean;
   pdfError?: string | null;
+  pokyn: boolean;
 }) {
   if (documents.length === 0) {
     if (isReadOnly) return null;
@@ -379,10 +418,14 @@ function DocumentsBlock({
         <div className="grid size-11 place-items-center rounded-2xl bg-firol-50 text-firol-500">
           <FileText className="size-5" />
         </div>
-        <h2 className="text-sm font-semibold text-ink-900">PDF protokol</h2>
+        <h2 className="text-sm font-semibold text-ink-900">
+          {pokyn ? 'PDF dokument' : 'PDF protokol'}
+        </h2>
         <p className="max-w-sm text-xs text-ink-500">
           {canGenerate
-            ? 'Po vygenerovaní sa školenie uzamkne a dostane svoje číslo (napr. SKO-2026-001).'
+            ? (pokyn
+              ? 'Po vygenerovaní sa pokyn uzamkne a dostane svoje číslo (napr. ZAT-2026-001).'
+              : 'Po vygenerovaní sa školenie uzamkne a dostane svoje číslo (napr. SKO-2026-001).')
             : (canGenerateHint ?? 'Pre vygenerovanie sú potrebné všetky údaje.')}
         </p>
         <Button
@@ -394,7 +437,7 @@ function DocumentsBlock({
           leftIcon={<FileText className="size-4" />}
           className="bg-status-bad hover:brightness-110"
         >
-          Generovať PDF protokol
+          {pokyn ? 'Generovať PDF pokyn' : 'Generovať PDF protokol'}
         </Button>
         {pdfError && (
           <p className="text-xs text-status-bad">{pdfError}</p>
@@ -410,10 +453,14 @@ function DocumentsBlock({
           <FileText className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-ink-900">PDF protokoly</h3>
+          <h3 className="text-sm font-semibold text-ink-900">
+            {pokyn ? 'PDF dokumenty' : 'PDF protokoly'}
+          </h3>
           <p className="text-xs text-ink-500">
             {finalized
-              ? 'Školenie je uzamknuté. Účastníkov a podpisy už nemožno meniť.'
+              ? (pokyn
+                ? 'Pokyn je uzamknutý. Jeho text už nemožno meniť.'
+                : 'Školenie je uzamknuté. Účastníkov a podpisy už nemožno meniť.')
               : `Vygenerované ${documents.length} ${documents.length === 1 ? 'protokol' : 'protokoly'}.`}
           </p>
         </div>
