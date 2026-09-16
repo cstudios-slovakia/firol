@@ -251,6 +251,12 @@ export function Select({
   }
 
   function onSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    // The input lives inside the <ul>, so every keydown bubbles to
+    // onListKeyDown too. Stop it here — the list's typeahead/space/select
+    // handling would otherwise fire on top of normal typing (e.g. space
+    // would commit the active option and close the dropdown instead of
+    // being typed into the search query).
+    e.stopPropagation();
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       moveActive(1);
