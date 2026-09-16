@@ -149,10 +149,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   useEffect(() => {
-    const handler = () => apply(null);
-    window.addEventListener('firol:unauthorized', handler);
-    return () => window.removeEventListener('firol:unauthorized', handler);
-  }, [apply]);
+    // The api layer fires this once it has established the session is gone
+    // for good (and has parked any interrupted write as a draft).
+    const lost = () => apply(null);
+    // ...and this when it silently renewed the CSRF token mid-session, so our
+    // snapshot stops handing out the stale one.
+    const refreshed = () => { refresh().catch(() => undefined); };
+    window.addEventListener('firol:unauthorized', lost);
+    window.addEventListener('firol:session-refreshed', refreshed);
+    return () => {
+      window.removeEventListener('firol:unauthorized', lost);
+      window.removeEventListener('firol:session-refreshed', refreshed);
+    };
+  }, [apply, refresh]);
 
   const login = useCallback(
     async (email: string, password: string, remember = false) => {

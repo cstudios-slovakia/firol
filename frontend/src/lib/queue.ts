@@ -17,7 +17,7 @@
  */
 import { db, cacheKey, type MutationEntry, type SerializedFormData, type SerializedBlob } from './db';
 import { getActiveAccountId, getCsrfToken } from './session';
-import { refreshAfterMutation } from './api';
+import { refreshAfterMutation, resyncSession, CSRF_INVALID } from './api';
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -118,8 +118,14 @@ export async function drainQueue(): Promise<DrainResult> {
   return result;
 }
 
-/** Replays one mutation and reports how it went (see ReplayOutcome). */
-async function replay(m: MutationEntry): Promise<ReplayOutcome> {
+/**
+ * Replays one mutation and reports how it went (see ReplayOutcome).
+ *
+ * `csrfRetried` guards the one re-sync-and-replay we allow when the server
+ * rejects our CSRF token: the drain runs long after the mutation was queued,
+ * so the session may well have been renewed in between.
+ */
+async function replay(m: MutationEntry, csrfRetried = false): Promise<ReplayOutcome> {
   await db.mutations.update(m.id!, { status: 'syncing' });
   try {
     const headers: Record<string, string> = {};
@@ -154,6 +160,20 @@ async function replay(m: MutationEntry): Promise<ReplayOutcome> {
         parsed && typeof parsed === 'object' && parsed && 'error' in parsed
           ? String((parsed as { error: unknown }).error)
           : `HTTP ${res.status}`;
+      const code =
+        parsed && typeof parsed === 'object' && parsed && 'code' in parsed
+          ? String((parsed as { code: unknown }).code)
+          : null;
+
+      // Stale page token, not a bad mutation — pick up the current one and
+      // replay rather than parking perfectly good work as "failed".
+      if (res.status === 403 && code === CSRF_INVALID && !csrfRetried) {
+        const fresh = await resyncSession();
+        if (fresh) return replay(m, true);
+        // No session behind it either — keep it pending for the next login.
+        await db.mutations.update(m.id!, { status: 'pending', lastStatus: 403 });
+        return 'stop-auth';
+      }
       // 4xx → permanent failure, parked for user retry/discard.
       // 5xx → also park (likely server bug; auto-retry won't help).
       await db.mutations.update(m.id!, {

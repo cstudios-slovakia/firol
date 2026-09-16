@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from '@/auth/AuthContext';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { SessionExpiredNotice } from '@/components/SessionExpiredNotice';
 import { ToastProvider } from '@/lib/toast';
 import { ConfirmProvider } from '@/lib/confirm';
 import { initPwa } from '@/lib/pwa';
@@ -17,6 +18,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
       <BrowserRouter>
         <AuthProvider>
           <ToastProvider>
+            <SessionExpiredNotice />
             <ConfirmProvider>
               <App />
             </ConfirmProvider>

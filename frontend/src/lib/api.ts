@@ -17,11 +17,20 @@
  *   (creating new top-level entities, PDF generation, auth, billing)
  *   rethrow the original network error so the UI shows "vyžaduje pripojenie".
  *
- * Throws ApiError on non-2xx so callers can branch on `.status`.
+ * Session handling (see SESSION_EXPIRED / CSRF_INVALID below):
+ * - 403 `csrf_invalid` — the page's CSRF token went stale (the server
+ *   renewed the session from the "remember me" cookie). Recovered silently:
+ *   re-sync the token from /api/me and replay the request once.
+ * - 401 `session_expired` — the login is really gone. Any in-flight
+ *   mutation is parked in the outbox as a draft first, so the technician's
+ *   half-written inspection survives, and only then is the app signed out.
+ *
+ * Throws ApiError on non-2xx so callers can branch on `.status` / `.code`.
  */
 import { readCache, writeCache, cachedPathsUnder } from './cache';
 import { enqueueMutation, OfflineQueuedError } from './queue';
 import { autoOptimistic } from './offlineEntities';
+import { getCsrfToken, setCsrfToken } from './session';
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -62,11 +71,37 @@ export function buildUrl(path: string): string {
 
 export { OfflineQueuedError } from './queue';
 
+/** Machine codes the backend attaches to session/CSRF rejections. */
+export const SESSION_EXPIRED = 'session_expired';
+export const NO_ACCOUNT = 'no_active_account';
+export const CSRF_INVALID = 'csrf_invalid';
+
+/** Shown when the session is gone for good and re-login is the only way on. */
+export const SESSION_EXPIRED_MESSAGE = 'Prihlásenie vypršalo, prihláste sa znova.';
+
+/** `detail` of the `firol:unauthorized` event. */
+export type UnauthorizedDetail = {
+  /** Slovak, safe to show as-is. */
+  message: string;
+  /** True when the interrupted write was parked in the outbox as a draft. */
+  draftSaved: boolean;
+  /**
+   * False when we were never signed in to begin with — a 401 on the first
+   * /api/me of a cold start just means "not logged in", and telling a visitor
+   * on the login screen that their session expired is nonsense. The app still
+   * needs the event to settle into the unauthed state; only the notice is
+   * suppressed.
+   */
+  announce: boolean;
+};
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
     public readonly body: unknown,
+    /** Backend `code` field, when present — e.g. `session_expired`. */
+    public readonly code: string | null = null,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -87,6 +122,11 @@ export type ApiOptions = {
    * instead of throwing, so the create flow can continue with a temp id.
    */
   optimistic?: OptimisticSpec;
+  /**
+   * Internal: set on the single replay that follows a CSRF re-sync, so a
+   * token the server keeps rejecting can't spin into a retry loop.
+   */
+  csrfRetry?: boolean;
 };
 
 export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {
@@ -126,38 +166,10 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
     // Endpoints that genuinely need the server (PDF, billing, …) bail out.
     if (opts.requireOnline) throw networkErr;
 
-    // An explicit optimistic spec (top-level create) or an auto-derived one
-    // (nested item/trainee write) lets us queue + reflect the change locally.
-    const optimistic = opts.optimistic ?? autoOptimistic(method as 'POST' | 'PATCH' | 'DELETE', path, opts.body);
-    if (optimistic) {
-      for (const patch of optimistic.patches ?? []) {
-        const current = await readCache(patch.path);
-        const next = patch.apply(current);
-        if (next !== undefined) await writeCache(patch.path, next);
-      }
-      const id = await enqueueMutation({
-        method: method as 'POST' | 'PATCH' | 'DELETE',
-        path,
-        body: opts.body,
-        label: opts.label ?? optimistic.label ?? `${method} ${path}`,
-        detail: optimistic.detail,
-        clientId: optimistic.create?.clientId,
-        idPath: optimistic.create?.idPath,
-      });
-      if (optimistic.returns !== undefined) return optimistic.returns as T;
-      throw new OfflineQueuedError(id);
-    }
-
-    if (isQueueable(method, path)) {
-      const id = await enqueueMutation({
-        method,
-        path,
-        body: opts.body,
-        label: opts.label ?? `${method} ${path}`,
-      });
-      throw new OfflineQueuedError(id);
-    }
-    throw networkErr;
+    const parked = await parkMutation(method, path, opts);
+    if (!parked.parked) throw networkErr;
+    if (parked.returns !== undefined) return parked.returns as T;
+    throw new OfflineQueuedError(parked.id);
   }
 
   if (res.status === 204) {
@@ -174,10 +186,28 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
       parsed && typeof parsed === 'object' && 'error' in parsed
         ? String((parsed as { error: unknown }).error)
         : `HTTP ${res.status}`;
-    if (res.status === 401) {
-      window.dispatchEvent(new Event('firol:unauthorized'));
+    const code =
+      parsed && typeof parsed === 'object' && 'code' in parsed
+        ? String((parsed as { code: unknown }).code)
+        : null;
+
+    // Recoverable: the session outlived the token the page is holding (it
+    // was renewed from the "remember me" cookie while the tab sat open).
+    // Fetch the current token and replay once — the user sees nothing.
+    if (res.status === 403 && code === CSRF_INVALID && !opts.csrfRetry) {
+      const fresh = await resyncSession();
+      if (fresh) {
+        return api<T>(path, { ...opts, csrfToken: fresh, csrfRetry: true });
+      }
+      // /api/me says we're logged out too — fall through to the sign-out path.
+      return signOutPreservingWork<T>(method, path, opts, SESSION_EXPIRED_MESSAGE);
     }
-    throw new ApiError(res.status, message, parsed);
+
+    if (isSessionLoss(res.status, code, path)) {
+      return signOutPreservingWork<T>(method, path, opts, message || SESSION_EXPIRED_MESSAGE);
+    }
+
+    throw new ApiError(res.status, message, parsed, code);
   }
 
   if (method === 'GET') {
@@ -190,6 +220,151 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
   }
 
   return parsed as T;
+}
+
+// --- session recovery ----------------------------------------------------
+
+/**
+ * Is this a "your login is gone" answer, as opposed to any other 4xx?
+ *
+ * The code is authoritative when the backend sends one. The path check is the
+ * fallback for a bare 401: without it a wrong password on the login form would
+ * read as an expired session and toast "prihláste sa znova" at someone who is
+ * already on the login screen.
+ */
+function isSessionLoss(status: number, code: string | null, path: string): boolean {
+  if (code === SESSION_EXPIRED || code === NO_ACCOUNT) return true;
+  return status === 401 && !path.startsWith('/api/auth/');
+}
+
+let resyncInFlight: Promise<string | null> | null = null;
+
+/**
+ * Pull the current CSRF token off /api/me and adopt it.
+ *
+ * Shared across concurrent callers: a screen that fires several writes at once
+ * would otherwise re-sync once per request. Returns null when /api/me itself
+ * is unauthenticated — i.e. the session really is gone, not just the token.
+ *
+ * Exported for the mutation-queue drain, which fetches directly (it needs to
+ * replay a serialised request) and so can't reuse api()'s own recovery.
+ */
+export async function resyncSession(): Promise<string | null> {
+  if (resyncInFlight) return resyncInFlight;
+
+  // Cleared inside the chain rather than by each awaiting caller, so a
+  // second wave of failures can start its own re-sync the moment this one
+  // settles — and can't have its promise cleared out from under it.
+  const run: Promise<string | null> = (async (): Promise<string | null> => {
+    try {
+      const res = await fetch(buildUrl('/api/me'), { credentials: 'include' });
+      if (!res.ok) return null;
+      const snapshot = (await res.json()) as { csrfToken?: unknown };
+      const token = typeof snapshot.csrfToken === 'string' ? snapshot.csrfToken : null;
+      if (!token) return null;
+      // Update the low-level holder the mutation queue reads, and tell
+      // AuthContext to re-read the snapshot — most callers pass the token
+      // down from there, so leaving it stale would re-break the next write.
+      setCsrfToken(token);
+      window.dispatchEvent(new Event('firol:session-refreshed'));
+      return token;
+    } catch {
+      return null; // offline mid-recovery — nothing to adopt
+    }
+  })().finally(() => {
+    resyncInFlight = null;
+  });
+
+  resyncInFlight = run;
+  return run;
+}
+
+/**
+ * The session is gone and can't be recovered. Before the app drops to the
+ * login screen, park whatever the user was writing in the mutation outbox so
+ * it replays once they sign back in (AuthContext drains the queue on every
+ * successful auth) — an inspection half-entered in the field must not be lost
+ * because the login timed out.
+ */
+async function signOutPreservingWork<T>(
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  path: string,
+  opts: ApiOptions,
+  message: string,
+): Promise<T> {
+  const parked =
+    method === 'GET' || opts.requireOnline
+      ? ({ parked: false } as const)
+      : await parkMutation(method, path, opts);
+
+  const detail: UnauthorizedDetail = {
+    message,
+    draftSaved: parked.parked,
+    announce: getCsrfToken() !== null,
+  };
+  window.dispatchEvent(new CustomEvent('firol:unauthorized', { detail }));
+
+  if (parked.parked) {
+    if (parked.returns !== undefined) return parked.returns as T;
+    throw new OfflineQueuedError(parked.id);
+  }
+  throw new ApiError(401, message, null, SESSION_EXPIRED);
+}
+
+type ParkResult =
+  | { parked: false }
+  | { parked: true; id: number; returns?: unknown };
+
+/**
+ * Append a mutation to the outbox and apply its optimistic cache patches, so
+ * the change is visible locally and replays on the next drain.
+ *
+ * Shared by the two situations where a write can't reach the server right now:
+ * the device is offline, and the session expired mid-edit. Returns
+ * `{ parked: false }` for requests that can't be replayed later — creating a
+ * new top-level entity whose id the caller needs immediately, PDF generation,
+ * billing — which the caller then surfaces as a plain error.
+ */
+async function parkMutation(
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  path: string,
+  opts: ApiOptions,
+): Promise<ParkResult> {
+  if (method === 'GET') return { parked: false };
+  const verb = method as 'POST' | 'PATCH' | 'DELETE';
+
+  // An explicit optimistic spec (top-level create) or an auto-derived one
+  // (nested item/trainee write) lets us queue + reflect the change locally.
+  const optimistic = opts.optimistic ?? autoOptimistic(verb, path, opts.body);
+  if (optimistic) {
+    for (const patch of optimistic.patches ?? []) {
+      const current = await readCache(patch.path);
+      const next = patch.apply(current);
+      if (next !== undefined) await writeCache(patch.path, next);
+    }
+    const id = await enqueueMutation({
+      method: verb,
+      path,
+      body: opts.body,
+      label: opts.label ?? optimistic.label ?? `${method} ${path}`,
+      detail: optimistic.detail,
+      clientId: optimistic.create?.clientId,
+      idPath: optimistic.create?.idPath,
+    });
+    return { parked: true, id, returns: optimistic.returns };
+  }
+
+  if (isQueueable(verb, path)) {
+    const id = await enqueueMutation({
+      method: verb,
+      path,
+      body: opts.body,
+      label: opts.label ?? `${method} ${path}`,
+    });
+    return { parked: true, id };
+  }
+
+  return { parked: false };
 }
 
 /**

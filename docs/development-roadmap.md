@@ -837,6 +837,54 @@ wired and waiting), and úlohy from a nedostatok's deadline (chapter 20, block 4
 
 ---
 
+## BOZP extension — block 0 „Opravy chýb" (POapp spec, september 2026) 🟡
+
+First delivery of the BOZP extension package
+(`POapp_BOZP_pre_vyvojarov11/`), which is handed over in blocks. Block 0 is
+chapter **A** — bugs in the current version, to be closed before any BOZP
+feature work starts. A.1 was closed earlier by the mail deliverability work;
+**A.3 (spacebar closing the search field) is still open.**
+
+### A.2 — „invalid token" ✅
+
+The report was one message with three unrelated causes behind it, which is why
+nobody could reproduce it. What the user saw was always the literal
+`Invalid CSRF token` from `Csrf::require`.
+
+- ✅ **Root cause: PHP's 24-minute idle timeout.** Shorter than a single
+  inspection. When the session was collected the CSRF token went with it, so
+  the *next save* — not the next page load — failed, which is what made the
+  trigger look random. `Session` now sets `gc_maxlifetime` to 12 hours and
+  slides the window by writing a throttled `last_seen`, because PHP's
+  `lazy_write` means a session that is only ever read still ages out.
+- ✅ **A token error is no longer reported for a session problem.**
+  `Csrf::require` checks whether there is a session at all before it looks at
+  the token: no session → **401 `session_expired`** with
+  „Prihlásenie vypršalo, prihláste sa znova."; session but stale token → **403
+  `csrf_invalid`**. `Tenant` returns the same 401 and the same sentence instead
+  of „Unauthorized" / „No active account".
+- ✅ **A stale token recovers silently.** A session renewed mid-visit from the
+  „remember me" cookie mints a fresh CSRF token that a long-open tab knows
+  nothing about. On 403 `csrf_invalid` the api layer re-syncs from `/api/me`
+  and replays the request once (de-duplicated across concurrent calls, one
+  retry only). The user sees nothing. The mutation-queue drain does the same,
+  so a queued write isn't parked as „failed" over a token that merely moved on.
+- ✅ **Unsaved work survives the expiry.** On an unrecoverable 401 the
+  interrupted write is pushed into the existing offline outbox before the app
+  signs out, with its optimistic cache patches applied — so it shows as a
+  concept and replays on the next login (`AuthContext` already drains on auth).
+  Requests that can't be replayed later (PDF generation, billing) are excluded.
+- ✅ **Every rejection is logged.** `AuthFailure` writes one grep-able
+  `[auth-failure]` line naming the code, the action (method + path), user,
+  account and the concrete cause — which is what the acceptance criteria ask
+  for and what made the original reports undiagnosable.
+
+**Cause 3 from the spec (invalid external-service key) needed no work:** Stripe
+and mail failures are already caught and answered in Slovak with their own log
+line; they never surfaced as a token error.
+
+---
+
 ## Open questions (must be answered before the relevant phase starts)
 - **Company entity:** base doc says only "name, IČO, address, contact".
   Proposed full set (need confirmation):
