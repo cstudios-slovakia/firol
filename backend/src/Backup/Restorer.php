@@ -55,6 +55,7 @@ final class Restorer
         'trainings'   => 0,
         'trainees'    => 0,
         'documents'   => 0,
+        'audit_templates' => 0,
     ];
 
     /** @var array<string, int> */
@@ -64,6 +65,7 @@ final class Restorer
         'inspections' => 0,
         'trainings'   => 0,
         'documents'   => 0,
+        'audit_templates' => 0,
     ];
 
     /** @var list<string> */
@@ -171,6 +173,7 @@ final class Restorer
         $this->pdo->beginTransaction();
         try {
             $this->restoreCompanies($this->list($manifest, 'companies'));
+            $this->restoreAuditTemplates($this->list($manifest, 'audit_templates'));
             $this->restoreInspections($this->list($manifest, 'inspections'));
             $this->restoreTrainings($this->list($manifest, 'trainings'));
             $this->restoreDocuments($this->list($manifest, 'documents'));
@@ -309,6 +312,67 @@ final class Restorer
         return $months > 0 ? [$months, 'mesiac', 0] : [null, null, 0];
     }
 
+    /**
+     * Audit checklists. Matched by kind + name, because that is what the
+     * technician recognises them by; an existing one is left alone, in line
+     * with merge never overwriting.
+     *
+     * @param list<array<string, mixed>> $templates
+     */
+    private function restoreAuditTemplates(array $templates): void
+    {
+        if ($templates === []) {
+            return;
+        }
+
+        $existing = [];
+        $stmt = $this->pdo->prepare(
+            'SELECT id, kind, name FROM audit_templates WHERE account_id = ? AND archived_at IS NULL'
+        );
+        $stmt->execute([$this->accountId]);
+        foreach ($stmt->fetchAll() as $row) {
+            $existing[$row['kind'] . '|' . mb_strtolower((string) $row['name'])] = (int) $row['id'];
+        }
+
+        $insert = $this->pdo->prepare(
+            'INSERT INTO audit_templates (account_id, kind, name, is_custom, source_key, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+
+        foreach ($templates as $template) {
+            $kind = $this->str($template, 'kind');
+            $name = $this->str($template, 'name');
+            if ($kind === null || $name === null || !in_array($kind, ['bozp', 'opp'], true)) {
+                continue;
+            }
+            if (isset($existing[$kind . '|' . mb_strtolower($name)])) {
+                $this->skipped['audit_templates']++;
+                continue;
+            }
+
+            $insert->execute([
+                $this->accountId,
+                $kind,
+                $name,
+                (int) ($template['is_custom'] ?? 1),
+                $this->str($template, 'source_key'),
+                $this->createdAt($template, null),
+            ]);
+            $templateId = (int) $this->pdo->lastInsertId();
+
+            $sections = [];
+            foreach ($this->list($template, 'sections') as $section) {
+                $sections[] = [
+                    'code'  => (string) ($section['code'] ?? ''),
+                    'name'  => (string) ($section['name'] ?? ''),
+                    'items' => $this->list($section, 'items'),
+                ];
+            }
+            \Firol\Audit\AuditCatalog::writeSections($templateId, $sections, isCustom: true);
+            $this->restored['audit_templates']++;
+        }
+    }
+
     /** @param list<array<string, mixed>> $inspections */
     private function restoreInspections(array $inspections): void
     {
@@ -316,12 +380,12 @@ final class Restorer
 
         $insert = $this->pdo->prepare(
             'INSERT INTO inspections
-                (account_id, company_id, facility_id, type,
+                (account_id, company_id, facility_id, type, audit_scope,
                  periodicity_value, periodicity_unit, periodicity_is_custom,
                  is_preventive_inspection, executed_on, inspector_user_id,
                  effective_inspector_user_id, effective_cert_number,
                  status, notes, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insertItem = $this->pdo->prepare(
             'INSERT INTO inspection_items (inspection_id, position, fields, created_at)
@@ -361,6 +425,13 @@ final class Restorer
                 $companyId,
                 $facilityId,
                 $type,
+                // The rozsah decides which questions the audit asked, so it is
+                // the difference between a protocol headed „ročná previerka"
+                // and one headed „vstupný audit". Archives written before
+                // block 3 have none; those are not audits.
+                in_array($inspection['audit_scope'] ?? null, ['vstupny', 'rocny'], true)
+                    ? (string) $inspection['audit_scope']
+                    : null,
                 ...$this->periodicity($inspection),
                 (int) ($inspection['is_preventive_inspection'] ?? 1),
                 $executedOn,

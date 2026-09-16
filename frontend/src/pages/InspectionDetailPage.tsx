@@ -10,6 +10,7 @@ import {
   INSPECTION_TYPE_LABELS,
   Inspections,
   documentDownloadUrl,
+  isAuditType,
   periodicityOf,
   type InspectionDetail,
   type InspectionDocument,
@@ -25,6 +26,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 import { getTypeModule } from '@/inspection-types';
+import { AuditSummaryBlock } from '@/components/AuditSummaryBlock';
 import { clearDuplicateSeed } from '@/inspection-types/duplicateSeed';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { ItemPhotoStrip } from '@/components/ItemPhotos';
@@ -331,6 +333,10 @@ export function InspectionDetailPage() {
   const { inspection: i, items } = data;
   const isDraft = i.status === 'draft';
   const module = getTypeModule(i.type);
+  // An audit shows its sections and findings instead of a list of devices —
+  // 109 checklist rows on the summary screen would be a page of scrolling
+  // that tells the technician nothing (block 3 / chapter 15).
+  const isAudit = isAuditType(i.type);
   const photoCount = items.reduce((n, it) => n + (it.photos?.length ?? 0), 0);
 
   return (
@@ -591,7 +597,9 @@ export function InspectionDetailPage() {
         />
       )}
 
-      {items.length === 0 ? (
+      {isAudit ? (
+        <AuditSummaryBlock inspectionId={id} canEdit={isDraft} />
+      ) : items.length === 0 ? (
         <EmptyItems inspectionId={id} disabled={!isDraft} />
       ) : (
         <Card className="overflow-hidden">

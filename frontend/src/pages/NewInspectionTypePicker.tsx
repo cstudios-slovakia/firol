@@ -1,7 +1,7 @@
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, Ban, BookOpen, ChevronRight, DoorClosed, Droplets, Flame,
-  Gauge, Lightbulb, ShieldCheck, Wrench,
+  ArrowLeft, Ban, BookOpen, ChevronRight, ClipboardCheck, DoorClosed, Droplets,
+  Flame, Gauge, HardHat, Lightbulb, ShieldCheck, Wrench,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -103,6 +103,22 @@ const TYPES: TypeMeta[] = [
     description: 'Protokol o vyradení hasiacich prístrojov z používania.',
     intervalLabel: 'podľa potreby',
     icon: <Ban className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'audit_opp',
+    shortLabel: 'Audit OPP',
+    description: 'Previerka stavu ochrany pred požiarmi podľa kontrolného listu.',
+    intervalLabel: '12 mes.',
+    icon: <ClipboardCheck className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'audit_bozp',
+    shortLabel: 'Audit BOZP',
+    description: 'Previerka stavu BOZP podľa kontrolného listu.',
+    intervalLabel: '12 mes.',
+    icon: <HardHat className="size-5" />,
     enabled: true,
   },
 ];

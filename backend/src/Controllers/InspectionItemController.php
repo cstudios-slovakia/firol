@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Audit\AuditCatalog;
+use Firol\Audit\AuditItems;
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
@@ -85,7 +87,7 @@ final class InspectionItemController
             }
         }
 
-        $fields = self::validateFields($inspection['type'], $req->json());
+        $fields = self::validateFields($inspection['type'], $req->json(), null);
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
@@ -128,7 +130,12 @@ final class InspectionItemController
 
         self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
-        $fields = self::validateFields($inspection['type'], $req->json());
+        // An audit item answers a question that is already stored on the row;
+        // the PATCH carries the answer only, never the question.
+        $stored = AuditCatalog::isAuditType((string) $inspection['type'])
+            ? (self::loadItem($itemId)['fields'] ?? [])
+            : null;
+        $fields = self::validateFields($inspection['type'], $req->json(), $stored);
 
         Db::pdo()->prepare(
             'UPDATE inspection_items SET fields = ? WHERE id = ? AND inspection_id = ?'
@@ -193,8 +200,11 @@ final class InspectionItemController
      * @param array<string, mixed> $body
      * @return array<string, mixed>
      */
-    private static function validateFields(string $type, array $body): array
+    private static function validateFields(string $type, array $body, ?array $stored = null): array
     {
+        if (AuditCatalog::isAuditType($type)) {
+            return self::validateAuditFields($body, $stored);
+        }
         return match ($type) {
             'php'                => self::validatePhpFields($body),
             'hydranty'           => self::validateHydrantyFields($body),
@@ -207,6 +217,31 @@ final class InspectionItemController
             'vyradenie'          => self::validateVyradenieFields($body),
             default => self::failValidation("Items for type '$type' are not supported yet."),
         };
+    }
+
+    /**
+     * Audit items (block 3 / chapter 15).
+     *
+     * On an update, `$stored` holds the question — its wording, its legal
+     * basis, its section — and only the evaluation comes off the wire. On an
+     * insert there is no stored question, so this is the technician adding one
+     * of their own to a running audit.
+     *
+     * @param array<string, mixed> $body
+     * @param array<string, mixed>|null $stored
+     * @return array<string, mixed>
+     */
+    private static function validateAuditFields(array $body, ?array $stored): array
+    {
+        try {
+            if ($stored === null || $stored === []) {
+                $fresh = AuditItems::customFromBody($body, (int) ($body['section_position'] ?? 999));
+                return AuditItems::applyAnswer($fresh, $body);
+            }
+            return AuditItems::applyAnswer($stored, $body);
+        } catch (\InvalidArgumentException $e) {
+            self::failValidation($e->getMessage());
+        }
     }
 
     /**

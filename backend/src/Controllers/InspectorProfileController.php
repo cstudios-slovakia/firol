@@ -46,12 +46,17 @@ final class InspectorProfileController
         $certPhp        = $req->jsonString('cert_php');
         $certOprava      = $req->jsonString('cert_oprava');
         $certGeneral     = $req->jsonString('cert_general');
+        // Block 3 — bezpečnostný technik. Personal, like the three above, and
+        // the number the audit BOZP prints (chapter 26).
+        $certBt          = $req->jsonString('cert_bt');
         $validFromPhp   = $req->jsonString('valid_from_php');
         $validToPhp     = $req->jsonString('valid_to_php');
         $validFromOprava = $req->jsonString('valid_from_oprava');
         $validToOprava   = $req->jsonString('valid_to_oprava');
         $validFromGeneral = $req->jsonString('valid_from_general');
         $validToGeneral  = $req->jsonString('valid_to_general');
+        $validFromBt     = $req->jsonString('valid_from_bt');
+        $validToBt       = $req->jsonString('valid_to_bt');
         $isActiveRaw     = $req->json()['is_active'] ?? null;
 
         foreach ([
@@ -61,6 +66,8 @@ final class InspectorProfileController
             'valid_to_oprava'    => $validToOprava,
             'valid_from_general' => $validFromGeneral,
             'valid_to_general'   => $validToGeneral,
+            'valid_from_bt'      => $validFromBt,
+            'valid_to_bt'        => $validToBt,
         ] as $field => $val) {
             if ($val !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $val)) {
                 Response::error("Invalid {$field} (expected YYYY-MM-DD)", 422);
@@ -70,6 +77,7 @@ final class InspectorProfileController
             ['valid_from_php',    $validFromPhp,   'valid_to_php',    $validToPhp],
             ['valid_from_oprava',  $validFromOprava,  'valid_to_oprava',  $validToOprava],
             ['valid_from_general', $validFromGeneral, 'valid_to_general', $validToGeneral],
+            ['valid_from_bt',      $validFromBt,      'valid_to_bt',      $validToBt],
         ] as [$fk, $fv, $tk, $tv]) {
             if ($fv !== null && $tv !== null && $tv < $fv) {
                 Response::error("{$tk} must be on or after {$fk}", 422);
@@ -83,24 +91,30 @@ final class InspectorProfileController
              SET    cert_php        = ?,
                     cert_oprava      = ?,
                     cert_general     = ?,
+                    cert_bt          = ?,
                     valid_from_php    = ?,
                     valid_to_php      = ?,
                     valid_from_oprava  = ?,
                     valid_to_oprava    = ?,
                     valid_from_general = ?,
                     valid_to_general   = ?,
+                    valid_from_bt      = ?,
+                    valid_to_bt        = ?,
                     is_active          = COALESCE(?, is_active)
              WHERE  user_id = ? AND account_id = ?'
         )->execute([
             $certPhp,
             $certOprava,
             $certGeneral,
+            $certBt,
             $validFromPhp,
             $validToPhp,
             $validFromOprava,
             $validToOprava,
             $validFromGeneral,
             $validToGeneral,
+            $validFromBt,
+            $validToBt,
             $isActive,
             $userId,
             $accountId,
@@ -185,10 +199,11 @@ final class InspectorProfileController
     private static function loadOrCreate(int $userId, int $accountId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT signature_path, cert_php, cert_oprava, cert_general,
+            'SELECT signature_path, cert_php, cert_oprava, cert_general, cert_bt,
                     valid_from_php, valid_to_php,
                     valid_from_oprava, valid_to_oprava,
                     valid_from_general, valid_to_general,
+                    valid_from_bt, valid_to_bt,
                     valid_from, valid_to,
                     is_active
              FROM   inspector_profiles
@@ -212,12 +227,15 @@ final class InspectorProfileController
             'cert_php'        => null,
             'cert_oprava'      => null,
             'cert_general'     => null,
+            'cert_bt'          => null,
             'valid_from_php'    => null,
             'valid_to_php'      => null,
             'valid_from_oprava'  => null,
             'valid_to_oprava'    => null,
             'valid_from_general' => null,
             'valid_to_general'   => null,
+            'valid_from_bt'      => null,
+            'valid_to_bt'        => null,
             'valid_from'       => null,
             'valid_to'         => null,
             'is_active'        => 1,
@@ -238,12 +256,15 @@ final class InspectorProfileController
             'cert_php'          => $row['cert_php'] ?? null,
             'cert_oprava'        => $row['cert_oprava'] ?? null,
             'cert_general'       => $row['cert_general'] ?? null,
+            'cert_bt'            => $row['cert_bt'] ?? null,
             'valid_from_php'    => $row['valid_from_php'] ?? null,
             'valid_to_php'      => $row['valid_to_php'] ?? null,
             'valid_from_oprava'  => $row['valid_from_oprava'] ?? null,
             'valid_to_oprava'    => $row['valid_to_oprava'] ?? null,
             'valid_from_general' => $row['valid_from_general'] ?? null,
             'valid_to_general'   => $row['valid_to_general'] ?? null,
+            'valid_from_bt'      => $row['valid_from_bt'] ?? null,
+            'valid_to_bt'        => $row['valid_to_bt'] ?? null,
             'is_active'          => (int) ($row['is_active'] ?? 1) === 1,
         ];
     }

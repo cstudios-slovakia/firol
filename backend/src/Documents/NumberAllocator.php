@@ -40,6 +40,11 @@ final class NumberAllocator
         // document (grey, SPOLOČNÉ) with its own series, because it is issued
         // per visit rather than per úkon.
         'potvrdenie_prace'   => 'POT',
+        // Block 3 / chapter 15 — audits. Two separate series: the BOZP audit
+        // is AUD, the OPP one AUD-PO, because a client with both gets two
+        // documents a year and they must not share a numbering line.
+        'audit_bozp'         => 'AUD',
+        'audit_opp'          => 'AUD-PO',
         // Trainings: per spec, all 6 attendance-based training types share
         // the SKO prefix and a single per-account+year sequence. The training
         // type itself is stored in the body, not encoded in the number.

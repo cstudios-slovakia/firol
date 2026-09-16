@@ -1,0 +1,445 @@
+{
+  "typ": "opp",
+  "nazov": "Audit ochrany pred požiarmi",
+  "pravny_zaklad": "§ 4 z. 314/2001, § 31 vyhl. 121/2002",
+  "je_vlastna": false,
+  "poznamka": "Predvolená šablóna. Technik MUSÍ vedieť položku prepísať, zmazať, pridať vlastnú aj celú sekciu a zmeniť poradie. Audit si pri vytvorení uloží kópiu použitej šablóny.",
+  "rozsah_vysvetlenie": {
+    "V": "len vstupný audit",
+    "R": "len ročná previerka",
+    "VR": "oba"
+  },
+  "pocet_sekcii": 9,
+  "pocet_poloziek": 75,
+  "sekcie": [
+    {
+      "kod": "A",
+      "nazov": "Dokumentácia ochrany pred požiarmi",
+      "polozky": [
+        {
+          "text": "Požiarna identifikačná karta — vypracovaná pre každú prevádzkareň",
+          "pravny_zaklad": "§ 24 ods. 1 písm. a), § 25 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Požiarny poriadok pracoviska — pre pracoviská so zvýšeným nebezpečenstvom",
+          "pravny_zaklad": "§ 24 ods. 1 písm. b), § 26 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Požiarne poplachové smernice — vypracované a vyvesené",
+          "pravny_zaklad": "§ 24 ods. 1 písm. c), § 27 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Požiarny evakuačný plán — textová aj grafická časť",
+          "pravny_zaklad": "§ 24 ods. 1 písm. d), § 28 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Požiarna kniha — vedená a aktuálna",
+          "pravny_zaklad": "§ 24 ods. 1 písm. e), § 29 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Analýza nebezpečenstva vzniku požiaru — ak ju uložilo krajské riaditeľstvo",
+          "pravny_zaklad": "§ 24 ods. 1 písm. f) vyhl. 121/2002, § 5 písm. g) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Doklady o kontrole požiarnych zariadení",
+          "pravny_zaklad": "§ 24 ods. 1 písm. g) vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Údaje o požiaroch, príčinách a vykonaných opatreniach",
+          "pravny_zaklad": "§ 24 ods. 1 písm. h) vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Dokumentácia o školení zamestnancov o ochrane pred požiarmi",
+          "pravny_zaklad": "§ 24 ods. 1 písm. i), § 30 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Dokumentácia o odbornej príprave protipožiarnych hliadok",
+          "pravny_zaklad": "§ 24 ods. 1 písm. j), § 30 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Dokumentácia o činnosti hasičskej jednotky — ak je zriadená",
+          "pravny_zaklad": "§ 24 ods. 1 písm. k) vyhl. 121/2002",
+          "rozsah": "V"
+        },
+        {
+          "text": "Riešenie protipožiarnej bezpečnosti stavby v projektovej dokumentácii",
+          "pravny_zaklad": "§ 24 ods. 1 písm. l) vyhl. 121/2002",
+          "rozsah": "V"
+        },
+        {
+          "text": "Dokumentácia vedená v písomnej forme a uložená na dostupnom mieste",
+          "pravny_zaklad": "§ 24 ods. 3, § 31 ods. 2 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Dokumentácia obsahuje meno, priezvisko, podpis a dátum vyhotovenia technikom",
+          "pravny_zaklad": "§ 31 ods. 4 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Vykonaná kontrola dokumentácie za posledných 12 mesiacov",
+          "pravny_zaklad": "§ 31 ods. 3 vyhl. 121/2002",
+          "rozsah": "R"
+        },
+        {
+          "text": "Dokumentácia upravená po organizačnej alebo inej zmene",
+          "pravny_zaklad": "§ 31 ods. 3 vyhl. 121/2002",
+          "rozsah": "R"
+        }
+      ]
+    },
+    {
+      "kod": "B",
+      "nazov": "Zabezpečenie ochrany pred požiarmi",
+      "polozky": [
+        {
+          "text": "Zabezpečená osoba s odbornou spôsobilosťou — technik alebo špecialista PO",
+          "pravny_zaklad": "§ 4 písm. p), § 9 z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Platné osvedčenie technika PO vrátane aktualizačnej odbornej prípravy",
+          "pravny_zaklad": "§ 11 ods. 5 z. 314/2001, § 33 ods. 3 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Určená osoba zodpovedná za ochranu pred požiarmi",
+          "pravny_zaklad": "§ 6 ods. 1 z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Vymedzené zabezpečenie ochrany pred požiarmi v mimopracovnom čase",
+          "pravny_zaklad": "§ 4 písm. d) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zmluvné vymedzenie povinností pri prenájme priestorov",
+          "pravny_zaklad": "§ 6 ods. 2 z. 314/2001",
+          "rozsah": "V"
+        },
+        {
+          "text": "Splnené opatrenia uložené štátnym požiarnym dozorom alebo obcou",
+          "pravny_zaklad": "§ 4 písm. h) z. 314/2001",
+          "rozsah": "VR"
+        }
+      ]
+    },
+    {
+      "kod": "C",
+      "nazov": "Preventívne protipožiarne prehliadky",
+      "polozky": [
+        {
+          "text": "Prehliadky vykonávané v ustanovených lehotách",
+          "pravny_zaklad": "§ 4 písm. a) z. 314/2001, § 14 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Rozsah prehliadok zodpovedá § 13 vyhlášky",
+          "pravny_zaklad": "§ 13 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zistené nedostatky zaznamenané v požiarnej knihe s termínom odstránenia",
+          "pravny_zaklad": "§ 29 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Odstránenie nedostatkov z predchádzajúcej prehliadky overené",
+          "pravny_zaklad": "§ 4 písm. a) z. 314/2001",
+          "rozsah": "R"
+        },
+        {
+          "text": "Požiarna kniha predložená štatutárnemu orgánu",
+          "pravny_zaklad": "§ 29 vyhl. 121/2002",
+          "rozsah": "R"
+        }
+      ]
+    },
+    {
+      "kod": "D",
+      "nazov": "Školenia a odborná príprava",
+      "polozky": [
+        {
+          "text": "Školenie vedúcich a ostatných zamestnancov — raz za 24 mesiacov",
+          "pravny_zaklad": "§ 21 ods. 1 písm. b) vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Školenie osôb zabezpečujúcich OPP v mimopracovnom čase — raz za 12 mesiacov",
+          "pravny_zaklad": "§ 21 ods. 1 písm. a) vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Overenie vedomostí písomným testom pri mimopracovnom čase",
+          "pravny_zaklad": "§ 21 ods. 2 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Školenie novoprijatých zamestnancov pred začatím práce",
+          "pravny_zaklad": "§ 22 ods. 1 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Oboznámenie osôb zdržujúcich sa v objektoch s vedomím prevádzkovateľa",
+          "pravny_zaklad": "§ 4 písm. e) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Odborná príprava protipožiarnej hliadky pracoviska — raz za 12 mesiacov",
+          "pravny_zaklad": "§ 23, § 20 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Odborná príprava protipožiarnej asistenčnej hliadky",
+          "pravny_zaklad": "§ 23 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Záznamy o školeniach — prezenčné listiny, obsah, dátumy, podpisy",
+          "pravny_zaklad": "§ 30 vyhl. 121/2002",
+          "rozsah": "VR"
+        }
+      ]
+    },
+    {
+      "kod": "E",
+      "nazov": "Protipožiarne hliadky a ohlasovňa požiarov",
+      "polozky": [
+        {
+          "text": "Zriadené protipožiarne hliadky v požadovanom rozsahu",
+          "pravny_zaklad": "§ 5 písm. h) z. 314/2001, § 18 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zloženie hliadok aktuálne a vyvesené",
+          "pravny_zaklad": "§ 31 ods. 3 vyhl. 121/2002",
+          "rozsah": "R"
+        },
+        {
+          "text": "Zriadený potrebný počet ohlasovní požiarov",
+          "pravny_zaklad": "§ 5 písm. f) z. 314/2001, § 15 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Ohlasovňa označená a vybavená podľa vyhlášky",
+          "pravny_zaklad": "§ 15 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zoznam dôležitých telefónnych čísel dostupný a aktuálny",
+          "pravny_zaklad": "§ 15 vyhl. 121/2002",
+          "rozsah": "VR"
+        }
+      ]
+    },
+    {
+      "kod": "F",
+      "nazov": "Požiarne zariadenia a vecné prostriedky",
+      "polozky": [
+        {
+          "text": "Vhodné druhy a počet hasiacich prístrojov podľa nebezpečenstva",
+          "pravny_zaklad": "§ 5 písm. a) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Hasiace prístroje prevádzkované v akcieschopnom stave",
+          "pravny_zaklad": "§ 5 písm. a) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Kontrola hasiacich prístrojov v lehote — označenie a doklad",
+          "pravny_zaklad": "§ 9 vyhl. 347/2022",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Vyradené prístroje odstránené a nahradené",
+          "pravny_zaklad": "§ 9 ods. 9 vyhl. 347/2022",
+          "rozsah": "R"
+        },
+        {
+          "text": "Požiarne hydranty — kontrola raz za 12 mesiacov",
+          "pravny_zaklad": "§ 15 ods. 2 vyhl. 699/2004",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Tlaková skúška požiarnych hadíc",
+          "pravny_zaklad": "STN 92 0801",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Elektrická požiarna signalizácia — kontroly a prevádzkyschopnosť",
+          "pravny_zaklad": "vyhl. 726/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Stabilné a polostabilné hasiace zariadenia — kontroly",
+          "pravny_zaklad": "vyhl. 169/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Dokumentácia o prevádzkovaní požiarnych zariadení vedená a uchovaná",
+          "pravny_zaklad": "§ 5 písm. a) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zdroje vody na hasenie udržiavané v použiteľnom stave",
+          "pravny_zaklad": "§ 5 písm. d) z. 314/2001",
+          "rozsah": "VR"
+        }
+      ]
+    },
+    {
+      "kod": "G",
+      "nazov": "Únikové cesty, evakuácia a stavebné riešenie",
+      "polozky": [
+        {
+          "text": "Únikové cesty a východy trvale voľné a označené",
+          "pravny_zaklad": "§ 5 písm. b) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zásahové cesty a nástupné plochy voľné a prístupné",
+          "pravny_zaklad": "§ 5 písm. b) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Prístup k uzáverom elektriny, plynu a vody voľný",
+          "pravny_zaklad": "§ 5 písm. b) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Funkčné núdzové a evakuačné osvetlenie",
+          "pravny_zaklad": "STN EN 50172",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Požiarne uzávery — kontrola akcieschopnosti a označenie",
+          "pravny_zaklad": "vyhl. 478/2008",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Požiarne uzávery — prevádzková údržba",
+          "pravny_zaklad": "§ 9 ods. 6 vyhl. 478/2008",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Požiarne deliace konštrukcie a prestupy — celistvosť a utesnenie",
+          "pravny_zaklad": "vyhl. 94/2004",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Grafická časť evakuačného plánu vyvesená na viditeľnom mieste",
+          "pravny_zaklad": "§ 28 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zhromaždiská určené, označené a prístupné",
+          "pravny_zaklad": "§ 28 vyhl. 121/2002",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Cvičný požiarny poplach vykonaný za posledných 12 mesiacov",
+          "pravny_zaklad": "§ 5 písm. e) z. 314/2001",
+          "rozsah": "R"
+        },
+        {
+          "text": "Zmena užívania stavby neznížila protipožiarnu bezpečnosť",
+          "pravny_zaklad": "§ 4 písm. l) z. 314/2001",
+          "rozsah": "V"
+        }
+      ]
+    },
+    {
+      "kod": "H",
+      "nazov": "Miesta a činnosti so zvýšeným nebezpečenstvom",
+      "polozky": [
+        {
+          "text": "Určené miesta so zvýšeným nebezpečenstvom vzniku požiaru",
+          "pravny_zaklad": "§ 4 písm. c) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Miesta označené príkazmi, zákazmi a pokynmi",
+          "pravny_zaklad": "§ 4 písm. c) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Opatrenia pri činnostiach so zvýšeným nebezpečenstvom",
+          "pravny_zaklad": "§ 4 písm. b) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zvárania a práce s otvoreným ohňom — písomný príkaz a hliadka",
+          "pravny_zaklad": "§ 4 písm. b) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Dodržiavanie zákazu fajčenia a označenie priestorov",
+          "pravny_zaklad": "§ 4 písm. c) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Opatrenia pri podujatiach s väčším počtom osôb",
+          "pravny_zaklad": "§ 4 písm. b) z. 314/2001",
+          "rozsah": "V"
+        }
+      ]
+    },
+    {
+      "kod": "I",
+      "nazov": "Horľavé látky, technické a technologické zariadenia",
+      "polozky": [
+        {
+          "text": "Skladovanie a manipulácia s horľavými látkami podľa požiadaviek",
+          "pravny_zaklad": "§ 4 písm. o) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Horľavé kvapaliny — podmienky skladovania a množstvá",
+          "pravny_zaklad": "vyhl. 38/2026 (od 1. 4. 2026)",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Požiarnotechnické charakteristiky látok k dispozícii",
+          "pravny_zaklad": "§ 4 písm. j) z. 314/2001",
+          "rozsah": "V"
+        },
+        {
+          "text": "Technické a technologické zariadenia prevádzkované protipožiarne bezpečne",
+          "pravny_zaklad": "§ 4 písm. i) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Palivové a elektrotepelné spotrebiče inštalované a prevádzkované správne",
+          "pravny_zaklad": "§ 4 písm. n) z. 314/2001",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Čistenie a kontrola komínov v ustanovených lehotách",
+          "pravny_zaklad": "§ 4 písm. m) z. 314/2001, vyhl. 401/2007",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Komín označený štítkom",
+          "pravny_zaklad": "§ 4 písm. n) z. 314/2001",
+          "rozsah": "V"
+        },
+        {
+          "text": "Odborné preskúšanie komína po zmene paliva alebo úprave",
+          "pravny_zaklad": "§ 4 písm. m) z. 314/2001",
+          "rozsah": "V"
+        }
+      ]
+    }
+  ]
+}

@@ -26,15 +26,20 @@ final class Sections
      * Inspection types per section. Trainings are listed separately (they live
      * in their own table) — see {@see trainingSection()}.
      *
-     * The BOZP types arrive with block 2; the section is declared here already
-     * so the mapping has one home rather than growing a second copy later.
+     * BOZP opens with the audit (block 3); the thirteen úkony of block 2 land
+     * in the same list.
      *
      * @var array<string, list<string>>
      */
     public const INSPECTION_TYPES = [
         self::REVIZIE => ['php', 'oprava_ts_php', 'vyradenie', 'hydranty', 'ts_hadic'],
-        self::OPP     => ['poziarna_kniha', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie'],
-        self::BOZP    => [],
+        self::OPP     => [
+            'poziarna_kniha', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie',
+            'audit_opp',
+        ],
+        // Block 3 opens the BOZP section with the audit. The thirteen BOZP
+        // úkony of block 2 join it here.
+        self::BOZP    => ['audit_bozp'],
     ];
 
     /** Slovak label of each section, as it reads in the menu. */

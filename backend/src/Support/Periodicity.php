@@ -44,6 +44,11 @@ final class Periodicity
         'pu_akcieschopnost'  => [3, 6, 12],
         'pu_udrzba'          => [12],
         'nudzove_osvetlenie' => [12],
+        // Audits (block 3). Twelve months is what a ročná previerka means, but
+        // the value is still the technician's: an entry audit at a new client
+        // is often followed by a second one in six months.
+        'audit_bozp'         => [12],
+        'audit_opp'          => [12],
     ];
 
     /**

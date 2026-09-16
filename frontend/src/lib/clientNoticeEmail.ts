@@ -27,6 +27,8 @@ export const INSPECTION_TYPE_ACCUSATIVE: Record<InspectionType, string> = {
   nudzove_osvetlenie: 'kontrolu núdzového osvetlenia',
   ts_hadic: 'tlakovú skúšku hadíc',
   vyradenie: 'vyradenie hasiacich prístrojov',
+  audit_bozp: 'audit bezpečnosti a ochrany zdravia pri práci',
+  audit_opp: 'previerku stavu ochrany pred požiarmi',
 };
 
 /** "2026-08-15" → "15. 8. 2026" (no leading zeros, as the spec's sample). */

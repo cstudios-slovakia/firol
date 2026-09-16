@@ -42,6 +42,10 @@ final class Writer
             'account'     => self::account($accountId, $pdo),
             'companies'   => self::companies($accountId, $pdo),
             'inspections' => self::inspections($accountId, $pdo, $withPhotos, $files),
+            // Block 3 — a technician's own audit checklists. They are typed
+            // work, not derived data: a 109-item list with twenty reworded
+            // questions is an afternoon nobody wants to spend twice.
+            'audit_templates' => self::auditTemplates($accountId, $pdo),
             'trainings'   => self::trainings($accountId, $pdo, $files),
             'documents'   => $withDocuments ? self::documents($accountId, $pdo, $files) : [],
         ];
@@ -50,6 +54,7 @@ final class Writer
             'companies'   => count($manifest['companies']),
             'facilities'  => array_sum(array_map(static fn (array $c): int => count($c['facilities']), $manifest['companies'])),
             'inspections' => count($manifest['inspections']),
+            'audit_templates' => count($manifest['audit_templates']),
             'trainings'   => count($manifest['trainings']),
             'documents'   => count($manifest['documents']),
             'photos'      => count(array_filter(array_keys($files), static fn (string $e): bool => str_starts_with($e, 'photos/') && !str_ends_with($e, '_t.jpg'))),
@@ -139,6 +144,37 @@ final class Writer
     }
 
     /**
+     * The account's audit checklists, sections and items nested. Delivered
+     * checklists are exported too, edits and all — restoring into a fresh
+     * account otherwise silently reverts them to the shipped wording.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function auditTemplates(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT id, kind, name, is_custom, source_key, created_at
+             FROM   audit_templates
+             WHERE  account_id = ? AND archived_at IS NULL
+             ORDER  BY id'
+        );
+        $stmt->execute([$accountId]);
+
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $template) {
+            $out[] = [
+                'kind'       => (string) $template['kind'],
+                'name'       => (string) $template['name'],
+                'is_custom'  => (int) $template['is_custom'],
+                'source_key' => $template['source_key'],
+                'created_at' => $template['created_at'],
+                'sections'   => \Firol\Audit\AuditCatalog::loadSections((int) $template['id']),
+            ];
+        }
+        return $out;
+    }
+
+    /**
      * @param array<string, string> $files
      * @return list<array<string, mixed>>
      */
@@ -146,6 +182,7 @@ final class Writer
     {
         $stmt = $pdo->prepare(
             'SELECT i.id, i.company_id, i.facility_id, i.source_inspection_id, i.type,
+                    i.audit_scope,
                     i.periodicity_value, i.periodicity_unit, i.periodicity_is_custom,
                     i.is_preventive_inspection, i.executed_on,
                     i.status, i.notes, i.created_at,

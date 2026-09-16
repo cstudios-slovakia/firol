@@ -43,10 +43,13 @@ export const SECTION_COLORS: Record<Section, string> = {
 /** Inspection types in each section. */
 export const SECTION_INSPECTION_TYPES: Record<Section, InspectionType[]> = {
   revizie: ['php', 'oprava_ts_php', 'vyradenie', 'hydranty', 'ts_hadic'],
-  opp: ['poziarna_kniha', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie'],
-  // The thirteen BOZP types arrive with block 2. The section is declared here
-  // already so the mapping has one home rather than a second copy later.
-  bozp: [],
+  opp: [
+    'poziarna_kniha', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie',
+    'audit_opp',
+  ],
+  // Block 3 opens the BOZP section with the audit; the thirteen BOZP úkony of
+  // block 2 join it in the same list.
+  bozp: ['audit_bozp'],
 };
 
 /**

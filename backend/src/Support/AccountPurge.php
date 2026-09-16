@@ -23,7 +23,8 @@ final class AccountPurge
 {
     /**
      * Companies + facilities + everything hanging off them (inspections,
-     * items, photos, trainings, trainees, documents).
+     * items, photos, trainings, trainees, documents), plus the account's audit
+     * checklists.
      *
      * @return int number of companies removed
      */
@@ -43,6 +44,11 @@ final class AccountPurge
 
         // documents has no FK to inspections/trainings, so it goes first.
         $pdo->prepare('DELETE FROM documents WHERE account_id = ?')->execute([$accountId]);
+        // Audit checklists belong to the account rather than to a company, so
+        // no cascade reaches them. A "replace" restore that left last year's
+        // reworded checklists behind would merge two accounts' idea of what to
+        // ask (see \Firol\Backup\Restorer).
+        $pdo->prepare('DELETE FROM audit_templates WHERE account_id = ?')->execute([$accountId]);
         // Visits and work confirmations describe work done at a company, so the
         // company cascade takes them — but only once their protocols are gone.
         $pdo->prepare('DELETE FROM companies WHERE account_id = ?')->execute([$accountId]);

@@ -82,6 +82,11 @@ final class PdfRenderer
             'nudzove_osvetlenie' => 'nudzove_osvetlenie.php',
             'ts_hadic'           => 'ts_hadic.php',
             'vyradenie'          => 'vyradenie.php',
+            // Both audits share one template — the two differ in their
+            // wording and their colour, and both of those travel in the
+            // payload (see Firol\Audit\AuditProtocol).
+            'audit_bozp',
+            'audit_opp'          => 'audit.php',
             default => throw new \InvalidArgumentException("No renderer for type: $type"),
         };
 

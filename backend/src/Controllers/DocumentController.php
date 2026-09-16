@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Audit\AuditCatalog;
+use Firol\Audit\AuditItems;
+use Firol\Audit\AuditProtocol;
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
@@ -12,6 +15,7 @@ use Firol\Documents\NumberAllocator;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Mail\Mailer;
+use Firol\Mail\ReplyTo;
 use Firol\Mail\Templates\DocumentEmail;
 use Firol\Pdf\PdfRenderer;
 use Firol\Storage\Storage;
@@ -115,9 +119,35 @@ final class DocumentController
         // inspection still uses the correct year bucket.
         $year = (int) substr((string) $inspection['executed_on'], 0, 4);
 
+        $insType = (string) $inspection['type'];
+
+        // An audit prints the questions it answered and leaves out the ones it
+        // did not. Issuing one with a third of the checklist untouched would
+        // produce a document that looks complete and is not — and the
+        // technician signs it. „Označiť všetko ako vyhovuje" turns the honest
+        // fix into one tap, so this costs them nothing.
+        if (AuditCatalog::isAuditType($insType)) {
+            $auditSummary = AuditItems::summarize($items);
+            $missing = $auditSummary['total'] - $auditSummary['answered'];
+            if ($missing > 0) {
+                return [
+                    'error' => 'Audit má ešte ' . $missing . ' nevyplnených položiek. '
+                        . 'Doplň ich alebo použi „Označiť všetko ako vyhovuje".',
+                    'status' => 422,
+                ];
+            }
+        }
+
         $payload = self::buildPayload($accountId, $userId, $inspection, $items);
         $stats   = $payload['stats'];
-        $insType = (string) $inspection['type'];
+
+        if (AuditCatalog::isAuditType($insType)) {
+            $payload['audit'] = AuditProtocol::build(
+                $insType,
+                $inspection['audit_scope'] !== null ? (string) $inspection['audit_scope'] : null,
+                $items,
+            );
+        }
 
         $payload['photos'] = $includePhotos
             ? self::buildPhotoAppendix($inspectionId, $insType, $items)
@@ -253,6 +283,7 @@ final class DocumentController
             pdfFilename:    $filename,
             pdfBytes:       $pdfBytes,
             note:           $note,
+            replyTo:        ReplyTo::forSender($accountId, Tenant::currentUserId()),
         );
 
         $sent = Mailer::send($message);
@@ -489,6 +520,7 @@ final class DocumentController
         // vyraďovací protokol. NULL for documents created standalone.
         $sql = 'SELECT i.id, i.account_id, i.type, i.executed_on, i.status,
                        i.periodicity_value, i.periodicity_unit,
+                       i.audit_scope,
                        i.notes, i.inspector_user_id, i.source_inspection_id,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
@@ -557,6 +589,10 @@ final class DocumentController
             return self::buildPkPhotoAppendix($items, $pathsByItem);
         }
 
+        if (AuditCatalog::isAuditType($type)) {
+            return self::buildAuditPhotoAppendix($items, $pathsByItem);
+        }
+
         $appendix = [];
         foreach ($items as $idx => $item) {
             $photos = $pathsByItem[(int) $item['id']] ?? [];
@@ -564,6 +600,59 @@ final class DocumentController
                 continue;
             }
             $caption = PhotoCaption::build($type, $item['fields'] ?? [], $idx + 1);
+            foreach ($photos as $photo) {
+                $appendix[] = [
+                    'caption' => $caption,
+                    'path'    => $photo['path'],
+                    'width'   => $photo['width'],
+                    'height'  => $photo['height'],
+                ];
+            }
+        }
+        return $appendix;
+    }
+
+    /**
+     * Photo appendix of an audit (block 3).
+     *
+     * A photo attached to a failing item is captioned with the NUMBER of the
+     * finding it documents, matching the row in „Zistené nedostatky" — that is
+     * what makes the appendix usable: the reader goes from finding 4 to the
+     * photo of finding 4 without hunting.
+     *
+     * Photos on items that passed are evidence of the state found, which is
+     * ordinary audit practice, so they are captioned with the section and the
+     * question instead. Excluded sections contribute nothing: their items are
+     * not part of the protocol.
+     *
+     * @param list<array<string, mixed>> $items
+     * @param array<int, list<array<string, mixed>>> $pathsByItem
+     * @return list<array<string, mixed>>
+     */
+    private static function buildAuditPhotoAppendix(array $items, array $pathsByItem): array
+    {
+        $summary = AuditItems::summarize($items);
+        $defectNumberByItem = [];
+        foreach ($summary['defects'] as $defect) {
+            $defectNumberByItem[(int) $defect['item_id']] = (int) $defect['number'];
+        }
+
+        $appendix = [];
+        foreach ($items as $item) {
+            $photos = $pathsByItem[(int) $item['id']] ?? [];
+            if ($photos === []) {
+                continue;
+            }
+            $f = $item['fields'] ?? [];
+            if (!empty($f['section_excluded']) || ($f['result'] ?? null) === 'neaplikovatelne') {
+                continue;
+            }
+
+            $number = $defectNumberByItem[(int) $item['id']] ?? null;
+            $caption = $number !== null
+                ? PhotoCaption::buildForDefect($number, (string) ($f['defect_description'] ?? ''))
+                : trim((string) ($f['section_code'] ?? '') . ' — ' . (string) ($f['text'] ?? ''), ' —');
+
             foreach ($photos as $photo) {
                 $appendix[] = [
                     'caption' => $caption,
@@ -743,11 +832,12 @@ final class DocumentController
     ): array {
         $loadProfile = static function (int $uid) use ($accountId): array {
             $stmt = Db::pdo()->prepare(
-                'SELECT signature_path, cert_php, cert_oprava, cert_general,
+                'SELECT signature_path, cert_php, cert_oprava, cert_general, cert_bt,
                         certification_number,
                         valid_from_php, valid_to_php,
                         valid_from_oprava, valid_to_oprava,
                         valid_from_general, valid_to_general,
+                        valid_from_bt, valid_to_bt,
                         valid_from, valid_to
                  FROM   inspector_profiles
                  WHERE  user_id = ? AND account_id = ?'
@@ -791,10 +881,23 @@ final class DocumentController
      * print the headline number without knowing the type.
      *
      * @param list<array<string, mixed>> $items
-     * @return array<string, int>
+     * @return array<string, int|string>
      */
     private static function computeStats(string $type, array $items): array
     {
+        if (AuditCatalog::isAuditType($type)) {
+            $summary = AuditItems::summarize($items);
+            return [
+                // Excluded sections are out of every figure here: they were
+                // taken out of the audit, not failed by it.
+                'total'      => $summary['total'],
+                'answered'   => $summary['answered'],
+                'vyhovuje'   => $summary['vyhovuje'],
+                'nevyhovuje' => $summary['nevyhovuje'],
+                'verdict'    => $summary['verdict'],
+            ];
+        }
+
         $stats = ['total' => count($items)];
         switch ($type) {
             case 'php':
@@ -885,11 +988,17 @@ final class DocumentController
         $key = match ($type) {
             'php'            => 'cert_php',
             'oprava_ts_php'  => 'cert_oprava',
+            // Block 3 — the BOZP audit carries the bezpečnostný technik's own
+            // number; every PO document carries the technik PO one.
+            'audit_bozp'     => 'cert_bt',
             default          => 'cert_general',
         };
         $val = $profile[$key] ?? null;
-        // Backward compat: fall back to the legacy single column
-        if ($val === null || $val === '') {
+        // Backward compat: fall back to the legacy single column — but never
+        // for cert_bt. That column predates BOZP entirely, so whatever is in
+        // it is a PO number, and printing it as a bezpečnostný technik's
+        // oprávnenie would be a false statement on a signed document.
+        if (($val === null || $val === '') && $key !== 'cert_bt') {
             $val = $profile['certification_number'] ?? null;
         }
         return $val ?: null;
@@ -907,12 +1016,14 @@ final class DocumentController
         [$fromKey, $toKey] = match ($type) {
             'php'            => ['valid_from_php',     'valid_to_php'],
             'oprava_ts_php'  => ['valid_from_oprava',  'valid_to_oprava'],
+            'audit_bozp'     => ['valid_from_bt',      'valid_to_bt'],
             default          => ['valid_from_general', 'valid_to_general'],
         };
         $from = $profile[$fromKey] ?? null;
         $to   = $profile[$toKey]   ?? null;
-        // Backward compat: fall back to legacy single pair
-        if (($from === null || $from === '') && ($to === null || $to === '')) {
+        // Backward compat: fall back to legacy single pair — not for the BT
+        // pair, for the same reason as the number itself.
+        if ($type !== 'audit_bozp' && ($from === null || $from === '') && ($to === null || $to === '')) {
             $from = $profile['valid_from'] ?? null;
             $to   = $profile['valid_to']   ?? null;
         }
@@ -1058,6 +1169,13 @@ final class DocumentController
         $payload['photos'] = $includePhotos
             ? self::buildPhotoAppendix($inspectionId, (string) $inspection['type'], $items)
             : [];
+        if (AuditCatalog::isAuditType((string) $inspection['type'])) {
+            $payload['audit'] = AuditProtocol::build(
+                (string) $inspection['type'],
+                $inspection['audit_scope'] !== null ? (string) $inspection['audit_scope'] : null,
+                $items,
+            );
+        }
         return $payload;
     }
 

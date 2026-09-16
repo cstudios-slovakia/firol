@@ -19,6 +19,8 @@ use Firol\Controllers\AccountController;
 use Firol\Controllers\DataController;
 use Firol\Controllers\AdminController;
 use Firol\Controllers\AdminPanelController;
+use Firol\Controllers\AuditController;
+use Firol\Controllers\AuditTemplateController;
 use Firol\Controllers\AuthController;
 use Firol\Controllers\BillingController;
 use Firol\Controllers\CalendarController;
@@ -168,6 +170,29 @@ $router->delete('/api/inspections/{id}/items/{item_id}', [InspectionItemControll
 $router->post('/api/inspections/{id}/items/{item_id}/photos', [InspectionPhotoController::class, 'store']);
 $router->get('/api/inspections/{id}/items/{item_id}/photos/{photo_id}', [InspectionPhotoController::class, 'download']);
 $router->delete('/api/inspections/{id}/items/{item_id}/photos/{photo_id}', [InspectionPhotoController::class, 'destroy']);
+
+// Block 3 / chapters 15 and 16 — filling in an audit. The checklist itself is
+// copied onto the úkon at creation, so there is no "add item" step here: what
+// is left is answering, the bulk shortcuts, and the two kinds of taking over.
+$router->get('/api/inspections/{id}/audit',             [AuditController::class, 'show']);
+$router->post('/api/inspections/{id}/audit/bulk',       [AuditController::class, 'bulk']);
+$router->post('/api/inspections/{id}/audit/take-over',  [AuditController::class, 'takeOver']);
+$router->post('/api/inspections/{id}/audit/carry-over', [AuditController::class, 'carryOver']);
+
+// Chapter 17 — the checklists themselves.
+$router->get('/api/audit-templates',            [AuditTemplateController::class, 'index']);
+$router->post('/api/audit-templates',           [AuditTemplateController::class, 'store']);
+$router->get('/api/audit-templates/{id}',       [AuditTemplateController::class, 'show']);
+$router->patch('/api/audit-templates/{id}',     [AuditTemplateController::class, 'update']);
+$router->delete('/api/audit-templates/{id}',    [AuditTemplateController::class, 'destroy']);
+$router->post('/api/audit-templates/{id}/restore', [AuditTemplateController::class, 'restore']);
+$router->post('/api/audit-templates/{id}/order',   [AuditTemplateController::class, 'reorder']);
+$router->post('/api/audit-templates/{id}/sections', [AuditTemplateController::class, 'storeSection']);
+$router->patch('/api/audit-templates/{id}/sections/{section_id}',  [AuditTemplateController::class, 'updateSection']);
+$router->delete('/api/audit-templates/{id}/sections/{section_id}', [AuditTemplateController::class, 'destroySection']);
+$router->post('/api/audit-templates/{id}/sections/{section_id}/items', [AuditTemplateController::class, 'storeItem']);
+$router->patch('/api/audit-templates/{id}/items/{item_id}',  [AuditTemplateController::class, 'updateItem']);
+$router->delete('/api/audit-templates/{id}/items/{item_id}', [AuditTemplateController::class, 'destroyItem']);
 
 $router->post('/api/inspections/{id}/generate-pdf',  [DocumentController::class, 'generateForInspection']);
 $router->get('/api/inspections/{id}/documents',      [DocumentController::class, 'indexForInspection']);

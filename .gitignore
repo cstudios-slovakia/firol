@@ -33,6 +33,7 @@ docs/*
 # …ale roadmap je tracked (referencuje sa z CLAUDE.md)
 !docs/development-roadmap.md
 opravy-pdf/
+POapp_BOZP_pre_vyvojarov11/
 
 # Deploy artefakty (zostavujú sa v CI)
 deploy/

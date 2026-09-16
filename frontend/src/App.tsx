@@ -20,6 +20,8 @@ import { InspectionDetailPage } from '@/pages/InspectionDetailPage';
 import { InspectionsListPage } from '@/pages/InspectionsListPage';
 import { SectionPage } from '@/pages/SectionPage';
 import { VisitNewPage } from '@/pages/VisitNewPage';
+import { AuditFillPage } from '@/pages/AuditFillPage';
+import { AuditTemplatesPage } from '@/pages/AuditTemplatesPage';
 import { VisitDetailPage } from '@/pages/VisitDetailPage';
 import { CalendarPage } from '@/pages/CalendarPage';
 import { TrainingsListPage } from '@/pages/TrainingsListPage';
@@ -109,6 +111,9 @@ export default function App() {
         <Route path="/inspections/new" element={<NewInspectionTypePicker />} />
         <Route path="/inspections/new/:type/step-1" element={<InspectionStep1Page />} />
         <Route path="/inspections/:id" element={<InspectionDetailPage />} />
+        {/* Block 3 — an audit answers a checklist rather than adding items
+            one by one, so it has its own screen instead of Step 2. */}
+        <Route path="/inspections/:id/audit" element={<AuditFillPage />} />
         <Route path="/inspections/:id/items/new" element={<InspectionStep2Page />} />
         <Route path="/inspections/:id/items/:itemId" element={<InspectionStep2Page />} />
 
@@ -121,6 +126,7 @@ export default function App() {
           <Route path="profil" element={<InspectorProfilePage />} />
           <Route path="branding" element={<BrandingPage />} />
           <Route path="technici" element={<TeamPage />} />
+          <Route path="audity" element={<AuditTemplatesPage />} />
           <Route path="data" element={<DataPage />} />
           <Route path="systemove" element={<SystemPage />} />
           <Route path="admin" element={<RequireAdmin><AdminPage /></RequireAdmin>} />

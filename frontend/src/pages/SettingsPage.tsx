@@ -89,6 +89,7 @@ const SECTION_TABS = [
     { to: "/settings/profil", label: "Profil technika", icon: ShieldCheck },
     { to: "/settings/branding", label: "Branding PDF", icon: Palette },
     { to: "/settings/technici", label: "Technici", icon: UsersRound },
+    { to: "/settings/audity", label: "Kontrolné listy", icon: ClipboardList },
     { to: "/settings/data", label: "Správa dát", icon: Database },
     { to: "/settings/systemove", label: "Systémové", icon: Smartphone },
 ] as const;
@@ -126,6 +127,15 @@ const MENU_ITEMS = [
         icon: UsersRound,
         color: "text-orange-600",
         bg: "bg-orange-50",
+    },
+    {
+        to: "/settings/audity",
+        label: "Kontrolné listy auditu",
+        description:
+            "Znenie položiek auditu BOZP a OPP — uprav, zmaž alebo pridaj vlastné.",
+        icon: ClipboardList,
+        color: "text-emerald-600",
+        bg: "bg-emerald-50",
     },
     {
         to: "/settings/data",
@@ -385,6 +395,11 @@ function InspectorProfileSection() {
     const [certGeneral, setCertGeneral] = useState("");
     const [validFromGeneral, setValidFromGeneral] = useState("");
     const [validToGeneral, setValidToGeneral] = useState("");
+    // Block 3 — bezpečnostný technik. Personal, like the three above, and the
+    // number the audit BOZP prints (chapter 26).
+    const [certBt, setCertBt] = useState("");
+    const [validFromBt, setValidFromBt] = useState("");
+    const [validToBt, setValidToBt] = useState("");
 
     const [showSigPicker, setShowSigPicker] = useState(false);
 
@@ -422,6 +437,9 @@ function InspectorProfileSection() {
         setCertGeneral(p.cert_general ?? "");
         setValidFromGeneral(p.valid_from_general ?? "");
         setValidToGeneral(p.valid_to_general ?? "");
+        setCertBt(p.cert_bt ?? "");
+        setValidFromBt(p.valid_from_bt ?? "");
+        setValidToBt(p.valid_to_bt ?? "");
     }
 
     async function onSubmit(e: FormEvent) {
@@ -440,6 +458,9 @@ function InspectorProfileSection() {
                     valid_to_oprava: validToOprava || null,
                     valid_from_general: validFromGeneral || null,
                     valid_to_general: validToGeneral || null,
+                    cert_bt: certBt.trim() || null,
+                    valid_from_bt: validFromBt || null,
+                    valid_to_bt: validToBt || null,
                 },
                 csrfToken,
             );
@@ -586,6 +607,19 @@ function InspectorProfileSection() {
                         validTo={validToGeneral}
                         onValidFromChange={setValidFromGeneral}
                         onValidToChange={setValidToGeneral}
+                    />
+
+                    <CertCard
+                        color="emerald"
+                        title="Bezpečnostný technik"
+                        subtitle="Audit BOZP a ďalšie úkony v oblasti BOZP"
+                        certValue={certBt}
+                        certPlaceholder="napr. 0123/2019-BT"
+                        onCertChange={setCertBt}
+                        validFrom={validFromBt}
+                        validTo={validToBt}
+                        onValidFromChange={setValidFromBt}
+                        onValidToChange={setValidToBt}
                     />
 
                     {error && (
@@ -1617,7 +1651,7 @@ function TeamSection() {
 
 // ─── Cert Card ────────────────────────────────────────────────────────────────
 
-type CertCardColor = "firol" | "violet" | "blue";
+type CertCardColor = "firol" | "violet" | "blue" | "emerald";
 
 const CERT_CARD_STYLES: Record<
     CertCardColor,
@@ -1640,6 +1674,12 @@ const CERT_CARD_STYLES: Record<
         bg: "bg-blue-50/40",
         iconBg: "bg-blue-100",
         iconColor: "text-blue-600",
+    },
+    emerald: {
+        border: "border-emerald-200",
+        bg: "bg-emerald-50/40",
+        iconBg: "bg-emerald-100",
+        iconColor: "text-emerald-600",
     },
 };
 

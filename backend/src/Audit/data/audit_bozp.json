@@ -1,0 +1,633 @@
+{
+  "typ": "bozp",
+  "nazov": "Audit BOZP",
+  "pravny_zaklad": "§ 9 ods. 1 písm. a) z. 124/2006",
+  "je_vlastna": false,
+  "poznamka": "Predvolená šablóna. Technik MUSÍ vedieť položku prepísať, zmazať, pridať vlastnú aj celú sekciu a zmeniť poradie. Audit si pri vytvorení uloží kópiu použitej šablóny.",
+  "rozsah_vysvetlenie": {
+    "V": "len vstupný audit",
+    "R": "len ročná previerka",
+    "VR": "oba"
+  },
+  "pocet_sekcii": 12,
+  "pocet_poloziek": 109,
+  "sekcie": [
+    {
+      "kod": "A",
+      "nazov": "Dokumentácia a systém riadenia BOZP",
+      "polozky": [
+        {
+          "text": "Vypracovaná a aktuálna dokumentácia BOZP",
+          "pravny_zaklad": "§ 6 ods. 1 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Koncepcia politiky BOZP a program jej realizácie",
+          "pravny_zaklad": "§ 6 ods. 1 písm. g) z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Záznamy z vykonaných kontrol BOZP (kniha kontrol)",
+          "pravny_zaklad": "§ 9 ods. 1 písm. a) z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Ročná previerka BOZP vykonaná a zdokumentovaná",
+          "pravny_zaklad": "§ 9 ods. 1 písm. a) z. 124/2006",
+          "rozsah": "R"
+        },
+        {
+          "text": "Aktuálny zoznam zamestnancov a ich pracovného zaradenia",
+          "pravny_zaklad": "§ 6 ods. 1 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Vymenovanie zástupcu zamestnancov pre bezpečnosť",
+          "pravny_zaklad": "§ 19 ods. 1 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Komisia BOZP zriadená a zasadá aspoň raz ročne (nad 100 zamestnancov)",
+          "pravny_zaklad": "§ 20 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zabezpečená bezpečnostnotechnická služba",
+          "pravny_zaklad": "§ 21 a § 22 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Platné oprávnenie bezpečnostného technika vrátane aktualizačnej prípravy",
+          "pravny_zaklad": "§ 23 a § 16 ods. 9 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Interné smernice a predpisy — aktuálne, schválené, podpísané",
+          "pravny_zaklad": "§ 6 ods. 1 písm. d) z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zmluvné zabezpečenie BOZP pri prácach dodávateľov",
+          "pravny_zaklad": "§ 18 z. 124/2006",
+          "rozsah": "V"
+        },
+        {
+          "text": "Prerokovanie otázok BOZP so zamestnancami alebo ich zástupcami",
+          "pravny_zaklad": "§ 10 z. 124/2006",
+          "rozsah": "R"
+        },
+        {
+          "text": "Poistenie zodpovednosti zamestnávateľa za škodu pri pracovnom úraze",
+          "pravny_zaklad": "§ 17 z. 124/2006",
+          "rozsah": "V"
+        }
+      ]
+    },
+    {
+      "kod": "B",
+      "nazov": "Posudzovanie rizík",
+      "polozky": [
+        {
+          "text": "Posúdenie rizík — aktuálne, pre všetky činnosti a pracoviská",
+          "pravny_zaklad": "§ 6 ods. 1 písm. c) z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Prehodnotenie rizík po zmene technológie, postupu alebo pracoviska",
+          "pravny_zaklad": "§ 6 ods. 1 písm. c) z. 124/2006",
+          "rozsah": "R"
+        },
+        {
+          "text": "Realizované opatrenia na odstránenie alebo zníženie rizík",
+          "pravny_zaklad": "§ 5 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zásady bezpečnej práce a bezpečné pracovné postupy",
+          "pravny_zaklad": "§ 6 ods. 1 písm. d) z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Posúdenie rizík pri práci osamotene a na odlúčenom pracovisku",
+          "pravny_zaklad": "§ 9 ods. 1 písm. c) z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Posúdenie rizík pre tehotné ženy, matky do 9 mesiacov a dojčiace ženy",
+          "pravny_zaklad": "NV 272/2004 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Posúdenie rizík pre mladistvých zamestnancov",
+          "pravny_zaklad": "NV 286/2004 Z. z.",
+          "rozsah": "VR"
+        }
+      ]
+    },
+    {
+      "kod": "C",
+      "nazov": "Školenia a odborná spôsobilosť",
+      "polozky": [
+        {
+          "text": "Osnova a rozsah vstupného oboznámenia zamestnancov",
+          "pravny_zaklad": "§ 7 ods. 1 a 3 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Opakované oboznamovanie najmenej raz za tri roky",
+          "pravny_zaklad": "§ 7 ods. 5 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Oboznámenie pri zmene technológie, prostriedku alebo postupu",
+          "pravny_zaklad": "§ 7 ods. 3 z. 124/2006",
+          "rozsah": "R"
+        },
+        {
+          "text": "Záznamy o oboznámení — prezenčné listiny, obsah, dátumy, podpisy",
+          "pravny_zaklad": "§ 7 ods. 6 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Oboznámenie vedúcich zamestnancov",
+          "pravny_zaklad": "§ 7 ods. 5 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Oboznámenie zástupcov zamestnancov pre bezpečnosť",
+          "pravny_zaklad": "§ 19 ods. 4 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Odborná spôsobilosť obsluhy vyhradených technických zariadení",
+          "pravny_zaklad": "§ 16 z. 124/2006, vyhl. 508/2009",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Platné preukazy a osvedčenia zamestnancov, evidencia ich platnosti",
+          "pravny_zaklad": "§ 16 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Oboznámenie pri stavebných prácach vo výške a vo výkope — raz za 12 mes.",
+          "pravny_zaklad": "§ 3 ods. 1 vyhl. 147/2013",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Oboznámenie zamestnancov dodávateľa s rizikami na pracovisku",
+          "pravny_zaklad": "§ 18 ods. 2 z. 124/2006",
+          "rozsah": "VR"
+        }
+      ]
+    },
+    {
+      "kod": "D",
+      "nazov": "Osobné ochranné pracovné prostriedky",
+      "polozky": [
+        {
+          "text": "Posúdenie rizík na účel poskytovania OOPP",
+          "pravny_zaklad": "§ 4 NV 395/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zoznam poskytovaných OOPP podľa profesií a rizík",
+          "pravny_zaklad": "§ 5 NV 395/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Prehodnotenie zoznamu OOPP po zmene rizík",
+          "pravny_zaklad": "§ 5 ods. 3 NV 395/2006",
+          "rozsah": "R"
+        },
+        {
+          "text": "Evidencia vydaných OOPP jednotlivým zamestnancom",
+          "pravny_zaklad": "§ 6 NV 395/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Stav OOPP — nepoškodené, funkčné, v lehote použiteľnosti",
+          "pravny_zaklad": "§ 8 NV 395/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Skutočné používanie OOPP na pracovisku",
+          "pravny_zaklad": "§ 12 ods. 2 písm. b) z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zabezpečená údržba, čistenie a opravy OOPP",
+          "pravny_zaklad": "§ 8 NV 395/2006",
+          "rozsah": "VR"
+        }
+      ]
+    },
+    {
+      "kod": "E",
+      "nazov": "Pracovné úrazy, prvá pomoc, mimoriadne udalosti",
+      "polozky": [
+        {
+          "text": "Postup pri vzniku pracovného úrazu a nebezpečnej udalosti",
+          "pravny_zaklad": "§ 17 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Evidencia pracovných úrazov v ustanovenom rozsahu",
+          "pravny_zaklad": "§ 17 ods. 4 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Záznam o registrovanom pracovnom úraze na predpísanom tlačive",
+          "pravny_zaklad": "vyhl. 500/2006 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Bezodkladné ohlásenie závažného pracovného úrazu inšpektorátu práce",
+          "pravny_zaklad": "§ 17 ods. 5 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Evidencia nebezpečných udalostí",
+          "pravny_zaklad": "§ 17 ods. 8 z. 124/2006",
+          "rozsah": "R"
+        },
+        {
+          "text": "Vyšetrenie príčin úrazu a prijaté opatrenia",
+          "pravny_zaklad": "§ 17 ods. 7 z. 124/2006",
+          "rozsah": "R"
+        },
+        {
+          "text": "Traumatologický plán — úplný aj skrátený pri lekárničke",
+          "pravny_zaklad": "§ 8 ods. 1 písm. a) z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Lekárničky — vybavenie, dostupnosť, doba spotreby",
+          "pravny_zaklad": "§ 8 ods. 1 písm. a) z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Určený a vyškolený počet zamestnancov na poskytovanie prvej pomoci",
+          "pravny_zaklad": "§ 8 ods. 1 písm. a) z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zabezpečená evakuácia a postup pri bezprostrednom ohrození života",
+          "pravny_zaklad": "§ 8 ods. 1 písm. a) z. 124/2006",
+          "rozsah": "VR"
+        }
+      ]
+    },
+    {
+      "kod": "F",
+      "nazov": "Pracovisko a pracovné prostredie",
+      "polozky": [
+        {
+          "text": "Čistota a poriadok na pracovisku",
+          "pravny_zaklad": "NV 391/2006 príloha",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Voľné a bezpečné komunikácie a únikové cesty",
+          "pravny_zaklad": "NV 391/2006 príloha",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Bezpečný stav podláh, schodísk, rámp a zábradlí",
+          "pravny_zaklad": "NV 391/2006 príloha",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Dostatočné osvetlenie — denné aj umelé",
+          "pravny_zaklad": "NV 391/2006 príloha",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Vetranie, teplota a mikroklíma pracoviska",
+          "pravny_zaklad": "NV 391/2006 príloha",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Bezpečnostné a zdravotné označenie pri práci",
+          "pravny_zaklad": "NV 387/2006 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Kontrola a údržba bezpečnostného označenia",
+          "pravny_zaklad": "bod 6 prílohy NV 387/2006",
+          "rozsah": "R"
+        },
+        {
+          "text": "Sociálne zariadenia, šatne a zabezpečenie pitného režimu",
+          "pravny_zaklad": "NV 391/2006 príloha",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Uloženie a skladovanie materiálu, označenie nosnosti plôch",
+          "pravny_zaklad": "NV 391/2006 príloha",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Ergonómia pracovných miest",
+          "pravny_zaklad": "§ 6 ods. 5 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Ručná manipulácia s bremenami — posúdenie a opatrenia",
+          "pravny_zaklad": "NV 281/2006 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Ochrana pred hlukom — meranie, opatrenia, OOPP",
+          "pravny_zaklad": "NV 115/2006 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Ochrana pred vibráciami — posúdenie a opatrenia",
+          "pravny_zaklad": "NV 416/2005 Z. z.",
+          "rozsah": "VR"
+        }
+      ]
+    },
+    {
+      "kod": "G",
+      "nazov": "Stroje, zariadenia a pracovné prostriedky",
+      "polozky": [
+        {
+          "text": "Zoznam pracovných prostriedkov a strojov",
+          "pravny_zaklad": "§ 5 NV 392/2006",
+          "rozsah": "V"
+        },
+        {
+          "text": "Kontroly pracovných prostriedkov v určenej periodicite",
+          "pravny_zaklad": "§ 5 ods. 1 a 3 NV 392/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Mimoriadna kontrola po výnimočnej udalosti alebo dlhšom nepoužívaní",
+          "pravny_zaklad": "§ 5 ods. 2 NV 392/2006",
+          "rozsah": "R"
+        },
+        {
+          "text": "Doklady o kontrolách uchovávané a dostupné",
+          "pravny_zaklad": "§ 5 ods. 4 NV 392/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Funkčné ochranné kryty a bezpečnostné prvky",
+          "pravny_zaklad": "príloha č. 1 NV 392/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zákaz zásahov a čistenia počas chodu zariadenia",
+          "pravny_zaklad": "príloha č. 1 NV 392/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Dostupné návody na obsluhu a miestne prevádzkové predpisy",
+          "pravny_zaklad": "§ 4 NV 392/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Regály — kontrola, označenie nosnosti, poverená osoba",
+          "pravny_zaklad": "STN EN 15635 · § 5 NV 392/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Rebríky — kontrola, evidencia, poverená osoba",
+          "pravny_zaklad": "STN EN 131-3 · § 5 NV 392/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Manipulačné vozíky — poverenia a odborná spôsobilosť obsluhy",
+          "pravny_zaklad": "§ 16 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Evidencia vyhradených technických zariadení a ich revízií",
+          "pravny_zaklad": "§ 9 vyhl. 508/2009",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zariadenia nespĺňajúce požiadavky odstránené z prevádzky",
+          "pravny_zaklad": "§ 6 ods. 1 písm. a) z. 124/2006",
+          "rozsah": "VR"
+        }
+      ]
+    },
+    {
+      "kod": "H",
+      "nazov": "Elektrické zariadenia",
+      "polozky": [
+        {
+          "text": "Stav elektroinštalácie, rozvádzačov a ich označenie",
+          "pravny_zaklad": "vyhl. 508/2009",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Platné odborné prehliadky a skúšky elektrických zariadení",
+          "pravny_zaklad": "§ 9 vyhl. 508/2009, príloha č. 8",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Kontroly elektrických spotrebičov a ručného náradia",
+          "pravny_zaklad": "§ 13a a § 13b vyhl. 508/2009",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Nepoškodené káble, vidlice a predlžovacie prívody",
+          "pravny_zaklad": "vyhl. 508/2009",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zásahy do elektrických zariadení len osobou s odbornou spôsobilosťou",
+          "pravny_zaklad": "§ 15 vyhl. 508/2009",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Bleskozvod — stav a platná revízia",
+          "pravny_zaklad": "vyhl. 508/2009, STN EN 62305",
+          "rozsah": "VR"
+        }
+      ]
+    },
+    {
+      "kod": "I",
+      "nazov": "Chemické látky, biologické faktory a výbušné prostredie",
+      "polozky": [
+        {
+          "text": "Zoznam nebezpečných chemických látok a zmesí",
+          "pravny_zaklad": "NV 355/2006 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Karty bezpečnostných údajov — dostupné a aktuálne",
+          "pravny_zaklad": "NV 355/2006 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Posúdenie rizík pri práci s chemickými faktormi",
+          "pravny_zaklad": "§ 4 NV 355/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Skladovanie, označenie a ochranné opatrenia",
+          "pravny_zaklad": "NV 355/2006 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Postup pri havárii a úniku nebezpečných látok",
+          "pravny_zaklad": "§ 8 NV 355/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Ochrana pred karcinogénnymi a mutagénnymi faktormi",
+          "pravny_zaklad": "NV 356/2006 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Ochrana pred biologickými faktormi",
+          "pravny_zaklad": "NV 83/2013 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Azbest — postup a opatrenia, ak sa vyskytuje",
+          "pravny_zaklad": "NV 253/2006 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Dokumentácia o ochrane pred výbuchom, ak vzniká výbušná atmosféra",
+          "pravny_zaklad": "§ 6 NV 393/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Klasifikácia priestorov s nebezpečenstvom výbuchu a ich označenie",
+          "pravny_zaklad": "NV 393/2006 Z. z.",
+          "rozsah": "VR"
+        }
+      ]
+    },
+    {
+      "kod": "J",
+      "nazov": "Špecifické činnosti a prevádzky",
+      "polozky": [
+        {
+          "text": "Práce vo výškach — postupy, kolektívne a osobné istenie",
+          "pravny_zaklad": "vyhl. 147/2013 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zákaz fajčenia — pokyn, vyhradené priestory, dodržiavanie",
+          "pravny_zaklad": "§ 9 ods. 1 písm. b) z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Alkohol a omamné látky — smernica a vykonávanie dychových skúšok",
+          "pravny_zaklad": "§ 9 ods. 1 písm. b) z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Zakázané práce ženám a mladistvým — smernica a dodržiavanie",
+          "pravny_zaklad": "NV 272/2004 · NV 286/2004",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Práca so zobrazovacími jednotkami — posúdenie a prestávky",
+          "pravny_zaklad": "NV 276/2006 Z. z.",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Domácka práca a telepráca — dohodnuté podmienky BOZP",
+          "pravny_zaklad": "§ 52 Zákonníka práce",
+          "rozsah": "V"
+        },
+        {
+          "text": "Nočná práca a práca na zmeny — opatrenia",
+          "pravny_zaklad": "§ 98 Zákonníka práce",
+          "rozsah": "V"
+        },
+        {
+          "text": "BOZP žiakov a osôb na praxi",
+          "pravny_zaklad": "§ 3 ods. 2 z. 124/2006",
+          "rozsah": "V"
+        }
+      ]
+    },
+    {
+      "kod": "K",
+      "nazov": "Zdravotný dohľad a kategorizácia prác",
+      "polozky": [
+        {
+          "text": "Kategorizácia prác podľa zdravotného rizika — vypracovaná a aktuálna",
+          "pravny_zaklad": "§ 30 z. 355/2007",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Rozhodnutie úradu verejného zdravotníctva pri 3. a 4. kategórii",
+          "pravny_zaklad": "§ 31 z. 355/2007",
+          "rozsah": "V"
+        },
+        {
+          "text": "Zabezpečená pracovná zdravotná služba",
+          "pravny_zaklad": "§ 30a z. 355/2007",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Posudky o riziku od pracovnej zdravotnej služby",
+          "pravny_zaklad": "§ 30 ods. 1 z. 355/2007",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Vstupné, periodické a výstupné lekárske preventívne prehliadky",
+          "pravny_zaklad": "§ 30e z. 355/2007",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Evidencia zamestnancov vykonávajúcich rizikové práce",
+          "pravny_zaklad": "§ 30 ods. 1 písm. l) z. 355/2007",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Oznámenie údajov o rizikových prácach úradu verejného zdravotníctva",
+          "pravny_zaklad": "§ 30 ods. 1 z. 355/2007",
+          "rozsah": "R"
+        }
+      ]
+    },
+    {
+      "kod": "L",
+      "nazov": "Stavebné práce a viacero zamestnávateľov",
+      "polozky": [
+        {
+          "text": "Zabezpečenie BOZP pri prácach viacerých zamestnávateľov",
+          "pravny_zaklad": "§ 18 z. 124/2006",
+          "rozsah": "VR"
+        },
+        {
+          "text": "Písomná dohoda o koordinácii a určenie zodpovednej osoby",
+          "pravny_zaklad": "§ 18 ods. 3 z. 124/2006",
+          "rozsah": "V"
+        },
+        {
+          "text": "Koordinátor bezpečnosti na stavenisku, ak sa vyžaduje",
+          "pravny_zaklad": "§ 6 NV 396/2006",
+          "rozsah": "V"
+        },
+        {
+          "text": "Plán bezpečnosti a ochrany zdravia pri práci na stavenisku",
+          "pravny_zaklad": "§ 5 NV 396/2006",
+          "rozsah": "V"
+        },
+        {
+          "text": "Ohlásenie staveniska inšpektorátu práce, ak sa vyžaduje",
+          "pravny_zaklad": "§ 3 NV 396/2006",
+          "rozsah": "V"
+        },
+        {
+          "text": "Lešenie — odovzdanie do užívania a pravidelné prehliadky",
+          "pravny_zaklad": "vyhl. 147/2013 Z. z.",
+          "rozsah": "VR"
+        }
+      ]
+    }
+  ]
+}

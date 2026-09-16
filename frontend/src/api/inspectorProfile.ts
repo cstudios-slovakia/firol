@@ -7,12 +7,16 @@ export type InspectorProfile = {
   cert_php: string | null;
   cert_oprava: string | null;
   cert_general: string | null;
+  /** Bezpečnostný technik — printed on the audit BOZP (block 3). Personal. */
+  cert_bt: string | null;
   valid_from_php: string | null;
   valid_to_php: string | null;
   valid_from_oprava: string | null;
   valid_to_oprava: string | null;
   valid_from_general: string | null;
   valid_to_general: string | null;
+  valid_from_bt: string | null;
+  valid_to_bt: string | null;
   is_active: boolean;
 };
 
@@ -20,12 +24,15 @@ export type InspectorProfileUpdate = {
   cert_php?: string | null;
   cert_oprava?: string | null;
   cert_general?: string | null;
+  cert_bt?: string | null;
   valid_from_php?: string | null;
   valid_to_php?: string | null;
   valid_from_oprava?: string | null;
   valid_to_oprava?: string | null;
   valid_from_general?: string | null;
   valid_to_general?: string | null;
+  valid_from_bt?: string | null;
+  valid_to_bt?: string | null;
   is_active?: boolean;
 };
 
