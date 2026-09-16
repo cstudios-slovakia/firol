@@ -11,11 +11,16 @@ use PHPMailer\PHPMailer\PHPMailer;
  * SMTP transport via PHPMailer. Single static entry point (`Mailer::send`)
  * keeps the call sites in controllers compact.
  *
- * If SMTP is not configured or the delivery fails, the mail is logged via
+ * If SMTP is not configured or the handoff fails, the mail is logged via
  * error_log() instead — so dev/staging keep working and an SMTP outage
  * cannot break the underlying flow (password reset, invite, invoice
- * receipt). The caller is never made aware of the failure; the return
- * value is informational.
+ * receipt). The return value says whether the SMTP server accepted the
+ * message; platform mail ignores it, protocol mail acts on it
+ * (DocumentController::emailDocument, DocumentSendController::store).
+ *
+ * A `true` return means accepted for delivery, NOT delivered. The relay
+ * accepts first and attempts delivery afterwards, so a remote rejection
+ * comes back as a bounce minutes later and is invisible here.
  *
  * Templates live in `Firol\Mail\Templates` and return a Message struct.
  */

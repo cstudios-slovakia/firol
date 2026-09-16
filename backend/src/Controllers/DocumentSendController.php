@@ -11,6 +11,7 @@ use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Mail\Mailer;
+use Firol\Mail\ReplyTo;
 use Firol\Mail\Templates\BulkDocumentEmail;
 use Firol\Storage\Storage;
 
@@ -169,6 +170,8 @@ final class DocumentSendController
         ]);
         $sendId = (int) $pdo->lastInsertId();
 
+        $replyTo = ReplyTo::forSender($accountId, $userId);
+
         $failed = [];
         foreach ($recipients as $to) {
             $message = BulkDocumentEmail::build(
@@ -177,6 +180,7 @@ final class DocumentSendController
                 brandName:  $brandName,
                 documents:  $attachments,
                 note:       $note,
+                replyTo:    $replyTo,
             );
             if (!Mailer::send($message)) {
                 $failed[] = $to;

@@ -15,6 +15,9 @@ use Firol\Mail\Message;
  *
  * The body lists the protocol numbers so the recipient can check the
  * attachments against the list without opening each PDF.
+ *
+ * `$replyTo` carries the sending technician's address (see Firol\Mail\ReplyTo)
+ * so a reply reaches a person rather than the platform's noreply@ From.
  */
 final class BulkDocumentEmail
 {
@@ -27,6 +30,7 @@ final class BulkDocumentEmail
         string $brandName,
         array $documents,
         ?string $note = null,
+        ?string $replyTo = null,
     ): Message {
         $brandEsc = htmlspecialchars($brandName, ENT_QUOTES, 'UTF-8');
 
@@ -78,6 +82,7 @@ HTML;
             subject: $subject,
             html:    Layout::render('Protokoly', $subject, $bodyHtml, $count . ' ' . $word . ' v prílohe.'),
             text:    $text,
+            replyTo: $replyTo,
             attachments: $attachments,
         );
     }
