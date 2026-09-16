@@ -36,9 +36,17 @@ final class Layout
      * and the dark ink of "PO" then sits on a black strip. Clients do not
      * invert image pixels, so the plate keeps the wordmark on the surface
      * it was drawn for — and it is invisible on the white strip everywhere
-     * else. To redo it after a rebrand: crop the source to its artwork,
-     * pad it by 28x24 px and lay it on a white rounded rect of radius 32
-     * (source-pixel scale, 427x171 canvas), then update the <img> size.
+     * else.
+     *
+     * It ships at exactly 2x its rendered size (220x88 for 110x44). Left
+     * larger, every client reduces it with its own resampler and most of
+     * them do it badly — the wordmark came out mushy in Gmail on desktop,
+     * Outlook, Websupport and BlueMail. A 2:1 reduction survives even a
+     * crude one, and still looks sharp on a retina screen.
+     *
+     * To redo it after a rebrand: crop the source to its artwork, scale
+     * that to 192x64, pad by 14x12 and lay it on a white rounded rect of
+     * radius 16 — then halve the canvas for the <img> width/height.
      */
     public static function logoFile(): string
     {
@@ -96,12 +104,14 @@ final class Layout
 
           <!-- Logo strip -->
           <tr>
-            <td bgcolor="#ffffff" style="background:#ffffff;background-color:#ffffff;padding:24px 32px 20px 32px;border-bottom:1px solid #eef0f3;">
+            <!-- Padding is inset by the logo plate's own 7x6 px margin so the
+                 wordmark lines up with the headline below it, not the plate. -->
+            <td bgcolor="#ffffff" style="background:#ffffff;background-color:#ffffff;padding:18px 25px 14px 25px;border-bottom:1px solid #eef0f3;">
               <img src="cid:poapp-logo"
                    alt="POapp"
                    width="110"
                    height="44"
-                   style="display:block;height:44px;width:auto;max-width:110px;border:0;outline:none;text-decoration:none;">
+                   style="display:block;width:110px;height:44px;border:0;outline:none;text-decoration:none;">
             </td>
           </tr>
 
