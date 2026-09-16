@@ -346,8 +346,8 @@ $approver = trim((string) ($company['approver'] ?? ''));
     <td><?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?><br><span
           style="font-size:8pt; color:#555;">technik PO, č. oprávnenia:
           <?= $h($inspector['certification_number']) ?></span><?php endif ?></td>
-    <td><?= $approver !== '' ? $h($approver) : 'Štatutárny zástupca / zodpovedná osoba' ?></td>
-    <td><?= $h(($city ? $city . ', ' : '') . $formatDate($inspection['executed_on'] ?? null)) ?></td>
+    <td><?= \Firol\Pdf\SignatureBlock::nameCell($handover ?? null, $approver) ?></td>
+    <td><?= \Firol\Pdf\SignatureBlock::placeAndDate($handover ?? null, ($city ? $city . ', ' : '') . $formatDate($inspection['executed_on'] ?? null)) ?></td>
   </tr>
   <tr class="sig-row">
     <td>

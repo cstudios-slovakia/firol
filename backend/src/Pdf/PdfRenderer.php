@@ -42,6 +42,20 @@ final class PdfRenderer
     }
 
     /**
+     * Potvrdenie o vykonaní práce (block 1 / chapter 10). Its own entry point
+     * rather than a branch of renderForType(): it is not an inspection
+     * protocol, it has no items or stats, and its header names the
+     * technician's firm instead of the client's.
+     *
+     * @param array<string, mixed> $payload
+     */
+    public static function renderWorkConfirmation(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/potvrdenie_prace.php', $payload);
+        return self::buildPdf($html, $payload['number'] ?? 'potvrdenie');
+    }
+
+    /**
      * Type-aware dispatcher. Adding a new inspection type means adding a
      * branch here + the corresponding template under templates/.
      *
