@@ -23,9 +23,12 @@ use Firol\Controllers\AuthController;
 use Firol\Controllers\BillingController;
 use Firol\Controllers\CalendarController;
 use Firol\Controllers\CompanyController;
+use Firol\Controllers\CompanyPersonController;
+use Firol\Controllers\DocumentSendController;
 use Firol\Controllers\FacilityController;
 use Firol\Controllers\DocumentController;
 use Firol\Controllers\FeedbackController;
+use Firol\Controllers\HandoverController;
 use Firol\Controllers\ImportController;
 use Firol\Controllers\InspectionController;
 use Firol\Controllers\InspectionItemController;
@@ -35,6 +38,8 @@ use Firol\Controllers\InviteController;
 use Firol\Controllers\TeamController;
 use Firol\Controllers\TraineeController;
 use Firol\Controllers\TrainingController;
+use Firol\Controllers\VisitController;
+use Firol\Controllers\WorkConfirmationController;
 use Firol\Controllers\MeController;
 use Firol\Controllers\PublicSettingsController;
 use Firol\Auth\Session;
@@ -125,6 +130,17 @@ $router->patch('/api/companies/{id}',               [CompanyController::class, '
 $router->delete('/api/companies/{id}',              [CompanyController::class, 'archive']);
 $router->post('/api/companies/{id}/facilities',     [FacilityController::class, 'storeUnderCompany']);
 
+// Chapter 13.2 — people at the client entitled to sign a protocol.
+$router->get('/api/companies/{id}/persons',                  [CompanyPersonController::class, 'index']);
+$router->post('/api/companies/{id}/persons',                 [CompanyPersonController::class, 'store']);
+$router->patch('/api/companies/{id}/persons/{person_id}',    [CompanyPersonController::class, 'update']);
+$router->delete('/api/companies/{id}/persons/{person_id}',   [CompanyPersonController::class, 'destroy']);
+
+// Chapter 9.1 — several protocols in one e-mail, from a visit or from history.
+$router->get('/api/companies/{id}/sendable-documents', [DocumentSendController::class, 'available']);
+$router->get('/api/companies/{id}/sends',              [DocumentSendController::class, 'index']);
+$router->post('/api/companies/{id}/sends',             [DocumentSendController::class, 'store']);
+
 $router->get('/api/facilities/{id}',                [FacilityController::class, 'show']);
 $router->patch('/api/facilities/{id}',              [FacilityController::class, 'update']);
 $router->delete('/api/facilities/{id}',             [FacilityController::class, 'archive']);
@@ -137,6 +153,8 @@ $router->get('/api/inspections/{id}',               [InspectionController::class
 $router->patch('/api/inspections/{id}',             [InspectionController::class, 'updateBasic']);
 $router->delete('/api/inspections/{id}',            [InspectionController::class, 'archive']);
 $router->post('/api/inspections/{id}/repeat',       [InspectionController::class, 'repeat']);
+// Chapter 12 — fill an empty draft from the previous inspection.
+$router->post('/api/inspections/{id}/carry-over',  [InspectionController::class, 'carryOver']);
 // "Upraviť" on a locked inspection — discards the issued protocol and puts
 // the inspection back into draft so it can be corrected.
 $router->post('/api/inspections/{id}/unlock',       [InspectionController::class, 'unlock']);
@@ -163,6 +181,21 @@ $router->patch('/api/calendar/events/{id}',          [CalendarController::class,
 $router->delete('/api/calendar/events/{id}',         [CalendarController::class, 'deleteEvent']);
 $router->get('/api/documents/{id}/download',         [DocumentController::class, 'download']);
 $router->post('/api/documents/{id}/email',           [DocumentController::class, 'emailDocument']);
+// Chapter 13 — client signs on the screen; the protocol is re-rendered as a
+// new version of the same number.
+$router->post('/api/documents/{id}/handover',       [HandoverController::class, 'store']);
+
+// Chapter 9 — návšteva: one trip, several úkony.
+$router->get('/api/visits',                         [VisitController::class, 'index']);
+$router->post('/api/visits',                        [VisitController::class, 'store']);
+$router->get('/api/visits/{id}',                    [VisitController::class, 'show']);
+$router->patch('/api/visits/{id}',                  [VisitController::class, 'update']);
+$router->delete('/api/visits/{id}',                 [VisitController::class, 'archive']);
+$router->post('/api/visits/{id}/generate-documents', [VisitController::class, 'generateDocuments']);
+
+// Chapter 10 — potvrdenie o vykonaní práce.
+$router->get('/api/work-confirmations',             [WorkConfirmationController::class, 'index']);
+$router->post('/api/work-confirmations',            [WorkConfirmationController::class, 'store']);
 
 $router->get('/api/me/inspector-profile',            [InspectorProfileController::class, 'show']);
 $router->patch('/api/me/inspector-profile',          [InspectorProfileController::class, 'update']);

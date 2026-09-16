@@ -664,6 +664,98 @@ created + swept by `deploy.yml`. `Storage::ensureDir` now `chmod`s after
 was there for — whichever of php-fpm/CLI created a directory first would
 otherwise lock the other one out.
 
+## BOZP extension — block 1 „Základ" (POapp spec, september 2026) ✅
+
+Second delivery of the BOZP extension package
+(`POapp_BOZP_pre_vyvojarov11/`). The package is handed over in blocks; block 0
+(bug fixes) is tracked separately. Block 1 is the ground the BOZP úkony in
+block 2 stand on: chapters **2, 5, 6, 9, 10, 12, 13**.
+
+Migrations `035`–`037`.
+
+- ✅ **Ch. 5 — periodicity is the technician's decision, on every type.**
+  `inspections.periodicity_months` is replaced by
+  `periodicity_value` + `periodicity_unit` (`den` / `tyzden` / `mesiac`), with
+  both NULL meaning „bez opakovania"; `periodicity_is_custom` records that the
+  value was not one the app offered. No type has a period forced on it or
+  forbidden to it any more — `pu_akcieschopnost` offers 3/6/12, and dychová
+  skúška (block 2) will start at „bez opakovania" but still accept a weekly
+  period, because some firms have one in their smernica.
+  The arithmetic lives in `Firol\Support\Periodicity` and `lib/periodicity.ts`
+  (month addition clamps: 31. 1. + 1 mesiac is 28. 2., not 3. 3.).
+  **The phrase „zákonný termín" is gone from the UI** — the calendar now says
+  „predpripravený termín", the picker „odporúčaná lehota", and a protocol
+  prints only the bare value. A protocol with no period prints **no**
+  Periodicita row at all rather than a dash. This is a liability decision, not
+  a wording one: lehoty follow from the building, its environment and the
+  operator, and the technician who signs carries them.
+- ✅ **Ch. 2 — one section becomes three.** Revízie / OPP / BOZP
+  (`/revizie`, `/opp`, `/bozp`, `<SectionPage>`), matching the paid modules one
+  to one. **Školenia disappears as a menu item**: a training has its own
+  protocol and its own next term, so školenie PO is a tab inside OPP. A section
+  with no types is left out of the menu entirely rather than greyed — BOZP
+  therefore appears once block 2 ships its úkony, which is also the shape
+  module gating needs in block 5. `/inspections` survives unsectioned for the
+  links and bookmarks that point at it.
+- ✅ **Ch. 12 — carrying items over.** `POST /api/inspections/{id}/carry-over`
+  plus a rewritten `repeat`. Identification travels; **stav, poznámky, fotky
+  and nedostatky do not** — carrying a verdict forward would let a protocol
+  claim something nobody checked. Items disposed of last time are left behind
+  and counted, so a shorter list reads as a decision. Each carried item keeps
+  `previous_status`, shown beside it while entering results and printed on
+  nothing. `carried_over_from_id` is kept apart from `source_inspection_id` so
+  the follow-up graph doesn't blur with the "typed once, a year ago" one.
+- ✅ **Ch. 9 — návšteva.** `visits` + `inspections.visit_id`,
+  `<VisitNewPage>` / `<VisitDetailPage>`. Firma and prevádzka are picked once;
+  types due within 30 days are ticked in advance. "Generovať všetky protokoly"
+  issues each úkon's protocol from its own number series and reports what it
+  had to skip and why — one úkon that isn't ready must not cost the other
+  three.
+- ✅ **Ch. 9.1 — several protocols, one e-mail.** `document_sends`,
+  `POST /api/companies/{id}/sends`, `<BulkSendDialog>`. Reachable from a visit
+  and from the company history, where "everything from last year" is a matter
+  of ticking rows. One message per recipient (one client's address never lands
+  in another's headers); every send is recorded with its protocols, recipients
+  and outcome. **Deviation from the spec:** over 20 MB the send is refused with
+  a Slovak message naming the size, rather than shrinking the photos — the PDFs
+  are already issued, and re-rendering one would mean sending a document that
+  differs from the archived original under the same number.
+- ✅ **Ch. 10 — potvrdenie o vykonaní práce.** `work_confirmations`,
+  `POST /api/work-confirmations`, template `potvrdenie_prace.php` (grey,
+  SPOLOČNÉ, `POT-RRRR-NNN`). Built from a visit, a single úkon, or a company
+  and a day. It names the technician's own firm as zhotoviteľ and lists
+  protocol NUMBERS only — no nedostatky, no stavy. Times are optional; without
+  them the row and the summary figure are left off. The "odovzdaný materiál"
+  section waits for the sklad in block 4 and is omitted while empty.
+- ✅ **Ch. 13 — prevzatie podpisom.** `company_persons` (several signatories
+  per client, pinned to a prevádzka or valid company-wide, one default),
+  `document_handovers`, `POST /api/documents/{id}/handover`,
+  `<HandoverDialog>`. Signing re-renders the protocol as a **new version of the
+  same number** (`documents.version` + `document_versions`); the earlier file
+  stays, because the client may already hold it. Signing is optional by design
+  — printing and signing on paper is ordinary practice, so the PDF always
+  carries an empty line for it.
+  The client column is headed **„Za organizáciu"** on every document, never
+  „Za spoločnosť" (a third of the clients are schools, obce and združenia), and
+  the line above the signature follows the document: **Schválil** on a požiarna
+  kniha (§ 29 vyhl. 121/2002 — the vedúci zamestnanec approves the record),
+  Prevzal na vedomie elsewhere. Centralised in `Firol\Support\Handover` +
+  `Firol\Pdf\SignatureBlock`, because nine templates had each spelled it out
+  and had already drifted apart.
+- ✅ **Ch. 6** — the three-step flow already matched the spec; the date still
+  is never auto-filled, and an interrupted zápis stays a koncept.
+
+Carried through the rest of the codebase: the Excel importer accepts a period
+in any unit (blank count = bez opakovania, blank unit = mesiac); backup
+archives written before block 1 are read through their old
+`periodicity_months`; `unlock` deletes every version of a discarded protocol,
+not only the latest.
+
+**Not in block 1, by design:** the BOZP úkony themselves (block 2), audits
+(block 3), sklad / úlohy / Dnes / časová os (block 4) and module subscriptions
+(block 5). The BOZP section and the výdajka rows on the potvrdenie are wired
+but empty until those land.
+
 ---
 
 ## Open questions (must be answered before the relevant phase starts)
