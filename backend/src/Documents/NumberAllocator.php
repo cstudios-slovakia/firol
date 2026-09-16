@@ -36,6 +36,10 @@ final class NumberAllocator
         // tree but keeps its own series: it is a document for the client's
         // employees, not one of the attendance-based trainings below.
         'pokyn_zatva'        => 'ZAT',
+        // Block 1 / chapter 10 — potvrdenie o vykonaní práce. A shared
+        // document (grey, SPOLOČNÉ) with its own series, because it is issued
+        // per visit rather than per úkon.
+        'potvrdenie_prace'   => 'POT',
         // Trainings: per spec, all 6 attendance-based training types share
         // the SKO prefix and a single per-account+year sequence. The training
         // type itself is stored in the body, not encoded in the number.
