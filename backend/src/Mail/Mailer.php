@@ -44,8 +44,23 @@ final class Mailer
             $mail->Host       = $host;
             $mail->Port       = $port;
             $mail->CharSet    = 'UTF-8';
-            $mail->Encoding   = 'base64';
             $mail->Timeout    = 15;
+
+            // Deliverability, aimed at Outlook/Hotmail's filter specifically —
+            // Gmail and Websupport already inbox these messages, Outlook junks
+            // them. SPF, DKIM and DMARC all verify, so what is left is the
+            // cheap signals:
+            //
+            // - quoted-printable, not base64: a body whose every byte is
+            //   base64 reads as something hiding from a content scanner.
+            // - Message-ID is derived from Hostname; left alone PHPMailer uses
+            //   $_SERVER['SERVER_NAME'], which is absent on CLI/cron sends and
+            //   degrades to `localhost.localdomain` — a Message-ID whose domain
+            //   is unrelated to the From domain is a junk signal.
+            // - X-Mailer only advertises the library and its version.
+            $mail->Encoding = PHPMailer::ENCODING_QUOTED_PRINTABLE;
+            $mail->Hostname = self::senderDomain($fromEmail);
+            $mail->XMailer  = ' ';
 
             if ($user !== '') {
                 $mail->SMTPAuth = true;
@@ -63,6 +78,9 @@ final class Mailer
             }
 
             $mail->setFrom($fromEmail, $fromName);
+            // Envelope sender, so Return-Path matches From and SPF is aligned
+            // for DMARC rather than merely passing on the hosting domain.
+            $mail->Sender = $fromEmail;
             $mail->addAddress($msg->to);
             if ($msg->replyTo !== null && $msg->replyTo !== '') {
                 $mail->addReplyTo($msg->replyTo);
@@ -109,6 +127,15 @@ final class Mailer
             $email = 'no-reply@localhost';
         }
         return [$email, $name];
+    }
+
+    /** Domain part of the From address, used for HELO and the Message-ID. */
+    private static function senderDomain(string $fromEmail): string
+    {
+        $at = strrpos($fromEmail, '@');
+        $domain = $at === false ? '' : substr($fromEmail, $at + 1);
+
+        return $domain !== '' ? $domain : 'localhost.localdomain';
     }
 
     public static function appBaseUrl(): string
