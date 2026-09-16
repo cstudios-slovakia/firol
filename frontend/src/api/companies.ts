@@ -1,4 +1,5 @@
 import { api, type OptimisticSpec } from '@/lib/api';
+import type { PeriodicityUnit } from '@/lib/periodicity';
 
 export type CompanyListItem = {
   id: number;
@@ -50,11 +51,31 @@ export type FacilityListItem = {
   contact_person: string | null;
   notes: string | null;
   /**
-   * Most recent periodicity used per inspection type for this facility,
-   * derived from history. Step 1 uses this to prefill the periodicity
-   * dropdown for types where it's selectable (PHP, požiarna kniha).
+   * Most recent periodicity used per inspection type at this prevádzka,
+   * derived from history. Step 1 prefills from it, because what was chosen
+   * here last time beats the catalogue's recommendation. Carries the unit too:
+   * since block 1 a period can be days or weeks, not only months.
    */
-  last_periodicities: Record<string, number>;
+  last_periodicities: Record<string, { value: number | null; unit: PeriodicityUnit | null }>;
+};
+
+/** One person at the client entitled to sign a protocol (chapter 13.2). */
+export type CompanyPerson = {
+  id: number;
+  /** Pinned to one prevádzka, or null when valid for the whole company. */
+  facility_id: number | null;
+  fullname: string;
+  role_title: string;
+  email: string | null;
+  is_default: boolean;
+};
+
+export type CompanyPersonPayload = {
+  fullname?: string;
+  role_title?: string;
+  email?: string | null;
+  facility_id?: number | null;
+  is_default?: boolean;
 };
 
 export type CompanyDetail = {
@@ -85,4 +106,35 @@ export const Companies = {
     api<{ company: Company }>(`/api/companies/${id}`, { method: 'PATCH', body, csrfToken }),
   archive: (id: number, csrfToken: string | null) =>
     api<void>(`/api/companies/${id}`, { method: 'DELETE', csrfToken }),
+
+  /**
+   * People entitled to sign this company's protocols (chapter 13.2). Pass
+   * `facilityId` to get the ones valid at that prevádzka plus the
+   * company-wide ones — which is what the signature picker needs.
+   */
+  persons: (id: number, facilityId?: number) => {
+    const qs = facilityId ? `?facility_id=${facilityId}` : '';
+    return api<{ items: CompanyPerson[]; role_suggestions: string[] }>(
+      `/api/companies/${id}/persons${qs}`,
+    );
+  },
+  createPerson: (id: number, body: CompanyPersonPayload, csrfToken: string | null) =>
+    api<{ person: CompanyPerson }>(`/api/companies/${id}/persons`, {
+      method: 'POST',
+      body,
+      csrfToken,
+    }),
+  updatePerson: (
+    id: number,
+    personId: number,
+    body: CompanyPersonPayload,
+    csrfToken: string | null,
+  ) =>
+    api<{ person: CompanyPerson }>(`/api/companies/${id}/persons/${personId}`, {
+      method: 'PATCH',
+      body,
+      csrfToken,
+    }),
+  deletePerson: (id: number, personId: number, csrfToken: string | null) =>
+    api<void>(`/api/companies/${id}/persons/${personId}`, { method: 'DELETE', csrfToken }),
 };
