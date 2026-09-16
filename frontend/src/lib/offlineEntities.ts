@@ -22,6 +22,7 @@
  */
 import type { CachePatch, OptimisticSpec } from './api';
 import { mintTempId } from './tempId';
+import { validUntil } from './periodicity';
 import type {
   Inspection,
   InspectionDetail,
@@ -82,7 +83,16 @@ export function inspectionCreateOptimistic(args: {
   const inspection: Inspection = {
     id,
     type: args.payload.type,
-    periodicity_months: args.payload.periodicity_months,
+    periodicity_value: args.payload.periodicity_value,
+    periodicity_unit: args.payload.periodicity_unit,
+    // The offline draft doesn't try to work out whether the chosen period is
+    // one the app recommended — the server decides that when the create syncs,
+    // and nothing in the UI reads the flag before then.
+    periodicity_is_custom: false,
+    valid_until: validUntil(args.payload.executed_on, {
+      value: args.payload.periodicity_value,
+      unit: args.payload.periodicity_unit,
+    }),
     executed_on: args.payload.executed_on,
     status: 'draft',
     notes: args.payload.notes ?? null,
@@ -106,6 +116,8 @@ export function inspectionCreateOptimistic(args: {
     // A manually created inspection has no source; follow-up drafts are made
     // server-side (change request 2.1).
     source_inspection_id: null,
+    carried_over_from_id: null,
+    visit_id: args.payload.visit_id ?? null,
   };
   const detail: InspectionDetail = { inspection, items: [] };
   const listRow: InspectionListItem = { ...inspection };
@@ -409,7 +421,7 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
   const inspection = INSPECTION_RE.exec(pathOnly);
   if (inspection) {
     const id = Number(inspection[1]);
-    const keys = ['executed_on', 'notes', 'periodicity_months'];
+    const keys = ['executed_on', 'notes', 'periodicity_value', 'periodicity_unit'];
     return {
       label: 'Úprava kontroly',
       patches: [

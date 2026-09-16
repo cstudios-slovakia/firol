@@ -37,7 +37,8 @@ export function InspectionStatusBadge({
         | "type"
         | "status"
         | "executed_on"
-        | "periodicity_months"
+        | "periodicity_value"
+        | "periodicity_unit"
         | "is_superseded"
         | "is_preventive_inspection"
     >;

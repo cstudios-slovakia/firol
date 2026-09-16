@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, Download, FileText,
-  GitBranch, History, Images, Link2, Lock, LockOpen, NotebookPen, Pencil, Plus, Repeat,
-  Warehouse,
+  ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, CopyPlus, Download,
+  FileText, GitBranch, History, Images, Link2, Lock, LockOpen, NotebookPen, Pencil,
+  PenLine, Plus, Repeat, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
   INSPECTION_TYPE_LABELS,
   Inspections,
   documentDownloadUrl,
+  periodicityOf,
   type InspectionDetail,
   type InspectionDocument,
   type InspectionType,
@@ -29,6 +30,11 @@ import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { ItemPhotoStrip } from '@/components/ItemPhotos';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { InspectionStatusBadge } from '@/components/InspectionStatusBadge';
+import { HandoverDialog } from '@/components/HandoverDialog';
+import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStatusBadge';
+import { PeriodicityPicker } from '@/components/PeriodicityPicker';
+import { periodicityLabel, type Periodicity } from '@/lib/periodicity';
+import { sectionPathForType } from '@/lib/sections';
 
 /**
  * Step 3 — summary screen. Final review before PDF generation.
@@ -51,6 +57,7 @@ export function InspectionDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [savingDate, setSavingDate] = useState(false);
+  const [savingPeriodicity, setSavingPeriodicity] = useState(false);
   const [localDate, setLocalDate] = useState<string>('');
   const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -60,6 +67,10 @@ export function InspectionDetailPage() {
   const [unlockPrompt, setUnlockPrompt] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [creatingFollowUp, setCreatingFollowUp] = useState(false);
+  // Chapter 12 — pulling last time's devices into an empty draft.
+  const [carryingOver, setCarryingOver] = useState(false);
+  // Chapter 13 — the document currently being handed over for signature.
+  const [signingDocument, setSigningDocument] = useState<InspectionDocument | null>(null);
   // "Priložiť fotodokumentáciu" (change request 2.2) — on by default, and only
   // shown at all when the inspection actually has photos.
   const [includePhotos, setIncludePhotos] = useState(true);
@@ -102,12 +113,54 @@ export function InspectionDetailPage() {
     setRepeating(true);
     try {
       const res = await Inspections.repeat(id, csrfToken);
+      // Devices disposed of last time are deliberately left behind (chapter
+      // 12). Saying so turns a shorter list from a suspected bug into a
+      // decision the technician can see was made.
+      if (res.disposed_skipped > 0) {
+        toast.success(disposedNotice(res.disposed_skipped));
+      }
       navigate(`/inspections/${res.inspection.id}`, { replace: false });
     } catch (err) {
       setError(offlineMessage(err, 'Opakovať sa nepodarilo.'));
     } finally {
       setRepeating(false);
     }
+  }
+
+  /**
+   * Fill an empty draft from the previous inspection at this prevádzka
+   * (chapter 12). The devices come across; their stav does not — the
+   * technician enters this year's results themselves.
+   */
+  async function handleCarryOver() {
+    if (!data) return;
+    setError(null);
+    setCarryingOver(true);
+    try {
+      const res = await Inspections.carryOver(id, csrfToken);
+      setData((prev) =>
+        prev
+          ? { ...prev, inspection: res.inspection, items: res.items, carry_over: null }
+          : prev,
+      );
+      toast.success(
+        res.disposed_skipped > 0
+          ? `Položky prevzaté. ${disposedNotice(res.disposed_skipped)}`
+          : 'Položky z minulej kontroly prevzaté — stav zadaj nanovo.',
+      );
+    } catch (err) {
+      setError(offlineMessage(err, 'Prevzatie položiek sa nepodarilo.'));
+    } finally {
+      setCarryingOver(false);
+    }
+  }
+
+  /** Reload the documents list after a signature produced a new version. */
+  async function refreshDocuments() {
+    const docs = await Inspections.documents(id).catch(
+      () => ({ items: [] as InspectionDocument[] }),
+    );
+    setDocuments(docs.items);
   }
 
   /**
@@ -167,6 +220,47 @@ export function InspectionDetailPage() {
       setPdfError(offlineMessage(err, 'PDF sa nepodarilo vygenerovať.'));
     } finally {
       setGenerating(false);
+    }
+  }
+
+  /**
+   * Change the period on a draft (chapter 5).
+   *
+   * Reachable here and not only in Step 1 because "Opakovať" skips Step 1
+   * entirely: the repeat inherits last year's period, and without this the
+   * technician would have no way to change it before issuing the protocol.
+   */
+  async function handlePeriodicityChange(next: Periodicity) {
+    if (!data) return;
+    setSavingPeriodicity(true);
+    try {
+      const res = await Inspections.update(
+        id,
+        { periodicity_value: next.value, periodicity_unit: next.unit },
+        csrfToken,
+      );
+      setData((prev) =>
+        prev ? { ...prev, inspection: { ...prev.inspection, ...res.inspection } } : prev,
+      );
+    } catch (err) {
+      if (handleOfflineSave(err, toast)) {
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                inspection: {
+                  ...prev.inspection,
+                  periodicity_value: next.value,
+                  periodicity_unit: next.unit,
+                },
+              }
+            : prev,
+        );
+        return;
+      }
+      setError(err instanceof ApiError ? err.message : 'Periodicitu sa nepodarilo uložiť.');
+    } finally {
+      setSavingPeriodicity(false);
     }
   }
 
@@ -242,7 +336,7 @@ export function InspectionDetailPage() {
   return (
     <div className="flex flex-col gap-5">
       <Link
-        to="/inspections"
+        to={sectionPathForType(i.type)}
         className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start"
       >
         <ArrowLeft className="size-4" />
@@ -443,6 +537,30 @@ export function InspectionDetailPage() {
             Uložiť dátum
           </Button>
         )}
+
+        <div className="border-t border-ink-100/70 pt-3">
+          <p
+            className={cn(
+              'text-xs font-semibold uppercase tracking-wider',
+              isDraft ? 'text-status-warn' : 'text-ink-500',
+            )}
+          >
+            Periodicita
+          </p>
+          {isDraft ? (
+            <div className="mt-2">
+              <PeriodicityPicker
+                type={i.type}
+                value={periodicityOf(i)}
+                executedOn={localDate || null}
+                disabled={savingPeriodicity}
+                onChange={handlePeriodicityChange}
+              />
+            </div>
+          ) : (
+            <p className="mt-0.5 text-sm text-ink-700">{periodicityLabel(periodicityOf(i))}</p>
+          )}
+        </div>
       </Card>
 
       {i.notes && (
@@ -463,6 +581,14 @@ export function InspectionDetailPage() {
 
       {error && data && (
         <Card className="px-3 py-2 text-sm text-status-bad">{error}</Card>
+      )}
+
+      {isDraft && items.length === 0 && data.carry_over && (
+        <CarryOverOfferCard
+          offer={data.carry_over}
+          busy={carryingOver}
+          onCarryOver={handleCarryOver}
+        />
       )}
 
       {items.length === 0 ? (
@@ -487,6 +613,14 @@ export function InspectionDetailPage() {
                     deleting={deletingItemId === it.id}
                     onDelete={() => handleDeleteItem(it.id)}
                   />
+                  {/* Chapter 12 — what this device scored last time, so the
+                      technician can see at a glance which one was on tlaková
+                      skúška a year ago. Display only. */}
+                  {previousStatusOf(it.fields) && (
+                    <div className="px-4 pb-2">
+                      <PreviousStatusBadge type={i.type} fields={it.fields} />
+                    </div>
+                  )}
                   <ItemPhotoStrip photos={it.photos} />
                 </li>
               ))}
@@ -526,8 +660,83 @@ export function InspectionDetailPage() {
         photoCount={photoCount}
         includePhotos={includePhotos}
         onIncludePhotosChange={setIncludePhotos}
+        onSign={setSigningDocument}
       />
+
+      {signingDocument && (
+        <HandoverDialog
+          open
+          onClose={() => setSigningDocument(null)}
+          documentId={signingDocument.id}
+          documentNumber={signingDocument.number}
+          documentType={i.type}
+          companyId={i.company_id}
+          facilityId={i.facility_id}
+          defaultPlace={i.facility_name}
+          defaultDate={i.executed_on}
+          onSigned={refreshDocuments}
+        />
+      )}
     </div>
+  );
+}
+
+/** "Z minulej kontroly boli 2 prístroje vyradené — neprenášam ich." */
+function disposedNotice(n: number): string {
+  const word = n === 1 ? 'položka bola vyradená' : n < 5 ? 'položky boli vyradené' : 'položiek bolo vyradených';
+  return `Z minulej kontroly ${n} ${word} — neprenášam ich.`;
+}
+
+/**
+ * "Prevziať položky z poslednej kontroly" — block 1 / chapter 12, and the
+ * single biggest time saver in the field: a technician standing in a boiler
+ * room does not retype forty extinguishers they already typed a year ago.
+ *
+ * What travels is identification. Stav, poznámky, fotky and nedostatky start
+ * empty, because carrying a verdict forward would let a protocol claim
+ * something nobody checked this time.
+ */
+function CarryOverOfferCard({
+  offer,
+  busy,
+  onCarryOver,
+}: {
+  offer: NonNullable<InspectionDetail['carry_over']>;
+  busy: boolean;
+  onCarryOver: () => void;
+}) {
+  const when = offer.executed_on
+    ? new Date(`${offer.executed_on}T00:00:00`).toLocaleDateString('sk-SK')
+    : null;
+  return (
+    <Card className="flex flex-col gap-3 border-firol-200 bg-firol-50/60 p-4">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-white text-firol-600">
+          <CopyPlus className="size-4" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-ink-900">
+            Prevziať položky z poslednej kontroly{when ? ` (${when})` : ''}?
+          </p>
+          <p className="mt-1 text-xs text-ink-600">
+            Prenesie sa {offer.item_count}{' '}
+            {offer.item_count === 1 ? 'položka' : offer.item_count < 5 ? 'položky' : 'položiek'} aj
+            s označením a umiestnením. Stav, poznámky a fotky zadáš nanovo — pri
+            každej položke uvidíš, aký stav mala minule.
+            {offer.disposed > 0 && ` ${disposedNotice(offer.disposed)}`}
+          </p>
+        </div>
+      </div>
+      <Button
+        type="button"
+        className="self-start"
+        loading={busy}
+        onClick={onCarryOver}
+        leftIcon={<CopyPlus className="size-4" />}
+      >
+        Prevziať položky
+      </Button>
+    </Card>
   );
 }
 
@@ -664,6 +873,7 @@ function DocumentsBlock({
   photoCount,
   includePhotos,
   onIncludePhotosChange,
+  onSign,
 }: {
   documents: InspectionDocument[];
   canGenerate: boolean;
@@ -673,6 +883,7 @@ function DocumentsBlock({
   photoCount: number;
   includePhotos: boolean;
   onIncludePhotosChange: (value: boolean) => void;
+  onSign: (doc: InspectionDocument) => void;
 }) {
   if (documents.length === 0) {
     return (
@@ -739,18 +950,65 @@ function DocumentsBlock({
                 <FileText className="size-4" />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="font-mono text-sm text-ink-900">{doc.number}</p>
+                <p className="font-mono text-sm text-ink-900">
+                  {doc.number}
+                  {doc.version > 1 && (
+                    <span className="ml-1.5 text-xs font-sans text-ink-400">
+                      verzia {doc.version}
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-ink-500">
                   Vystavený {new Date(doc.generated_at.replace(' ', 'T')).toLocaleString('sk-SK')}
                 </p>
               </div>
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
+            <HandoverRow doc={doc} onSign={() => onSign(doc)} />
             <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} />
           </li>
         ))}
       </ul>
     </Card>
+  );
+}
+
+/**
+ * Whether the client has taken this protocol over on the screen (chapter 13).
+ *
+ * An unsigned protocol is a finished protocol: printing it and collecting the
+ * signature on paper is ordinary practice, and the PDF carries an empty line
+ * for exactly that. So this row offers the signature rather than demanding it.
+ */
+function HandoverRow({
+  doc,
+  onSign,
+}: {
+  doc: InspectionDocument;
+  onSign: () => void;
+}) {
+  if (doc.handover) {
+    return (
+      <div className="flex items-start gap-2 border-t border-ink-100 bg-[var(--color-status-ok-bg)]/40 px-4 py-2.5 text-xs text-ink-600">
+        <PenLine className="mt-0.5 size-3.5 shrink-0 text-status-ok" />
+        <p>
+          Prevzal <span className="font-medium text-ink-800">{doc.handover.fullname}</span>
+          {doc.handover.role_title && ` — ${doc.handover.role_title}`},{' '}
+          {doc.handover.place},{' '}
+          {new Date(`${doc.handover.signed_on}T00:00:00`).toLocaleDateString('sk-SK')}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-between gap-2 border-t border-ink-100 px-4 py-2.5">
+      <p className="text-xs text-ink-500">
+        Nepodpísané — protokol sa dá odovzdať aj na podpis po vytlačení.
+      </p>
+      <Button type="button" size="sm" variant="secondary" onClick={onSign} leftIcon={<PenLine className="size-3.5" />}>
+        Dať podpísať
+      </Button>
+    </div>
   );
 }
 
