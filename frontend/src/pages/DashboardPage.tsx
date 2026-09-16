@@ -6,6 +6,7 @@ import {
     ClipboardList,
     GraduationCap,
     Plus,
+    Route,
 } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
 import { Companies, type CompanyListItem } from "@/api/companies";
@@ -63,6 +64,16 @@ export function DashboardPage() {
                     Tu je prehľad tvojej aktuálnej činnosti.
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
+                    {/* A visit is the right start when several úkony are
+                        planned at one client — firma and prevádzka get picked
+                        once instead of per úkon (chapter 9). */}
+                    <Link
+                        to="/visits/new"
+                        className="inline-flex items-center gap-1.5 rounded-2xl bg-white/20 px-3 py-1.5 text-xs font-semibold backdrop-blur-sm transition-colors hover:bg-white/30"
+                    >
+                        <Route className="size-3.5" />
+                        Nová návšteva
+                    </Link>
                     <Link
                         to="/inspections/new"
                         className="inline-flex items-center gap-1.5 rounded-2xl bg-white/20 px-3 py-1.5 text-xs font-semibold backdrop-blur-sm transition-colors hover:bg-white/30"
