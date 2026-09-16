@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, Hash, Mail, MapPin, Phone, Plus, Trash2, UserCheck, Warehouse } from 'lucide-react';
+import { ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, FileSignature, Hash, History, Mail, MapPin, Phone, Plus, Route, Send, Trash2, UserCheck, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyDetail } from '@/api/companies';
@@ -11,6 +11,10 @@ import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
+import { BulkSendDialog } from '@/components/BulkSendDialog';
+import { CompanyPersons } from '@/components/CompanyPersons';
+import { WorkConfirmationDialog } from '@/components/WorkConfirmationDialog';
+import { Documents, type DocumentSend } from '@/api/documents';
 
 export function CompanyDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
@@ -23,6 +27,23 @@ export function CompanyDetailPage() {
 
   const [data, setData] = useState<CompanyDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Chapter 9.1 — bulk send, reachable from the history and not only from a
+  // visit: a client asking for "everything from last year" is answered here.
+  const [sendOpen, setSendOpen] = useState(false);
+  const [sends, setSends] = useState<DocumentSend[]>([]);
+  // Chapter 10 — a potvrdenie can also be built after the fact from whatever
+  // was finished at this client on a chosen day, not only from a visit.
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
+
+  const loadSends = useCallback(() => {
+    Documents.sends(id)
+      .then((res) => setSends(res.items))
+      .catch(() => setSends([]));
+  }, [id]);
+
+  useEffect(() => {
+    loadSends();
+  }, [loadSends]);
 
   async function onDeleteFacility(facilityId: number, name: string) {
     const ok = await confirm({
@@ -166,17 +187,47 @@ export function CompanyDetailPage() {
         </dl>
 
         {facilities.length > 0 && !isReadOnly && (
-          <div className="border-t border-ink-100 px-5 py-3">
+          <div className="flex flex-wrap gap-2 border-t border-ink-100 px-5 py-3">
+            {/* A visit is the right start when several úkony are planned:
+                firma and prevádzka get picked once instead of per úkon
+                (chapter 9). */}
+            <Link
+              to={`/visits/new?company_id=${company.id}`}
+              className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] transition-transform hover:bg-firol-600 active:scale-[0.98]"
+            >
+              <Route className="size-4" />
+              Nová návšteva
+            </Link>
             <Link
               to={`/inspections/new?company_id=${company.id}`}
-              className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+              className="inline-flex h-10 items-center gap-1.5 rounded-2xl border border-ink-200 bg-white px-4 text-sm font-medium text-ink-700 transition-colors hover:border-ink-300 hover:bg-ink-50"
             >
               <ClipboardList className="size-4" />
-              Nová kontrola
+              Jedna kontrola
             </Link>
+            <button
+              type="button"
+              onClick={() => setSendOpen(true)}
+              className="inline-flex h-10 items-center gap-1.5 rounded-2xl border border-ink-200 bg-white px-4 text-sm font-medium text-ink-700 transition-colors hover:border-ink-300 hover:bg-ink-50"
+            >
+              <Send className="size-4" />
+              Odoslať protokoly
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmationOpen(true)}
+              className="inline-flex h-10 items-center gap-1.5 rounded-2xl border border-ink-200 bg-white px-4 text-sm font-medium text-ink-700 transition-colors hover:border-ink-300 hover:bg-ink-50"
+            >
+              <FileSignature className="size-4" />
+              Potvrdenie o práci
+            </button>
           </div>
         )}
       </Card>
+
+      <CompanyPersons companyId={company.id} facilities={facilities} />
+
+      <SendHistory sends={sends} />
 
       <section>
         <header className="mb-3 flex items-center justify-between">
@@ -250,7 +301,71 @@ export function CompanyDetailPage() {
           </ul>
         )}
       </section>
+
+      <BulkSendDialog
+        open={sendOpen}
+        onClose={() => setSendOpen(false)}
+        companyId={company.id}
+        companyName={company.name}
+        defaultRecipient={company.contact_email}
+        onSent={loadSends}
+      />
+
+      <WorkConfirmationDialog
+        open={confirmationOpen}
+        onClose={() => setConfirmationOpen(false)}
+        companyId={company.id}
+        companyName={company.name}
+        date={todayIso()}
+      />
     </div>
+  );
+}
+
+/**
+ * What was sent to this client, and when — block 1 / chapter 9.1.
+ *
+ * "Poslali ste nám to?" is a question technicians get often enough that the
+ * app has to be able to answer it, including when a send failed and why.
+ */
+function SendHistory({ sends }: { sends: DocumentSend[] }) {
+  if (sends.length === 0) return null;
+  return (
+    <section>
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-500">
+        Odoslané protokoly
+      </h2>
+      <Card className="overflow-hidden">
+        <ul className="divide-y divide-ink-100">
+          {sends.slice(0, 10).map((send) => (
+            <li key={send.id} className="flex items-start gap-3 px-4 py-3">
+              <span
+                className={
+                  send.status === 'odoslane'
+                    ? 'mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-[var(--color-status-ok-bg)] text-status-ok'
+                    : 'mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-[var(--color-status-bad-bg)] text-status-bad'
+                }
+              >
+                <History className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-ink-900">
+                  {send.documents.map((d) => d.number).join(', ')}
+                </p>
+                <p className="text-xs text-ink-500">
+                  {send.recipients.join(', ')} ·{' '}
+                  {new Date((send.sent_at ?? send.created_at).replace(' ', 'T')).toLocaleString('sk-SK')}
+                  {send.sent_by && ` · ${send.sent_by}`}
+                </p>
+                {send.status === 'chyba' && send.error_text && (
+                  <p className="mt-0.5 text-xs text-status-bad">{send.error_text}</p>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </section>
   );
 }
 
@@ -264,6 +379,11 @@ function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: strin
       </div>
     </div>
   );
+}
+
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function plural(n: number, one: string, few: string, many: string): string {
