@@ -28,8 +28,17 @@ final class Layout
     /**
      * On-disk logo attached by Mailer. Kept inside backend/ so the mail
      * module does not depend on the frontend tree being present (it is not
-     * mounted in the dev container); the original lives at
-     * frontend/public/icons/firol_logo_color_transparent.png.
+     * mounted in the dev container).
+     *
+     * Derived from frontend/public/icons/firol_logo_color_transparent.png
+     * with a white rounded-rect plate baked in: clients that force dark
+     * mode (BlueMail) invert our markup no matter what color-scheme says,
+     * and the dark ink of "PO" then sits on a black strip. Clients do not
+     * invert image pixels, so the plate keeps the wordmark on the surface
+     * it was drawn for — and it is invisible on the white strip everywhere
+     * else. To redo it after a rebrand: crop the source to its artwork,
+     * pad it by 28x24 px and lay it on a white rounded rect of radius 32
+     * (source-pixel scale, 427x171 canvas), then update the <img> size.
      */
     public static function logoFile(): string
     {
@@ -90,9 +99,9 @@ final class Layout
             <td bgcolor="#ffffff" style="background:#ffffff;background-color:#ffffff;padding:24px 32px 20px 32px;border-bottom:1px solid #eef0f3;">
               <img src="cid:poapp-logo"
                    alt="POapp"
-                   width="130"
+                   width="110"
                    height="44"
-                   style="display:block;height:44px;width:auto;max-width:130px;border:0;outline:none;text-decoration:none;">
+                   style="display:block;height:44px;width:auto;max-width:110px;border:0;outline:none;text-decoration:none;">
             </td>
           </tr>
 
