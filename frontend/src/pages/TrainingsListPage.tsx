@@ -34,7 +34,12 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { SkeletonList } from "@/components/ui/Skeleton";
 
-export function TrainingsListPage() {
+/**
+ * `embedded` drops the page header — the OPP section (chapter 2) supplies its
+ * own, because a training is one of that section's úkony rather than a list of
+ * its own. There is no top-level "Školenia" any more.
+ */
+export function TrainingsListPage({ embedded = false }: { embedded?: boolean } = {}) {
     const { csrfToken } = useAuth();
     const isReadOnly = useIsReadOnly();
     const toast = useToast();
@@ -113,25 +118,27 @@ export function TrainingsListPage() {
 
     return (
         <div className="flex flex-col gap-4">
-            <header className="flex items-center justify-between gap-3">
-                <div>
-                    <h1 className="text-xl font-semibold tracking-tight text-ink-900">
-                        Školenia
-                    </h1>
-                    <p className="mt-0.5 text-sm text-ink-500">
-                        Záznamy zo školení a pokyny vydané zamestnancom klienta.
-                    </p>
-                </div>
-                {!isReadOnly && (
-                    <Link
-                        to="/trainings/new"
-                        className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
-                    >
-                        <Plus className="size-4" />
-                        Nové školenie
-                    </Link>
-                )}
-            </header>
+            {!embedded && (
+                <header className="flex items-center justify-between gap-3">
+                    <div>
+                        <h1 className="text-xl font-semibold tracking-tight text-ink-900">
+                            Školenia
+                        </h1>
+                        <p className="mt-0.5 text-sm text-ink-500">
+                            Záznamy zo školení a pokyny vydané zamestnancom klienta.
+                        </p>
+                    </div>
+                    {!isReadOnly && (
+                        <Link
+                            to="/trainings/new"
+                            className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+                        >
+                            <Plus className="size-4" />
+                            Nové školenie
+                        </Link>
+                    )}
+                </header>
+            )}
 
             {items && items.length > 0 && (
                 <div className="overflow-hidden rounded-2xl border border-ink-200 bg-white shadow-xs transition-all focus-within:border-firol-300">

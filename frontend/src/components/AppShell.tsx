@@ -5,7 +5,6 @@ import {
     CalendarClock,
     ClipboardList,
     CreditCard,
-    GraduationCap,
     LayoutDashboard,
     LogOut,
     Settings,
@@ -25,6 +24,48 @@ import { InstallPrompt } from "./InstallPrompt";
 import { TermsUpdateNotice } from "./TermsUpdateNotice";
 import { BrandMark } from "./Logo";
 import { cn } from "@/lib/cn";
+import {
+    SECTIONS,
+    SECTION_COLORS,
+    SECTION_LABELS,
+    SECTION_PATHS,
+    sectionHasContent,
+} from "@/lib/sections";
+
+type Tab = {
+    readonly to: string;
+    readonly label: string;
+    readonly icon: typeof Settings;
+    readonly activeColor: string;
+    /** Section tabs carry the odbor's colour as an inline style, not a class. */
+    readonly activeStyle?: React.CSSProperties;
+    readonly activeBg: string;
+    readonly iconBg: string;
+};
+
+/**
+ * Menu — block 1 / chapter 2.
+ *
+ * The one item "Kontroly" becomes Revízie / OPP / BOZP, matching the paid
+ * modules one to one, and the item "Školenia" disappears: a training is an
+ * úkon of its odbor, so školenie PO now lives inside OPP.
+ *
+ * A section with nothing in it is left out entirely rather than greyed — a
+ * disabled menu item invites a tap that leads nowhere. BOZP therefore appears
+ * once block 2 ships its úkony, which is also how module gating will read once
+ * block 5 lands.
+ */
+const SECTION_TABS = SECTIONS.filter(sectionHasContent).map((section) => ({
+    to: SECTION_PATHS[section],
+    label: SECTION_LABELS[section],
+    icon: ClipboardList,
+    // The odbor's own colour, so the section reads the same in the menu as it
+    // does on its protocols.
+    activeColor: "",
+    activeStyle: { color: SECTION_COLORS[section] },
+    activeBg: "bg-ink-50 shadow-[inset_0_0_0_1px_var(--color-ink-100)]",
+    iconBg: "bg-ink-100",
+}));
 
 const TOP_TABS = [
     {
@@ -43,15 +84,7 @@ const TOP_TABS = [
         activeBg: "bg-blue-50 shadow-[inset_0_0_0_1px_theme(colors.blue.100)]",
         iconBg: "bg-blue-100",
     },
-    {
-        to: "/inspections",
-        label: "Kontroly",
-        icon: ClipboardList,
-        activeColor: "text-orange-600",
-        activeBg:
-            "bg-orange-50 shadow-[inset_0_0_0_1px_theme(colors.orange.100)]",
-        iconBg: "bg-orange-100",
-    },
+    ...SECTION_TABS,
     {
         to: "/kalendar",
         label: "Kalendár",
@@ -59,15 +92,6 @@ const TOP_TABS = [
         activeColor: "text-firol-600",
         activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
         iconBg: "bg-firol-100",
-    },
-    {
-        to: "/trainings",
-        label: "Školenia",
-        icon: GraduationCap,
-        activeColor: "text-emerald-600",
-        activeBg:
-            "bg-emerald-50 shadow-[inset_0_0_0_1px_theme(colors.emerald.100)]",
-        iconBg: "bg-emerald-100",
     },
 ] as const;
 
@@ -94,16 +118,7 @@ const DESKTOP_BOTTOM_TABS = [
 ] as const;
 
 // Mobile bottom nav — the top tabs plus settings.
-const MOBILE_TABS = [...TOP_TABS, SETTINGS_TAB] as const;
-
-type Tab = {
-    readonly to: string;
-    readonly label: string;
-    readonly icon: typeof Settings;
-    readonly activeColor: string;
-    readonly activeBg: string;
-    readonly iconBg: string;
-};
+const MOBILE_TABS: Tab[] = [...TOP_TABS, SETTINGS_TAB];
 
 export function AppShell() {
     const { logout } = useAuth();
@@ -409,6 +424,7 @@ function SideNav({ topOffset }: { topOffset: number }) {
                 {({ isActive }) => (
                     <>
                         <tab.icon
+                            style={isActive ? tab.activeStyle : undefined}
                             className={cn(
                                 "size-4 shrink-0 transition-transform duration-150",
                                 isActive && "scale-110",
@@ -457,15 +473,20 @@ function BottomTabBar() {
             aria-label="Hlavná navigácia"
             className="fixed inset-x-0 bottom-0 z-10 border-t border-ink-100 bg-white/95 backdrop-blur sm:hidden"
         >
-            <ul className="mx-auto flex max-w-2xl items-stretch justify-around px-2 py-1.5">
+            {/* Splitting Kontroly into three sections (chapter 2) put up to
+                seven items in here. They are laid out to shrink rather than
+                overflow: equal flex basis, a tighter label and truncation, so
+                a 360px phone — what a technician actually holds — still shows
+                every one of them. */}
+            <ul className="mx-auto flex max-w-2xl items-stretch justify-around px-1 py-1.5">
                 {MOBILE_TABS.map((tab) => (
-                    <li key={tab.to} className="flex-1">
+                    <li key={tab.to} className="min-w-0 flex-1">
                         <NavLink
                             to={tab.to}
                             end={tab.to === "/"}
                             className={({ isActive }) =>
                                 cn(
-                                    "flex flex-col items-center gap-0.5 rounded-2xl py-2 text-[11px] font-medium transition-all duration-150",
+                                    "flex min-w-0 flex-col items-center gap-0.5 rounded-2xl px-0.5 py-2 text-[10px] font-medium transition-all duration-150",
                                     isActive
                                         ? cn(tab.activeColor, tab.activeBg)
                                         : "text-ink-400 hover:text-ink-600",
@@ -475,13 +496,16 @@ function BottomTabBar() {
                             {({ isActive }) => (
                                 <>
                                     <tab.icon
+                                        style={isActive ? tab.activeStyle : undefined}
                                         className={cn(
                                             "size-5 transition-transform duration-150",
                                             tab.activeColor,
                                             isActive && "scale-110 stroke-[2.25px]",
                                         )}
                                     />
-                                    <span>{tab.label}</span>
+                                    <span className="w-full truncate text-center">
+                                        {tab.label}
+                                    </span>
                                 </>
                             )}
                         </NavLink>

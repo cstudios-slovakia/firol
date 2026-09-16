@@ -7,9 +7,16 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import {
   INSPECTION_TYPE_LABELS,
-  INSPECTION_TYPE_PERIODICITIES,
   type InspectionType,
 } from '@/api/inspections';
+import { RECOMMENDED_MONTHS } from '@/lib/periodicity';
+import {
+  SECTION_INSPECTION_TYPES,
+  SECTION_LABELS,
+  SECTION_PATHS,
+  isSection,
+  type Section,
+} from '@/lib/sections';
 
 type TypeMeta = {
   type: InspectionType;
@@ -106,15 +113,26 @@ export function NewInspectionTypePicker() {
   // we forward those IDs so Step 1 can prefill them.
   const facilityId = params.get('facility_id');
   const companyId = params.get('company_id');
+  // Which section the technician came from (chapter 2). It narrows the list to
+  // that odbor's types — arriving from Revízie and being offered a požiarna
+  // kniha would just be noise to scroll past.
+  const sectionParam = params.get('section') ?? undefined;
+  const section: Section | null = isSection(sectionParam) ? sectionParam : null;
   const backHref = facilityId
     ? `/facilities/${facilityId}`
     : companyId
       ? `/companies/${companyId}`
-      : '/';
+      : section
+        ? SECTION_PATHS[section]
+        : '/';
 
   const passthrough = new URLSearchParams();
   if (facilityId) passthrough.set('facility_id', facilityId);
   if (companyId) passthrough.set('company_id', companyId);
+
+  const offered = section
+    ? TYPES.filter((m) => SECTION_INSPECTION_TYPES[section].includes(m.type))
+    : TYPES;
   const passthroughQs = passthrough.toString();
   const stepOnePathFor = (type: InspectionType) =>
     `/inspections/new/${type}/step-1${passthroughQs ? `?${passthroughQs}` : ''}`;
@@ -130,14 +148,16 @@ export function NewInspectionTypePicker() {
       </Link>
 
       <header>
-        <h1 className="text-xl font-semibold tracking-tight text-ink-900">Nová kontrola</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-ink-900">
+          Nová kontrola{section ? ` — ${SECTION_LABELS[section]}` : ''}
+        </h1>
         <p className="mt-0.5 text-sm text-ink-500">
           Vyber typ kontroly. Periodicitu si zvolíš v ďalšom kroku.
         </p>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {TYPES.map((meta, i) => (
+        {offered.map((meta, i) => (
           <div key={meta.type} className="animate-fade-up" style={{ animationDelay: `${i * 40}ms` }}>
             <TypeCard meta={meta} href={stepOnePathFor(meta.type)} />
           </div>
@@ -149,7 +169,12 @@ export function NewInspectionTypePicker() {
 
 function TypeCard({ meta, href }: { meta: TypeMeta; href: string }) {
   const fullLabel = INSPECTION_TYPE_LABELS[meta.type];
-  const periodicities = INSPECTION_TYPE_PERIODICITIES[meta.type].join(' / ');
+  // What the app suggests for this type — a starting point the technician
+  // overrides freely in Step 1 (chapter 5), never a fixed interval.
+  const recommended = RECOMMENDED_MONTHS[meta.type] ?? [];
+  const periodicities = recommended.length > 0
+    ? `odporúčané ${recommended.join(' / ')} mes.`
+    : 'bez opakovania';
 
   if (!meta.enabled) {
     return (
@@ -167,7 +192,7 @@ function TypeCard({ meta, href }: { meta: TypeMeta; href: string }) {
             <Badge tone="neutral">Čoskoro</Badge>
           </div>
           <p className="mt-0.5 line-clamp-2 text-xs text-ink-400">{meta.description}</p>
-          <p className="mt-1 text-[11px] text-ink-400">{meta.intervalLabel} · {periodicities} mes.</p>
+          <p className="mt-1 text-[11px] text-ink-400">{periodicities}</p>
         </div>
       </Card>
     );
@@ -186,7 +211,7 @@ function TypeCard({ meta, href }: { meta: TypeMeta; href: string }) {
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold text-ink-900">{meta.shortLabel}</h3>
           <p className="mt-0.5 line-clamp-2 text-xs text-ink-500">{meta.description}</p>
-          <p className="mt-1 text-[11px] text-ink-400">{meta.intervalLabel}</p>
+          <p className="mt-1 text-[11px] text-ink-400">{periodicities}</p>
         </div>
         <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-firol-500" />
       </Card>

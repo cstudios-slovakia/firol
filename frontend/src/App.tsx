@@ -18,6 +18,9 @@ import { InspectionStep1Page } from '@/pages/InspectionStep1Page';
 import { InspectionStep2Page } from '@/pages/InspectionStep2Page';
 import { InspectionDetailPage } from '@/pages/InspectionDetailPage';
 import { InspectionsListPage } from '@/pages/InspectionsListPage';
+import { SectionPage } from '@/pages/SectionPage';
+import { VisitNewPage } from '@/pages/VisitNewPage';
+import { VisitDetailPage } from '@/pages/VisitDetailPage';
 import { CalendarPage } from '@/pages/CalendarPage';
 import { TrainingsListPage } from '@/pages/TrainingsListPage';
 import { NewTrainingPage } from '@/pages/NewTrainingPage';
@@ -88,7 +91,21 @@ export default function App() {
         <Route path="/facilities/:id/edit" element={<FacilityEditPage />} />
 
         <Route path="/kalendar" element={<CalendarPage />} />
+
+        {/* The three sections (chapter 2), spelled out rather than matched as
+            a pattern — the router takes a literal segment, and three routes
+            read more plainly than one that has to be decoded. /inspections
+            stays as an unsectioned list: it is nowhere in the menu, but
+            in-app links and bookmarks still point at it. */}
+        <Route path="/revizie" element={<SectionPage />} />
+        <Route path="/opp" element={<SectionPage />} />
+        <Route path="/bozp" element={<SectionPage />} />
         <Route path="/inspections" element={<InspectionsListPage />} />
+
+        {/* Návšteva (chapter 9) — an activity, not a section: it belongs to no
+            odbor and offers types from all of them at once. */}
+        <Route path="/visits/new" element={<VisitNewPage />} />
+        <Route path="/visits/:id" element={<VisitDetailPage />} />
         <Route path="/inspections/new" element={<NewInspectionTypePicker />} />
         <Route path="/inspections/new/:type/step-1" element={<InspectionStep1Page />} />
         <Route path="/inspections/:id" element={<InspectionDetailPage />} />

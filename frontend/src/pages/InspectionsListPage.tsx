@@ -14,9 +14,16 @@ import {
 import {
     INSPECTION_TYPE_LABELS,
     Inspections,
+    periodicityOf,
     type InspectionListItem,
     type InspectionType,
 } from "@/api/inspections";
+import { periodicityShort } from "@/lib/periodicity";
+import {
+    SECTION_INSPECTION_TYPES,
+    SECTION_LABELS,
+    type Section,
+} from "@/lib/sections";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { daysUntilNext, getInspectionStatus } from "@/lib/inspectionStatus";
@@ -35,13 +42,13 @@ import { Spinner } from "@/components/ui/Spinner";
 const PAGE_SIZE = 10;
 
 /**
- * List sections, rendered (and paginated) in this order. Drafts are their own
+ * Validity buckets, rendered (and paginated) in this order. Drafts are their own
  * group — a concept is unfinished work, not a valid inspection — and sit above
  * "Platné" so they stay reachable without paging past every finalized record.
  */
 type GroupKey = "overdue" | "soon" | "drafts" | "valid";
 
-const SECTIONS: { key: GroupKey; label: string; color: string }[] = [
+const GROUPS: { key: GroupKey; label: string; color: string }[] = [
     { key: "overdue", label: "Po termíne", color: "var(--color-status-bad)" },
     { key: "soon", label: "Blíži sa termín", color: "var(--color-status-warn)" },
     { key: "drafts", label: "Koncepty", color: "var(--color-ink-400)" },
@@ -73,13 +80,26 @@ const TYPE_CHIPS: [InspectionType, string][] = [
     ["vyradenie", "Vyradenie PHP"],
 ];
 
-export function InspectionsListPage() {
+/**
+ * `section` scopes the page to one odbor (chapter 2) — its label, its types and
+ * its "Nová kontrola" button. Leaving it out shows every type, which is what
+ * the /inspections compatibility route uses.
+ *
+ * `embedded` drops the page header, for when a section page supplies its own.
+ */
+export function InspectionsListPage({
+    section,
+    embedded = false,
+}: {
+    section?: Section;
+    embedded?: boolean;
+} = {}) {
     const { csrfToken } = useAuth();
     const isReadOnly = useIsReadOnly();
     const toast = useToast();
     const navigate = useNavigate();
 
-    const [items, setItems] = useState<InspectionListItem[] | null>(null);
+    const [allItems, setAllItems] = useState<InspectionListItem[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState<InspectionType | "">("");
@@ -93,7 +113,7 @@ export function InspectionsListPage() {
         let cancelled = false;
         Inspections.list()
             .then((res) => {
-                if (!cancelled) setItems(res.items);
+                if (!cancelled) setAllItems(res.items);
             })
             .catch((err: unknown) => {
                 if (cancelled) return;
@@ -107,6 +127,17 @@ export function InspectionsListPage() {
             cancelled = true;
         };
     }, []);
+
+    // Everything in this section. Filtering here rather than at the fetch keeps
+    // one request behind all three sections, and the list is small enough per
+    // account that paging it server-side would buy nothing.
+    const sectionTypes = section ? SECTION_INSPECTION_TYPES[section] : null;
+    const items = useMemo(() => {
+        if (!allItems) return null;
+        if (!sectionTypes) return allItems;
+        return allItems.filter((it) => sectionTypes.includes(it.type));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [allItems, section]);
 
     // Search + type only. The validity chips count against this set, so their
     // numbers stay stable while switching between them.
@@ -150,9 +181,9 @@ export function InspectionsListPage() {
         // orders — it is the one thing the technician still has to fill in.
         const byDaysAsc = (a: InspectionListItem, b: InspectionListItem) => {
             const da =
-                daysUntilNext(a.executed_on, a.periodicity_months) ?? -Infinity;
+                daysUntilNext(a.executed_on, periodicityOf(a)) ?? -Infinity;
             const db =
-                daysUntilNext(b.executed_on, b.periodicity_months) ?? -Infinity;
+                daysUntilNext(b.executed_on, periodicityOf(b)) ?? -Infinity;
             return da - db;
         };
         const byDateDesc = (a: InspectionListItem, b: InspectionListItem) => {
@@ -192,7 +223,7 @@ export function InspectionsListPage() {
     // page.
     const pageIds = useMemo(() => {
         if (!grouped) return null;
-        const ordered = SECTIONS.flatMap((s) => grouped[s.key]);
+        const ordered = GROUPS.flatMap((g) => grouped[g.key]);
         const slice = ordered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
         return new Set(slice.map((it) => it.id));
     }, [grouped, page]);
@@ -200,9 +231,9 @@ export function InspectionsListPage() {
     const pagedGroups = useMemo(() => {
         if (!grouped || !pageIds) return null;
         return Object.fromEntries(
-            SECTIONS.map((s) => [
-                s.key,
-                grouped[s.key].filter((it) => pageIds.has(it.id)),
+            GROUPS.map((g) => [
+                g.key,
+                grouped[g.key].filter((it) => pageIds.has(it.id)),
             ]),
         ) as Record<GroupKey, InspectionListItem[]>;
     }, [grouped, pageIds]);
@@ -212,7 +243,7 @@ export function InspectionsListPage() {
         setDeleting(true);
         try {
             await Inspections.archive(pendingDeleteId, csrfToken);
-            setItems(
+            setAllItems(
                 (prev) => prev?.filter((i) => i.id !== pendingDeleteId) ?? null,
             );
             setPendingDeleteId(null);
@@ -242,27 +273,33 @@ export function InspectionsListPage() {
         }
     }
 
+    const newHref = section
+        ? `/inspections/new?section=${section}`
+        : "/inspections/new";
+
     return (
         <div className="flex flex-col gap-4">
-            <header className="flex items-center justify-between gap-3">
-                <div>
-                    <h1 className="text-xl font-semibold tracking-tight text-ink-900">
-                        Kontroly
-                    </h1>
-                    <p className="mt-0.5 text-sm text-ink-500">
-                        Všetky vykonané kontroly a rozpracované koncepty.
-                    </p>
-                </div>
-                {!isReadOnly && (
-                    <Link
-                        to="/inspections/new"
-                        className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
-                    >
-                        <Plus className="size-4" />
-                        Nová kontrola
-                    </Link>
-                )}
-            </header>
+            {!embedded && (
+                <header className="flex items-center justify-between gap-3">
+                    <div>
+                        <h1 className="text-xl font-semibold tracking-tight text-ink-900">
+                            {section ? SECTION_LABELS[section] : "Kontroly"}
+                        </h1>
+                        <p className="mt-0.5 text-sm text-ink-500">
+                            Vykonané úkony a rozpracované koncepty.
+                        </p>
+                    </div>
+                    {!isReadOnly && (
+                        <Link
+                            to={newHref}
+                            className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+                        >
+                            <Plus className="size-4" />
+                            Nová kontrola
+                        </Link>
+                    )}
+                </header>
+            )}
 
             {items && items.length > 0 && (
                 <div className="overflow-hidden rounded-2xl border border-ink-200 bg-white shadow-xs transition-all focus-within:border-firol-300">
@@ -290,7 +327,9 @@ export function InspectionsListPage() {
                         >
                             Všetky
                         </button>
-                        {TYPE_CHIPS.map(([val, label]) => (
+                        {TYPE_CHIPS.filter(
+                            ([val]) => !sectionTypes || sectionTypes.includes(val),
+                        ).map(([val, label]) => (
                             <button
                                 key={val}
                                 type="button"
@@ -323,7 +362,7 @@ export function InspectionsListPage() {
                         >
                             Všetky stavy
                         </button>
-                        {SECTIONS.map(({ key, label, color }) => {
+                        {GROUPS.map(({ key, label, color }) => {
                             const count = statusCounts?.[key] ?? 0;
                             const active = statusFilter === key;
                             return (
@@ -378,11 +417,11 @@ export function InspectionsListPage() {
                         Zatiaľ žiadne kontroly
                     </h2>
                     <p className="max-w-xs text-sm text-ink-500">
-                        Začni výberom firmy a typu kontroly. Drafty zostávajú
+                        Začni výberom firmy a typu kontroly. Koncepty zostávajú
                         uložené, kým nevygeneruješ PDF protokol.
                     </p>
                     <Link
-                        to="/inspections/new"
+                        to={newHref}
                         className="inline-flex h-11 items-center gap-1.5 rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
                     >
                         <Plus className="size-4" />
@@ -400,10 +439,10 @@ export function InspectionsListPage() {
                 </Card>
             )}
 
-            {pagedGroups && SECTIONS.some((s) => pagedGroups[s.key].length > 0) && (
+            {pagedGroups && GROUPS.some((g) => pagedGroups[g.key].length > 0) && (
                 <>
                     <div className="flex flex-col gap-5">
-                        {SECTIONS.map(({ key, label, color }) =>
+                        {GROUPS.map(({ key, label, color }) =>
                             pagedGroups[key].length === 0 ? null : (
                                 <section key={key}>
                                     <div className="mb-2 flex items-center gap-2">
@@ -556,7 +595,7 @@ function InspectionRow({
                             ? new Date(it.executed_on + "T00:00:00").toLocaleDateString("sk-SK")
                             : "—"}
                         <span className="mx-1.5 text-ink-300">·</span>
-                        {it.periodicity_months} mes.
+                        {periodicityShort(periodicityOf(it))}
                         <span className="mx-1.5 text-ink-300">·</span>
                         {it.effective_inspector_name ?? it.inspector_name}
                     </p>
