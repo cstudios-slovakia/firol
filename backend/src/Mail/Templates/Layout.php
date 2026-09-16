@@ -33,7 +33,18 @@ final class Layout
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
 <title>{$title}</title>
+<style>
+  .logo-dark { display:none !important; }
+  @media (prefers-color-scheme: dark) {
+    .logo-light { display:none !important; }
+    .logo-dark { display:block !important; }
+  }
+  [data-ogsc] .logo-light { display:none !important; }
+  [data-ogsc] .logo-dark { display:block !important; }
+</style>
 </head>
 <body style="margin:0;padding:0;background-color:#f3f4f7;font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#1f2733;-webkit-font-smoothing:antialiased;">
   <!-- Preheader (hidden) -->
@@ -53,7 +64,14 @@ final class Layout
                    alt="POapp"
                    width="130"
                    height="44"
+                   class="logo-light"
                    style="display:block;height:44px;width:auto;max-width:130px;border:0;outline:none;text-decoration:none;">
+              <img src="https://app.poapp.sk/icons/firol_logo_color_dark_transparent.png"
+                   alt="POapp"
+                   width="130"
+                   height="44"
+                   class="logo-dark"
+                   style="display:none;height:44px;width:auto;max-width:130px;border:0;outline:none;text-decoration:none;">
             </td>
           </tr>
 
