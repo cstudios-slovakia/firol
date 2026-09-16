@@ -16,6 +16,33 @@ namespace Firol\Mail\Templates;
 final class Layout
 {
     /**
+     * Content-ID of the inline logo part. The image travels with the
+     * message instead of being fetched from app.poapp.sk: privacy-minded
+     * clients (BlueMail) treat a remote image in an email as a tracker and
+     * block it, which left a broken placeholder where the logo should be.
+     * Mailer attaches the PNG under this id and falls back to the hosted
+     * URL if the asset is missing on disk.
+     */
+    public const LOGO_CID = 'poapp-logo';
+
+    /**
+     * On-disk logo attached by Mailer. Kept inside backend/ so the mail
+     * module does not depend on the frontend tree being present (it is not
+     * mounted in the dev container); the original lives at
+     * frontend/public/icons/firol_logo_color_transparent.png.
+     */
+    public static function logoFile(): string
+    {
+        return dirname(__DIR__, 3) . '/assets/email/poapp-logo.png';
+    }
+
+    /** Hosted logo, used only when the on-disk asset cannot be read. */
+    public static function logoUrl(): string
+    {
+        return rtrim(\Firol\Http\Url::appBase(), '/') . '/icons/firol_logo_color_transparent.png';
+    }
+
+    /**
      * @param string $title       short tag rendered above the headline
      * @param string $headline    H1 inside the card
      * @param string $bodyHtml    pre-rendered HTML (paragraphs, buttons, etc.)
@@ -33,17 +60,18 @@ final class Layout
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<meta name="supported-color-schemes" content="light dark">
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light only">
 <title>{$title}</title>
 <style>
-  .logo-dark { display:none !important; }
-  @media (prefers-color-scheme: dark) {
-    .logo-light { display:none !important; }
-    .logo-dark { display:block !important; }
-  }
-  [data-ogsc] .logo-light { display:none !important; }
-  [data-ogsc] .logo-dark { display:block !important; }
+  /*
+   * The card is a light design end to end, so we opt out of client-side
+   * dark-mode rewriting instead of shipping a second set of assets.
+   * A prefers-color-scheme swap is not usable here: a webmail can match
+   * the query (the OS is dark) while still rendering our email on white,
+   * which showed the white-ink logo on a white strip.
+   */
+  :root { color-scheme: light only; supported-color-schemes: light only; }
 </style>
 </head>
 <body style="margin:0;padding:0;background-color:#f3f4f7;font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#1f2733;-webkit-font-smoothing:antialiased;">
@@ -59,19 +87,12 @@ final class Layout
 
           <!-- Logo strip -->
           <tr>
-            <td style="background:#ffffff;padding:24px 32px 20px 32px;border-bottom:1px solid #eef0f3;">
-              <img src="https://app.poapp.sk/icons/firol_logo_color_transparent.png"
+            <td bgcolor="#ffffff" style="background:#ffffff;background-color:#ffffff;padding:24px 32px 20px 32px;border-bottom:1px solid #eef0f3;">
+              <img src="cid:poapp-logo"
                    alt="POapp"
                    width="130"
                    height="44"
-                   class="logo-light"
                    style="display:block;height:44px;width:auto;max-width:130px;border:0;outline:none;text-decoration:none;">
-              <img src="https://app.poapp.sk/icons/firol_logo_color_dark_transparent.png"
-                   alt="POapp"
-                   width="130"
-                   height="44"
-                   class="logo-dark"
-                   style="display:none;height:44px;width:auto;max-width:130px;border:0;outline:none;text-decoration:none;">
             </td>
           </tr>
 

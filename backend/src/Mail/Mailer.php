@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Mail;
 
+use Firol\Mail\Templates\Layout;
 use PHPMailer\PHPMailer\Exception as PHPMailerException;
 use PHPMailer\PHPMailer\PHPMailer;
 
@@ -93,7 +94,7 @@ final class Mailer
 
             $mail->Subject = $msg->subject;
             $mail->isHTML(true);
-            $mail->Body    = $msg->html;
+            $mail->Body    = self::embedLogo($mail, $msg->html);
             $mail->AltBody = $msg->text;
 
             foreach ($msg->attachments as $att) {
@@ -113,6 +114,40 @@ final class Mailer
             error_log('[mail.failed] to=' . $msg->to . ' ' . $e::class . ': ' . $e->getMessage());
             return false;
         }
+    }
+
+    /**
+     * Attaches the POapp logo as an inline (Content-ID) part so the header
+     * renders even in clients that block remote images as trackers —
+     * BlueMail does, and showed a broken placeholder instead of the logo.
+     *
+     * If the asset is not readable we rewrite the reference to the hosted
+     * URL, so a missing file degrades to the old behaviour rather than to
+     * a dead `cid:`.
+     */
+    private static function embedLogo(PHPMailer $mail, string $html): string
+    {
+        $cid = Layout::LOGO_CID;
+        if (!str_contains($html, "cid:{$cid}")) {
+            return $html;
+        }
+
+        $file  = Layout::logoFile();
+        $bytes = is_readable($file) ? (string) file_get_contents($file) : '';
+        if ($bytes === '') {
+            error_log("[mail.logo] unreadable asset {$file} — falling back to the hosted URL");
+            return str_replace("cid:{$cid}", Layout::logoUrl(), $html);
+        }
+
+        $mail->addStringEmbeddedImage(
+            $bytes,
+            $cid,
+            'poapp-logo.png',
+            PHPMailer::ENCODING_BASE64,
+            'image/png',
+        );
+
+        return $html;
     }
 
     /**
