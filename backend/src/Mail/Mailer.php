@@ -94,9 +94,10 @@ final class Mailer
 
     /**
      * Resolves the `From:` address as a (email, name) pair for PHPMailer.
-     * In dev (no MAIL_FROM) we fall back to no-reply@localhost so the
-     * library doesn't reject an empty sender; production must set
-     * MAIL_FROM to a domain authorized by the SMTP server.
+     * In dev (no MAIL_FROM) we fall back to a syntactically valid dummy
+     * address so the library doesn't reject an empty sender — the domain
+     * needs a dot, PHPMailer rejects bare `@localhost`. Production must
+     * set MAIL_FROM to a domain authorized by the SMTP server.
      *
      * @return array{0: string, 1: string}
      */
@@ -106,7 +107,7 @@ final class Mailer
         $name  = trim((string) ($_ENV['MAIL_FROM_NAME'] ?? 'POapp'));
 
         if ($email === '') {
-            $email = 'no-reply@localhost';
+            $email = 'no-reply@localhost.localdomain';
         }
         return [$email, $name];
     }

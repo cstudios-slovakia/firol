@@ -27,6 +27,15 @@ services:
     depends_on: [php]
     networks: [firol]
 
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: firol-mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_SMTP_HOST_PORT:-1025}:1025"
+      - "${MAILPIT_UI_HOST_PORT:-8025}:8025"
+    networks: [firol]
+
   db:
     image: mariadb:11
     container_name: firol-db
