@@ -10,6 +10,7 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Support\Periodicity;
 
 /**
  * Calendar (change request 2.5).
@@ -41,7 +42,8 @@ final class CalendarController
         // Latest non-superseded finalized preventive inspection per facility+type
         // defines the current deadline. Plain fire-book entries and drafts are
         // excluded (they carry no statutory cycle).
-        $sql = 'SELECT i.id, i.type, i.executed_on, i.periodicity_months,
+        $sql = 'SELECT i.id, i.type, i.executed_on,
+                       i.periodicity_value, i.periodicity_unit,
                        i.company_id, c.name AS company_name, c.contact_email AS company_email,
                        i.facility_id, f.name AS facility_name,
                        p.planned_date
@@ -53,6 +55,7 @@ final class CalendarController
                   AND  i.status = "finalized"
                   AND  i.archived_at IS NULL
                   AND  i.executed_on IS NOT NULL
+                  AND  i.periodicity_value IS NOT NULL
                   AND  i.is_preventive_inspection = 1
                   AND  NOT EXISTS (
                          SELECT 1 FROM inspections s
@@ -69,9 +72,14 @@ final class CalendarController
         $stmt->execute($isAdmin ? [] : ['acct' => $accountId]);
 
         $deadlines = array_map(static function (array $r): array {
-            $statutory = (new \DateTimeImmutable((string) $r['executed_on']))
-                ->modify('+' . (int) $r['periodicity_months'] . ' months')
-                ->format('Y-m-d');
+            // Named `statutory_date` for historical reasons only — the app
+            // never claims a period is statutory (chapter 5). It is simply
+            // the date this úkon's own periodicity runs out on.
+            $due = Periodicity::validUntil(
+                (string) $r['executed_on'],
+                (int) $r['periodicity_value'],
+                (string) $r['periodicity_unit'],
+            );
             return [
                 'inspection_id' => (int) $r['id'],
                 'type'          => (string) $r['type'],
@@ -83,7 +91,7 @@ final class CalendarController
                     : null,
                 'facility_id'   => (int) $r['facility_id'],
                 'facility_name' => (string) $r['facility_name'],
-                'statutory_date' => $statutory,
+                'statutory_date' => $due,
                 'planned_date'  => $r['planned_date'] !== null ? (string) $r['planned_date'] : null,
             ];
         }, $stmt->fetchAll());

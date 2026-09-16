@@ -10,6 +10,7 @@ use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Import\Schema;
+use Firol\Support\Periodicity;
 use Firol\Support\Address;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
@@ -680,9 +681,10 @@ final class ImportController
 
             $insertInspection = $pdo->prepare(
                 'INSERT INTO inspections
-                    (account_id, company_id, facility_id, type, periodicity_months,
+                    (account_id, company_id, facility_id, type,
+                     periodicity_value, periodicity_unit, periodicity_is_custom,
                      executed_on, inspector_user_id, status, notes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, "draft", ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?)'
             );
 
             foreach ($rowsBySheet['Kontroly'] as $idx => $row) {
@@ -692,7 +694,6 @@ final class ImportController
                 $ico = self::ico($row, 'company_ico');
                 $facilityName = self::str($row, 'facility_name');
                 $type = self::str($row, 'type');
-                $periodicity = self::intOrNull($row, 'periodicity_months');
                 $executedOn = self::str($row, 'executed_on');
 
                 if ($rowNo === null) {
@@ -703,13 +704,22 @@ final class ImportController
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Chýba názov firmy / IČO firmy / prevádzka / typ.'];
                     continue;
                 }
-                $allowed = Schema::INSPECTION_PERIODICITIES[$type] ?? null;
-                if ($allowed === null) {
+                if (!array_key_exists($type, Schema::INSPECTION_RECOMMENDED_MONTHS)) {
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Neznámy typ kontroly: $type."];
                     continue;
                 }
-                if ($periodicity === null || !in_array($periodicity, $allowed, true)) {
-                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => "Neplatná periodicita pre typ $type (povolené: " . implode(',', $allowed) . ')'];
+                // Periodicity is the technician's decision, so the importer
+                // accepts any value in any unit — and an empty cell as "bez
+                // opakovania". A blank unit beside a filled count means months,
+                // which is what every sheet written before block 1 meant.
+                $unitCell = self::str($row, 'periodicity_unit');
+                try {
+                    [$periodicityValue, $periodicityUnit] = Periodicity::normalize(
+                        self::intOrNull($row, 'periodicity_value'),
+                        $unitCell ?? (self::intOrNull($row, 'periodicity_value') !== null ? 'mesiac' : null),
+                    );
+                } catch (\InvalidArgumentException $e) {
+                    $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => $e->getMessage()];
                     continue;
                 }
                 if ($executedOn === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $executedOn)) {
@@ -741,7 +751,9 @@ final class ImportController
                 }
 
                 $insertInspection->execute([
-                    $accountId, $companyId, $facilityId, $type, $periodicity,
+                    $accountId, $companyId, $facilityId, $type,
+                    $periodicityValue, $periodicityUnit,
+                    Periodicity::isCustom($type, $periodicityValue, $periodicityUnit) ? 1 : 0,
                     $executedOn, $inspectorId, self::str($row, 'notes'),
                 ]);
                 $newId = (int) $pdo->lastInsertId();

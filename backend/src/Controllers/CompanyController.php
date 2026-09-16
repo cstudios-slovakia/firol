@@ -92,14 +92,16 @@ final class CompanyController
         $facStmt->execute([$id]);
         $facilities = $facStmt->fetchAll();
 
-        // Last-used periodicity per (facility, inspection type) — used by
-        // Step 1 to prefill the periodicity dropdown for types where it's
-        // selectable (PHP, požiarna kniha). The window function picks the
-        // most recent finalized inspection per facility+type.
+        // Last-used periodicity per (facility, inspection type) — Step 1
+        // prefills it, because what this prevádzka was on last time is a far
+        // better guess than the catalogue's recommendation. Carries the unit
+        // too: since block 1 a period can be days or weeks, not only months.
+        // The window function picks the most recent inspection per
+        // facility+type.
         $defStmt = Db::pdo()->prepare(
-            'SELECT facility_id, type, periodicity_months
+            'SELECT facility_id, type, periodicity_value, periodicity_unit
              FROM (
-                 SELECT i.facility_id, i.type, i.periodicity_months,
+                 SELECT i.facility_id, i.type, i.periodicity_value, i.periodicity_unit,
                         ROW_NUMBER() OVER (
                             PARTITION BY i.facility_id, i.type
                             ORDER BY i.executed_on DESC, i.id DESC
@@ -117,7 +119,10 @@ final class CompanyController
         foreach ($defStmt->fetchAll() as $r) {
             $fid = (int) $r['facility_id'];
             $defaultsByFacility[$fid] ??= [];
-            $defaultsByFacility[$fid][(string) $r['type']] = (int) $r['periodicity_months'];
+            $defaultsByFacility[$fid][(string) $r['type']] = [
+                'value' => $r['periodicity_value'] !== null ? (int) $r['periodicity_value'] : null,
+                'unit'  => $r['periodicity_unit'] !== null ? (string) $r['periodicity_unit'] : null,
+            ];
         }
         foreach ($facilities as &$fac) {
             $fac['id'] = (int) $fac['id'];

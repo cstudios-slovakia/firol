@@ -700,7 +700,11 @@ function DeadlineRow({
                         {INSPECTION_TYPE_LABELS[deadline.type]}
                     </Link>
                     <p className="text-xs text-ink-500">
-                        Zákonný termín:{" "}
+                        {/* Never „zákonný termín" (chapter 5): the period
+                            follows from the building, its environment and the
+                            operator's decision, and the technician sets it —
+                            the app only prepares a date from what they chose. */}
+                        Predpripravený termín:{" "}
                         {new Date(statutory + "T00:00:00").toLocaleDateString(
                             "sk-SK",
                         )}
@@ -738,7 +742,7 @@ function DeadlineRow({
                     {overshoot && (
                         <p className="flex items-center gap-1.5 text-xs text-status-warn">
                             <AlertTriangle className="size-3.5" />
-                            Plánovaný dátum je po zákonnom termíne.
+                            Plánovaný dátum je po predpripravenom termíne.
                         </p>
                     )}
                     <div className="flex items-center gap-2">

@@ -9,6 +9,7 @@ use Firol\Documents\NumberAllocator;
 use Firol\Storage\Storage;
 use Firol\Support\AccountPurge;
 use Firol\Support\Address;
+use Firol\Support\Periodicity;
 use PDO;
 use ZipArchive;
 
@@ -281,6 +282,33 @@ final class Restorer
 
     // ── Inspections, items, photos ───────────────────────────────────────────
 
+    /**
+     * Periodicity of a backed-up inspection as [value, unit, is_custom].
+     *
+     * Archives written before block 1 carry `periodicity_months` instead; they
+     * are read as months, and the 0 that used to mean "one-off" becomes the
+     * NULL pair that says the same thing today.
+     *
+     * @param array<string, mixed> $inspection
+     * @return array{0: int|null, 1: string|null, 2: int}
+     */
+    private function periodicity(array $inspection): array
+    {
+        if (array_key_exists('periodicity_value', $inspection)) {
+            $value = $inspection['periodicity_value'];
+            $unit  = $inspection['periodicity_unit'] ?? null;
+            $value = is_numeric($value) ? (int) $value : null;
+            $unit  = is_string($unit) && in_array($unit, Periodicity::UNITS, true) ? $unit : null;
+            if ($value === null || $unit === null) {
+                return [null, null, 0];
+            }
+            return [$value, $unit, (int) ($inspection['periodicity_is_custom'] ?? 0)];
+        }
+
+        $months = (int) ($inspection['periodicity_months'] ?? 0);
+        return $months > 0 ? [$months, 'mesiac', 0] : [null, null, 0];
+    }
+
     /** @param list<array<string, mixed>> $inspections */
     private function restoreInspections(array $inspections): void
     {
@@ -288,11 +316,12 @@ final class Restorer
 
         $insert = $this->pdo->prepare(
             'INSERT INTO inspections
-                (account_id, company_id, facility_id, type, periodicity_months,
+                (account_id, company_id, facility_id, type,
+                 periodicity_value, periodicity_unit, periodicity_is_custom,
                  is_preventive_inspection, executed_on, inspector_user_id,
                  effective_inspector_user_id, effective_cert_number,
                  status, notes, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insertItem = $this->pdo->prepare(
             'INSERT INTO inspection_items (inspection_id, position, fields, created_at)
@@ -332,7 +361,7 @@ final class Restorer
                 $companyId,
                 $facilityId,
                 $type,
-                (int) ($inspection['periodicity_months'] ?? 12),
+                ...$this->periodicity($inspection),
                 (int) ($inspection['is_preventive_inspection'] ?? 1),
                 $executedOn,
                 $this->user($inspection, 'inspector_email') ?? $this->userId,

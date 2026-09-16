@@ -146,7 +146,8 @@ final class Writer
     {
         $stmt = $pdo->prepare(
             'SELECT i.id, i.company_id, i.facility_id, i.source_inspection_id, i.type,
-                    i.periodicity_months, i.is_preventive_inspection, i.executed_on,
+                    i.periodicity_value, i.periodicity_unit, i.periodicity_is_custom,
+                    i.is_preventive_inspection, i.executed_on,
                     i.status, i.notes, i.created_at,
                     i.effective_cert_number,
                     u.email  AS inspector_email,
@@ -187,7 +188,10 @@ final class Writer
             $inspection['id']                       = (int) $inspection['id'];
             $inspection['company_id']               = (int) $inspection['company_id'];
             $inspection['facility_id']              = (int) $inspection['facility_id'];
-            $inspection['periodicity_months']       = (int) $inspection['periodicity_months'];
+            $inspection['periodicity_value']        = $inspection['periodicity_value'] !== null
+                ? (int) $inspection['periodicity_value']
+                : null;
+            $inspection['periodicity_is_custom']    = (int) $inspection['periodicity_is_custom'];
             $inspection['is_preventive_inspection'] = (int) $inspection['is_preventive_inspection'];
             $inspection['source_inspection_id']     = $inspection['source_inspection_id'] !== null
                 ? (int) $inspection['source_inspection_id']

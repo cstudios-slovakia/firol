@@ -25,9 +25,11 @@ import { Facilities, type Facility } from "@/api/facilities";
 import {
     INSPECTION_TYPE_LABELS,
     Inspections,
+    periodicityOf,
     type InspectionListItem,
     type InspectionType,
 } from "@/api/inspections";
+import { periodicityShort } from "@/lib/periodicity";
 import {
     TRAINING_TYPE_LABELS,
     TRAINING_TYPES,
@@ -513,7 +515,7 @@ export function FacilityDetailPage() {
                                                     <CalendarDays className="-mt-0.5 mr-1 inline size-3" />
                                                     {ins.executed_on ?? "—"}
                                                     <span className="mx-1.5 text-ink-300">·</span>
-                                                    {ins.periodicity_months} mes.
+                                                    {periodicityShort(periodicityOf(ins))}
                                                     <span className="mx-1.5 text-ink-300">·</span>
                                                     {ins.effective_inspector_name ?? ins.inspector_name}
                                                 </p>

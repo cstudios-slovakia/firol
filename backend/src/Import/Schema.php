@@ -97,16 +97,23 @@ final class Schema
         ];
     }
 
-    /** Locked inspection type slugs and per-type allowed periodicities. */
-    public const INSPECTION_PERIODICITIES = [
-        'php' => [12, 24],
-        'hydranty' => [12],
-        'oprava_ts_php' => [60],
-        'poziarna_kniha' => [3, 6, 12],
-        'pu_akcieschopnost' => [3],
-        'pu_udrzba' => [12],
-        'nudzove_osvetlenie' => [12],
-        'ts_hadic' => [12],
+    /**
+     * Inspection type slugs the importer accepts, with the periodicity in
+     * months the app recommends for each. Since block 1 (chapter 5) the
+     * recommendation is a default, not a constraint: an import may carry any
+     * period, in any unit, or none at all.
+     *
+     * @var array<string, int|null>
+     */
+    public const INSPECTION_RECOMMENDED_MONTHS = [
+        'php' => 24,
+        'hydranty' => 12,
+        'oprava_ts_php' => null,
+        'poziarna_kniha' => 12,
+        'pu_akcieschopnost' => 3,
+        'pu_udrzba' => 12,
+        'nudzove_osvetlenie' => 12,
+        'ts_hadic' => 12,
     ];
 
     public const TRAINING_TYPES = [
@@ -118,31 +125,11 @@ final class Schema
         'hliadka_opah',
     ];
 
-    /** All valid periodicities across all inspection types (for the dropdown). */
-    private const ALL_PERIODICITIES = ['3', '6', '12', '24', '60'];
+    /** Values offered in the periodicity dropdown. Anything else is accepted too. */
+    private const PERIODICITY_SUGGESTIONS = ['1', '3', '6', '12', '24', '36'];
 
-    /**
-     * Reverse of {@see INSPECTION_PERIODICITIES}: for each periodicity value
-     * the list of inspection types that accept it, as a comma-separated note
-     * keyed by the (string) periodicity. Used to annotate the periodicity
-     * dropdown in the import template.
-     *
-     * @return array<string,string>
-     */
-    public static function periodicityHelp(): array
-    {
-        $typesByPeriod = [];
-        foreach (self::INSPECTION_PERIODICITIES as $type => $periods) {
-            foreach ($periods as $p) {
-                $typesByPeriod[(string) $p][] = $type;
-            }
-        }
-        $out = [];
-        foreach (self::ALL_PERIODICITIES as $p) {
-            $out[$p] = implode(', ', $typesByPeriod[$p] ?? []);
-        }
-        return $out;
-    }
+    /** Units a period can be expressed in (chapter 5). */
+    public const PERIODICITY_UNITS = ['mesiac', 'tyzden', 'den'];
 
     /** Predefined activity slugs for Požiarna kniha entries. */
     public const PK_ACTIVITIES = [
@@ -166,7 +153,7 @@ final class Schema
      */
     public static function inspections(): array
     {
-        $inspectionTypes = array_keys(self::INSPECTION_PERIODICITIES);
+        $inspectionTypes = array_keys(self::INSPECTION_RECOMMENDED_MONTHS);
 
         $sheets = [
             'Kontroly' => [
@@ -189,14 +176,20 @@ final class Schema
                         'options' => $inspectionTypes,
                     ],
                     [
-                        'header' => 'Periodicita (mes) *',
-                        'key' => 'periodicity_months',
+                        'header' => 'Periodicita — počet',
+                        'key' => 'periodicity_value',
                         'hint' => '12',
-                        'options' => self::ALL_PERIODICITIES,
-                        // Each periodicity is only valid for some inspection
-                        // types — annotate the option list so the user knows
-                        // which type to pair it with.
-                        'options_help' => self::periodicityHelp(),
+                        'options' => self::PERIODICITY_SUGGESTIONS,
+                        'prompt_title' => 'Periodicita',
+                        'prompt' => 'Koľko dní / týždňov / mesiacov platí kontrola. Nechaj prázdne, ak sa kontrola neopakuje.',
+                    ],
+                    [
+                        'header' => 'Periodicita — jednotka',
+                        'key' => 'periodicity_unit',
+                        'hint' => 'mesiac',
+                        'options' => self::PERIODICITY_UNITS,
+                        'prompt_title' => 'Jednotka periodicity',
+                        'prompt' => 'den, tyzden alebo mesiac. Prázdne pole znamená mesiac.',
                     ],
                     ['header' => 'Vykonané (DD-MM-RRRR) *', 'key' => 'executed_on', 'hint' => '10-01-2026', 'date' => true],
                     ['header' => 'E-mail technika', 'key' => 'inspector_email', 'hint' => 'technik@firma.sk'],
