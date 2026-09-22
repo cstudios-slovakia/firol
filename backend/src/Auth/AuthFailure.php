@@ -35,7 +35,14 @@ final class AuthFailure
     public const CSRF_INVALID = 'csrf_invalid';
 
     public const MSG_SESSION_EXPIRED = 'Prihlásenie vypršalo, prihláste sa znova.';
-    public const MSG_CSRF_INVALID    = 'Bezpečnostný token stránky vypršal. Skús akciu zopakovať.';
+    /**
+     * Only ever reaches the user when retrying in place cannot work: the
+     * current SPA re-syncs the token silently and shows this only if that
+     * failed too, and a tab still running a build from before that recovery
+     * existed holds the stale token for good — repeating the action fails
+     * identically every time. Loading the app again is what fixes both.
+     */
+    public const MSG_CSRF_INVALID    = 'Bezpečnostný token stránky vypršal. Načítaj aplikáciu znova a akciu zopakuj.';
 
     /** Logs the failure with the action that hit it, then ends the request. */
     public static function reject(string $code, string $message, int $status, string $cause): never
