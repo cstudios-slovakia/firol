@@ -929,6 +929,10 @@ until its results are entered. Step 1 now opens the summary when a
   the firm that was printed, not the account as it stands by then. A missing
   IČO or address is left out and does not block issuing. Potvrdenie o vykonaní
   práce already names the firm in its header and was left as it is.
+- ⬜ **Potvrdenie o vykonaní práce: the firm isn't frozen on re-render.**
+  Signing it on screen rebuilds the PDF from `WorkConfirmationController::payload()`,
+  which reads the account's firm (name, IČO, address) live. A firm renamed
+  between issue and signing appears on version 2 of the same number.
 - ⬜ After the filled DS/OPL is issued, the blank form stays in
   `document_versions` and on disk. It can't be downloaded in the app, though,
   and the backup contains only the current version. The unsigned original of
