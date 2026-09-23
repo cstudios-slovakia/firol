@@ -27,6 +27,21 @@ import { cn } from '@/lib/cn';
  * so.
  */
 
+/**
+ * The standard offer every type shows (chapter 5): denne · týždenne · mesačne ·
+ * 3 · 6 · 12 · 24 mesiacov. Values the type recommends are lifted into the
+ * first row and labelled as such; the rest stay one tap away below them.
+ */
+const STANDARD_OPTIONS: { value: number; unit: PeriodicityUnit; label: string }[] = [
+  { value: 1, unit: 'den', label: 'Denne' },
+  { value: 1, unit: 'tyzden', label: 'Týždenne' },
+  { value: 1, unit: 'mesiac', label: 'Mesačne' },
+  { value: 3, unit: 'mesiac', label: '3 mesiace' },
+  { value: 6, unit: 'mesiac', label: '6 mesiacov' },
+  { value: 12, unit: 'mesiac', label: '12 mesiacov' },
+  { value: 24, unit: 'mesiac', label: '24 mesiacov' },
+];
+
 const QUICK_UNITS: { unit: PeriodicityUnit; label: string }[] = [
   { unit: 'den', label: 'dni' },
   { unit: 'tyzden', label: 'týždne' },
@@ -49,9 +64,14 @@ type Props = {
 
 export function PeriodicityPicker({ type, value, onChange, executedOn, disabled }: Props) {
   const recommended = RECOMMENDED_MONTHS[type] ?? [];
+  const others = STANDARD_OPTIONS.filter(
+    (o) => !(o.unit === 'mesiac' && recommended.includes(o.value)),
+  );
   const isNone = value.value === null || value.unit === null;
-  const matchesChip =
+  const isRecommended =
     !isNone && value.unit === 'mesiac' && recommended.includes(value.value as number);
+  const matchesChip =
+    isRecommended || others.some((o) => o.value === value.value && o.unit === value.unit);
 
   // The custom row stays open once the user goes there, so switching units
   // mid-thought doesn't collapse the fields under them.
@@ -72,9 +92,9 @@ export function PeriodicityPicker({ type, value, onChange, executedOn, disabled 
     setCustomUnit(value.unit as PeriodicityUnit);
   }, [value.value, value.unit, isNone, matchesChip]);
 
-  function pickChip(months: number) {
+  function pickChip(n: number, unit: PeriodicityUnit = 'mesiac') {
     setCustomOpen(false);
-    onChange({ value: months, unit: 'mesiac' });
+    onChange({ value: n, unit });
   }
 
   function pickNone() {
@@ -96,23 +116,50 @@ export function PeriodicityPicker({ type, value, onChange, executedOn, disabled 
 
   return (
     <div className="flex flex-col gap-2.5">
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Periodicita">
-        {recommended.map((months) => {
-          const active = !customOpen && matchesChip && value.value === months;
-          return (
-            <button
-              key={months}
-              type="button"
-              disabled={disabled}
-              onClick={() => pickChip(months)}
-              className={cn(chipClass, active ? chipActive : chipIdle)}
-            >
-              <Repeat className="size-4" />
-              {months} {unitWord(months, 'mesiac')}
-            </button>
-          );
-        })}
+      {recommended.length > 0 && (
+        <>
+          <p className="text-xs font-medium text-ink-500">Odporúčaná lehota</p>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Odporúčaná lehota">
+            {recommended.map((months) => {
+              const active = !customOpen && isRecommended && value.value === months;
+              return (
+                <button
+                  key={months}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => pickChip(months)}
+                  className={cn(chipClass, active ? chipActive : chipIdle)}
+                >
+                  <Repeat className="size-4" />
+                  {months} {unitWord(months, 'mesiac')}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
 
+      {others.length > 0 && (
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Ďalšie lehoty">
+          {others.map((o) => {
+            const active =
+              !customOpen && matchesChip && value.value === o.value && value.unit === o.unit;
+            return (
+              <button
+                key={`${o.value}-${o.unit}`}
+                type="button"
+                disabled={disabled}
+                onClick={() => pickChip(o.value, o.unit)}
+                className={cn(smallChipClass, active ? chipActive : chipIdle)}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           disabled={disabled}
@@ -177,7 +224,7 @@ export function PeriodicityPicker({ type, value, onChange, executedOn, disabled 
           <>Úkon sa neopakuje — v prehľadoch sa zobrazí „podľa potreby".</>
         ) : (
           <>
-            Odporúčaná lehota, po vykonaní platí{' '}
+            {isRecommended ? 'Odporúčaná lehota, po' : 'Po'} vykonaní platí{' '}
             <span className="font-medium text-ink-700">{periodicityLabel(value)}</span>
             {due && (
               <>
@@ -198,5 +245,7 @@ export function PeriodicityPicker({ type, value, onChange, executedOn, disabled 
 
 const chipClass =
   'inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border px-3.5 text-sm font-medium transition-all duration-150 active:scale-[0.98] disabled:cursor-default disabled:opacity-60';
+const smallChipClass =
+  'inline-flex h-10 items-center justify-center rounded-xl border px-3 text-sm font-medium transition-all duration-150 active:scale-[0.98] disabled:cursor-default disabled:opacity-60';
 const chipActive = 'border-firol-500 bg-firol-50 text-firol-700';
 const chipIdle = 'border-ink-200 bg-white text-ink-700 hover:border-ink-300 hover:bg-ink-50';

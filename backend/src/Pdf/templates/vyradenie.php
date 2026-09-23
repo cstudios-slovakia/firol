@@ -339,7 +339,7 @@ $approver = trim((string) ($company['approver'] ?? ''));
 <table class="sig-tbl">
   <tr>
     <th width="38%">Vyradenie navrhol</th>
-    <th width="38%">Za spoločnosť prevzal na vedomie</th>
+    <th width="38%"><?= \Firol\Pdf\SignatureBlock::heading('vyradenie') ?></th>
     <th width="24%">Miesto a dátum</th>
   </tr>
   <tr>
@@ -357,7 +357,7 @@ $approver = trim((string) ($company['approver'] ?? ''));
       <div class="sig-line"></div>
     </td>
     <td>
-      <div class="sig-line">Podpis zodpovednej osoby</div>
+      <?= \Firol\Pdf\SignatureBlock::signCell($handover ?? null, 'vyradenie') ?>
     </td>
     <td></td>
   </tr>
