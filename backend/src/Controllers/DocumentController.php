@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
-use Firol\Audit\AuditCatalog;
-use Firol\Audit\AuditItems;
-use Firol\Audit\AuditProtocol;
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
@@ -133,23 +130,6 @@ final class DocumentController
 
         $insType = (string) $inspection['type'];
 
-        // An audit prints the questions it answered and leaves out the ones it
-        // did not. Issuing one with a third of the checklist untouched would
-        // produce a document that looks complete and is not — and the
-        // technician signs it. „Označiť všetko ako vyhovuje" turns the honest
-        // fix into one tap, so this costs them nothing.
-        if (AuditCatalog::isAuditType($insType)) {
-            $auditSummary = AuditItems::summarize($items);
-            $missing = $auditSummary['total'] - $auditSummary['answered'];
-            if ($missing > 0) {
-                return [
-                    'error' => 'Audit má ešte ' . $missing . ' nevyplnených položiek. '
-                        . 'Doplň ich alebo použi „Označiť všetko ako vyhovuje".',
-                    'status' => 422,
-                ];
-            }
-        }
-
         // Block 2 — a row carried over from last time (chapter 12) arrives
         // with its výsledok blank on purpose. The protocol must not print a
         // blank verdict over the technician's signature.
@@ -226,14 +206,6 @@ final class DocumentController
             $frozen[\Firol\Support\ClientTerms::SNAPSHOT_KEY] = $payload['client_terms'];
             Db::pdo()->prepare('UPDATE inspection_items SET fields = ? WHERE id = ? AND inspection_id = ?')
                 ->execute([json_encode($frozen, JSON_UNESCAPED_UNICODE), (int) $items[0]['id'], $inspectionId]);
-        }
-
-        if (AuditCatalog::isAuditType($insType)) {
-            $payload['audit'] = AuditProtocol::build(
-                $insType,
-                $inspection['audit_scope'] !== null ? (string) $inspection['audit_scope'] : null,
-                $items,
-            );
         }
 
         // The blank form (chapter 8.1) prints no nedostatky, so it carries no
@@ -653,7 +625,6 @@ final class DocumentController
         // vyraďovací protokol. NULL for documents created standalone.
         $sql = 'SELECT i.id, i.account_id, i.type, i.executed_on, i.status,
                        i.periodicity_value, i.periodicity_unit,
-                       i.audit_scope,
                        i.notes, i.details, i.inspector_user_id, i.source_inspection_id,
                        i.effective_inspector_user_id, i.effective_cert_number,
                        i.effective_cert_valid_from, i.effective_cert_valid_to,
@@ -724,10 +695,6 @@ final class DocumentController
             return self::buildPkPhotoAppendix($items, $pathsByItem);
         }
 
-        if (AuditCatalog::isAuditType($type)) {
-            return self::buildAuditPhotoAppendix($items, $pathsByItem);
-        }
-
         $appendix = [];
         foreach ($items as $idx => $item) {
             // Photos of a nedostatok (block 2, Firol\Support\Defects) carry a
@@ -753,59 +720,6 @@ final class DocumentController
         // nedostatky" table — the body prints the rows before the table, so
         // the appendix follows the body.
         return array_merge($appendix, \Firol\Support\Defects::photoAppendix($items, $pathsByItem));
-    }
-
-    /**
-     * Photo appendix of an audit (block 3).
-     *
-     * A photo attached to a failing item is captioned with the NUMBER of the
-     * finding it documents, matching the row in „Zistené nedostatky" — that is
-     * what makes the appendix usable: the reader goes from finding 4 to the
-     * photo of finding 4 without hunting.
-     *
-     * Photos on items that passed are evidence of the state found, which is
-     * ordinary audit practice, so they are captioned with the section and the
-     * question instead. Excluded sections contribute nothing: their items are
-     * not part of the protocol.
-     *
-     * @param list<array<string, mixed>> $items
-     * @param array<int, list<array<string, mixed>>> $pathsByItem
-     * @return list<array<string, mixed>>
-     */
-    private static function buildAuditPhotoAppendix(array $items, array $pathsByItem): array
-    {
-        $summary = AuditItems::summarize($items);
-        $defectNumberByItem = [];
-        foreach ($summary['defects'] as $defect) {
-            $defectNumberByItem[(int) $defect['item_id']] = (int) $defect['number'];
-        }
-
-        $appendix = [];
-        foreach ($items as $item) {
-            $photos = $pathsByItem[(int) $item['id']] ?? [];
-            if ($photos === []) {
-                continue;
-            }
-            $f = $item['fields'] ?? [];
-            if (!empty($f['section_excluded']) || ($f['result'] ?? null) === 'neaplikovatelne') {
-                continue;
-            }
-
-            $number = $defectNumberByItem[(int) $item['id']] ?? null;
-            $caption = $number !== null
-                ? PhotoCaption::buildForDefect($number, (string) ($f['defect_description'] ?? ''))
-                : trim((string) ($f['section_code'] ?? '') . ' — ' . (string) ($f['text'] ?? ''), ' —');
-
-            foreach ($photos as $photo) {
-                $appendix[] = [
-                    'caption' => $caption,
-                    'path'    => $photo['path'],
-                    'width'   => $photo['width'],
-                    'height'  => $photo['height'],
-                ];
-            }
-        }
-        return $appendix;
     }
 
     /**
@@ -1044,18 +958,6 @@ final class DocumentController
         if (PersonList::isPersonType($type)) {
             return PersonList::stats($type, $items);
         }
-        if (AuditCatalog::isAuditType($type)) {
-            $summary = AuditItems::summarize($items);
-            return [
-                // Excluded sections are out of every figure here: they were
-                // taken out of the audit, not failed by it.
-                'total'      => $summary['total'],
-                'answered'   => $summary['answered'],
-                'vyhovuje'   => $summary['vyhovuje'],
-                'nevyhovuje' => $summary['nevyhovuje'],
-                'verdict'    => $summary['verdict'],
-            ];
-        }
 
         // Block 2 — single-record BOZP úkony (Firol\Support\BozpRecords).
         if (\Firol\Support\BozpRecords::supports($type)) {
@@ -1154,9 +1056,8 @@ final class DocumentController
      */
     private static function certForType(string $type, array $profile): ?string
     {
-        // Every BOZP úkon (the audit and the block 2 types) carries the
-        // bezpečnostný technik's own number; every PO document carries the
-        // technik PO one. The section decides, so a new BOZP type needs no
+        // Every BOZP úkon carries the bezpečnostný technik's own number;
+        // every PO document carries the technik PO one. The section decides, so a new BOZP type needs no
         // branch here.
         $isBozp = \Firol\Support\Sections::forInspectionType($type) === \Firol\Support\Sections::BOZP;
         $key = match (true) {
@@ -1423,13 +1324,6 @@ final class DocumentController
                     (string) $inspection['executed_on'],
                     'kniha_bozp',
                 );
-        }
-        if (AuditCatalog::isAuditType((string) $inspection['type'])) {
-            $payload['audit'] = AuditProtocol::build(
-                (string) $inspection['type'],
-                $inspection['audit_scope'] !== null ? (string) $inspection['audit_scope'] : null,
-                $items,
-            );
         }
         return $payload;
     }

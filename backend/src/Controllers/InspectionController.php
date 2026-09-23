@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
-use Firol\Audit\AuditCatalog;
-use Firol\Audit\AuditItems;
 use Firol\Audit\AuditLog;
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
@@ -79,11 +77,6 @@ final class InspectionController
         // TrainingController), not among the inspection types.
         // One-off document — a disposal has no recurrence (change request 2.1).
         'vyradenie',
-        // Block 3 / chapter 15 — audits. An audit is an úkon like any other:
-        // one date, one periodicity, one protocol, one signature. What is
-        // different is only its items, which are copied out of a checklist
-        // (chapter 17) instead of typed one by one.
-        'audit_bozp', 'audit_opp',
         // Block 2 — single-record BOZP úkony (Firol\Support\BozpRecords).
         'kniha_bozp', 'pracovisko', 'osamele_pracovisko', 'fajcenie',
         // Block 2 — BOZP úkony whose rows are items (Firol\Support\BozpItems).
@@ -603,40 +596,16 @@ final class InspectionController
             }
         }
 
-        // An audit is created together with its questions: it is a checklist
-        // run, and one with no checklist in it is not a draft of anything.
-        // Which checklist and which rozsah are therefore settled here, not on
-        // a later screen (chapters 15.1 and 17).
-        $auditKind = AuditCatalog::kindForType($type);
-        $auditScope = null;
-        $auditTemplateId = null;
-        if ($auditKind !== null) {
-            $auditScope = $req->jsonString('audit_scope');
-            if (!in_array($auditScope, AuditItems::SCOPES, true)) {
-                Response::error('Vyber rozsah auditu — vstupný audit alebo ročná previerka.', 422);
-            }
-            $auditTemplateId = $req->jsonInt('audit_template_id');
-            if ($auditTemplateId === null) {
-                $auditTemplateId = AuditCatalog::ensureDelivered($accountId, $auditKind);
-            } else {
-                $template = AuditCatalog::template($accountId, $auditTemplateId);
-                if ($template === null || $template['kind'] !== $auditKind) {
-                    Response::error('Kontrolný list sa nenašiel.', 404);
-                }
-            }
-        }
-
         $pdo = Db::pdo();
         $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare(
                 'INSERT INTO inspections
                     (account_id, company_id, facility_id, visit_id, type,
-                     audit_template_id, audit_scope,
                      periodicity_value, periodicity_unit, periodicity_is_custom,
                      executed_on, inspector_user_id, status, notes,
                      is_preventive_inspection)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?)'
             );
             $stmt->execute([
                 $accountId,
@@ -644,8 +613,6 @@ final class InspectionController
                 $facilityId,
                 $visitId,
                 $type,
-                $auditTemplateId,
-                $auditScope,
                 $periodicityValue,
                 $periodicityUnit,
                 Periodicity::isCustom($type, $periodicityValue, $periodicityUnit) ? 1 : 0,
@@ -660,93 +627,19 @@ final class InspectionController
                 $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
                     ->execute([InspectionDetails::encode($details), $id]);
             }
-
-            if ($auditKind !== null) {
-                AuditController::snapshotTemplate($id, (int) $auditTemplateId, (string) $auditScope);
-            }
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
             throw $e;
         }
 
-        $items = [];
-        $auditCarryOver = null;
-        if ($auditKind !== null) {
-            $items = AuditController::loadItems($id);
-            $auditCarryOver = self::auditCarryOverOffer($accountId, $facilityId, $type, $id);
-        }
-
         Response::json([
             'inspection' => self::shapeRow(self::loadOrFail($accountId, $id)),
-            'items' => $items,
+            'items' => [],
             // Chapter 12 — offer to carry the devices over from last time
             // instead of typing them again.
             'carry_over' => self::carryOverOffer($accountId, $facilityId, $type, $id),
-            // Chapter 15.4 — the audit's own version of the same offer. It
-            // carries exclusions and the technician's own items, never a
-            // result, so it is a separate offer with separate wording.
-            'audit_carry_over' => $auditCarryOver,
         ], 201);
-    }
-
-    /**
-     * Chapter 15.4 — is there a previous audit of this kind here worth taking
-     * the shape of? Reports how many items it had marked neaplikovateľné, how
-     * many sections it excluded and how many items the technician had added,
-     * so the offer can say what it would actually do.
-     *
-     * @return array<string, mixed>|null
-     */
-    private static function auditCarryOverOffer(
-        int $accountId,
-        int $facilityId,
-        string $type,
-        int $exceptId,
-    ): ?array {
-        $sourceId = self::lastFinalizedId($accountId, $facilityId, $type, $exceptId);
-        if ($sourceId === null) {
-            return null;
-        }
-
-        $stmt = Db::pdo()->prepare('SELECT executed_on FROM inspections WHERE id = ?');
-        $stmt->execute([$sourceId]);
-        $executedOn = $stmt->fetchColumn();
-
-        $excluded = [];
-        $notApplicable = 0;
-        $custom = 0;
-        $defects = 0;
-        foreach (AuditController::loadItems($sourceId) as $item) {
-            $f = $item['fields'];
-            if (!empty($f['section_excluded'])) {
-                $excluded[(string) ($f['section_code'] ?? '')] = true;
-            }
-            if (($f['result'] ?? null) === 'neaplikovatelne') {
-                $notApplicable++;
-            }
-            if (($f['result'] ?? null) === 'nevyhovuje') {
-                $defects++;
-            }
-            if (!empty($f['is_custom'])) {
-                $custom++;
-            }
-        }
-
-        if ($notApplicable === 0 && $excluded === [] && $custom === 0 && $defects === 0) {
-            return null;
-        }
-
-        return [
-            'source_id'          => $sourceId,
-            'executed_on'        => $executedOn !== false ? (string) $executedOn : null,
-            'not_applicable'     => $notApplicable,
-            'excluded_sections'  => count($excluded),
-            'custom_items'       => $custom,
-            // Not carried over — shown so the technician knows what they are
-            // walking back into.
-            'previous_defects'   => $defects,
-        ];
     }
 
     public static function updateBasic(Request $req, array $params): void
@@ -1323,9 +1216,9 @@ final class InspectionController
             return;
         }
 
-        // Every other BOZP úkon (the audit and the block 2 types) is signed as
-        // a bezpečnostný technik, not as a technik PO — chapter 26, „číslo
-        // oprávnenia na protokole MUSÍ zodpovedať typu úkonu". There is no
+        // Every other BOZP úkon is signed as a bezpečnostný technik, not as a
+        // technik PO — chapter 26, „číslo oprávnenia na protokole MUSÍ
+        // zodpovedať typu úkonu". There is no
         // borrowing here: the oprávnenie is personal, and the protocol says
         // who did the work.
         if (\Firol\Support\Sections::forInspectionType($type) === \Firol\Support\Sections::BOZP) {

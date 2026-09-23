@@ -43,14 +43,9 @@ export const SECTION_COLORS: Record<Section, string> = {
 /** Inspection types in each section. */
 export const SECTION_INSPECTION_TYPES: Record<Section, InspectionType[]> = {
   revizie: ['php', 'oprava_ts_php', 'vyradenie', 'hydranty', 'ts_hadic'],
-  opp: [
-    'poziarna_kniha', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie',
-    'audit_opp',
-  ],
-  // Block 3 opens the BOZP section with the audit; the thirteen BOZP úkony of
-  // block 2 join it in the same list.
+  opp: ['poziarna_kniha', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie'],
+  // The BOZP úkony of block 2.
   bozp: [
-    'audit_bozp',
     // Block 2 — single-record úkony (api/bozpRecords.ts).
     'kniha_bozp', 'pracovisko', 'osamele_pracovisko', 'fajcenie',
     // Block 2 — chapter 5.3 order.

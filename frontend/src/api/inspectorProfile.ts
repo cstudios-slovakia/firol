@@ -7,7 +7,7 @@ export type InspectorProfile = {
   cert_php: string | null;
   cert_oprava: string | null;
   cert_general: string | null;
-  /** Bezpečnostný technik — printed on the audit BOZP (block 3). Personal. */
+  /** Bezpečnostný technik — printed on every BOZP úkon. Personal. */
   cert_bt: string | null;
   valid_from_php: string | null;
   valid_to_php: string | null;

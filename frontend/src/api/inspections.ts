@@ -1,6 +1,5 @@
 import { api, buildUrl, type OptimisticSpec } from '@/lib/api';
 import type { Periodicity, PeriodicityUnit } from '@/lib/periodicity';
-import type { AuditCarryOverOffer, AuditScope } from '@/api/audits';
 import type { BozpItemFields } from '@/api/bozpItems';
 import type { BozpRecordFields } from '@/api/bozpRecords';
 import type { PersonFields } from '@/api/personList';
@@ -19,8 +18,6 @@ export type InspectionType =
   | 'nudzove_osvetlenie'
   | 'ts_hadic'
   | 'vyradenie'
-  | 'audit_bozp'
-  | 'audit_opp'
   // Block 2 — single-record BOZP úkony (api/bozpRecords.ts).
   | 'kniha_bozp'
   | 'pracovisko'
@@ -47,8 +44,6 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   nudzove_osvetlenie: 'Núdzové osvetlenie',
   ts_hadic: 'Tlaková skúška hadíc',
   vyradenie: 'Vyraďovací protokol PHP',
-  audit_bozp: 'Audit BOZP',
-  audit_opp: 'Audit ochrany pred požiarmi',
   // Block 2 — typy_ukonov.json `nazov`.
   kniha_bozp: 'Kniha kontrol BOZP',
   pracovisko: 'Kontrola pracoviska',
@@ -63,18 +58,6 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   omamne_latky: 'Kontrola omamných a psychotropných látok',
   skolenie_bozp: 'Oboznámenie zamestnancov v oblasti BOZP',
 };
-
-/**
- * The two audit types, block 3. They are úkony like any other — same three
- * steps, same protocol, same signature — but their items come out of a
- * checklist instead of being typed one by one, so several screens branch on
- * this rather than on the slug.
- */
-export const AUDIT_TYPES: InspectionType[] = ['audit_bozp', 'audit_opp'];
-
-export function isAuditType(type: InspectionType): boolean {
-  return AUDIT_TYPES.includes(type);
-}
 
 export type InspectionStatus = 'draft' | 'finalized';
 
@@ -384,8 +367,6 @@ export type InspectionDetail = {
   follow_ups?: FollowUpRef[];
   /** Present on show() and on create, when carrying over is possible. */
   carry_over?: CarryOverOffer | null;
-  /** Audits only — the same offer in the audit's own terms (chapter 15.4). */
-  audit_carry_over?: AuditCarryOverOffer | null;
 };
 
 /** Who took the protocol over and signed for it (chapter 13). */
@@ -431,10 +412,6 @@ export type GeneratePdfResponse = {
 
 export type InspectionDraftPayload = {
   type: InspectionType;
-  /** Audits only — which questions get asked (chapter 15.1). */
-  audit_scope?: AuditScope;
-  /** Audits only — which checklist to copy. Omitted means the delivered one. */
-  audit_template_id?: number;
   periodicity_value: number | null;
   periodicity_unit: PeriodicityUnit | null;
   executed_on: string;

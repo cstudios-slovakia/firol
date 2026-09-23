@@ -46,8 +46,8 @@ final class InspectorProfileController
         $certPhp        = $req->jsonString('cert_php');
         $certOprava      = $req->jsonString('cert_oprava');
         $certGeneral     = $req->jsonString('cert_general');
-        // Block 3 — bezpečnostný technik. Personal, like the three above, and
-        // the number the audit BOZP prints (chapter 26).
+        // Bezpečnostný technik. Personal, like the three above, and the number
+        // every BOZP úkon prints (chapter 26).
         $certBt          = $req->jsonString('cert_bt');
         $validFromPhp   = $req->jsonString('valid_from_php');
         $validToPhp     = $req->jsonString('valid_to_php');

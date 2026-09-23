@@ -40,11 +40,6 @@ final class NumberAllocator
         // document (grey, SPOLOČNÉ) with its own series, because it is issued
         // per visit rather than per úkon.
         'potvrdenie_prace'   => 'POT',
-        // Block 3 / chapter 15 — audits. Two separate series: the BOZP audit
-        // is AUD, the OPP one AUD-PO, because a client with both gets two
-        // documents a year and they must not share a numbering line.
-        'audit_bozp'         => 'AUD',
-        'audit_opp'          => 'AUD-PO',
         // Block 2 / chapter 26 — single-record BOZP úkony.
         'kniha_bozp'         => 'BOZP',
         'pracovisko'         => 'PRAC',

@@ -27,8 +27,6 @@ export const INSPECTION_TYPE_ACCUSATIVE: Record<InspectionType, string> = {
   nudzove_osvetlenie: 'kontrolu núdzového osvetlenia',
   ts_hadic: 'tlakovú skúšku hadíc',
   vyradenie: 'vyradenie hasiacich prístrojov',
-  audit_bozp: 'audit bezpečnosti a ochrany zdravia pri práci',
-  audit_opp: 'previerku stavu ochrany pred požiarmi',
   kniha_bozp: 'kontrolu stavu bezpečnosti a ochrany zdravia pri práci',
   pracovisko: 'kontrolu pracoviska a pracovného prostredia',
   osamele_pracovisko: 'kontrolu osamelých a odlúčených pracovísk',

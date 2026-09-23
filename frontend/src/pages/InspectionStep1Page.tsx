@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, NotebookPen,
+  ArrowLeft, ArrowRight, Building2, CalendarDays, NotebookPen,
   Plus, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
@@ -9,16 +9,8 @@ import { Companies, type CompanyListItem, type FacilityListItem } from '@/api/co
 import {
   INSPECTION_TYPE_LABELS,
   Inspections,
-  isAuditType,
   type InspectionType,
 } from '@/api/inspections';
-import {
-  AUDIT_KIND_FOR_TYPE,
-  AUDIT_SCOPE_LABELS,
-  AuditTemplates,
-  type AuditScope,
-  type AuditTemplate,
-} from '@/api/audits';
 import {
   defaultPeriodicity,
   type Periodicity,
@@ -42,7 +34,7 @@ import { NewFacilityDialog } from '@/components/NewFacilityDialog';
 const KNOWN_TYPES: InspectionType[] = [
   'php', 'hydranty', 'oprava_ts_php', 'poziarna_kniha',
   'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'ts_hadic',
-  'vyradenie', 'audit_bozp', 'audit_opp',
+  'vyradenie',
   'kniha_bozp', 'pracovisko', 'osamele_pracovisko', 'fajcenie',
   'oopp', 'pracovne_prostriedky', 'rebriky', 'regale', 'oznacenie',
   'dychova_skuska', 'omamne_latky', 'skolenie_bozp',
@@ -95,34 +87,6 @@ export function InspectionStep1Page() {
   const [fieldErrors, setFieldErrors] = useState<{ company?: string; facility?: string; date?: string }>({});
   const [newCompanyOpen, setNewCompanyOpen] = useState(false);
   const [newFacilityOpen, setNewFacilityOpen] = useState(false);
-
-  // Audits only (chapter 15.1 + 17). The rozsah decides which questions get
-  // asked, and the checklist decides what they are — both are settled here,
-  // because an audit is created together with its items.
-  const isAudit = isAuditType(type);
-  const auditKind = AUDIT_KIND_FOR_TYPE[type] ?? null;
-  const [auditScope, setAuditScope] = useState<AuditScope>('rocny');
-  const [templates, setTemplates] = useState<AuditTemplate[] | null>(null);
-  const [templateId, setTemplateId] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (auditKind === null) return;
-    let cancelled = false;
-    AuditTemplates.list(auditKind)
-      .then((res) => {
-        if (cancelled) return;
-        setTemplates(res.items);
-        setTemplateId((prev) => prev ?? res.items[0]?.id ?? null);
-      })
-      .catch(() => {
-        // Not fatal — leaving the choice empty makes the server fall back to
-        // the delivered checklist, which is what the technician wanted anyway.
-        if (!cancelled) setTemplates([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [auditKind]);
 
   // Initial company list. Pulls a generous page (200) — enough for the
   // typical technician's client base; pagination/search lands in Phase 5.
@@ -222,12 +186,6 @@ export function InspectionStep1Page() {
         facility_id: facilityId!,
         notes: notes.trim() || undefined,
         ...(visitId !== null ? { visit_id: visitId } : {}),
-        ...(isAudit
-          ? {
-              audit_scope: auditScope,
-              ...(templateId !== null ? { audit_template_id: templateId } : {}),
-            }
-          : {}),
       };
       const company = (companies ?? []).find((c) => c.id === companyId);
       const facility = facilities.find((f) => f.id === facilityId);
@@ -239,26 +197,16 @@ export function InspectionStep1Page() {
         facility: { id: facilityId!, name: facility?.name ?? '' },
         inspector: { id: user?.id ?? 0, name: user?.fullname ?? '' },
       });
-      const res = await Inspections.createDraft(
-        payload,
-        csrfToken,
-        // An audit's items are copied from a checklist on the server, so there
-        // is nothing sensible to invent locally — it needs the connection.
-        isAudit ? undefined : optimistic,
-      );
-      toast.success(isAudit ? 'Audit vytvorený' : 'Kontrola vytvorená');
-      // An audit skips the per-item form: its questions already exist, and what
-      // follows is answering them on one screen.
+      const res = await Inspections.createDraft(payload, csrfToken, optimistic);
+      toast.success('Kontrola vytvorená');
       // Chapter 12 — when last time's items can be carried over, the offer
       // („Prevziať položky z poslednej kontroly") waits on the summary; going
       // straight to an empty item form would walk the technician past it.
       navigate(
-        isAudit
-          ? `/inspections/${res.inspection.id}/audit`
-          // Block 2 — a list of people is typed on one screen, row after
-          // row, with the takeover of names offered at its top.
-          : isPersonListType(type)
-            ? `/inspections/${res.inspection.id}/osoby`
+        // Block 2 — a list of people is typed on one screen, row after
+        // row, with the takeover of names offered at its top.
+        isPersonListType(type)
+          ? `/inspections/${res.inspection.id}/osoby`
           : res.carry_over
             ? `/inspections/${res.inspection.id}`
             : `/inspections/${res.inspection.id}/items/new`,
@@ -425,47 +373,6 @@ export function InspectionStep1Page() {
             )}
           </Field>
 
-          {isAudit && (
-            <>
-              <Field
-                label="Rozsah auditu"
-                required
-                hint="Vstupný audit sa pýta na jednorazové veci, ročná previerka na tie opakované."
-              >
-                {(p) => (
-                  <Select
-                    id={p.id}
-                    value={auditScope}
-                    onChange={(v) => setAuditScope(v as AuditScope)}
-                    leftIcon={<ClipboardList className="size-4" />}
-                    options={(Object.keys(AUDIT_SCOPE_LABELS) as AuditScope[]).map((scope) => ({
-                      value: scope,
-                      label: AUDIT_SCOPE_LABELS[scope],
-                    }))}
-                  />
-                )}
-              </Field>
-
-              {templates !== null && templates.length > 1 && (
-                <Field label="Kontrolný list" hint="Upraviť si ich môžeš v Nastaveniach.">
-                  {(p) => (
-                    <Select
-                      id={p.id}
-                      value={templateId !== null ? String(templateId) : ''}
-                      onChange={(v) => setTemplateId(v ? Number(v) : null)}
-                      leftIcon={<ClipboardList className="size-4" />}
-                      options={templates.map((t) => ({
-                        value: String(t.id),
-                        label: t.name,
-                        description: `${t.item_count} položiek`,
-                      }))}
-                    />
-                  )}
-                </Field>
-              )}
-            </>
-          )}
-
           <Field label="Periodicita">
             {() => (
               <PeriodicityPicker
@@ -625,10 +532,6 @@ function dateLabel(type: InspectionType): string {
   switch (type) {
     case 'vyradenie':
       return 'Dátum vyradenia';
-    case 'audit_bozp':
-      return 'Dátum kontroly';
-    case 'audit_opp':
-      return 'Dátum previerky';
     case 'dychova_skuska':
       return 'Dátum skúšky';
     case 'skolenie_bozp':
@@ -654,9 +557,6 @@ function stepTwoCta(type: InspectionType): string {
       return 'Pokračovať — zadanie svietidiel';
     case 'vyradenie':
       return 'Pokračovať — zadanie prístrojov';
-    case 'audit_bozp':
-    case 'audit_opp':
-      return 'Pokračovať — vyplnenie auditu';
     case 'kniha_bozp':
     case 'pracovisko':
     case 'osamele_pracovisko':

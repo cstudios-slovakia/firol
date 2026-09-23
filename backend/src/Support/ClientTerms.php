@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Firol\Support;
 
-use Firol\Audit\AuditCatalog;
 use Firol\Db;
 
 /**
@@ -37,15 +36,29 @@ final class ClientTerms
     /** „Blíži sa termín" window — the calendar's „do 30 dní" bucket. */
     private const SOON_DAYS = 30;
 
-    /** Names from typy_ukonov.json for the types the audit map does not name. */
+    /** Names of the inspection types, from typy_ukonov.json. */
     private const LABELS = [
-        'oprava_ts_php'      => 'Oprava, plnenie a tlaková skúška PHP',
-        'audit_bozp'         => 'Audit BOZP',
-        'audit_opp'          => 'Audit ochrany pred požiarmi',
-        'kniha_bozp'         => 'Kniha kontrol BOZP',
-        'pracovisko'         => 'Kontrola pracoviska',
-        'osamele_pracovisko' => 'Kontrola osamelých pracovísk',
-        'omamne_latky'       => 'Kontrola omamných a psychotropných látok',
+        'php'                  => 'Kontrola hasiacich prístrojov',
+        'hydranty'             => 'Kontrola požiarnych hydrantov',
+        'ts_hadic'             => 'Tlaková skúška hadíc',
+        'poziarna_kniha'       => 'Preventívna protipožiarna prehliadka',
+        'pu_akcieschopnost'    => 'Požiarne uzávery — akcieschopnosť',
+        'pu_udrzba'            => 'Požiarne uzávery — prevádzková údržba',
+        'nudzove_osvetlenie'   => 'Kontrola núdzového osvetlenia',
+        'skolenie_po'          => 'Školenie o ochrane pred požiarmi',
+        'skolenie_bozp'        => 'Oboznámenie zamestnancov v oblasti BOZP',
+        'oopp'                 => 'Kontrola OOPP',
+        'oznacenie'            => 'Kontrola bezpečnostného označenia',
+        'pracovne_prostriedky' => 'Kontrola pracovných prostriedkov',
+        'rebriky'              => 'Kontrola rebríkov',
+        'regale'               => 'Kontrola regálov',
+        'fajcenie'             => 'Kontrola dodržiavania zákazu fajčenia',
+        'dychova_skuska'       => 'Dychová skúška',
+        'oprava_ts_php'        => 'Oprava, plnenie a tlaková skúška PHP',
+        'kniha_bozp'           => 'Kniha kontrol BOZP',
+        'pracovisko'           => 'Kontrola pracoviska',
+        'osamele_pracovisko'   => 'Kontrola osamelých pracovísk',
+        'omamne_latky'         => 'Kontrola omamných a psychotropných látok',
     ];
 
     /** Training types, as the app names them (api/trainings.ts). */
@@ -185,6 +198,6 @@ final class ClientTerms
 
     private static function inspectionLabel(string $type): string
     {
-        return AuditCatalog::LINKED_TYPE_LABELS[$type] ?? self::LABELS[$type] ?? $type;
+        return self::LABELS[$type] ?? $type;
     }
 }

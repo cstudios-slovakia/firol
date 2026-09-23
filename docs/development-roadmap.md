@@ -677,8 +677,8 @@ per finished block.
 |---|---|---|---|
 | 0 | Opravy chýb (Gmail, invalid token, spacebar) | A | ✅ |
 | 1 | Základ pre BOZP | 2, 5, 6, 9, 10, 12, 13 | ✅ |
-| 2 | BOZP úkony — 12 new types (audit_bozp came with block 3) | 5.3, 7, 8 | ✅ (awaiting client test) |
-| 3 | Audity | 15, 16, 17 | ✅ |
+| 2 | BOZP úkony — 12 new types (audit_bozp comes with block 3) | 5.3, 7, 8 | ✅ (awaiting client test) |
+| 3 | Audity | 15, 16, 17 | ⏸ parked on branch `block-3-audity` (user, 23. 9.) |
 | 4 | Denná práca — úlohy, sklad, Dnes, časová os, kalendár, fakturácia | 11, 18–22 | ⬜ |
 | 5 | Moduly a predplatné | 1, 3 | ⏸ later (user, 23. 9.) |
 | 6 | Web — new poapp.sk | separate file | ⬜ |
@@ -855,8 +855,9 @@ but empty until those land.
 ## BOZP extension — block 2 „BOZP úkony" (POapp spec, september 2026) ✅
 
 Chapters **5.3, 7, 8** (plus their share of 12 and 26): the twelve BOZP úkony
-next to block 3's `audit_bozp`. Built on 23. 9. by three agents in parallel,
-one per Step 2 pattern. Migrations `041`–`042`; `039`–`040` stayed unused.
+(`audit_bozp` comes with block 3). Built on 23. 9. by three agents in parallel,
+one per Step 2 pattern. Migrations `038` (`cert_bt` on the inspector profile)
+and `041`–`042`; `039`–`040` stayed unused.
 
 **Shared pieces, built once:**
 - **Zistené nedostatky** (`Support/Defects.php`, `components/DefectsEditor.tsx`,
@@ -964,85 +965,6 @@ Fixed during review (23. 9.):
   no nedostatky.
 - A úkon reopened with „Doplniť výsledky" can't be signed until it is locked
   again, so a signature is never put on a list that has changed since.
-
-## BOZP extension — block 3 „Audity" (POapp spec, september 2026) ✅
-
-Chapters **15, 16, 17** (plus their share of 26). Migration `038`.
-
-**An audit is an úkon, not a new kind of thing.** It is stored as an
-`inspections` row of type `audit_bozp` / `audit_opp` whose items are the
-checklist questions. That one decision is what made the block small: photos,
-document numbering, handover, the calendar, a visit, the bulk e-mail, export,
-restore and purge already know what an úkon is, so none of them had to learn
-what an audit is. What is genuinely new is the checklist behind it
-(`audit_templates` + sections + items) and the screen for answering 109
-questions on a phone.
-
-- ✅ **Ch. 15 — filling in and evaluating.** `Firol\Audit\AuditItems` holds the
-  shape of one answer and the sums drawn from a whole audit, so the fill
-  screen and the PDF can never disagree about how many items were evaluated.
-  **Poznámka and fotky are available at every result, not only at a failing
-  one** — a photo of the poplachové smernice on the wall is how an auditor
-  evidences the state they found, and that is ordinary practice, not an edge
-  case. `nevyhovuje` makes the popis mandatory and the item turns into a
-  numbered finding; `neaplikovateľné` is not printed at all.
-  „Označiť všetko ako vyhovuje" and „Označiť sekciu" answer **only unanswered
-  items**: the technician marks everything compliant first and then corrects
-  the five that are not, so overwriting an existing answer would erase the
-  only work they actually did. An excluded section is replaced on the protocol
-  by a line naming it as excluded, because „not asked" must never read as
-  „asked and passed".
-- ✅ **Ch. 15.4 — carrying the previous audit over.** Exclusions, the
-  `neaplikovateľné` marks and the technician's own items cross over; **not one
-  result, note, photo or finding does.** Those are observations, and an
-  observation copied from last year is a fabrication. Items that failed last
-  time are shown with the old description and deadline beside the question, so
-  the technician knows what to verify before they answer it. Questions are
-  matched across audits by section + wording, not by template id: an item
-  reworded between two audits is a different question.
-- ✅ **Ch. 16 — what a separate protocol already answers.**
-  `Firol\Audit\LinkedWork`. The rule is the úkon's **validity**, not its age —
-  that is the only rule that works for a monthly OOPP check and a
-  twelve-monthly regál check at the same time. Same day or same visit fills the
-  item in and prints the protocol number in the note; still valid but earlier is
-  **offered** and waits for the technician; expired, never done, or without a
-  period fills in nothing. The period is shown next to every date, always:
-  „checked a month ago" means different things at different periods and the
-  inspectorate looks at exactly that. The mapping names block 2's types
-  (`oopp`, `rebriky`, `regale`, …) already — until those úkony exist the
-  resolver finds nothing and the technician answers by hand, which is the right
-  outcome.
-- ✅ **Ch. 17 — the checklists are a default, not a fixed list.** Reword,
-  delete, add an item or a whole section, reorder, keep several side by side,
-  and restore a delivered one to the state it shipped in
-  (`/settings/audity`). **An audit copies the checklist when it is created**,
-  so a protocol issued in March keeps reading the way it read in March. Legal
-  basis is optional on an item of one's own and the column is left blank on the
-  protocol rather than filled with a paragraph nobody checked.
-- ✅ **Ch. 26 — the protocols.** `AUD-RRRR-NNN` (BOZP, modrá) and
-  `AUD-PO-RRRR-NNN` (OPP, červená), each with the odbor spelled out in a box in
-  the header. Layout follows the delivered mockup, with one section added that
-  the mockup has no room for: the item-by-item evaluation with its legal basis,
-  which chapter 17 requires and which is what makes the document worth anything
-  to the client. Photos attached to a failing item are captioned with the
-  **number of the finding** they document, so the appendix lines up with the
-  „Zistené nedostatky" table.
-- ✅ **`cert_bt` on the inspector profile.** The audit BOZP is signed as a
-  bezpečnostný technik, not as a technik PO, and chapter 26 requires the number
-  on the protocol to match the type of úkon. No borrowing and no fallback to
-  the legacy single cert column: whatever is in that column predates BOZP, so
-  printing it as a BT oprávnenie would be a false statement on a signed
-  document.
-
-**Deviation from the spec, deliberate:** issuing the protocol is refused while
-any non-excluded item is unanswered, with a message naming how many are left.
-The spec does not ask for this, but an audit prints the questions it answered
-and silently omits the rest — a protocol that looks complete and is not, over
-the technician's signature. „Označiť všetko ako vyhovuje" makes the honest fix
-one tap, so it costs them nothing.
-
-**Not in block 3:** the BOZP úkony of block 2 (the audit's linked types are
-wired and waiting), and úlohy from a nedostatok's deadline (chapter 20, block 4).
 
 ---
 

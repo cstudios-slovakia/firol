@@ -10,7 +10,6 @@ import {
   INSPECTION_TYPE_LABELS,
   Inspections,
   documentDownloadUrl,
-  isAuditType,
   periodicityOf,
   type InspectionDetail,
   type InspectionDocument,
@@ -26,7 +25,6 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 import { getTypeModule } from '@/inspection-types';
-import { AuditSummaryBlock } from '@/components/AuditSummaryBlock';
 import { PersonProtocolBlock } from '@/components/persons/PersonProtocolBlock';
 import { isPersonListType, type PersonListType } from '@/api/personList';
 import { clearDuplicateSeed } from '@/inspection-types/duplicateSeed';
@@ -342,10 +340,6 @@ export function InspectionDetailPage() {
   const { inspection: i, items } = data;
   const isDraft = i.status === 'draft';
   const module = getTypeModule(i.type);
-  // An audit shows its sections and findings instead of a list of devices —
-  // 109 checklist rows on the summary screen would be a page of scrolling
-  // that tells the technician nothing (block 3 / chapter 15).
-  const isAudit = isAuditType(i.type);
   // Block 2 — a list of people is typed on its own screen and issued with
   // the blank-form choice of chapter 8.1 (PersonProtocolBlock).
   const isPersons = isPersonListType(i.type);
@@ -610,9 +604,7 @@ export function InspectionDetailPage() {
         />
       )}
 
-      {isAudit ? (
-        <AuditSummaryBlock inspectionId={id} canEdit={isDraft} />
-      ) : items.length === 0 ? (
+      {items.length === 0 ? (
         <EmptyItems
           inspectionId={id}
           disabled={!isDraft}
@@ -669,7 +661,7 @@ export function InspectionDetailPage() {
 
       {/* Úkon-level fields that belong to no single row — the opatrenia or
           záver of a block 2 BOZP úkon. Hidden on a locked úkon when empty. */}
-      {module?.DetailsBlock && !isAudit && (
+      {module?.DetailsBlock && (
         <module.DetailsBlock
           inspectionId={id}
           details={i.details ?? null}

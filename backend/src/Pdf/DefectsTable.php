@@ -19,8 +19,8 @@ namespace Firol\Pdf;
  * printed at all (chapter 26, „sekcie bez obsahu sa nevypisujú").
  *
  * Markup: an `<h2>` band followed by `<table class="grid">`, i.e. the band and
- * grid styles every block-2 template gets from {@see ProtocolLayout::styles()}
- * (the same class names audit.php uses). Options:
+ * grid styles every block-2 template gets from {@see ProtocolLayout::styles()}.
+ * Options:
  *
  *   title       band text                 default „Zistené nedostatky"
  *   labels      [popis, opatrenie, termín] default the kniha BOZP mockup's
