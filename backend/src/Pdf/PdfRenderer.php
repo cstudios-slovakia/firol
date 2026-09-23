@@ -56,6 +56,19 @@ final class PdfRenderer
     }
 
     /**
+     * Výdajka materiálu (block 4 / chapter 21). A shared document with its
+     * own entry point, like the potvrdenie: it lists material from the sklad,
+     * not the items of an úkon.
+     *
+     * @param array<string, mixed> $payload
+     */
+    public static function renderStockIssue(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/vydajka.php', $payload);
+        return self::buildPdf($html, $payload['number'] ?? 'vydajka');
+    }
+
+    /**
      * Type-aware dispatcher. Adding a new inspection type means adding a
      * branch here + the corresponding template under templates/.
      *

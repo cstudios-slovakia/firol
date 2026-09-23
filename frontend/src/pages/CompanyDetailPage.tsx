@@ -14,6 +14,7 @@ import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { BulkSendDialog } from '@/components/BulkSendDialog';
 import { CompanyPersons } from '@/components/CompanyPersons';
 import { WorkConfirmationDialog } from '@/components/WorkConfirmationDialog';
+import { CompanyStockIssues } from '@/components/stock/CompanyStockIssues';
 import { Documents, type DocumentSend } from '@/api/documents';
 
 export function CompanyDetailPage() {
@@ -228,6 +229,9 @@ export function CompanyDetailPage() {
       <CompanyPersons companyId={company.id} facilities={facilities} />
 
       <SendHistory sends={sends} />
+
+      {/* Chapter 21 — výdajky of this client; hidden while there are none. */}
+      <CompanyStockIssues companyId={company.id} readOnly={isReadOnly} />
 
       <section>
         <header className="mb-3 flex items-center justify-between">

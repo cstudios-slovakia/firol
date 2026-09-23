@@ -18,11 +18,13 @@ export type HandoverPayload = {
 /** A protocol available for a bulk send (chapter 9.1). */
 export type SendableDocument = {
   id: number;
-  type: InspectionType;
+  /** An úkon's protocol, or a výdajka materiálu (block 4 / chapter 21). */
+  type: InspectionType | 'vydajka';
   number: string;
   executed_on: string | null;
-  facility_id: number;
-  facility_name: string;
+  /** Null for a výdajka not tied to one prevádzka. */
+  facility_id: number | null;
+  facility_name: string | null;
   /** Size of the PDF, so the technician can see what is filling the message. */
   byte_size: number;
 };

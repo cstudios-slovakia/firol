@@ -1,5 +1,6 @@
 import { api, type OptimisticSpec } from '@/lib/api';
 import type { PeriodicityUnit } from '@/lib/periodicity';
+import type { CompanyBillingMode } from '@/api/invoicing';
 
 export type CompanyListItem = {
   id: number;
@@ -15,6 +16,8 @@ export type CompanyListItem = {
   contact_email: string | null;
   /** Schvaľujúca osoba — name and role, printed on documents (2.3 / 2.1). */
   approver: string | null;
+  /** Chapter 22 — the režim a new úkon for this firm starts with. */
+  billing_mode: CompanyBillingMode;
   facilities_count: number;
   inspections_count: number;
   last_inspection_at: string | null;
@@ -37,6 +40,8 @@ export type Company = {
   contact_email: string | null;
   /** Schvaľujúca osoba — name and role, printed on documents (2.3 / 2.1). */
   approver: string | null;
+  /** Chapter 22 — the režim a new úkon for this firm starts with. */
+  billing_mode: CompanyBillingMode;
   created_at?: string;
 };
 
@@ -92,6 +97,8 @@ export type CompanyPayload = {
   contact?: string;
   contact_email?: string;
   approver?: string;
+  /** Chapter 22 — omitted keeps the current setting (default na faktúru). */
+  billing_mode?: CompanyBillingMode;
 };
 
 export const Companies = {

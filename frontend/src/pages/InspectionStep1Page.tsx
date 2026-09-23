@@ -193,7 +193,13 @@ export function InspectionStep1Page() {
       // entirely when the create POST reaches the server.
       const optimistic = inspectionCreateOptimistic({
         payload,
-        company: { id: companyId!, name: company?.name ?? '', ico: company?.ico ?? null },
+        company: {
+          id: companyId!,
+          name: company?.name ?? '',
+          ico: company?.ico ?? null,
+          // Chapter 22 — the offline draft shows the firm's režim fakturácie.
+          billing_mode: company?.billing_mode,
+        },
         facility: { id: facilityId!, name: facility?.name ?? '' },
         inspector: { id: user?.id ?? 0, name: user?.fullname ?? '' },
       });
@@ -457,6 +463,7 @@ export function InspectionStep1Page() {
               contact: c.contact,
               contact_email: c.contact_email,
               approver: c.approver,
+              billing_mode: c.billing_mode,
               facilities_count: 0,
               inspections_count: 0,
               last_inspection_at: null,

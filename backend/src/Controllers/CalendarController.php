@@ -10,106 +10,109 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
-use Firol\Support\Periodicity;
+use Firol\Support\AccountCertificates;
+use Firol\Support\Deadlines;
+use Firol\Support\Sections;
+use Firol\Support\TeamIdentity;
 
 /**
- * Calendar (change request 2.5).
+ * Calendar (change request 2.5, BOZP extension chapter 11).
  *
- * Statutory deadlines are computed on the fly from each inspection's
- * executed_on + periodicity — never stored — so they always reflect the latest
- * inspection for a facility+type. Only the two user-editable layers are
- * persisted: a planned visit date per deadline (calendar_plans) and free
- * standing custom events (calendar_events).
+ * Deadlines are computed on the fly ({@see Deadlines}) — never stored — so
+ * they always follow the latest úkon of a type at a prevádzka. Persisted are
+ * only the user-editable layers: a planned visit date per deadline
+ * (calendar_plans), free-standing vlastné udalosti (calendar_events), the
+ * automatic-notice settings and the record of notices sent (deadline_notices).
+ *
+ * Every termín carries its `zdroj` (11.2): `kontrola` for a deadline computed
+ * from an úkon, `vlastny` for a vlastná udalosť, `technik` for the signed-in
+ * technician's own certificate dates.
  */
 final class CalendarController
 {
+    /** The day counts the automatic notice offers (11.3). */
+    public const NOTICE_DAYS = [7, 14, 30];
+
+    /** Personal certificates on inspector_profiles, and the odbor each serves. */
+    private const PERSONAL_CERTS = [
+        'po_technik'   => ['column' => 'valid_to_general', 'label' => 'Technik požiarnej ochrany',            'section' => Sections::OPP],
+        'php_kontrola' => ['column' => 'valid_to_php',     'label' => 'Kontrola hasiacich prístrojov',        'section' => Sections::REVIZIE],
+        'php_oprava'   => ['column' => 'valid_to_oprava',  'label' => 'Oprava, plnenie a tlaková skúška PHP', 'section' => Sections::REVIZIE],
+        'bt'           => ['column' => 'valid_to_bt',      'label' => 'Bezpečnostný technik',                 'section' => Sections::BOZP],
+    ];
+
     /**
-     * Statutory deadlines (with any planned date) plus custom events for the
-     * active account. The frontend groups deadlines per facility and buckets
-     * them by nearness; nothing here is date-range filtered — the volume per
-     * account is small and the calendar needs the full picture.
+     * Everything the calendar and the timeline show, for the active account:
+     *
+     *   deadlines  computed from úkony — the open ones and the fulfilled ones
+     *              of the last year ({@see Deadlines} for shape and states);
+     *   events     vlastné udalosti;
+     *   own_terms  the signed-in technician's certificate validity dates
+     *              („Tvoje termíny"), plus the firm's certificates for the main
+     *              user, who is the one warned about those (1.3.1).
      *
      * Admins get deadlines and events across all accounts (no tenant filter),
      * the same rule the inspections list follows — otherwise an inspection an
-     * admin can see in "Kontroly" as po termíne would be missing from both the
-     * calendar and the dashboard "Termíny" block.
+     * admin can see as po termíne would be missing from the calendar.
      */
     public static function index(Request $req): void
     {
         $accountId = Tenant::currentAccountId();
-        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $userId = Tenant::currentUserId();
+        $isAdmin = Admin::isAdmin($userId);
+        $today = date('Y-m-d');
 
-        // Latest non-superseded finalized preventive inspection per facility+type
-        // defines the current deadline. Plain fire-book entries and drafts are
-        // excluded (they carry no statutory cycle).
-        $sql = 'SELECT i.id, i.type, i.executed_on,
-                       i.periodicity_value, i.periodicity_unit,
-                       i.company_id, c.name AS company_name, c.contact_email AS company_email,
-                       i.facility_id, f.name AS facility_name,
-                       p.planned_date
-                FROM   inspections i
-                JOIN   companies  c ON c.id = i.company_id
-                JOIN   facilities f ON f.id = i.facility_id
-                LEFT   JOIN calendar_plans p ON p.inspection_id = i.id
-                WHERE  ' . ($isAdmin ? '1 = 1' : 'i.account_id = :acct') . '
-                  AND  i.status = "finalized"
-                  AND  i.archived_at IS NULL
-                  AND  i.executed_on IS NOT NULL
-                  AND  i.periodicity_value IS NOT NULL
-                  AND  i.is_preventive_inspection = 1
-                  AND  NOT EXISTS (
-                         SELECT 1 FROM inspections s
-                         WHERE  s.account_id  = i.account_id
-                           AND  s.facility_id = i.facility_id
-                           AND  s.type        = i.type
-                           AND  s.archived_at IS NULL
-                           AND  s.status      = "finalized"
-                           AND  s.is_preventive_inspection = 1
-                           AND  (COALESCE(s.executed_on, "1000-01-01"), s.id)
-                              > (COALESCE(i.executed_on, "1000-01-01"), i.id)
-                       )';
-        $stmt = Db::pdo()->prepare($sql);
-        $stmt->execute($isAdmin ? [] : ['acct' => $accountId]);
+        // Members who joined through a path that assigned no avatar get one
+        // before anything is drawn with it.
+        TeamIdentity::ensureAll(Db::pdo(), $accountId);
 
-        $deadlines = array_map(static function (array $r): array {
-            // Named `statutory_date` for historical reasons only — the app
-            // never claims a period is statutory (chapter 5). It is simply
-            // the date this úkon's own periodicity runs out on.
-            $due = Periodicity::validUntil(
-                (string) $r['executed_on'],
-                (int) $r['periodicity_value'],
-                (string) $r['periodicity_unit'],
-            );
-            return [
-                'inspection_id' => (int) $r['id'],
-                'type'          => (string) $r['type'],
-                'company_id'    => (int) $r['company_id'],
-                'company_name'  => (string) $r['company_name'],
-                // Recipient for the "Oznámiť klientovi e-mailom" button (2.5.4).
-                'company_email' => $r['company_email'] !== null && $r['company_email'] !== ''
-                    ? (string) $r['company_email']
-                    : null,
-                'facility_id'   => (int) $r['facility_id'],
-                'facility_name' => (string) $r['facility_name'],
-                'statutory_date' => $due,
-                'planned_date'  => $r['planned_date'] !== null ? (string) $r['planned_date'] : null,
-            ];
-        }, $stmt->fetchAll());
+        $deadlines = Deadlines::compute($isAdmin ? null : $accountId, true, $today);
 
         $evStmt = Db::pdo()->prepare(
-            'SELECT e.id, e.title, e.event_date, e.note,
-                    e.company_id, c.name AS company_name,
-                    e.facility_id, f.name AS facility_name
-             FROM   calendar_events e
-             LEFT   JOIN companies  c ON c.id = e.company_id
-             LEFT   JOIN facilities f ON f.id = e.facility_id
+            self::eventSelect() . '
              WHERE  ' . ($isAdmin ? '1 = 1' : 'e.account_id = :acct') . '
              ORDER  BY e.event_date ASC, e.id ASC'
         );
         $evStmt->execute($isAdmin ? [] : ['acct' => $accountId]);
         $events = array_map(static fn (array $r): array => self::shapeEvent($r), $evStmt->fetchAll());
 
-        Response::json(['deadlines' => $deadlines, 'events' => $events]);
+        Response::json([
+            'deadlines' => $deadlines,
+            'events'    => $events,
+            'own_terms' => self::ownTerms($accountId, $userId, $today),
+        ]);
+    }
+
+    /** Automatic client notice settings (11.3). */
+    public static function showNoticeSettings(Request $req): void
+    {
+        Response::json(['settings' => self::noticeSettings(Tenant::currentAccountId())]);
+    }
+
+    /**
+     * Only the main user switches the automatic notice — it sends mail to the
+     * firm's clients on the whole team's behalf.
+     */
+    public static function updateNoticeSettings(Request $req): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        if (!self::isMainUser($accountId, Tenant::currentUserId())) {
+            Response::error('Automatické oznámenia môže nastaviť len hlavný používateľ.', 403);
+        }
+
+        $current = self::noticeSettings($accountId);
+        $enabled = $req->jsonBool('enabled') ?? $current['enabled'];
+        $days = $req->jsonInt('days_ahead') ?? $current['days_ahead'];
+        if (!in_array($days, self::NOTICE_DAYS, true)) {
+            Response::error('Počet dní vopred musí byť 7, 14 alebo 30.', 422);
+        }
+
+        Db::pdo()->prepare(
+            'UPDATE accounts SET client_notice_auto = ?, client_notice_days = ? WHERE id = ?'
+        )->execute([$enabled ? 1 : 0, $days, $accountId]);
+
+        Response::json(['settings' => self::noticeSettings($accountId)]);
     }
 
     /** Set or update the planned visit date for a deadline's inspection. */
@@ -143,7 +146,7 @@ final class CalendarController
         Response::json(['ok' => true]);
     }
 
-    /** Clear the planned visit date, falling the deadline back to statutory. */
+    /** Clear the planned visit date, falling the deadline back to its due date. */
     public static function deletePlan(Request $req, array $params): void
     {
         Csrf::require($req);
@@ -162,7 +165,7 @@ final class CalendarController
         Response::noContent();
     }
 
-    /** Create a free-standing custom event. */
+    /** Create a free-standing vlastná udalosť, owned by whoever creates it. */
     public static function createEvent(Request $req): void
     {
         Csrf::require($req);
@@ -171,9 +174,9 @@ final class CalendarController
         [$title, $date, $note, $companyId, $facilityId] = self::validateEventBody($req, $accountId);
 
         Db::pdo()->prepare(
-            'INSERT INTO calendar_events (account_id, title, event_date, note, company_id, facility_id)
-             VALUES (?, ?, ?, ?, ?, ?)'
-        )->execute([$accountId, $title, $date, $note, $companyId, $facilityId]);
+            'INSERT INTO calendar_events (account_id, user_id, title, event_date, note, company_id, facility_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$accountId, Tenant::currentUserId(), $title, $date, $note, $companyId, $facilityId]);
 
         $id = (int) Db::pdo()->lastInsertId();
         Response::json(['event' => self::loadEvent($id, $accountId)], 201);
@@ -215,6 +218,85 @@ final class CalendarController
         Db::pdo()->prepare($sql)->execute($args);
 
         Response::noContent();
+    }
+
+    /** @return array{enabled: bool, days_ahead: int} */
+    private static function noticeSettings(int $accountId): array
+    {
+        $stmt = Db::pdo()->prepare('SELECT client_notice_auto, client_notice_days FROM accounts WHERE id = ?');
+        $stmt->execute([$accountId]);
+        $row = $stmt->fetch() ?: ['client_notice_auto' => 0, 'client_notice_days' => 14];
+        return [
+            'enabled'    => (bool) $row['client_notice_auto'],
+            'days_ahead' => (int) $row['client_notice_days'],
+        ];
+    }
+
+    private static function isMainUser(int $accountId, int $userId): bool
+    {
+        $stmt = Db::pdo()->prepare('SELECT main_user_id FROM accounts WHERE id = ?');
+        $stmt->execute([$accountId]);
+        return (int) $stmt->fetchColumn() === $userId;
+    }
+
+    /**
+     * „Tvoje termíny" — the dates the signed-in technician's own certificates
+     * run out on, and for the main user also the firm's certificates. Shown in
+     * the calendar apart from client deadlines (11.1).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function ownTerms(int $accountId, int $userId, string $today): array
+    {
+        $out = [];
+
+        $stmt = Db::pdo()->prepare(
+            'SELECT valid_to_general, valid_to_php, valid_to_oprava, valid_to_bt
+             FROM   inspector_profiles WHERE user_id = ? AND account_id = ?'
+        );
+        $stmt->execute([$userId, $accountId]);
+        $profile = $stmt->fetch() ?: [];
+        foreach (self::PERSONAL_CERTS as $code => $meta) {
+            $date = $profile[$meta['column']] ?? null;
+            if ($date === null || $date === '') {
+                continue;
+            }
+            $out[] = self::ownTerm($code, (string) $date, $meta['label'], $meta['section'], 'osobne', $today);
+        }
+
+        if (self::isMainUser($accountId, $userId)) {
+            foreach (AccountCertificates::forAccount($accountId) as $type => $cert) {
+                if ($cert['valid_to'] === null) {
+                    continue;
+                }
+                $out[] = self::ownTerm(
+                    $type,
+                    $cert['valid_to'],
+                    AccountCertificates::LABELS[$type] ?? $type,
+                    Sections::BOZP,
+                    'firemne',
+                    $today,
+                );
+            }
+        }
+
+        usort($out, static fn (array $a, array $b): int => strcmp($a['date'], $b['date']));
+        return $out;
+    }
+
+    /** @return array<string, mixed> */
+    private static function ownTerm(string $code, string $date, string $label, string $section, string $level, string $today): array
+    {
+        return [
+            'key'     => 'technik-' . $code,
+            'zdroj'   => 'technik',
+            'code'    => $code,
+            'level'   => $level,
+            'title'   => 'Platnosť oprávnenia — ' . $label,
+            'section' => $section,
+            'date'    => $date,
+            'state'   => $date < $today ? 'po_termine' : 'planovany',
+        ];
     }
 
     /**
@@ -310,17 +392,23 @@ final class CalendarController
         return (int) $owner;
     }
 
+    private static function eventSelect(): string
+    {
+        return 'SELECT e.id, e.title, e.event_date, e.note,
+                       e.company_id, c.name AS company_name,
+                       e.facility_id, f.name AS facility_name, f.city AS facility_city,
+                       e.user_id, u.fullname AS user_name,
+                       au.initials AS user_initials, au.avatar_color AS user_color
+                FROM   calendar_events e
+                LEFT   JOIN companies  c ON c.id = e.company_id
+                LEFT   JOIN facilities f ON f.id = e.facility_id
+                LEFT   JOIN users      u ON u.id = e.user_id
+                LEFT   JOIN account_users au ON au.account_id = e.account_id AND au.user_id = e.user_id';
+    }
+
     private static function loadEvent(int $id, int $accountId): array
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT e.id, e.title, e.event_date, e.note,
-                    e.company_id, c.name AS company_name,
-                    e.facility_id, f.name AS facility_name
-             FROM   calendar_events e
-             LEFT   JOIN companies  c ON c.id = e.company_id
-             LEFT   JOIN facilities f ON f.id = e.facility_id
-             WHERE  e.id = ? AND e.account_id = ?'
-        );
+        $stmt = Db::pdo()->prepare(self::eventSelect() . ' WHERE e.id = ? AND e.account_id = ?');
         $stmt->execute([$id, $accountId]);
         $row = $stmt->fetch();
         return $row ? self::shapeEvent($row) : [];
@@ -329,8 +417,26 @@ final class CalendarController
     /** @param array<string, mixed> $r */
     private static function shapeEvent(array $r): array
     {
+        $technician = null;
+        if ($r['user_id'] !== null) {
+            $name = (string) ($r['user_name'] ?? '');
+            $technician = [
+                'id'           => (int) $r['user_id'],
+                'fullname'     => $name,
+                'initials'     => $r['user_initials'] !== null && $r['user_initials'] !== ''
+                    ? (string) $r['user_initials']
+                    : TeamIdentity::deriveInitials($name),
+                'avatar_color' => $r['user_color'] !== null && $r['user_color'] !== ''
+                    ? (string) $r['user_color']
+                    : TeamIdentity::FORMER_MEMBER_COLOR,
+            ];
+        }
+        $city = $r['facility_city'] ?? null;
+
         return [
             'id'            => (int) $r['id'],
+            'key'           => 'vlastny-' . (int) $r['id'],
+            'zdroj'         => 'vlastny',
             'title'         => (string) $r['title'],
             'event_date'    => (string) $r['event_date'],
             'note'          => $r['note'] !== null ? (string) $r['note'] : null,
@@ -338,6 +444,9 @@ final class CalendarController
             'company_name'  => $r['company_name'] !== null ? (string) $r['company_name'] : null,
             'facility_id'   => $r['facility_id'] !== null ? (int) $r['facility_id'] : null,
             'facility_name' => $r['facility_name'] !== null ? (string) $r['facility_name'] : null,
+            'facility_city' => $city !== null && trim((string) $city) !== '' ? trim((string) $city) : null,
+            // Who created it; null for events recorded before chapter 11.
+            'technician'    => $technician,
         ];
     }
 

@@ -89,6 +89,9 @@ $router->post('/api/account/users',       [TeamController::class, 'invite']);
 $router->patch('/api/account/users/{id}', [TeamController::class, 'update']);
 $router->delete('/api/account/users/{id}',[TeamController::class, 'destroy']);
 $router->post('/api/account/team-defaults', [TeamController::class, 'setDefault']);
+// Chapter 11.5 — technician initials + avatar colour.
+$router->get('/api/account/avatar-palette',          [\Firol\Controllers\TeamIdentityController::class, 'palette']);
+$router->patch('/api/account/users/{id}/identity',   [\Firol\Controllers\TeamIdentityController::class, 'update']);
 
 // Chapter 1.3.1 — firemné oprávnenia (BTS, výchova a vzdelávanie).
 $router->get('/api/account/certificates',   [\Firol\Controllers\AccountCertificateController::class, 'show']);
@@ -189,6 +192,9 @@ $router->delete('/api/calendar/plans/{inspection_id}', [CalendarController::clas
 $router->post('/api/calendar/events',                [CalendarController::class, 'createEvent']);
 $router->patch('/api/calendar/events/{id}',          [CalendarController::class, 'updateEvent']);
 $router->delete('/api/calendar/events/{id}',         [CalendarController::class, 'deleteEvent']);
+// Chapter 11.3 — automatic client notice settings (sent by backend/bin/send-deadline-notices.php).
+$router->get('/api/calendar/notice-settings',        [CalendarController::class, 'showNoticeSettings']);
+$router->patch('/api/calendar/notice-settings',      [CalendarController::class, 'updateNoticeSettings']);
 $router->get('/api/documents/{id}/download',         [DocumentController::class, 'download']);
 $router->post('/api/documents/{id}/email',           [DocumentController::class, 'emailDocument']);
 // Chapter 13 — client signs on the screen; the protocol is re-rendered as a
@@ -207,6 +213,26 @@ $router->post('/api/visits/{id}/generate-documents', [VisitController::class, 'g
 $router->get('/api/work-confirmations',             [WorkConfirmationController::class, 'index']);
 $router->post('/api/work-confirmations',            [WorkConfirmationController::class, 'store']);
 
+// Block 4 / chapter 21 — sklad and the výdajka. The movements journal is
+// read-only: there is deliberately no PATCH/DELETE on a movement, only its
+// invoice flags („Pridať na faktúru" / vyfakturované).
+$router->get('/api/stock',                              [\Firol\Controllers\StockController::class, 'index']);
+$router->post('/api/stock/items',                       [\Firol\Controllers\StockController::class, 'storeItem']);
+$router->get('/api/stock/movements',                    [\Firol\Controllers\StockController::class, 'movements']);
+$router->post('/api/stock/movements',                   [\Firol\Controllers\StockController::class, 'storeMovement']);
+$router->patch('/api/stock/movements/{id}/billing',     [\Firol\Controllers\StockController::class, 'billing']);
+$router->get('/api/stock/movements/{id}/issuable',      [\Firol\Controllers\StockController::class, 'issuable']);
+$router->get('/api/stock/issues',                       [\Firol\Controllers\StockController::class, 'issues']);
+$router->post('/api/stock/issues',                      [\Firol\Controllers\StockController::class, 'storeIssue']);
+
+// Chapter 20 — úlohy. `count` feeds the menu badge, `upcoming` the Dnes card.
+$router->get('/api/tasks',                          [\Firol\Controllers\TaskController::class, 'index']);
+$router->get('/api/tasks/count',                    [\Firol\Controllers\TaskController::class, 'count']);
+$router->get('/api/tasks/upcoming',                 [\Firol\Controllers\TaskController::class, 'upcoming']);
+$router->post('/api/tasks',                         [\Firol\Controllers\TaskController::class, 'store']);
+$router->patch('/api/tasks/{id}',                   [\Firol\Controllers\TaskController::class, 'update']);
+$router->delete('/api/tasks/{id}',                  [\Firol\Controllers\TaskController::class, 'destroy']);
+
 $router->get('/api/me/inspector-profile',            [InspectorProfileController::class, 'show']);
 $router->patch('/api/me/inspector-profile',          [InspectorProfileController::class, 'update']);
 $router->post('/api/me/inspector-profile/signature', [InspectorProfileController::class, 'uploadSignature']);
@@ -222,6 +248,12 @@ $router->delete('/api/trainings/{id}/trainees/{trainee_id}', [TraineeController:
 $router->get('/api/trainees/{id}/signature',        [TraineeController::class, 'downloadSignature']);
 $router->post('/api/trainings/{id}/generate-pdf',   [DocumentController::class, 'generateForTraining']);
 $router->get('/api/trainings/{id}/documents',       [DocumentController::class, 'indexForTraining']);
+
+// Block 4 / chapter 22 — fakturácia úkonu. Editable on a locked úkon too;
+// the summary is the Dnes card „Nevyfakturované". Not the SaaS /api/billing.
+$router->patch('/api/inspections/{id}/invoicing',   [\Firol\Controllers\InvoicingController::class, 'updateInspection']);
+$router->patch('/api/trainings/{id}/invoicing',     [\Firol\Controllers\InvoicingController::class, 'updateTraining']);
+$router->get('/api/invoicing/summary',              [\Firol\Controllers\InvoicingController::class, 'summary']);
 
 $router->get('/api/account/export',                [DataController::class, 'exportData']);
 $router->post('/api/account/restore',              [DataController::class, 'restoreData']);

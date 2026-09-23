@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 // SIGNATURE DISABLED — import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { InvoicingBlock } from '@/components/InvoicingBlock';
+import { invoicingOf } from '@/api/invoicing';
 import {
   ArrowLeft, Briefcase, Building2, CalendarDays, CheckCircle2, Clock,
   Download, Edit2, FileText, GraduationCap, Plus, Trash2, User, Users,
@@ -367,6 +369,20 @@ export function TrainingDetailPage() {
         isReadOnly={isReadOnly}
         pdfError={pdfError}
         pokyn={pokyn}
+      />
+
+      {/* Chapter 22 — a training is an úkon, so it is invoiced like one.
+          Editable after the PDF is issued; the protocol never shows it. */}
+      <InvoicingBlock
+        target="trainings"
+        id={id}
+        value={invoicingOf(t)}
+        disabled={isReadOnly}
+        onChange={(next) =>
+          setData((prev) =>
+            prev ? { ...prev, training: { ...prev.training, ...next } } : prev,
+          )
+        }
       />
     </div>
   );

@@ -61,7 +61,10 @@ export function DeadlinesBlock({
   // block is about. Grouping the raw list would chip every control the facility
   // has — a deadline a year out would then read as "po termíne" because the row
   // is bucketed by the facility's nearest deadline.
-  const inWindow = deadlines.filter((d) => bucketForDays(daysUntil(d.statutory_date)) !== null);
+  // Fulfilled deadlines (chapter 11: `splneny`) are history, not work to do.
+  const inWindow = deadlines.filter(
+    (d) => d.state !== 'splneny' && bucketForDays(daysUntil(d.due_date)) !== null,
+  );
   const groups = groupByFacilityDay(inWindow);
   const buckets: Record<DeadlineBucket, FacilityDayGroup[]> = {
     overdue: [],

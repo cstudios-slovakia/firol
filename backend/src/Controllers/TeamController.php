@@ -31,9 +31,13 @@ final class TeamController
     {
         $accountId = Tenant::currentAccountId();
 
+        // Chapter 11.5 — make sure everyone has initials and a colour.
+        \Firol\Support\TeamIdentity::ensureAll(Db::pdo(), $accountId);
+
         $stmt = Db::pdo()->prepare(
             'SELECT u.id, u.fullname, u.email, u.phone,
                     au.role, au.is_active, au.created_at,
+                    au.initials, au.avatar_color,
                     a.main_user_id = u.id AS is_main,
                     a.default_php_user_id    = u.id AS is_default_php,
                     a.default_oprava_user_id = u.id AS is_default_oprava,
@@ -71,6 +75,8 @@ final class TeamController
             'valid_to_oprava'    => $r['valid_to_oprava']    ?: null,
             'valid_from_general' => $r['valid_from_general'] ?: null,
             'valid_to_general'   => $r['valid_to_general']   ?: null,
+            'initials'           => (string) ($r['initials'] ?? ''),
+            'avatar_color'       => (string) ($r['avatar_color'] ?? ''),
             'created_at' => $r['created_at'],
         ], $rows);
 
@@ -369,8 +375,28 @@ final class TeamController
             Response::error('You cannot remove yourself', 409);
         }
 
+        // Block 4 / chapter 21: whatever the technician holds in the sklad goes
+        // back to Sklad (as a `presun` in the journal) and their column
+        // disappears. Same transaction as the removal, so neither half can
+        // happen without the other.
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            \Firol\Support\Stock::returnToWarehouse($accountId, $userId, Tenant::currentUserId());
+            $pdo->prepare(
+                'DELETE FROM account_users WHERE account_id = ? AND user_id = ?'
+            )->execute([$accountId, $userId]);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        // Chapter 20 — the removed member's úlohy stay in the account, but
+        // unassigned: they can no longer open them. The user row survives, so
+        // the FK's ON DELETE SET NULL doesn't fire here.
         Db::pdo()->prepare(
-            'DELETE FROM account_users WHERE account_id = ? AND user_id = ?'
+            'UPDATE tasks SET assignee_user_id = NULL WHERE account_id = ? AND assignee_user_id = ?'
         )->execute([$accountId, $userId]);
 
         SeatSync::recompute($accountId);

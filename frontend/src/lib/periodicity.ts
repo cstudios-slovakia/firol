@@ -4,7 +4,7 @@
  * The rule the whole feature rests on: the app SUGGESTS a period, the
  * technician decides it. Lehoty depend on the type of building, its
  * environment and the operator's own decision, so the app never presents one
- * as statutory — the phrase „zákonný termín" appears nowhere in the UI or on a
+ * as statutory — no wording that calls a period statutory appears anywhere in the UI or on a
  * protocol, and the responsibility for the number stays with the person who
  * signs it.
  *

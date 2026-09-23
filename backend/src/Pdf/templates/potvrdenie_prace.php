@@ -13,7 +13,7 @@
  * @var array      $facility       name, address, city
  * @var array      $technician     fullname, certification_number, signature_data_uri
  * @var array      $acts           id, type, executed_on, item_count, document_number
- * @var array      $materials      rows from that day's výdajka (block 4; empty until then)
+ * @var array      $materials      name, quantity („3 ks"), document_number — items of that day's výdajky
  * @var array|null $handover       client signature, once captured (chapter 13)
  */
 $h = static fn(?string $v): string => htmlspecialchars((string) ($v ?? '—'), ENT_QUOTES, 'UTF-8');
@@ -27,32 +27,7 @@ $formatDate = static function (?string $iso): string {
 };
 
 /** Slovak name of each úkon, so the line reads as work done rather than a slug. */
-$actLabels = [
-  'php'                => 'Kontrola hasiacich prístrojov',
-  'oprava_ts_php'      => 'Oprava, plnenie a tlaková skúška hasiacich prístrojov',
-  'vyradenie'          => 'Vyradenie hasiacich prístrojov',
-  'hydranty'           => 'Kontrola požiarnych hydrantov',
-  'ts_hadic'           => 'Tlaková skúška hadíc',
-  'poziarna_kniha'     => 'Zápis do požiarnej knihy',
-  'pu_akcieschopnost'  => 'Kontrola akcieschopnosti požiarnych uzáverov',
-  'pu_udrzba'          => 'Prevádzková údržba požiarnych uzáverov',
-  'nudzove_osvetlenie' => 'Kontrola núdzového osvetlenia',
-  // Block 2 — single-record BOZP úkony.
-  'kniha_bozp'         => 'Kontrola stavu BOZP (kniha kontrol BOZP)',
-  'pracovisko'         => 'Kontrola pracoviska a pracovného prostredia',
-  'osamele_pracovisko' => 'Kontrola osamelých a odlúčených pracovísk',
-  'fajcenie'           => 'Kontrola dodržiavania zákazu fajčenia',
-  // Block 2 — the person-list úkony (typy_ukonov.json names).
-  'dychova_skuska'     => 'Dychová skúška na alkohol',
-  'omamne_latky'       => 'Kontrola omamných a psychotropných látok',
-  'skolenie_bozp'      => 'Oboznámenie zamestnancov v oblasti BOZP',
-  // Block 2 — BOZP úkony with a list of rows (Záznam o kontrole … titles).
-  'oopp'                 => 'Kontrola osobných ochranných pracovných prostriedkov',
-  'pracovne_prostriedky' => 'Kontrola pracovných prostriedkov',
-  'rebriky'              => 'Kontrola rebríkov',
-  'regale'               => 'Kontrola regálov',
-  'oznacenie'            => 'Kontrola bezpečnostného a zdravotného označenia',
-];
+$actLabels = \Firol\Pdf\ActLabels::LABELS;
 
 /** "12 prístrojov", "4 pracoviská" — the scope column of each line. */
 $scope = static function (string $type, int $n): string {
@@ -280,8 +255,8 @@ $placeAndDate = ($place ? $place . ', ' : '') . $formatDate($confirmation['confi
   </tbody>
 </table>
 
-<?php // Empty sections are not printed (chapter 26). Material comes from a
-      // výdajka, which arrives with the sklad in block 4. ?>
+<?php // Empty sections are not printed (chapter 26). Material comes from the
+      // výdajky issued at this client on that day, each line with its number. ?>
 <?php if (!empty($materials)): ?>
   <h2>Odovzdaný materiál</h2>
   <table class="items">

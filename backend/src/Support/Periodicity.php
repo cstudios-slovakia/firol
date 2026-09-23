@@ -10,7 +10,7 @@ namespace Firol\Support;
  * Block 1 / chapter 5. The rule the whole app is built around: the app
  * SUGGESTS a period, the technician decides it. Lehoty depend on the type of
  * building, its environment and the operator's own decision, so nothing here
- * may be presented as statutory — the phrase „zákonný termín" must not appear
+ * may be presented as statutory — no wording calling a period statutory may appear
  * anywhere in the UI or on a protocol.
  *
  * `null` value + `null` unit means „bez opakovania": the úkon happened once

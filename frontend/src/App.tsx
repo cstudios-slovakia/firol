@@ -24,6 +24,8 @@ import { PersonsFillPage } from '@/pages/PersonsFillPage';
 import { CompanyCertificatesPage } from '@/pages/CompanyCertificatesPage';
 import { VisitDetailPage } from '@/pages/VisitDetailPage';
 import { CalendarPage } from '@/pages/CalendarPage';
+import { StockPage } from '@/pages/StockPage';
+import { TasksPage } from '@/pages/TasksPage';
 import { TrainingsListPage } from '@/pages/TrainingsListPage';
 import { NewTrainingPage } from '@/pages/NewTrainingPage';
 import { TrainingDetailPage } from '@/pages/TrainingDetailPage';
@@ -93,6 +95,8 @@ export default function App() {
         <Route path="/facilities/:id/edit" element={<FacilityEditPage />} />
 
         <Route path="/kalendar" element={<CalendarPage />} />
+        <Route path="/sklad" element={<StockPage />} />
+        <Route path="/ulohy" element={<TasksPage />} />
 
         {/* The three sections (chapter 2), spelled out rather than matched as
             a pattern — the router takes a literal segment, and three routes

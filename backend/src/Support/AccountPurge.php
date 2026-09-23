@@ -43,6 +43,12 @@ final class AccountPurge
 
         // documents has no FK to inspections/trainings, so it goes first.
         $pdo->prepare('DELETE FROM documents WHERE account_id = ?')->execute([$accountId]);
+        // Úlohy (chapter 20): a firm's tasks would go with the company cascade,
+        // but „všeobecné" ones hang off nothing, and a replace-mode restore
+        // writes them back from the backup — leaving them would duplicate them.
+        $pdo->prepare('DELETE FROM tasks WHERE account_id = ?')->execute([$accountId]);
+        // Výdajky (chapter 21) go with the company cascade; the sklad itself
+        // is not firm data and stays — see stock() for the restore case.
         // Visits and work confirmations describe work done at a company, so the
         // company cascade takes them — but only once their protocols are gone.
         $pdo->prepare('DELETE FROM companies WHERE account_id = ?')->execute([$accountId]);
@@ -50,6 +56,45 @@ final class AccountPurge
         self::unlink(array_merge($documentPaths, $signaturePaths, $handoverPaths, $photoPaths));
         self::pruneDocumentDirs($accountId);
         self::prunePhotoDirs($accountId);
+
+        return $count;
+    }
+
+    /**
+     * The sklad (chapter 21): items, balances, the movements journal and the
+     * výdajky with their PDFs. Only for a replace-mode restore, which writes
+     * the sklad back whole — left in place, every balance would be doubled.
+     * Deleting the firms does not touch the sklad: material is not firm data,
+     * and the journal is never edited or deleted from the app.
+     *
+     * @return int number of items removed
+     */
+    public static function stock(int $accountId): int
+    {
+        $pdo = Db::pdo();
+
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM stock_items WHERE account_id = ?');
+        $stmt->execute([$accountId]);
+        $count = (int) $stmt->fetchColumn();
+
+        $docStmt = $pdo->prepare(
+            "SELECT file_path FROM documents WHERE account_id = ? AND parent_type = 'stock_issue'"
+        );
+        $docStmt->execute([$accountId]);
+        $documentPaths = array_merge(
+            $docStmt->fetchAll(PDO::FETCH_COLUMN),
+            self::versionPaths($accountId, $pdo, ['stock_issue']),
+        );
+
+        $pdo->prepare("DELETE FROM documents WHERE account_id = ? AND parent_type = 'stock_issue'")
+            ->execute([$accountId]);
+        // Movements point at výdajky and items; balances cascade with items.
+        $pdo->prepare('DELETE FROM stock_movements WHERE account_id = ?')->execute([$accountId]);
+        $pdo->prepare('DELETE FROM stock_issues WHERE account_id = ?')->execute([$accountId]);
+        $pdo->prepare('DELETE FROM stock_items WHERE account_id = ?')->execute([$accountId]);
+
+        self::unlink($documentPaths);
+        self::pruneDocumentDirs($accountId);
 
         return $count;
     }

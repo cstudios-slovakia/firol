@@ -206,7 +206,10 @@ export function BulkSendDialog({
                     <span className="min-w-0 flex-1">
                       <span className="block font-mono text-sm text-ink-900">{doc.number}</span>
                       <span className="block text-xs text-ink-500">
-                        {INSPECTION_TYPE_LABELS[doc.type] ?? doc.type} · {doc.facility_name}
+                        {doc.type === 'vydajka'
+                          ? 'Výdajka materiálu'
+                          : (INSPECTION_TYPE_LABELS[doc.type] ?? doc.type)}
+                        {doc.facility_name && ` · ${doc.facility_name}`}
                         {doc.executed_on &&
                           ` · ${new Date(`${doc.executed_on}T00:00:00`).toLocaleDateString('sk-SK')}`}
                       </span>

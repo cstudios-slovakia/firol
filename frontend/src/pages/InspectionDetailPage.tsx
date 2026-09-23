@@ -37,6 +37,9 @@ import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStat
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { periodicityLabel, type Periodicity } from '@/lib/periodicity';
 import { sectionPathForType } from '@/lib/sections';
+import { InvoicingBlock } from '@/components/InvoicingBlock';
+import { invoicingOf } from '@/api/invoicing';
+import { useIsReadOnly } from '@/auth/useIsReadOnly';
 
 /**
  * Step 3 — summary screen. Final review before PDF generation.
@@ -53,6 +56,7 @@ export function InspectionDetailPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
+  const isReadOnly = useIsReadOnly();
 
   const [data, setData] = useState<InspectionDetail | null>(null);
   const [documents, setDocuments] = useState<InspectionDocument[]>([]);
@@ -716,6 +720,20 @@ export function InspectionDetailPage() {
         canSign={!isDraft}
       />
       )}
+
+      {/* Chapter 22 — fakturácia úkonu. Editable on a locked úkon as well:
+          invoicing follows the issued protocol and never changes it. */}
+      <InvoicingBlock
+        target="inspections"
+        id={id}
+        value={invoicingOf(i)}
+        disabled={isReadOnly}
+        onChange={(next) =>
+          setData((prev) =>
+            prev ? { ...prev, inspection: { ...prev.inspection, ...next } } : prev,
+          )
+        }
+      />
 
       {signingDocument && (
         <HandoverDialog

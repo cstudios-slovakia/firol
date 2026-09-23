@@ -6,7 +6,9 @@ import {
     ClipboardList,
     CreditCard,
     LayoutDashboard,
+    ListTodo,
     LogOut,
+    Package,
     Settings,
     Sparkles,
 } from "lucide-react";
@@ -22,6 +24,8 @@ import { AuroraBackground } from "./AuroraBackground";
 import { FeedbackFloater } from "./FeedbackFloater";
 import { InstallPrompt } from "./InstallPrompt";
 import { TermsUpdateNotice } from "./TermsUpdateNotice";
+import { DefectTaskOfferHost } from "./DefectTaskOffer";
+import { TasksNavBadge } from "./TasksNavBadge";
 import { BrandMark } from "./Logo";
 import { cn } from "@/lib/cn";
 import {
@@ -41,6 +45,8 @@ type Tab = {
     readonly activeStyle?: React.CSSProperties;
     readonly activeBg: string;
     readonly iconBg: string;
+    /** Chapter 20 — the Úlohy item carries the open-task count. */
+    readonly badge?: "tasks";
 };
 
 /**
@@ -92,6 +98,26 @@ const TOP_TABS = [
         activeColor: "text-firol-600",
         activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
         iconBg: "bg-firol-100",
+    },
+    // Chapter 21 — sklad (materiál a značenie), shared by all modules.
+    {
+        to: "/sklad",
+        label: "Sklad",
+        icon: Package,
+        activeColor: "text-firol-600",
+        activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
+        iconBg: "bg-firol-100",
+    },
+    // Chapter 20. Menu order (texty_ui.json → navigacia): … Kalendár,
+    // Časová os, Sklad, Úlohy, Nastavenia.
+    {
+        to: "/ulohy",
+        label: "Úlohy",
+        icon: ListTodo,
+        activeColor: "text-firol-600",
+        activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
+        iconBg: "bg-firol-100",
+        badge: "tasks",
     },
 ] as const;
 
@@ -219,6 +245,7 @@ export function AppShell() {
             <FeedbackFloater />
             <InstallPrompt />
             <TermsUpdateNotice />
+            <DefectTaskOfferHost />
         </div>
     );
 }
@@ -432,6 +459,7 @@ function SideNav({ topOffset }: { topOffset: number }) {
                             )}
                         />
                         <span>{tab.label}</span>
+                        {tab.badge === "tasks" && <TasksNavBadge variant="side" />}
                     </>
                 )}
             </NavLink>
@@ -480,7 +508,7 @@ function BottomTabBar() {
                 every one of them. */}
             <ul className="mx-auto flex max-w-2xl items-stretch justify-around px-1 py-1.5">
                 {MOBILE_TABS.map((tab) => (
-                    <li key={tab.to} className="min-w-0 flex-1">
+                    <li key={tab.to} className="relative min-w-0 flex-1">
                         <NavLink
                             to={tab.to}
                             end={tab.to === "/"}
@@ -509,6 +537,7 @@ function BottomTabBar() {
                                 </>
                             )}
                         </NavLink>
+                        {tab.badge === "tasks" && <TasksNavBadge variant="bottom" />}
                     </li>
                 ))}
             </ul>

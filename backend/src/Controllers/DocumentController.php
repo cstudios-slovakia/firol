@@ -1195,6 +1195,8 @@ final class DocumentController
         $payload = match ((string) $doc['parent_type']) {
             'inspection' => self::inspectionPayloadForRerender($accountId, $parentId, (bool) $doc['include_photos']),
             'work_confirmation' => WorkConfirmationController::payload($accountId, $parentId),
+            // Block 4 / chapter 21 — výdajka materiálu, signed „Prevzal".
+            'stock_issue' => StockController::issuePayload($accountId, $parentId),
             default => throw new \RuntimeException('Tento typ dokumentu sa nedá podpísať na displeji.'),
         };
         $payload['number'] = $number;
@@ -1209,8 +1211,9 @@ final class DocumentController
         }
 
         $bytes = match ((string) $doc['parent_type']) {
-            'inspection' => PdfRenderer::renderForType((string) $doc['type'], $payload),
-            default      => PdfRenderer::renderWorkConfirmation($payload),
+            'inspection'  => PdfRenderer::renderForType((string) $doc['type'], $payload),
+            'stock_issue' => PdfRenderer::renderStockIssue($payload),
+            default       => PdfRenderer::renderWorkConfirmation($payload),
         };
 
         $relPath = Storage::documentVersionRelative($accountId, $year, $number, $version);

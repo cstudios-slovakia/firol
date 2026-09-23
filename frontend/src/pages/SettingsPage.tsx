@@ -59,6 +59,8 @@ import { DataApi, type RestoreMode, type RestoreResult } from "@/api/data";
 import { ImportApi, type ImportKind, type ImportResult } from "@/api/import";
 import { BackupReminderModal } from "@/components/BackupReminderModal";
 import { InstallAppCard } from "@/components/InstallAppCard";
+import { ClientNoticeSettingsCard } from "@/components/ClientNoticeSettingsCard";
+import { MemberIdentityEditor } from "@/components/team/MemberIdentityEditor";
 import {
     InspectorProfileApi,
     type InspectorProfile,
@@ -1554,9 +1556,14 @@ function TeamSection() {
                                     className="flex flex-col gap-2.5 rounded-2xl border border-ink-100 px-3 py-2.5"
                                 >
                                     <div className="flex items-center gap-3">
-                                        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-firol-50 text-firol-600">
-                                            <User className="size-4" />
-                                        </span>
+                                        {/* Chapter 11.5 — initials + avatar colour. */}
+                                        <MemberIdentityEditor
+                                            member={m}
+                                            members={members}
+                                            isMain={isMain}
+                                            isSelf={isSelf}
+                                            onSaved={reloadMembers}
+                                        />
                                         <div className="min-w-0 flex-1">
                                             <p className="truncate text-sm font-semibold text-ink-900">
                                                 {m.fullname}
@@ -2163,6 +2170,7 @@ export function SystemPage() {
         <>
             <SectionBack label="Systémové" />
             <InstallAppCard />
+            <ClientNoticeSettingsCard className="mt-4" />
             <LegalDocumentsCard />
         </>
     );
@@ -2561,6 +2569,9 @@ const RESTORE_LABELS: Record<string, string> = {
     trainings: "školení",
     trainees: "účastníkov",
     documents: "PDF protokolov",
+    stock_items: "skladových položiek",
+    stock_movements: "pohybov v sklade",
+    tasks: "úloh",
 };
 
 const RESTORE_MODES: {

@@ -3,6 +3,7 @@ import type { Periodicity, PeriodicityUnit } from '@/lib/periodicity';
 import type { BozpItemFields } from '@/api/bozpItems';
 import type { BozpRecordFields } from '@/api/bozpRecords';
 import type { PersonFields } from '@/api/personList';
+import type { InvoicingFields } from '@/api/invoicing';
 
 /**
  * Inspection types — locked slugs from docs/Firol base document.
@@ -61,7 +62,11 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
 
 export type InspectionStatus = 'draft' | 'finalized';
 
-export type InspectionListItem = {
+/**
+ * Chapter 22 — fakturácia úkonu (`billing_mode`, `invoiced`, `invoiced_at`,
+ * `billing_note`) rides along on every row; see api/invoicing.ts.
+ */
+export type InspectionListItem = InvoicingFields & {
   id: number;
   type: InspectionType;
   /**
@@ -441,6 +446,8 @@ export type InspectionListFilters = {
   company_id?: number;
   facility_id?: number;
   type?: InspectionType;
+  /** Chapter 22 — only úkony na faktúru not yet checked off, filtered server-side. */
+  uninvoiced?: boolean;
 };
 
 function buildQuery(filters: InspectionListFilters = {}): string {
@@ -448,6 +455,7 @@ function buildQuery(filters: InspectionListFilters = {}): string {
   if (filters.company_id) parts.push(`company_id=${filters.company_id}`);
   if (filters.facility_id) parts.push(`facility_id=${filters.facility_id}`);
   if (filters.type) parts.push(`type=${encodeURIComponent(filters.type)}`);
+  if (filters.uninvoiced) parts.push('uninvoiced=1');
   return parts.length > 0 ? `?${parts.join('&')}` : '';
 }
 

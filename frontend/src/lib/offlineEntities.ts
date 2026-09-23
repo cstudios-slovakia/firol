@@ -47,6 +47,27 @@ import type {
 } from '@/api/companies';
 import type { Facility } from '@/api/facilities';
 import { formatAddress } from './address';
+import {
+  COMPANY_BILLING_DEFAULT,
+  isUninvoiced,
+  mergeInvoicing,
+  type CompanyBillingMode,
+  type InvoicingFields,
+  type InvoicingPatch,
+} from '@/api/invoicing';
+
+/**
+ * Chapter 22 — a new úkon starts with its firm's režim fakturácie, exactly as
+ * the server sets it when the create syncs.
+ */
+function newUkonInvoicing(mode: CompanyBillingMode | null | undefined): InvoicingFields {
+  return {
+    billing_mode: mode ?? COMPANY_BILLING_DEFAULT,
+    invoiced: false,
+    invoiced_at: null,
+    billing_note: null,
+  };
+}
 
 function nowIso(): string {
   // Server timestamps look like "2026-06-03 10:20:00"; mirror that shape.
@@ -74,7 +95,7 @@ function prependListRow(path: string, row: unknown): CachePatch {
 
 export function inspectionCreateOptimistic(args: {
   payload: InspectionDraftPayload;
-  company: { id: number; name: string; ico: string | null };
+  company: { id: number; name: string; ico: string | null; billing_mode?: CompanyBillingMode | null };
   facility: { id: number; name: string };
   inspector: { id: number; name: string };
 }): OptimisticSpec {
@@ -118,6 +139,7 @@ export function inspectionCreateOptimistic(args: {
     source_inspection_id: null,
     carried_over_from_id: null,
     visit_id: args.payload.visit_id ?? null,
+    ...newUkonInvoicing(args.company.billing_mode),
   };
   const detail: InspectionDetail = { inspection, items: [] };
   const listRow: InspectionListItem = { ...inspection };
@@ -135,7 +157,13 @@ export function inspectionCreateOptimistic(args: {
 
 export function trainingCreateOptimistic(args: {
   payload: TrainingPayload;
-  company: { id: number; name: string; ico: string | null; approver: string | null };
+  company: {
+    id: number;
+    name: string;
+    ico: string | null;
+    approver: string | null;
+    billing_mode?: CompanyBillingMode | null;
+  };
   facility: { id: number; name: string } | null;
   trainer: { id: number; name: string; certification_number: string | null } | null;
 }): OptimisticSpec {
@@ -163,6 +191,7 @@ export function trainingCreateOptimistic(args: {
     trainees_count: 0,
     fields,
     pokyn_year: fields?.year ?? null,
+    ...newUkonInvoicing(args.company.billing_mode),
   };
   const detail: TrainingDetail = { training, trainees: [] };
   const listRow: TrainingListItem = { ...training };
@@ -187,9 +216,11 @@ export function companyCreateOptimistic(args: {
   contact: string | null;
   contact_email: string | null;
   approver: string | null;
+  billing_mode?: CompanyBillingMode;
 }): OptimisticSpec {
   const id = mintTempId();
   const address = formatAddress(args.street, args.postal_code, args.city);
+  const billingMode = args.billing_mode ?? COMPANY_BILLING_DEFAULT;
   const company: Company = {
     id,
     name: args.name,
@@ -201,6 +232,7 @@ export function companyCreateOptimistic(args: {
     contact: args.contact,
     contact_email: args.contact_email,
     approver: args.approver,
+    billing_mode: billingMode,
     created_at: nowIso(),
   };
   const detail: CompanyDetail = { company, facilities: [] };
@@ -215,6 +247,7 @@ export function companyCreateOptimistic(args: {
     contact: args.contact,
     contact_email: args.contact_email,
     approver: args.approver,
+    billing_mode: billingMode,
     facilities_count: 0,
     inspections_count: 0,
     last_inspection_at: null,
@@ -296,6 +329,8 @@ const COMPANY_RE = /^\/api\/companies\/(-?\d+)$/;
 const FACILITY_RE = /^\/api\/facilities\/(-?\d+)$/;
 const TRAINING_RE = /^\/api\/trainings\/(-?\d+)$/;
 const INSPECTION_RE = /^\/api\/inspections\/(-?\d+)$/;
+// Chapter 22 — PATCH /api/(inspections|trainings)/<id>/invoicing.
+const INVOICING_RE = /^\/api\/(inspections|trainings)\/(-?\d+)\/invoicing$/;
 
 /** Copy the listed keys from `f` onto a clone of `target` when present. */
 function mergeFields<T extends Record<string, unknown>>(
@@ -351,10 +386,13 @@ function updateListRow(
 function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec | null {
   const f = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
 
+  const invoicing = INVOICING_RE.exec(pathOnly);
+  if (invoicing) return invoicingOptimistic(invoicing[1] as 'inspections' | 'trainings', Number(invoicing[2]), f);
+
   const company = COMPANY_RE.exec(pathOnly);
   if (company) {
     const id = Number(company[1]);
-    const keys = ['name', 'ico', 'street', 'postal_code', 'city', 'contact', 'contact_email', 'approver'];
+    const keys = ['name', 'ico', 'street', 'postal_code', 'city', 'contact', 'contact_email', 'approver', 'billing_mode'];
     return {
       label: 'Úprava firmy',
       detail: typeof f.name === 'string' ? f.name : undefined,
@@ -443,6 +481,54 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
   }
 
   return null;
+}
+
+/**
+ * Chapter 22 — a queued invoicing change shows at once: the detail and the
+ * list caches get the merged fields (same rules as the server), and a row
+ * that is no longer „nevyfakturované" drops out of the cached filtered list.
+ */
+function invoicingOptimistic(
+  resource: 'inspections' | 'trainings',
+  id: number,
+  patch: InvoicingPatch,
+): OptimisticSpec {
+  const entityKey = resource === 'inspections' ? 'inspection' : 'training';
+  const mergeRow = (row: Record<string, unknown>) => ({
+    ...row,
+    ...mergeInvoicing(row as Partial<InvoicingFields>, patch),
+  });
+  return {
+    label: 'Fakturácia úkonu',
+    patches: [
+      {
+        path: `/api/${resource}/${id}`,
+        apply: (current) => {
+          const d = current as Record<string, unknown> | undefined;
+          const entity = d?.[entityKey] as Record<string, unknown> | undefined;
+          if (!d || !entity) return undefined;
+          return { ...d, [entityKey]: mergeRow(entity) };
+        },
+      },
+      {
+        path: `/api/${resource}`,
+        apply: (current) => updateListRow(current, id, mergeRow),
+      },
+      {
+        path: `/api/${resource}?uninvoiced=1`,
+        apply: (current) => {
+          const list = current as { items?: Record<string, unknown>[] } | undefined;
+          if (!list || !Array.isArray(list.items)) return undefined;
+          return {
+            ...list,
+            items: list.items
+              .map((row) => (row.id === id ? mergeRow(row) : row))
+              .filter((row) => isUninvoiced(row as Partial<InvoicingFields>)),
+          };
+        },
+      },
+    ],
+  };
 }
 
 /**

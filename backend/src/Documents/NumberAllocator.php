@@ -40,6 +40,9 @@ final class NumberAllocator
         // document (grey, SPOLOČNÉ) with its own series, because it is issued
         // per visit rather than per úkon.
         'potvrdenie_prace'   => 'POT',
+        // Block 4 / chapter 21 — výdajka materiálu. Shared (SPOLOČNÉ), own
+        // series per account and year.
+        'vydajka'            => 'VYD',
         // Block 2 / chapter 26 — single-record BOZP úkony.
         'kniha_bozp'         => 'BOZP',
         'pracovisko'         => 'PRAC',

@@ -223,17 +223,28 @@ final class DocumentSendController
         $companyId = (int) $params['id'];
         $accountId = self::assertCompany($companyId);
 
+        // Výdajky (block 4 / chapter 21) are this client's documents too, so
+        // they can go out in the same e-mail as the protocols.
         $stmt = Db::pdo()->prepare(
-            'SELECT d.id, d.type, d.number, d.generated_at, d.file_path,
-                    i.executed_on, i.facility_id, f.name AS facility_name
-             FROM   documents d
-             JOIN   inspections i ON i.id = d.parent_id AND d.parent_type = "inspection"
-             JOIN   facilities  f ON f.id = i.facility_id
-             WHERE  d.account_id = ? AND i.company_id = ? AND i.archived_at IS NULL
-             ORDER  BY COALESCE(i.executed_on, d.generated_at) DESC, d.id DESC
+            'SELECT * FROM (
+                SELECT d.id, d.type, d.number, d.generated_at, d.file_path,
+                       i.executed_on, i.facility_id, f.name AS facility_name
+                FROM   documents d
+                JOIN   inspections i ON i.id = d.parent_id AND d.parent_type = "inspection"
+                JOIN   facilities  f ON f.id = i.facility_id
+                WHERE  d.account_id = ? AND i.company_id = ? AND i.archived_at IS NULL
+                UNION ALL
+                SELECT d.id, d.type, d.number, d.generated_at, d.file_path,
+                       si.issued_on AS executed_on, si.facility_id, f.name AS facility_name
+                FROM   documents d
+                JOIN   stock_issues si ON si.id = d.parent_id AND d.parent_type = "stock_issue"
+                LEFT   JOIN facilities f ON f.id = si.facility_id
+                WHERE  d.account_id = ? AND si.company_id = ?
+             ) x
+             ORDER  BY COALESCE(executed_on, generated_at) DESC, id DESC
              LIMIT  300'
         );
-        $stmt->execute([$accountId, $companyId]);
+        $stmt->execute([$accountId, $companyId, $accountId, $companyId]);
 
         $items = array_map(static function (array $r): array {
             $abs = Storage::documentAbsolute((string) $r['file_path']);
@@ -242,8 +253,9 @@ final class DocumentSendController
                 'type'          => (string) $r['type'],
                 'number'        => (string) $r['number'],
                 'executed_on'   => $r['executed_on'],
-                'facility_id'   => (int) $r['facility_id'],
-                'facility_name' => (string) $r['facility_name'],
+                // Null for a výdajka not tied to one prevádzka.
+                'facility_id'   => $r['facility_id'] !== null ? (int) $r['facility_id'] : null,
+                'facility_name' => $r['facility_name'],
                 // Shown next to each row so the technician can see which
                 // protocol is pushing the send over the mailbox limit.
                 'byte_size'     => is_file($abs) ? (int) filesize($abs) : 0,
@@ -311,8 +323,10 @@ final class DocumentSendController
         $stmt = Db::pdo()->prepare(
             "SELECT d.id, d.number, d.file_path
              FROM   documents d
-             JOIN   inspections i ON i.id = d.parent_id AND d.parent_type = 'inspection'
-             WHERE  d.account_id = ? AND i.company_id = ? AND d.id IN ($placeholders)
+             LEFT   JOIN inspections  i  ON i.id  = d.parent_id AND d.parent_type = 'inspection'
+             LEFT   JOIN stock_issues si ON si.id = d.parent_id AND d.parent_type = 'stock_issue'
+             WHERE  d.account_id = ? AND COALESCE(i.company_id, si.company_id) = ?
+               AND  d.id IN ($placeholders)
              ORDER  BY d.id ASC"
         );
         $stmt->execute(array_merge([$accountId, $companyId], $ids));

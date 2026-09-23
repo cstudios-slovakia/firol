@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
     Building2,
     CalendarDays,
     ClipboardList,
     Edit2,
     Plus,
+    Receipt,
     Repeat,
     Search,
     Trash2,
@@ -38,6 +39,13 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Pagination } from "@/components/ui/Pagination";
 import { SkeletonList } from "@/components/ui/Skeleton";
 import { Spinner } from "@/components/ui/Spinner";
+import { InvoiceTickButton } from "@/components/InvoicingBlock";
+import {
+    UNINVOICED_LABEL,
+    UNINVOICED_PARAM,
+    isUninvoiced,
+    type InvoicingFields,
+} from "@/api/invoicing";
 
 const PAGE_SIZE = 10;
 
@@ -120,6 +128,48 @@ export function InspectionsListPage({
     const [deleting, setDeleting] = useState(false);
     const [repeatingId, setRepeatingId] = useState<number | null>(null);
     const [page, setPage] = useState(1);
+    // Chapter 22 — „Nevyfakturované": úkony na faktúru not yet checked off.
+    // Fetched on its own, filtered server-side, because the main list is
+    // capped and an older úkon still waiting for its invoice must not vanish.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const uninvoicedOnly = searchParams.get(UNINVOICED_PARAM) === "1";
+    const [uninvoicedItems, setUninvoicedItems] = useState<InspectionListItem[] | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        Inspections.list({ uninvoiced: true })
+            .then((res) => {
+                if (!cancelled) setUninvoicedItems(res.items);
+            })
+            .catch(() => {
+                // The chip just stays at zero; the main list reports errors.
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    function setUninvoicedOnly(on: boolean) {
+        setSearchParams(
+            (prev) => {
+                const next = new URLSearchParams(prev);
+                if (on) next.set(UNINVOICED_PARAM, "1");
+                else next.delete(UNINVOICED_PARAM);
+                return next;
+            },
+            { replace: true },
+        );
+    }
+
+    /** A row was ticked off as vyfakturované — it leaves the filtered list. */
+    function handleInvoiced(id: number, next: InvoicingFields) {
+        setUninvoicedItems((prev) =>
+            prev?.filter((it) => it.id !== id || isUninvoiced(next)) ?? null,
+        );
+        setAllItems((prev) =>
+            prev?.map((it) => (it.id === id ? { ...it, ...next } : it)) ?? null,
+        );
+    }
 
     useEffect(() => {
         let cancelled = false;
@@ -151,12 +201,24 @@ export function InspectionsListPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [allItems, section]);
 
+    // The same section scoping over the „Nevyfakturované" set.
+    const uninvoicedInSection = useMemo(() => {
+        if (!uninvoicedItems) return null;
+        if (!sectionTypes) return uninvoicedItems;
+        return uninvoicedItems.filter((it) => sectionTypes.includes(it.type));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [uninvoicedItems, section]);
+
+    // What the filters below work on: the whole section, or only what is
+    // still waiting to be invoiced.
+    const pool = uninvoicedOnly ? uninvoicedInSection : items;
+
     // Search + type only. The validity chips count against this set, so their
     // numbers stay stable while switching between them.
     const searched = useMemo(() => {
-        if (!items) return null;
+        if (!pool) return null;
         const q = query.trim().toLowerCase();
-        return items.filter((it) => {
+        return pool.filter((it) => {
             if (typeFilter && it.type !== typeFilter) return false;
             if (!q) return true;
             return (
@@ -167,7 +229,7 @@ export function InspectionsListPage({
                 INSPECTION_TYPE_LABELS[it.type].toLowerCase().includes(q)
             );
         });
-    }, [items, query, typeFilter]);
+    }, [pool, query, typeFilter]);
 
     const statusCounts = useMemo(() => {
         if (!searched) return null;
@@ -228,7 +290,7 @@ export function InspectionsListPage({
 
     useEffect(() => {
         setPage(1);
-    }, [query, typeFilter, statusFilter]);
+    }, [query, typeFilter, statusFilter, uninvoicedOnly]);
 
     // Paginate across the ordered groups so each page holds at most PAGE_SIZE
     // rows; section headers render only for the items that fall on the current
@@ -408,6 +470,32 @@ export function InspectionsListPage({
                                 </button>
                             );
                         })}
+                        {/* Chapter 22 — the end-of-month round: what is
+                            still to be invoiced (server-side filter). */}
+                        <button
+                            type="button"
+                            id="filter-uninvoiced"
+                            aria-pressed={uninvoicedOnly}
+                            disabled={(uninvoicedInSection?.length ?? 0) === 0 && !uninvoicedOnly}
+                            onClick={() => setUninvoicedOnly(!uninvoicedOnly)}
+                            className={cn(
+                                "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all duration-150",
+                                uninvoicedOnly
+                                    ? "bg-ink-800 text-white scale-[1.04]"
+                                    : "bg-ink-100 text-ink-600 hover:bg-ink-200 disabled:opacity-40 disabled:hover:bg-ink-100",
+                            )}
+                        >
+                            <Receipt className="size-3 shrink-0" />
+                            {UNINVOICED_LABEL}
+                            <span
+                                className={cn(
+                                    "tabular-nums",
+                                    uninvoicedOnly ? "text-white/70" : "text-ink-400",
+                                )}
+                            >
+                                {uninvoicedInSection?.length ?? 0}
+                            </span>
+                        </button>
                     </div>
                 </div>
             )}
@@ -446,7 +534,9 @@ export function InspectionsListPage({
                 <Card className="flex flex-col items-center gap-2 px-6 py-10 text-center">
                     <Search className="size-6 text-ink-300" />
                     <p className="text-sm text-ink-500">
-                        Žiadne kontroly nevyhovujú filtru.
+                        {uninvoicedOnly && !query && !typeFilter && !statusFilter
+                            ? "Všetko je vyfakturované."
+                            : "Žiadne kontroly nevyhovujú filtru."}
                     </p>
                 </Card>
             )}
@@ -472,7 +562,7 @@ export function InspectionsListPage({
                                     <ul className="flex flex-col gap-2">
                                         {pagedGroups[key].map((it) => (
                                             <li key={it.id}>
-                                                <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
+                                                <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} onInvoiced={uninvoicedOnly ? handleInvoiced : undefined} />
                                             </li>
                                         ))}
                                     </ul>
@@ -528,17 +618,27 @@ function InspectionRow({
     onRepeat,
     repeatingId,
     isReadOnly,
+    onInvoiced,
 }: {
     it: InspectionListItem;
     onDelete: (id: number) => void;
     onRepeat: (id: number) => void;
     repeatingId: number | null;
     isReadOnly: boolean;
+    /** Set in the „Nevyfakturované" view — offers the one-tap check-off. */
+    onInvoiced?: (id: number, next: InvoicingFields) => void;
 }) {
     const isRepeating = repeatingId === it.id;
 
     const actions = isReadOnly ? null : (
         <>
+            {onInvoiced && isUninvoiced(it) && (
+                <InvoiceTickButton
+                    target="inspections"
+                    id={it.id}
+                    onDone={(next) => onInvoiced(it.id, next)}
+                />
+            )}
             {it.status === "finalized" && (
                 <button
                     type="button"

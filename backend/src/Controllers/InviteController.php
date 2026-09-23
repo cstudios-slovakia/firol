@@ -179,6 +179,10 @@ final class InviteController
 
         SeatSync::recompute((int) $invite['account_id']);
 
+        // Chapter 11.5 — the new member gets initials and an avatar colour
+        // no one else in the team has.
+        \Firol\Support\TeamIdentity::ensure($pdo, (int) $invite['account_id'], $userId);
+
         // Log the user in so they land on the dashboard with the new
         // account active. For an already-logged-in existing user we also
         // switch their active account to the freshly accepted one.

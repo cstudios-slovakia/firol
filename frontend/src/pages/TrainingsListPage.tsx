@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pagination } from "@/components/ui/Pagination";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
     Building2,
     CalendarDays,
     Edit2,
     GraduationCap,
     Plus,
+    Receipt,
     Search,
     Trash2,
     User,
@@ -33,6 +34,13 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { SkeletonList } from "@/components/ui/Skeleton";
+import { InvoiceTickButton } from "@/components/InvoicingBlock";
+import {
+    UNINVOICED_LABEL,
+    UNINVOICED_PARAM,
+    isUninvoiced,
+    type InvoicingFields,
+} from "@/api/invoicing";
 
 /**
  * `embedded` drops the page header — the OPP section (chapter 2) supplies its
@@ -54,6 +62,48 @@ export function TrainingsListPage({ embedded = false }: { embedded?: boolean } =
 
     const PAGE_SIZE = 10;
 
+    // Chapter 22 — „Nevyfakturované", fetched on its own and filtered
+    // server-side so the capped main list can never hide one.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const uninvoicedOnly = searchParams.get(UNINVOICED_PARAM) === "1";
+    const [uninvoicedItems, setUninvoicedItems] = useState<TrainingListItem[] | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        Trainings.list({ uninvoiced: true })
+            .then((res) => {
+                if (!cancelled) setUninvoicedItems(res.items);
+            })
+            .catch(() => {
+                // The chip just stays at zero; the main list reports errors.
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    function setUninvoicedOnly(on: boolean) {
+        setSearchParams(
+            (prev) => {
+                const next = new URLSearchParams(prev);
+                if (on) next.set(UNINVOICED_PARAM, "1");
+                else next.delete(UNINVOICED_PARAM);
+                return next;
+            },
+            { replace: true },
+        );
+    }
+
+    /** A row was ticked off as vyfakturované — it leaves the filtered list. */
+    function handleInvoiced(id: number, next: InvoicingFields) {
+        setUninvoicedItems((prev) =>
+            prev?.filter((it) => it.id !== id || isUninvoiced(next)) ?? null,
+        );
+        setItems((prev) =>
+            prev?.map((it) => (it.id === id ? { ...it, ...next } : it)) ?? null,
+        );
+    }
+
     useEffect(() => {
         let cancelled = false;
         Trainings.list()
@@ -73,10 +123,12 @@ export function TrainingsListPage({ embedded = false }: { embedded?: boolean } =
         };
     }, []);
 
+    const pool = uninvoicedOnly ? uninvoicedItems : items;
+
     const filtered = useMemo(() => {
-        if (!items) return null;
+        if (!pool) return null;
         const q = query.trim().toLowerCase();
-        return items.filter((it) => {
+        return pool.filter((it) => {
             if (typeFilter && it.type !== typeFilter) return false;
             if (!q) return true;
             return (
@@ -86,9 +138,9 @@ export function TrainingsListPage({ embedded = false }: { embedded?: boolean } =
                 TRAINING_TYPE_LABELS[it.type].toLowerCase().includes(q)
             );
         });
-    }, [items, query, typeFilter]);
+    }, [pool, query, typeFilter]);
 
-    useEffect(() => { setPage(1); }, [query, typeFilter]);
+    useEffect(() => { setPage(1); }, [query, typeFilter, uninvoicedOnly]);
 
     const totalPages = filtered ? Math.ceil(filtered.length / PAGE_SIZE) : 0;
     const paged = filtered
@@ -184,6 +236,34 @@ export function TrainingsListPage({ embedded = false }: { embedded?: boolean } =
                             </button>
                         ))}
                     </div>
+                    <div className="h-px bg-ink-100" />
+                    {/* Chapter 22 — the end-of-month round. */}
+                    <div className="flex gap-1.5 overflow-x-auto px-3 py-2.5 [&::-webkit-scrollbar]:hidden">
+                        <button
+                            type="button"
+                            id="filter-trainings-uninvoiced"
+                            aria-pressed={uninvoicedOnly}
+                            disabled={(uninvoicedItems?.length ?? 0) === 0 && !uninvoicedOnly}
+                            onClick={() => setUninvoicedOnly(!uninvoicedOnly)}
+                            className={cn(
+                                "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all duration-150",
+                                uninvoicedOnly
+                                    ? "bg-ink-800 text-white scale-[1.04]"
+                                    : "bg-ink-100 text-ink-600 hover:bg-ink-200 disabled:opacity-40 disabled:hover:bg-ink-100",
+                            )}
+                        >
+                            <Receipt className="size-3 shrink-0" />
+                            {UNINVOICED_LABEL}
+                            <span
+                                className={cn(
+                                    "tabular-nums",
+                                    uninvoicedOnly ? "text-white/70" : "text-ink-400",
+                                )}
+                            >
+                                {uninvoicedItems?.length ?? 0}
+                            </span>
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -221,7 +301,9 @@ export function TrainingsListPage({ embedded = false }: { embedded?: boolean } =
                 <Card className="flex flex-col items-center gap-2 px-6 py-10 text-center">
                     <Search className="size-6 text-ink-300" />
                     <p className="text-sm text-ink-500">
-                        Žiadne školenia nevyhovujú filtru.
+                        {uninvoicedOnly && !query && !typeFilter
+                            ? "Všetko je vyfakturované."
+                            : "Žiadne školenia nevyhovujú filtru."}
                     </p>
                 </Card>
             )}
@@ -235,6 +317,7 @@ export function TrainingsListPage({ embedded = false }: { embedded?: boolean } =
                                     it={it}
                                     onDelete={setPendingDeleteId}
                                     isReadOnly={isReadOnly}
+                                    onInvoiced={uninvoicedOnly ? handleInvoiced : undefined}
                                 />
                             </li>
                         ))}
@@ -285,10 +368,13 @@ function TrainingRow({
     it,
     onDelete,
     isReadOnly,
+    onInvoiced,
 }: {
     it: TrainingListItem;
     onDelete: (id: number) => void;
     isReadOnly: boolean;
+    /** Set in the „Nevyfakturované" view — offers the one-tap check-off. */
+    onInvoiced?: (id: number, next: InvoicingFields) => void;
 }) {
     return (
         <Card className="px-4 py-3">
@@ -358,6 +444,14 @@ function TrainingRow({
 
                 {!isReadOnly && (
                     <div className="flex shrink-0 items-center gap-3">
+                        {onInvoiced && isUninvoiced(it) && (
+                            <InvoiceTickButton
+                                target="trainings"
+                                id={it.id}
+                                compact
+                                onDone={(next) => onInvoiced(it.id, next)}
+                            />
+                        )}
                         <Link
                             to={`/trainings/${it.id}/edit`}
                             title="Upraviť"

@@ -164,6 +164,8 @@ export function NewTrainingPage() {
           name: company?.name ?? '',
           ico: company?.ico ?? null,
           approver: company?.approver ?? null,
+          // Chapter 22 — the offline draft shows the firm's režim fakturácie.
+          billing_mode: company?.billing_mode,
         },
         facility: facility ? { id: facility.id, name: facility.name } : null,
         trainer: trainer
@@ -413,6 +415,7 @@ export function NewTrainingPage() {
               contact: c.contact,
               contact_email: c.contact_email,
               approver: c.approver,
+              billing_mode: c.billing_mode,
               facilities_count: 0,
               inspections_count: 0,
               last_inspection_at: null,

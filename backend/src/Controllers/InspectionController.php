@@ -119,6 +119,7 @@ final class InspectionController
                        i.effective_inspector_user_id,
                        eu.fullname AS effective_inspector_name,
                        i.effective_cert_number,
+                       i.billing_mode, i.invoiced, i.invoiced_at, i.billing_note,
                        ' . self::SUPERSEDED_EXPR . '
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
@@ -127,6 +128,12 @@ final class InspectionController
                 LEFT JOIN users    eu ON eu.id = i.effective_inspector_user_id
                 WHERE  i.archived_at IS NULL';
         $params = [];
+        // Chapter 22 — „Nevyfakturované": filtered here rather than on the
+        // client, so the 200-row cap below never hides an older úkon that is
+        // still waiting to be invoiced.
+        if ($req->query('uninvoiced') === '1') {
+            $sql .= ' AND ' . \Firol\Support\Invoicing::uninvoicedCondition('i');
+        }
         if (!$isAdmin) {
             $sql .= ' AND i.account_id = :account_id';
             $params['account_id'] = $accountId;
@@ -389,6 +396,11 @@ final class InspectionController
             ]);
             $newId = (int) $pdo->lastInsertId();
 
+            // Chapter 22 — a follow-up is a new úkon; its režim comes from
+            // the firm, not from the source úkon.
+            $pdo->prepare('UPDATE inspections SET billing_mode = ? WHERE id = ?')
+                ->execute([\Firol\Support\Invoicing::companyMode((int) $source['company_id']), $newId]);
+
             $ins = $pdo->prepare(
                 'INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)'
             );
@@ -622,6 +634,10 @@ final class InspectionController
                 in_array($type, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
             ]);
             $id = (int) $pdo->lastInsertId();
+
+            // Chapter 22 — the režim starts from the firm's setting.
+            $pdo->prepare('UPDATE inspections SET billing_mode = ? WHERE id = ?')
+                ->execute([\Firol\Support\Invoicing::companyMode($companyId), $id]);
 
             if ($details !== null) {
                 $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
@@ -917,6 +933,11 @@ final class InspectionController
                 $sourceId,
             ]);
             $newId = (int) $pdo->lastInsertId();
+
+            // Chapter 22 — a repeat is a new úkon to invoice: režim from the
+            // firm's current setting, check-off and note start empty.
+            $pdo->prepare('UPDATE inspections SET billing_mode = ? WHERE id = ?')
+                ->execute([\Firol\Support\Invoicing::companyMode((int) $source['company_id']), $newId]);
 
             // The header travels in the same spirit as the items: what
             // identifies (the device, the kind of oboznámenie) comes along,
@@ -1283,6 +1304,7 @@ final class InspectionController
                        i.effective_inspector_user_id,
                        eu.fullname AS effective_inspector_name,
                        i.effective_cert_number,
+                       i.billing_mode, i.invoiced, i.invoiced_at, i.billing_note,
                        ' . self::SUPERSEDED_EXPR . '
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
@@ -1349,6 +1371,9 @@ final class InspectionController
                 InspectionDetails::decode($row['details']),
             );
         }
+        // Chapter 22 — fakturácia úkonu (billing_mode null = recorded before
+        // the app tracked invoicing).
+        $row = \Firol\Support\Invoicing::shape($row);
         unset($row['account_id']);
         return $row;
     }

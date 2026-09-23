@@ -44,6 +44,13 @@ final class Writer
             'inspections' => self::inspections($accountId, $pdo, $withPhotos, $files),
             'trainings'   => self::trainings($accountId, $pdo, $files),
             'documents'   => $withDocuments ? self::documents($accountId, $pdo, $files) : [],
+            // Chapter 21 — sklad: items with every holder's balance, the
+            // výdajky and the movements journal.
+            'stock'       => self::stock($accountId, $pdo),
+            'tasks'       => self::tasks($accountId, $pdo),
+            // Chapter 11.3 — which deadlines already had their automatic
+            // client notice, so a restore does not send it a second time.
+            'deadline_notices' => self::deadlineNotices($accountId, $pdo),
         ];
 
         $manifest['counts'] = [
@@ -52,6 +59,7 @@ final class Writer
             'inspections' => count($manifest['inspections']),
             'trainings'   => count($manifest['trainings']),
             'documents'   => count($manifest['documents']),
+            'tasks'       => count($manifest['tasks']),
             'photos'      => count(array_filter(array_keys($files), static fn (string $e): bool => str_starts_with($e, 'photos/') && !str_ends_with($e, '_t.jpg'))),
         ];
 
@@ -111,7 +119,7 @@ final class Writer
     private static function companies(int $accountId, PDO $pdo): array
     {
         $stmt = $pdo->prepare(
-            'SELECT id, name, ico, street, postal_code, city, contact, contact_email, approver, created_at
+            'SELECT id, name, ico, street, postal_code, city, contact, contact_email, approver, billing_mode, created_at
              FROM   companies WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
         );
         $stmt->execute([$accountId]);
@@ -151,6 +159,7 @@ final class Writer
                     i.status, i.notes, i.details, i.created_at,
                     i.effective_cert_number,
                     i.effective_cert_valid_from, i.effective_cert_valid_to,
+                    i.billing_mode, i.invoiced, i.invoiced_at, i.billing_note,
                     u.email  AS inspector_email,
                     eu.email AS effective_inspector_email
              FROM   inspections i
@@ -197,6 +206,8 @@ final class Writer
             $inspection['source_inspection_id']     = $inspection['source_inspection_id'] !== null
                 ? (int) $inspection['source_inspection_id']
                 : null;
+            // Chapter 22 — fakturácia úkonu (migration 046).
+            $inspection['invoiced'] = (int) $inspection['invoiced'];
             $inspection['items'] = $itemsByInspection[$inspection['id']] ?? [];
             $out[] = $inspection;
         }
@@ -250,6 +261,7 @@ final class Writer
         $stmt = $pdo->prepare(
             'SELECT t.id, t.company_id, t.facility_id, t.type, t.date, t.topics,
                     t.duration_min, t.fields, t.status, t.created_at,
+                    t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
                     u.email AS trainer_email
              FROM   trainings t
              LEFT   JOIN users u ON u.id = t.trainer_id
@@ -301,6 +313,8 @@ final class Writer
             $training['fields']      = $training['fields'] !== null
                 ? json_decode((string) $training['fields'], true)
                 : null;
+            // Chapter 22 — fakturácia úkonu (migration 046).
+            $training['invoiced']    = (int) $training['invoiced'];
             $training['trainees']    = $byTraining[$training['id']] ?? [];
             $out[] = $training;
         }
@@ -324,9 +338,12 @@ final class Writer
              FROM   documents d
              LEFT   JOIN inspections i ON d.parent_type = 'inspection' AND i.id = d.parent_id
              LEFT   JOIN trainings   t ON d.parent_type = 'training'   AND t.id = d.parent_id
+             LEFT   JOIN stock_issues si ON d.parent_type = 'stock_issue' AND si.id = d.parent_id
+             LEFT   JOIN companies  sic ON sic.id = si.company_id
              WHERE  d.account_id = ?
                AND  (i.id IS NOT NULL AND i.archived_at IS NULL
-                  OR t.id IS NOT NULL AND t.archived_at IS NULL)
+                  OR t.id IS NOT NULL AND t.archived_at IS NULL
+                  OR si.id IS NOT NULL AND sic.archived_at IS NULL)
              ORDER  BY d.id"
         );
         $stmt->execute([$accountId]);
@@ -350,6 +367,144 @@ final class Writer
             ];
         }
         return $out;
+    }
+
+    /**
+     * Úlohy (chapter 20). Tasks of an archived firm are left out — the app no
+     * longer shows them, and the firm itself is not in the backup either.
+     * People are carried by e-mail, like the inspector of an úkon.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function tasks(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT t.id, t.text, t.company_id, t.facility_id, t.due_date, t.done, t.done_at,
+                    t.source_inspection_id, t.source_defect_key, t.created_at,
+                    au.email AS assignee_email, cu.email AS created_by_email
+             FROM   tasks t
+             LEFT   JOIN companies c  ON c.id  = t.company_id
+             LEFT   JOIN users     au ON au.id = t.assignee_user_id
+             LEFT   JOIN users     cu ON cu.id = t.created_by_user_id
+             WHERE  t.account_id = ? AND c.archived_at IS NULL
+             ORDER  BY t.id'
+        );
+        $stmt->execute([$accountId]);
+
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $task) {
+            foreach (['id', 'company_id', 'facility_id', 'source_inspection_id'] as $key) {
+                $task[$key] = $task[$key] !== null ? (int) $task[$key] : null;
+            }
+            $task['done'] = (int) $task['done'];
+            $out[] = $task;
+        }
+        return $out;
+    }
+
+    /**
+     * Automatic client notices already sent (chapter 11.3), keyed by the
+     * úkon whose deadline they announced.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function deadlineNotices(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT n.inspection_id, n.notice_date, n.recipient, n.sent_at
+             FROM   deadline_notices n
+             JOIN   inspections i ON i.id = n.inspection_id AND i.archived_at IS NULL
+             WHERE  n.account_id = ?
+             ORDER  BY n.id'
+        );
+        $stmt->execute([$accountId]);
+        return array_map(static fn (array $r): array => [
+            'inspection_id' => (int) $r['inspection_id'],
+            'notice_date'   => (string) $r['notice_date'],
+            'recipient'     => (string) $r['recipient'],
+            'sent_at'       => (string) $r['sent_at'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Sklad (chapter 21). Balances are written as they stand — Sklad on the
+     * item, technicians by e-mail — so a restore reproduces the same sum over
+     * holders without replaying the journal. Výdajky of an archived firm are
+     * left out with the firm; their movements stay (the journal is the
+     * record of what happened) and lose only the link.
+     *
+     * @return array{items: list<array<string, mixed>>, issues: list<array<string, mixed>>, movements: list<array<string, mixed>>}
+     */
+    private static function stock(int $accountId, PDO $pdo): array
+    {
+        $itemStmt = $pdo->prepare(
+            'SELECT id, name, unit, warehouse_qty, created_at FROM stock_items WHERE account_id = ? ORDER BY id'
+        );
+        $itemStmt->execute([$accountId]);
+        $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $balStmt = $pdo->prepare(
+            'SELECT b.item_id, b.qty, u.email
+             FROM   stock_balances b JOIN users u ON u.id = b.user_id
+             WHERE  b.account_id = ? AND b.qty > 0'
+        );
+        $balStmt->execute([$accountId]);
+        $balances = [];
+        foreach ($balStmt->fetchAll(PDO::FETCH_ASSOC) as $b) {
+            $balances[(int) $b['item_id']][] = ['email' => (string) $b['email'], 'qty' => (int) $b['qty']];
+        }
+        foreach ($items as &$item) {
+            $item['id']            = (int) $item['id'];
+            $item['warehouse_qty'] = (int) $item['warehouse_qty'];
+            $item['balances']      = $balances[$item['id']] ?? [];
+        }
+        unset($item);
+
+        $issueStmt = $pdo->prepare(
+            'SELECT si.id, si.company_id, si.facility_id, si.inspection_id, si.issued_on,
+                    si.issuer_name, si.issuer_cert, si.contractor, si.created_at,
+                    iu.email AS issuer_email
+             FROM   stock_issues si
+             JOIN   companies c ON c.id = si.company_id AND c.archived_at IS NULL
+             LEFT   JOIN users iu ON iu.id = si.issuer_user_id
+             WHERE  si.account_id = ?
+             ORDER  BY si.id'
+        );
+        $issueStmt->execute([$accountId]);
+        $issues = array_map(static function (array $r): array {
+            foreach (['id', 'company_id', 'facility_id', 'inspection_id'] as $key) {
+                $r[$key] = $r[$key] !== null ? (int) $r[$key] : null;
+            }
+            $r['contractor'] = $r['contractor'] !== null ? json_decode((string) $r['contractor'], true) : null;
+            return $r;
+        }, $issueStmt->fetchAll(PDO::FETCH_ASSOC));
+
+        $movStmt = $pdo->prepare(
+            'SELECT m.id, m.item_id, m.item_name, m.unit, m.action,
+                    m.from_holder, fu.email AS from_email, m.from_name,
+                    m.to_holder, tu.email AS to_email, m.to_name,
+                    m.qty, m.company_id, m.inspection_id, m.note, m.issue_id,
+                    m.to_invoice, m.invoiced, m.invoiced_at,
+                    cu.email AS created_by_email, m.created_by_name, m.created_at
+             FROM   stock_movements m
+             LEFT   JOIN users fu ON fu.id = m.from_user_id
+             LEFT   JOIN users tu ON tu.id = m.to_user_id
+             LEFT   JOIN users cu ON cu.id = m.created_by_user_id
+             WHERE  m.account_id = ?
+             ORDER  BY m.id'
+        );
+        $movStmt->execute([$accountId]);
+        $movements = array_map(static function (array $r): array {
+            foreach (['id', 'item_id', 'company_id', 'inspection_id', 'issue_id'] as $key) {
+                $r[$key] = $r[$key] !== null ? (int) $r[$key] : null;
+            }
+            $r['qty']        = (int) $r['qty'];
+            $r['to_invoice'] = (int) $r['to_invoice'];
+            $r['invoiced']   = (int) $r['invoiced'];
+            return $r;
+        }, $movStmt->fetchAll(PDO::FETCH_ASSOC));
+
+        return ['items' => $items, 'issues' => $issues, 'movements' => $movements];
     }
 
     /**

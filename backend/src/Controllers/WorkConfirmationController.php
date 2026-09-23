@@ -122,15 +122,21 @@ final class WorkConfirmationController
         $pdo = Db::pdo();
         $pdo->beginTransaction();
         try {
+            // Chapter 10 `vydajky`: the výdajky issued at this client on that
+            // day. Frozen here, so a later re-render for a signature prints
+            // the same material even if another výdajka is issued afterwards.
+            $stockIssueIds = self::stockIssueIdsOfDay($accountId, $companyId, $facilityId, $confirmedOn);
+
             $pdo->prepare(
                 'INSERT INTO work_confirmations
                     (account_id, company_id, facility_id, visit_id, confirmed_on,
-                     time_from, time_to, technician_user_id, inspection_ids)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     time_from, time_to, technician_user_id, inspection_ids, stock_issue_ids)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             )->execute([
                 $accountId, $companyId, $facilityId, $visitId, $confirmedOn,
                 $timeFrom, $timeTo, $technicianId,
                 json_encode(array_column($inspections, 'id')),
+                json_encode($stockIssueIds),
             ]);
             $id = (int) $pdo->lastInsertId();
 
@@ -193,7 +199,7 @@ final class WorkConfirmationController
     {
         $stmt = Db::pdo()->prepare(
             'SELECT w.id, w.confirmed_on, w.time_from, w.time_to, w.inspection_ids,
-                    w.company_id, c.name AS company_name, c.ico AS company_ico,
+                    w.stock_issue_ids, w.company_id, c.name AS company_name, c.ico AS company_ico,
                     c.street AS company_street, c.postal_code AS company_postal_code,
                     c.city AS company_city,
                     w.facility_id, f.name AS facility_name,
@@ -271,11 +277,14 @@ final class WorkConfirmationController
                 'signature_data_uri'   => self::signatureDataUri($row['signature_path'] ?? null),
             ],
             'acts' => $inspections,
-            // Chapter 10 lists issued material from that day's výdajka. The
-            // sklad arrives with block 4; until then the section has nothing
-            // to print and is left out, per the rule that an empty section is
-            // not printed at all.
-            'materials' => [],
+            // Chapter 10: material handed over that day, from the výdajky
+            // frozen on the confirmation, each line with the výdajka's number.
+            // None (or a potvrdenie issued before the sklad existed) → the
+            // section is left out, as every empty section is.
+            'materials' => self::materials(
+                $accountId,
+                self::readIds(json_decode((string) ($row['stock_issue_ids'] ?? ''), true)),
+            ),
             'handover' => null,
         ];
     }
@@ -371,6 +380,62 @@ final class WorkConfirmationController
         $stmt = Db::pdo()->prepare($sql);
         $stmt->execute($args);
         return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Výdajky (chapter 21) issued at this client on that day. With a
+     * prevádzka on the confirmation, a výdajka tied to a different prevádzka
+     * is left out; one tied to none still counts — it was the same client
+     * that day.
+     *
+     * @return list<int>
+     */
+    private static function stockIssueIdsOfDay(
+        int $accountId,
+        int $companyId,
+        ?int $facilityId,
+        string $date,
+    ): array {
+        $sql = 'SELECT id FROM stock_issues
+                WHERE  account_id = ? AND company_id = ? AND issued_on = ?';
+        $args = [$accountId, $companyId, $date];
+        if ($facilityId !== null) {
+            $sql .= ' AND (facility_id IS NULL OR facility_id = ?)';
+            $args[] = $facilityId;
+        }
+        $sql .= ' ORDER BY id ASC';
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($args);
+        return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Lines of the „Odovzdaný materiál" section: every item on the given
+     * výdajky, with the výdajka's number as the Doklad.
+     *
+     * @param list<int> $issueIds
+     * @return list<array{name: string, quantity: string, document_number: ?string}>
+     */
+    private static function materials(int $accountId, array $issueIds): array
+    {
+        if ($issueIds === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($issueIds), '?'));
+        $stmt = Db::pdo()->prepare(
+            "SELECT m.item_name, m.qty, m.unit, d.number AS document_number
+             FROM   stock_movements m
+             LEFT   JOIN documents d
+                    ON d.parent_type = 'stock_issue' AND d.parent_id = m.issue_id
+             WHERE  m.account_id = ? AND m.issue_id IN ($placeholders)
+             ORDER  BY m.issue_id ASC, m.id ASC"
+        );
+        $stmt->execute(array_merge([$accountId], $issueIds));
+        return array_map(static fn (array $r): array => [
+            'name'            => (string) $r['item_name'],
+            'quantity'        => (int) $r['qty'] . ' ' . (string) $r['unit'],
+            'document_number' => $r['document_number'],
+        ], $stmt->fetchAll());
     }
 
     /** @return array<string, mixed> */
