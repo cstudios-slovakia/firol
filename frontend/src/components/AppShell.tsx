@@ -4,7 +4,6 @@ import {
     Building2,
     CalendarClock,
     ChartNoAxesGantt,
-    ClipboardList,
     CreditCard,
     ListTodo,
     LogOut,
@@ -29,6 +28,7 @@ import { TermsUpdateNotice } from "./TermsUpdateNotice";
 import { DefectTaskOfferHost } from "./DefectTaskOffer";
 import { TasksNavBadge } from "./TasksNavBadge";
 import { BrandMark } from "./Logo";
+import { SECTION_ICONS } from "./SectionIcons";
 import { cn } from "@/lib/cn";
 import {
     SECTIONS,
@@ -41,10 +41,16 @@ import {
 type Tab = {
     readonly to: string;
     readonly label: string;
-    readonly icon: typeof Settings;
+    readonly icon: React.ComponentType<{
+        className?: string;
+        style?: React.CSSProperties;
+    }>;
     readonly activeColor: string;
-    /** Section tabs carry the odbor's colour as an inline style, not a class. */
-    readonly activeStyle?: React.CSSProperties;
+    /**
+     * Section tabs carry the odbor's colour as an inline style, not a class —
+     * always, so the module reads by colour even when it is not the open one.
+     */
+    readonly iconStyle?: React.CSSProperties;
     readonly activeBg: string;
     readonly iconBg: string;
     /** Chapter 20 — the Úlohy item carries the open-task count. */
@@ -66,11 +72,11 @@ type Tab = {
 const SECTION_TABS = SECTIONS.filter(sectionHasContent).map((section) => ({
     to: SECTION_PATHS[section],
     label: SECTION_LABELS[section],
-    icon: ClipboardList,
+    icon: SECTION_ICONS[section],
     // The odbor's own colour, so the section reads the same in the menu as it
     // does on its protocols.
     activeColor: "",
-    activeStyle: { color: SECTION_COLORS[section] },
+    iconStyle: { color: SECTION_COLORS[section] },
     activeBg: "bg-ink-50 shadow-[inset_0_0_0_1px_var(--color-ink-100)]",
     iconBg: "bg-ink-100",
 }));
@@ -132,6 +138,22 @@ const TOP_TABS = [
         badge: "tasks",
     },
 ] as const;
+
+const TOP_TABS_BY_PATH = new Map<string, Tab>(
+    TOP_TABS.map((tab): [string, Tab] => [tab.to, tab]),
+);
+
+/**
+ * Desktop sidebar grouping. Only the sidebar reads this — the mobile bar keeps
+ * its own order (TOP_TABS), so regrouping here never reshuffles the phone menu.
+ * A path with no tab (a section with nothing in it) simply drops out.
+ */
+const NAV_GROUPS: readonly { label?: string; paths: readonly string[] }[] = [
+    { paths: ["/"] },
+    { label: "Plánovanie", paths: ["/kalendar", "/casova-os", "/ulohy"] },
+    { label: "Moduly", paths: SECTION_TABS.map((t) => t.to) },
+    { label: "Evidencia", paths: ["/companies", "/sklad"] },
+];
 
 const SETTINGS_TAB = {
     to: "/settings",
@@ -470,7 +492,7 @@ function SideNav({ topOffset }: { topOffset: number }) {
                 {({ isActive }) => (
                     <>
                         <tab.icon
-                            style={isActive ? tab.activeStyle : undefined}
+                            style={tab.iconStyle}
                             className={cn(
                                 "size-4 shrink-0 transition-transform duration-150",
                                 isActive && "scale-110",
@@ -485,7 +507,13 @@ function SideNav({ topOffset }: { topOffset: number }) {
         </li>
     );
 
-    const [dashboardTab, ...sectionTabs] = TOP_TABS;
+    const groups = NAV_GROUPS.map((group) => ({
+        label: group.label,
+        tabs: group.paths.flatMap((path) => {
+            const tab = TOP_TABS_BY_PATH.get(path);
+            return tab ? [tab] : [];
+        }),
+    })).filter((group) => group.tabs.length > 0);
 
     return (
         <aside
@@ -496,13 +524,23 @@ function SideNav({ topOffset }: { topOffset: number }) {
                 className="sticky flex flex-col pt-5 sm:pt-8"
                 style={{ top: topOffset, height: `calc(100vh - ${topOffset}px)` }}
             >
-                <ul className="flex flex-col gap-1">
-                    {renderItem(dashboardTab)}
-                </ul>
-                <div className="my-3 border-t border-ink-100" />
-                <ul className="flex flex-col gap-1">
-                    {sectionTabs.map(renderItem)}
-                </ul>
+                {groups.map((group, i) => (
+                    <div
+                        key={group.label ?? "top"}
+                        role="group"
+                        aria-label={group.label}
+                        className={cn(i > 0 && "mt-3 border-t border-ink-100 pt-3")}
+                    >
+                        {group.label && (
+                            <p className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wider text-ink-400">
+                                {group.label}
+                            </p>
+                        )}
+                        <ul className="flex flex-col gap-1">
+                            {group.tabs.map(renderItem)}
+                        </ul>
+                    </div>
+                ))}
                 <div className="mt-auto pt-4 pb-5 sm:pb-8">
                     <div className="mb-2 border-t border-ink-100" />
                     <ul className="flex flex-col gap-1">
@@ -598,7 +636,7 @@ function BottomTabBar() {
                             {({ isActive }) => (
                                 <>
                                     <tab.icon
-                                        style={isActive ? tab.activeStyle : undefined}
+                                        style={tab.iconStyle}
                                         className={cn(
                                             "size-5 transition-transform duration-150",
                                             tab.activeColor,
