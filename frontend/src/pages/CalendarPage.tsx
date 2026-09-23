@@ -483,7 +483,8 @@ export function CalendarPage() {
 
 // ─── Filters ─────────────────────────────────────────────────────────────────
 
-function SegmentedControl<T extends string>({
+/** Also used by the Časová os (chapter 19), so both views read the same. */
+export function SegmentedControl<T extends string>({
     label,
     value,
     onChange,
@@ -912,7 +913,8 @@ function DeadlineDates({ deadline: d }: { deadline: CalendarDeadline }) {
     );
 }
 
-function PlanEditor({
+/** Also the „Naplánovať" of the Časová os (chapter 19) — one planning flow. */
+export function PlanEditor({
     deadline,
     csrfToken,
     onDone,

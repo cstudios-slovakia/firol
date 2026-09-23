@@ -246,7 +246,7 @@ final class CalendarController
      *
      * @return list<array<string, mixed>>
      */
-    private static function ownTerms(int $accountId, int $userId, string $today): array
+    public static function ownTerms(int $accountId, int $userId, string $today): array
     {
         $out = [];
 

@@ -3,14 +3,16 @@ import {
     AlertTriangle,
     Building2,
     CalendarClock,
+    ChartNoAxesGantt,
     ClipboardList,
     CreditCard,
-    LayoutDashboard,
     ListTodo,
     LogOut,
+    MoreHorizontal,
     Package,
     Settings,
     Sparkles,
+    Sun,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
@@ -75,9 +77,10 @@ const SECTION_TABS = SECTIONS.filter(sectionHasContent).map((section) => ({
 
 const TOP_TABS = [
     {
+        // Chapter 18 — „Dnes" replaces Prehľad (texty_ui.json → navigacia.dnes).
         to: "/",
-        label: "Prehľad",
-        icon: LayoutDashboard,
+        label: "Dnes",
+        icon: Sun,
         activeColor: "text-firol-600",
         activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
         iconBg: "bg-firol-100",
@@ -95,6 +98,15 @@ const TOP_TABS = [
         to: "/kalendar",
         label: "Kalendár",
         icon: CalendarClock,
+        activeColor: "text-firol-600",
+        activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
+        iconBg: "bg-firol-100",
+    },
+    // Chapter 19 — časová os termínov, right after Kalendár (navigacia order).
+    {
+        to: "/casova-os",
+        label: "Časová os",
+        icon: ChartNoAxesGantt,
         activeColor: "text-firol-600",
         activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
         iconBg: "bg-firol-100",
@@ -143,8 +155,15 @@ const DESKTOP_BOTTOM_TABS = [
     SETTINGS_TAB,
 ] as const;
 
-// Mobile bottom nav — the top tabs plus settings.
-const MOBILE_TABS: Tab[] = [...TOP_TABS, SETTINGS_TAB];
+// Mobile bottom nav. Block 4 took the menu to ten items, which a 360px phone
+// cannot show side by side, so the bar keeps where the work is entered (Dnes,
+// Firmy, the odbor sections) and the rest opens from „Viac" as a sheet.
+const MOBILE_BAR_PATHS = new Set<string>(["/", "/companies", ...SECTION_TABS.map((t) => t.to)]);
+const MOBILE_TABS: Tab[] = TOP_TABS.filter((tab) => MOBILE_BAR_PATHS.has(tab.to));
+const MOBILE_MORE_TABS: Tab[] = [
+    ...TOP_TABS.filter((tab) => !MOBILE_BAR_PATHS.has(tab.to)),
+    SETTINGS_TAB,
+];
 
 export function AppShell() {
     const { logout } = useAuth();
@@ -496,16 +515,71 @@ function SideNav({ topOffset }: { topOffset: number }) {
 }
 
 function BottomTabBar() {
+    const location = useLocation();
+    const [moreOpen, setMoreOpen] = useState(false);
+    const moreActive = MOBILE_MORE_TABS.some(
+        (tab) => location.pathname === tab.to || location.pathname.startsWith(`${tab.to}/`),
+    );
+
+    // Any navigation closes the sheet, including the browser's back button.
+    useEffect(() => {
+        setMoreOpen(false);
+    }, [location.pathname]);
+
+    useEffect(() => {
+        if (!moreOpen) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setMoreOpen(false);
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [moreOpen]);
+
     return (
+        <>
+        {moreOpen && (
+            <div className="fixed inset-0 z-10 sm:hidden" role="presentation">
+                <button
+                    type="button"
+                    aria-label="Zavrieť ponuku"
+                    className="absolute inset-0 bg-ink-900/20 backdrop-blur-[2px] animate-fade-up"
+                    onClick={() => setMoreOpen(false)}
+                />
+                <div
+                    id="mobile-more-menu"
+                    className="absolute inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] rounded-3xl border border-ink-100 bg-white p-2 shadow-xl animate-fade-up"
+                >
+                    <ul className="flex flex-col gap-0.5">
+                        {MOBILE_MORE_TABS.map((tab) => (
+                            <li key={tab.to} className="relative">
+                                <NavLink
+                                    to={tab.to}
+                                    className={({ isActive }) =>
+                                        cn(
+                                            "flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition-all duration-150 active:scale-[0.98]",
+                                            isActive
+                                                ? cn("text-ink-900", tab.activeBg)
+                                                : "text-ink-700 hover:bg-ink-50",
+                                        )
+                                    }
+                                >
+                                    <tab.icon className={cn("size-5 shrink-0", tab.activeColor)} />
+                                    <span>{tab.label}</span>
+                                    {tab.badge === "tasks" && <TasksNavBadge variant="side" />}
+                                </NavLink>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            </div>
+        )}
         <nav
             aria-label="Hlavná navigácia"
             className="fixed inset-x-0 bottom-0 z-10 border-t border-ink-100 bg-white/95 backdrop-blur sm:hidden"
         >
-            {/* Splitting Kontroly into three sections (chapter 2) put up to
-                seven items in here. They are laid out to shrink rather than
-                overflow: equal flex basis, a tighter label and truncation, so
-                a 360px phone — what a technician actually holds — still shows
-                every one of them. */}
+            {/* Equal flex basis, a tighter label and truncation, so a 360px
+                phone — what a technician actually holds — shows every item
+                of the bar without scrolling. */}
             <ul className="mx-auto flex max-w-2xl items-stretch justify-around px-1 py-1.5">
                 {MOBILE_TABS.map((tab) => (
                     <li key={tab.to} className="relative min-w-0 flex-1">
@@ -540,7 +614,31 @@ function BottomTabBar() {
                         {tab.badge === "tasks" && <TasksNavBadge variant="bottom" />}
                     </li>
                 ))}
+                <li className="relative min-w-0 flex-1">
+                    <button
+                        type="button"
+                        aria-expanded={moreOpen}
+                        aria-controls="mobile-more-menu"
+                        onClick={() => setMoreOpen((open) => !open)}
+                        className={cn(
+                            "flex w-full min-w-0 flex-col items-center gap-0.5 rounded-2xl px-0.5 py-2 text-[10px] font-medium transition-all duration-150 active:scale-95",
+                            moreActive || moreOpen
+                                ? "bg-ink-50 text-ink-900 shadow-[inset_0_0_0_1px_var(--color-ink-100)]"
+                                : "text-ink-400 hover:text-ink-600",
+                        )}
+                    >
+                        <MoreHorizontal
+                            className={cn(
+                                "size-5 transition-transform duration-150",
+                                (moreActive || moreOpen) && "scale-110 stroke-[2.25px]",
+                            )}
+                        />
+                        <span className="w-full truncate text-center">Viac</span>
+                    </button>
+                    <TasksNavBadge variant="bottom" />
+                </li>
             </ul>
         </nav>
+        </>
     );
 }

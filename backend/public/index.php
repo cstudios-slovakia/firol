@@ -255,6 +255,10 @@ $router->patch('/api/inspections/{id}/invoicing',   [\Firol\Controllers\Invoicin
 $router->patch('/api/trainings/{id}/invoicing',     [\Firol\Controllers\InvoicingController::class, 'updateTraining']);
 $router->get('/api/invoicing/summary',              [\Firol\Controllers\InvoicingController::class, 'summary']);
 
+// Block 4 / chapter 18 — obrazovka „Dnes": the cards without a list endpoint
+// of their own (úlohy come from /api/tasks/upcoming).
+$router->get('/api/today',                          [\Firol\Controllers\TodayController::class, 'index']);
+
 $router->get('/api/account/export',                [DataController::class, 'exportData']);
 $router->post('/api/account/restore',              [DataController::class, 'restoreData']);
 $router->delete('/api/account/data/companies',   [DataController::class, 'purgeCompanies']);

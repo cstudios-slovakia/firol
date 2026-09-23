@@ -7,7 +7,7 @@ import { OnboardingBillingPage } from '@/pages/auth/OnboardingBillingPage';
 import { PasswordResetRequestPage } from '@/pages/auth/PasswordResetRequestPage';
 import { PasswordResetConfirmPage } from '@/pages/auth/PasswordResetConfirmPage';
 import { InviteAcceptPage } from '@/pages/auth/InviteAcceptPage';
-import { DashboardPage } from '@/pages/DashboardPage';
+import { TodayPage } from '@/pages/TodayPage';
 import { CompaniesPage } from '@/pages/CompaniesPage';
 import { CompanyDetailPage } from '@/pages/CompanyDetailPage';
 import { CompanyEditPage } from '@/pages/CompanyEditPage';
@@ -24,6 +24,7 @@ import { PersonsFillPage } from '@/pages/PersonsFillPage';
 import { CompanyCertificatesPage } from '@/pages/CompanyCertificatesPage';
 import { VisitDetailPage } from '@/pages/VisitDetailPage';
 import { CalendarPage } from '@/pages/CalendarPage';
+import { TimelinePage } from '@/pages/TimelinePage';
 import { StockPage } from '@/pages/StockPage';
 import { TasksPage } from '@/pages/TasksPage';
 import { TrainingsListPage } from '@/pages/TrainingsListPage';
@@ -83,7 +84,8 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route path="/" element={<DashboardPage />} />
+        {/* Chapter 18 — „Dnes" replaces the old Prehľad as the first screen. */}
+        <Route path="/" element={<TodayPage />} />
         <Route path="/companies" element={<CompaniesPage />} />
 
         <Route path="/companies/new" element={<CompanyEditPage />} />
@@ -95,6 +97,7 @@ export default function App() {
         <Route path="/facilities/:id/edit" element={<FacilityEditPage />} />
 
         <Route path="/kalendar" element={<CalendarPage />} />
+        <Route path="/casova-os" element={<TimelinePage />} />
         <Route path="/sklad" element={<StockPage />} />
         <Route path="/ulohy" element={<TasksPage />} />
 

@@ -165,6 +165,22 @@ export function TasksPage() {
     setFormOpen(true);
   }
 
+  // `?uloha={id}` — a row of the Dnes card „Úlohy do 7 dní" (chapter 18)
+  // opens that task. The param is consumed once the list is in, so closing
+  // the form does not reopen it.
+  const deepLinkId = params.get('uloha');
+  useEffect(() => {
+    if (!deepLinkId || status !== 'idle') return;
+    const task = items.find((t) => String(t.id) === deepLinkId);
+    if (task && !isReadOnly) {
+      setEditing(task);
+      setFormOpen(true);
+    }
+    const p = new URLSearchParams(params);
+    p.delete('uloha');
+    setParams(p, { replace: true });
+  }, [deepLinkId, status, items, isReadOnly, params, setParams]);
+
   const memberOptions = useMemo(
     () => [
       { value: '', label: 'Všetci' },

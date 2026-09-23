@@ -679,7 +679,7 @@ per finished block.
 | 1 | Základ pre BOZP | 2, 5, 6, 9, 10, 12, 13 | ✅ |
 | 2 | BOZP úkony — 12 new types (audit_bozp comes with block 3) | 5.3, 7, 8 | ✅ (awaiting client test) |
 | 3 | Audity | 15, 16, 17 | ⏸ parked on branch `block-3-audity` (user, 23. 9.) |
-| 4 | Denná práca — úlohy, sklad, Dnes, časová os, kalendár, fakturácia | 11, 18–22 | ⬜ |
+| 4 | Denná práca — úlohy, sklad, Dnes, časová os, kalendár, fakturácia | 11, 18–22 | ✅ (awaiting client test) |
 | 5 | Moduly a predplatné | 1, 3 | ⏸ later (user, 23. 9.) |
 | 6 | Web — new poapp.sk | separate file | ⬜ |
 
@@ -920,7 +920,7 @@ until its results are entered. Step 1 now opens the summary when a
 - ⬜ External revízie in kniha BOZP's „Termíny a kontroly" wait for ch. 5.5
   (`revizia_*` evidence).
 - ⬜ The photo caption shows no place or time per photo.
-- ⬜ Úlohy from a termín odstránenia belong to block 4.
+- ✅ Úlohy from a termín odstránenia came with block 4 (ch. 20).
 - ✅ **„Zhotoviteľ" row (ch. 1.3.3) is on every protocol** (decision 23. 9. 2026).
   The technician's firm — account name, IČO, address — is printed in
   Základné informácie. The mockup rows around it are unchanged. Only
@@ -965,6 +965,112 @@ Fixed during review (23. 9.):
   no nedostatky.
 - A úkon reopened with „Doplniť výsledky" can't be signed until it is locked
   again, so a signature is never put on a list that has changed since.
+
+---
+
+## BOZP extension — block 4 „Denná práca" (POapp spec, september 2026) ✅
+
+Chapters **11, 18, 19, 20, 21, 22**. Built on 23. 9. by six agents: four in
+parallel (úlohy, sklad, fakturácia, kalendár), then Dnes and časová os on
+top of them. Migrations `044`–`047`. Block 3 (audity) was taken out of the
+app the same day and parked on branch `block-3-audity`. Merging that branch
+brings it back, with its tables in `039_audits.sql`.
+
+- ✅ **Ch. 20 — úlohy** (`044_tasks.sql`, `TaskController`, `/ulohy`).
+  A plain list: text, optional firma/prevádzka, assignee and termín, done
+  with a timestamp. No priorities, tags or subtasks. Filters by person and
+  state, and a menu badge with the open count. Saving a nedostatok with a
+  termín offers „Overiť odstránenie nedostatku — …" with that termín. The
+  offer can be declined and is never repeated for the same defect: it's
+  remembered per device, and the server refuses a second task for one
+  defect. A task points back to the defect by inspection id + defect key.
+  Removing a member unassigns their tasks. Tasks of an archived firm are
+  hidden.
+- ✅ **Ch. 21 — sklad a výdajka** (`045_stock.sql`, `Support/Stock.php`,
+  `/sklad`). Items, one balance per holder (Sklad + each technician), and an
+  append-only journal. The journal has no edit or delete routes.
+  - A presun or použitie that would overdraw is refused under a row lock,
+    with „Na {držiteľ} toľko nie je (N {jednotka})".
+  - Použité at a firma offers both „Pridať na faktúru" and „Vystaviť
+    výdajku". „Pridať na faktúru" marks the movement to invoice; it is
+    ticked off in Sklad → Na faktúru. The výdajka is `VYD-RRRR-NNN`, laid out
+    per the mockup, dated with the movement, and can be signed, e-mailed and
+    bulk-sent. It covers the day's použitia at that firma.
+  - The potvrdenie o vykonaní práce lists the day's výdajky under
+    „Odovzdaný materiál".
+  - A removed technician's stock goes back to Sklad as a recorded presun.
+  - Sklad writes are online only, with a Slovak notice when offline.
+- ✅ **Ch. 22 — fakturácia úkonu** (`046_billing.sql`, `Support/Invoicing.php`).
+  - Every inspection and training has a režim (paušál / na faktúru /
+    nefakturuje sa), prefilled from the firm's new setting. It also has a
+    vyfakturované check-off with a date, and a poznámka. There is no payment
+    field.
+  - Billing stays editable on a locked úkon and never touches the PDF.
+  - Under paušál the check-off isn't shown.
+  - The úkon lists have a „Nevyfakturované" filter
+    (`?nevyfakturovane=1`), with a one-tap tick on each row.
+  - Úkony from before this change keep NULL, so years of history don't flood
+    the list.
+  - The spec says it „extends existing fakturácia", but there was no
+    per-úkon billing to extend, so this is the first version of it.
+- ✅ **Ch. 11 — kalendár** (`047_calendar_team.php`, `Support/Deadlines.php`,
+  `Support/TeamIdentity.php`).
+  - Deadlines are grouped by firma (4 in a month = one group) or by mesto.
+  - Colours follow the odbor. Po termíne is listed first and red; splnené is
+    greyed.
+  - Zdroj labels (Predpripravený termín / Vlastná udalosť / Tvoj termín).
+    The technician's own certificate validity is shown apart from client
+    termíny.
+  - Initials and avatar colour are stored per membership, and the colour is
+    unique per account. The main user can change colours; initials are
+    editable.
+  - „Kto: Všetci / Len moje" is shared by the calendar and the časová os. It
+    is hidden for a solo technician and remembered per account.
+  - Automatic client notice: off by default, 7/14/30 days ahead, main user
+    only, sent by `backend/bin/send-deadline-notices.php` from a daily 06:00
+    cron that deploy installs. It goes out at most once per deadline
+    (`deadline_notices`), only to a firm with a contact e-mail, and carries
+    the manual notice's text (`Support/ClientNotice.php`, kept in step with
+    `lib/clientNoticeEmail.ts`).
+  - Archived firms and prevádzky produce no deadlines.
+- ✅ **Ch. 18 — Dnes** (`TodayController`, `GET /api/today`, `TodayPage`).
+  - Replaces Prehľad as the first screen.
+  - Seven cards in the spec's order. Empty cards aren't rendered, and the
+    header count always equals the rows after „+ N ďalšie".
+  - Po termíne has a red frame.
+  - The main user of a team gets a Moje / Celý tím switch. Celý tím shows
+    avatars.
+  - Otvorené nedostatky counts a defect that has a termín, sits on a
+    finalized úkon not superseded by a later one, and has no completed
+    „overiť" task.
+  - Tvoje termíny shows certificates that have expired or expire within 120
+    days.
+  - Dnes v teréne lists today's visits, plans and own events. There is no
+    time-of-day field, so it is ordered by kind and then by creation.
+- ✅ **Ch. 19 — časová os** (`/casova-os`, `lib/timeline.ts`).
+  - Open client deadlines only.
+  - „Po termíne" is always the first group; grouping by mesiac, mesto or
+    firma. The odbor and „Kto" filters apply.
+  - Each row shows the last control, a countdown and an avatar.
+  - „Naplánovať" reuses the calendar's plan editor.
+- ✅ **Mobile menu.** Ten items don't fit a 360px bar. The bar keeps Dnes,
+  Firmy and the odbor sections; Kalendár, Časová os, Sklad, Úlohy and
+  Nastavenia open from „Viac", which carries the task badge.
+
+**Still open:**
+- ⬜ A browser click-through of sklad, fakturácia, the calendar and the „Viac"
+  sheet. Úlohy, Dnes and the časová os were clicked through; the rest was
+  tested through the API.
+- ⬜ Úlohy of an archived firm aren't marked „zrušené — firma archivovaná"
+  (ch. 25); they're only hidden.
+- ⬜ Unsynced offline drafts don't appear in Dnes → Rozrobené koncepty.
+- ⬜ Sklad items can't be renamed or deleted (the spec only has „Nová
+  položka"), and a movement can't be back-dated.
+- ⬜ `calendar_plans` / `calendar_events` aren't in the backup archive
+  (predates block 4); nor are potvrdenia and handover signatures.
+  `calendar_events` may also have the SET NULL + account-cascade FK problem
+  that `044_tasks.sql` had to avoid.
+- ⬜ The automatic notice cron reaches the server on the next deploy.
 
 ---
 
