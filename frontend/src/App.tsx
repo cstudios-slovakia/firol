@@ -21,6 +21,8 @@ import { InspectionsListPage } from '@/pages/InspectionsListPage';
 import { SectionPage } from '@/pages/SectionPage';
 import { VisitNewPage } from '@/pages/VisitNewPage';
 import { AuditFillPage } from '@/pages/AuditFillPage';
+import { PersonsFillPage } from '@/pages/PersonsFillPage';
+import { CompanyCertificatesPage } from '@/pages/CompanyCertificatesPage';
 import { AuditTemplatesPage } from '@/pages/AuditTemplatesPage';
 import { VisitDetailPage } from '@/pages/VisitDetailPage';
 import { CalendarPage } from '@/pages/CalendarPage';
@@ -114,6 +116,9 @@ export default function App() {
         {/* Block 3 — an audit answers a checklist rather than adding items
             one by one, so it has its own screen instead of Step 2. */}
         <Route path="/inspections/:id/audit" element={<AuditFillPage />} />
+        {/* Block 2 — a list of people (dychová skúška, omamné látky,
+            oboznámenie BOZP) is typed row after row on one screen. */}
+        <Route path="/inspections/:id/osoby" element={<PersonsFillPage />} />
         <Route path="/inspections/:id/items/new" element={<InspectionStep2Page />} />
         <Route path="/inspections/:id/items/:itemId" element={<InspectionStep2Page />} />
 
@@ -127,6 +132,7 @@ export default function App() {
           <Route path="branding" element={<BrandingPage />} />
           <Route path="technici" element={<TeamPage />} />
           <Route path="audity" element={<AuditTemplatesPage />} />
+          <Route path="opravnenia" element={<CompanyCertificatesPage />} />
           <Route path="data" element={<DataPage />} />
           <Route path="systemove" element={<SystemPage />} />
           <Route path="admin" element={<RequireAdmin><AdminPage /></RequireAdmin>} />

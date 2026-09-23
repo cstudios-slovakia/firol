@@ -48,6 +48,22 @@ export const RECOMMENDED_MONTHS: Record<string, number[]> = {
   pu_akcieschopnost: [3, 6, 12],
   pu_udrzba: [12],
   nudzove_osvetlenie: [12],
+  // Block 2 — chapter 5.3 „Odporúčaná"; fajčenie starts at „bez opakovania".
+  kniha_bozp: [12, 6, 3],
+  pracovisko: [12, 6],
+  osamele_pracovisko: [12, 6],
+  fajcenie: [],
+  // Block 2 — typy_ukonov.json `periodicita_predvolena`.
+  oopp: [12],
+  pracovne_prostriedky: [12],
+  rebriky: [12],
+  regale: [12],
+  oznacenie: [12],
+  // „bez opakovania" by default — a period stays settable (chapter 5: some
+  // firms test weekly, others once a year).
+  dychova_skuska: [],
+  omamne_latky: [],
+  skolenie_bozp: [36, 24, 12],
 };
 
 /** The period the app offers first for a type, before any history is known. */

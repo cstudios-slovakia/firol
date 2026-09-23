@@ -27,6 +27,18 @@ export const INSPECTION_TYPE_SHORT: Record<InspectionType, string> = {
   vyradenie: 'Vyradenie PHP',
   audit_bozp: 'Audit BOZP',
   audit_opp: 'Audit OPP',
+  kniha_bozp: 'Kniha BOZP',
+  pracovisko: 'Pracovisko',
+  osamele_pracovisko: 'Osamelé pracoviská',
+  fajcenie: 'Zákaz fajčenia',
+  oopp: 'OOPP',
+  pracovne_prostriedky: 'Pracovné prostriedky',
+  rebriky: 'Rebríky',
+  regale: 'Regály',
+  oznacenie: 'Bezp. označenie',
+  dychova_skuska: 'Dychová skúška',
+  omamne_latky: 'Omamné látky',
+  skolenie_bozp: 'Oboznámenie BOZP',
 };
 
 const BUCKET_META: Record<DeadlineBucket, { label: string; dot: string; text: string }> = {

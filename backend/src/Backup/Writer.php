@@ -185,7 +185,7 @@ final class Writer
                     i.audit_scope,
                     i.periodicity_value, i.periodicity_unit, i.periodicity_is_custom,
                     i.is_preventive_inspection, i.executed_on,
-                    i.status, i.notes, i.created_at,
+                    i.status, i.notes, i.details, i.created_at,
                     i.effective_cert_number,
                     u.email  AS inspector_email,
                     eu.email AS effective_inspector_email
@@ -355,7 +355,7 @@ final class Writer
         // in the archive that can never come back out — and would make the
         // "27 protocols in, 25 restored" arithmetic look like data loss.
         $stmt = $pdo->prepare(
-            "SELECT d.id, d.parent_type, d.parent_id, d.type, d.number, d.file_path,
+            "SELECT d.id, d.parent_type, d.parent_id, d.type, d.number, d.form_variant, d.file_path,
                     d.generated_at, d.signed, d.signed_at
              FROM   documents d
              LEFT   JOIN inspections i ON d.parent_type = 'inspection' AND i.id = d.parent_id

@@ -47,6 +47,25 @@ final class CarryOver
         // ticked are the "identification" — the result and the nedostatky are
         // not (chapter 12).
         'poziarna_kniha'     => ['is_preventive', 'workspaces', 'activities', 'custom_activities'],
+        // Block 2 — single-record BOZP úkony (BozpRecords). The workplaces
+        // walked, the activities ticked and the rows checked travel; every
+        // result inside a row is blanked by ROW_KEEP below.
+        'kniha_bozp'         => ['workspaces', 'activities', 'custom_activities'],
+        'pracovisko'         => ['spaces', 'areas'],
+        'osamele_pracovisko' => ['rows'],
+        'fajcenie'           => ['scope', 'rows'],
+        // Block 2 — a person list carries names and pracovné zaradenie; the
+        // result, time, value and signature are this test's (PersonList).
+        'dychova_skuska'     => ['name', 'position'],
+        'omamne_latky'       => ['name', 'position'],
+        'skolenie_bozp'      => ['name', 'position'],
+        // Block 2 (Firol\Support\BozpItems). Whether a regál carries its
+        // nosnosť label is an observation, not identification, so it stays.
+        'rebriky'              => ['inventory_number', 'type', 'manufacturer', 'year', 'location'],
+        'regale'               => ['label', 'type', 'capacity', 'location'],
+        'oopp'                 => ['position', 'equipment'],
+        'pracovne_prostriedky' => ['name', 'manufacturer_type', 'inventory_number', 'location'],
+        'oznacenie'            => ['kind', 'location'],
     ];
 
     /**
@@ -66,6 +85,32 @@ final class CarryOver
         'nudzove_osvetlenie' => ['duration_min' => null, 'result' => '', 'notes' => null],
         'ts_hadic'           => ['working_pressure' => null, 'test_pressure' => null, 'result' => '', 'notes' => null],
         'poziarna_kniha'     => ['result' => '', 'defects' => [], 'notes' => null],
+        'kniha_bozp'         => ['result' => '', 'defects' => []],
+        'pracovisko'         => ['overall' => '', 'defects' => []],
+        'osamele_pracovisko' => ['overall' => '', 'defects' => []],
+        'fajcenie'           => ['measures' => null, 'defects' => []],
+        'dychova_skuska'     => ['time' => null, 'value' => null, 'result' => null, 'signature' => null, 'defects' => []],
+        'omamne_latky'       => ['time' => null, 'result' => null, 'signature' => null, 'defects' => []],
+        'skolenie_bozp'      => ['date' => null, 'signature' => null, 'defects' => []],
+        'rebriky'              => ['faults' => null, 'result' => '', 'defects' => []],
+        'regale'               => ['capacity_marked' => null, 'faults' => null, 'result' => '', 'defects' => []],
+        'oopp'                 => ['provided' => null, 'used' => null, 'condition' => null, 'notes' => null, 'defects' => []],
+        'pracovne_prostriedky' => ['faults' => null, 'result' => '', 'defects' => []],
+        'oznacenie'            => ['result' => '', 'notes' => null, 'defects' => []],
+    ];
+
+    /**
+     * Lists of rows kept inside a carried record, and which keys of each row
+     * travel. Every other key of the row is blanked: which workplace was
+     * checked is identification, how it came out („nevyhovuje", the note, the
+     * spojenie found there) is this year's observation.
+     *
+     * @var array<string, array<string, list<string>>>
+     */
+    private const ROW_KEEP = [
+        'pracovisko'         => ['areas' => ['name']],
+        'osamele_pracovisko' => ['rows' => ['workplace', 'activity']],
+        'fajcenie'           => ['rows' => ['area']],
     ];
 
     /** True when the app can carry items over for this inspection type. */
@@ -97,6 +142,18 @@ final class CarryOver
             }
         }
         $out += self::BLANK[$type] ?? [];
+
+        foreach (self::ROW_KEEP[$type] ?? [] as $listKey => $rowKeys) {
+            $rows = is_array($out[$listKey] ?? null) ? $out[$listKey] : [];
+            $out[$listKey] = array_values(array_map(static function (mixed $row) use ($rowKeys): array {
+                $row = is_array($row) ? $row : [];
+                $kept = [];
+                foreach ($row as $k => $v) {
+                    $kept[$k] = in_array($k, $rowKeys, true) ? $v : (is_string($v) ? '' : null);
+                }
+                return $kept;
+            }, $rows));
+        }
 
         $previous = self::previousStatus($type, $fields);
         if ($previous !== null) {
@@ -131,7 +188,9 @@ final class CarryOver
             'pu_udrzba',
             'hydranty',
             'nudzove_osvetlenie',
-            'ts_hadic'          => ($fields['result'] ?? null) === 'vyradene',
+            'ts_hadic',
+            'rebriky',
+            'regale'            => ($fields['result'] ?? null) === 'vyradene',
             default             => false,
         };
     }
@@ -150,7 +209,14 @@ final class CarryOver
             'pu_akcieschopnost',
             'pu_udrzba',
             'nudzove_osvetlenie',
-            'ts_hadic' => $fields['result'] ?? null,
+            'ts_hadic',
+            'rebriky',
+            'regale',
+            'pracovne_prostriedky',
+            'oznacenie' => $fields['result'] ?? null,
+            // OOPP has no výsledok; its stav (vyhovujúci / opotrebený / chýba)
+            // is what the technician wants to see from last time.
+            'oopp'   => $fields['condition'] ?? null,
             default  => null,
         };
         return is_string($raw) && $raw !== '' ? $raw : null;

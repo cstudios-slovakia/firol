@@ -1,8 +1,11 @@
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, Ban, BookOpen, ChevronRight, ClipboardCheck, DoorClosed, Droplets,
-  Flame, Gauge, HardHat, Lightbulb, ShieldCheck, Wrench,
+  Flame, Gauge, HardHat, LibraryBig, Lightbulb, Shield, ShieldCheck, Signpost, TrainTrack, Wrench,
+  TestTube, Users, Wind,
 } from 'lucide-react';
+// Block 2 — single-record BOZP úkony.
+import { BookCheck, CigaretteOff, Factory, PhoneCall } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import {
@@ -119,6 +122,105 @@ const TYPES: TypeMeta[] = [
     description: 'Previerka stavu BOZP podľa kontrolného listu.',
     intervalLabel: '12 mes.',
     icon: <HardHat className="size-5" />,
+    enabled: true,
+  },
+  // Block 2 — single-record BOZP úkony (kniha, pracovisko, osamelé, fajčenie).
+  {
+    type: 'kniha_bozp',
+    shortLabel: 'Kniha kontrol BOZP',
+    description: 'Záznam o kontrole stavu BOZP s prehľadom termínov klienta.',
+    intervalLabel: '12 / 6 / 3 mes.',
+    icon: <BookCheck className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'pracovisko',
+    shortLabel: 'Kontrola pracoviska',
+    description: 'Pracovisko a pracovné prostredie po oblastiach.',
+    intervalLabel: '12 / 6 mes.',
+    icon: <Factory className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'osamele_pracovisko',
+    shortLabel: 'Osamelé pracoviská',
+    description: 'Spojenie a kontrola prítomnosti osamotene pracujúcich.',
+    intervalLabel: '12 / 6 mes.',
+    icon: <PhoneCall className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'fajcenie',
+    shortLabel: 'Zákaz fajčenia',
+    description: 'Kontrola dodržiavania zákazu fajčenia v priestoroch.',
+    intervalLabel: 'bez opakovania',
+    icon: <CigaretteOff className="size-5" />,
+    enabled: true,
+  },
+  // Block 2 — BOZP úkony, chapter 5.3 order.
+  {
+    type: 'oopp',
+    shortLabel: 'Kontrola OOPP',
+    description: 'Poskytovanie a používanie osobných ochranných pracovných prostriedkov.',
+    intervalLabel: '12 mes.',
+    icon: <Shield className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'pracovne_prostriedky',
+    shortLabel: 'Pracovné prostriedky',
+    description: 'Zoznam pracovných prostriedkov s výsledkom a opatreniami.',
+    intervalLabel: '12 mes.',
+    icon: <Wrench className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'rebriky',
+    shortLabel: 'Rebríky',
+    description: 'Kontrola rebríkov — vyhovuje / nevyhovuje / vyradené.',
+    intervalLabel: '12 mes.',
+    icon: <TrainTrack className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'regale',
+    shortLabel: 'Regály',
+    description: 'Kontrola regálov vrátane označenia nosnosti.',
+    intervalLabel: '12 mes.',
+    icon: <LibraryBig className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'oznacenie',
+    shortLabel: 'Bezpečnostné označenie',
+    description: 'Kontrola bezpečnostného a zdravotného označenia pri práci.',
+    intervalLabel: '12 mes.',
+    icon: <Signpost className="size-5" />,
+    enabled: true,
+  },
+  // Block 2 — the person-list úkony (chapters 7, 8, 8.1).
+  {
+    type: 'dychova_skuska',
+    shortLabel: 'Dychová skúška',
+    description: 'Zoznam osôb s výsledkom — aj prázdny formulár na ručné doplnenie.',
+    intervalLabel: 'bez opakovania',
+    icon: <Wind className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'omamne_latky',
+    shortLabel: 'Omamné látky',
+    description: 'Kontrola omamných a psychotropných látok — aj prázdny formulár.',
+    intervalLabel: 'bez opakovania',
+    icon: <TestTube className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'skolenie_bozp',
+    shortLabel: 'Oboznámenie BOZP',
+    description: 'Prezenčná listina s odkazom na osnovu — bez tematického plánu.',
+    intervalLabel: '36 / 24 / 12 mes.',
+    icon: <Users className="size-5" />,
     enabled: true,
   },
 ];

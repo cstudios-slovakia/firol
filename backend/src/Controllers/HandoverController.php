@@ -52,6 +52,21 @@ final class HandoverController
             Response::error('Školenie sa podpisuje na prezenčnej listine, nie tu.', 422);
         }
 
+        // A signature re-renders the protocol from the record. While the úkon
+        // is open again (a test printed blank whose results are being typed
+        // in, block 2 / chapter 8.1), the record no longer matches the issued
+        // document, and signing would put edited content under its number.
+        if ($doc['parent_type'] === 'inspection') {
+            $status = Db::pdo()->prepare('SELECT status FROM inspections WHERE id = ? AND account_id = ?');
+            $status->execute([(int) $doc['parent_id'], $accountId]);
+            if ($status->fetchColumn() !== 'finalized') {
+                Response::error(
+                    'Úkon je práve otvorený na úpravy — protokol sa dá podpísať, až keď bude znova uzamknutý.',
+                    409,
+                );
+            }
+        }
+
         [$fullname, $roleTitle, $personId] = self::resolveSignatory($req, $accountId, $doc);
 
         $place = $req->jsonString('place');
@@ -108,10 +123,12 @@ final class HandoverController
                 $relSig, $place, $signedOn, $signedTime,
             ]);
 
+            // form_variant (block 2, chapter 8.1): a signed version is the
+            // same printout as the one it replaces — blank stays blank.
             $pdo->prepare(
-                'INSERT INTO document_versions (document_id, version, file_path)
-                 VALUES (?, ?, ?)'
-            )->execute([$documentId, $version, $newPath]);
+                'INSERT INTO document_versions (document_id, version, file_path, form_variant)
+                 SELECT ?, ?, ?, form_variant FROM documents WHERE id = ?'
+            )->execute([$documentId, $version, $newPath, $documentId]);
 
             $pdo->prepare(
                 'UPDATE documents SET version = ?, file_path = ? WHERE id = ?'

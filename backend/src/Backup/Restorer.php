@@ -384,8 +384,8 @@ final class Restorer
                  periodicity_value, periodicity_unit, periodicity_is_custom,
                  is_preventive_inspection, executed_on, inspector_user_id,
                  effective_inspector_user_id, effective_cert_number,
-                 status, notes, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 status, notes, details, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insertItem = $this->pdo->prepare(
             'INSERT INTO inspection_items (inspection_id, position, fields, created_at)
@@ -440,6 +440,9 @@ final class Restorer
                 $this->str($inspection, 'effective_cert_number'),
                 $this->status($inspection),
                 $this->str($inspection, 'notes'),
+                // Header data of a block 2 úkon (inspections.details); absent in
+                // archives written before it existed.
+                self::details($inspection['details'] ?? null),
                 $createdAt,
             ]);
             $inspectionId = (int) $this->pdo->lastInsertId();
@@ -624,9 +627,9 @@ final class Restorer
 
         $insert = $this->pdo->prepare(
             'INSERT INTO documents
-                (account_id, parent_type, parent_id, type, number, file_path,
+                (account_id, parent_type, parent_id, type, number, form_variant, file_path,
                  generated_at, signed, signed_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
 
         /** @var array<string, int> highest sequence seen per "type|year" */
@@ -673,6 +676,10 @@ final class Restorer
                 $parentId,
                 (string) ($document['type'] ?? ''),
                 $number,
+                // Chapter 8.1 — which printout of a test this is.
+                in_array($document['form_variant'] ?? null, ['vyplneny', 'prazdny'], true)
+                    ? (string) $document['form_variant']
+                    : null,
                 $relative,
                 $generatedAt,
                 (int) ($document['signed'] ?? 1),
@@ -689,6 +696,21 @@ final class Restorer
         }
 
         $this->bumpSequences($sequences);
+    }
+
+    /**
+     * inspections.details as stored in an archive — a JSON string (Writer
+     * dumps the column as is) or, defensively, an already decoded object.
+     */
+    private static function details(mixed $raw): ?string
+    {
+        if (is_array($raw)) {
+            return json_encode($raw, JSON_UNESCAPED_UNICODE);
+        }
+        if (!is_string($raw) || $raw === '' || !is_array(json_decode($raw, true))) {
+            return null;
+        }
+        return $raw;
     }
 
     /**

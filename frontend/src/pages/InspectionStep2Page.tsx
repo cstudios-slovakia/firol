@@ -189,6 +189,7 @@ export function InspectionStep2Page() {
         initialItem={initialItem}
         csrfToken={csrfToken}
         onSaved={handleSaved}
+        items={detail.items}
       />
     </div>
   );

@@ -87,6 +87,22 @@ final class PdfRenderer
             // payload (see Firol\Audit\AuditProtocol).
             'audit_bozp',
             'audit_opp'          => 'audit.php',
+            // Block 2 — single-record BOZP úkony (Firol\Support\BozpRecords).
+            'kniha_bozp'         => 'kniha_bozp.php',
+            'pracovisko'         => 'pracovisko.php',
+            'osamele_pracovisko' => 'osamele_pracovisko.php',
+            'fajcenie'           => 'fajcenie.php',
+            // Block 2 — both tests share one template; the filled record and
+            // the blank form for handwriting are two modes of it (8.1).
+            'dychova_skuska',
+            'omamne_latky'       => 'osoby_skuska.php',
+            'skolenie_bozp'      => 'skolenie_bozp.php',
+            // Block 2 — BOZP úkony with a list of rows (Firol\Support\BozpItems).
+            'oopp'                 => 'oopp.php',
+            'pracovne_prostriedky' => 'pracovne_prostriedky.php',
+            'rebriky'              => 'rebriky.php',
+            'regale'               => 'regale.php',
+            'oznacenie'            => 'oznacenie.php',
             default => throw new \InvalidArgumentException("No renderer for type: $type"),
         };
 

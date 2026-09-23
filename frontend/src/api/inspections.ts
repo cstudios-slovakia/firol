@@ -1,6 +1,9 @@
 import { api, buildUrl, type OptimisticSpec } from '@/lib/api';
 import type { Periodicity, PeriodicityUnit } from '@/lib/periodicity';
 import type { AuditCarryOverOffer, AuditScope } from '@/api/audits';
+import type { BozpItemFields } from '@/api/bozpItems';
+import type { BozpRecordFields } from '@/api/bozpRecords';
+import type { PersonFields } from '@/api/personList';
 
 /**
  * Inspection types — locked slugs from docs/Firol base document.
@@ -17,7 +20,22 @@ export type InspectionType =
   | 'ts_hadic'
   | 'vyradenie'
   | 'audit_bozp'
-  | 'audit_opp';
+  | 'audit_opp'
+  // Block 2 — single-record BOZP úkony (api/bozpRecords.ts).
+  | 'kniha_bozp'
+  | 'pracovisko'
+  | 'osamele_pracovisko'
+  | 'fajcenie'
+  // Block 2 — BOZP úkony whose rows are items (api/bozpItems.ts).
+  | 'oopp'
+  | 'pracovne_prostriedky'
+  | 'rebriky'
+  | 'regale'
+  | 'oznacenie'
+  // Block 2 — the person-list úkony (api/personList.ts).
+  | 'dychova_skuska'
+  | 'omamne_latky'
+  | 'skolenie_bozp';
 
 export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   php: 'Hasiace prístroje (PHP)',
@@ -31,6 +49,19 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   vyradenie: 'Vyraďovací protokol PHP',
   audit_bozp: 'Audit BOZP',
   audit_opp: 'Audit ochrany pred požiarmi',
+  // Block 2 — typy_ukonov.json `nazov`.
+  kniha_bozp: 'Kniha kontrol BOZP',
+  pracovisko: 'Kontrola pracoviska',
+  osamele_pracovisko: 'Kontrola osamelých pracovísk',
+  fajcenie: 'Kontrola dodržiavania zákazu fajčenia',
+  oopp: 'Kontrola OOPP',
+  pracovne_prostriedky: 'Kontrola pracovných prostriedkov',
+  rebriky: 'Kontrola rebríkov',
+  regale: 'Kontrola regálov',
+  oznacenie: 'Kontrola bezpečnostného označenia',
+  dychova_skuska: 'Dychová skúška na alkohol',
+  omamne_latky: 'Kontrola omamných a psychotropných látok',
+  skolenie_bozp: 'Oboznámenie zamestnancov v oblasti BOZP',
 };
 
 /**
@@ -98,6 +129,12 @@ export type InspectionListItem = {
 export type Inspection = InspectionListItem & {
   updated_at: string;
   company_ico: string | null;
+  /**
+   * Header data of the úkon (`inspections.details`, migration 042) — what
+   * belongs to the úkon as a whole rather than to one row. Null for types
+   * without any. Validated per type on the server (Support\InspectionDetails).
+   */
+  details?: Record<string, unknown> | null;
 };
 
 export type PhpStatus = 'A' | 'TS' | 'O' | 'V';
@@ -369,6 +406,12 @@ export type InspectionDocument = {
    * already hold a copy of it.
    */
   version: number;
+  /**
+   * Block 2 / chapter 8.1 — which printout of a test this version is: the
+   * blank form for handwriting or the filled record. Both share the number.
+   * Null (or absent) for every other document.
+   */
+  form_variant?: 'vyplneny' | 'prazdny' | null;
   generated_at: string;
   signed: boolean;
   download_url: string;
@@ -413,6 +456,8 @@ export type InspectionUpdatePayload = {
   periodicity_value?: number | null;
   periodicity_unit?: PeriodicityUnit | null;
   notes?: string;
+  /** Replaces the whole header object (see `Inspection.details`). */
+  details?: Record<string, unknown>;
 };
 
 export type InspectionListFilters = {
@@ -440,9 +485,11 @@ export const Inspections = {
    * location), drawn from the account's own history (change request 2.4.1).
    * Pass facilityId for `location` to float that facility's values to the top.
    */
-  suggestions: (field: SuggestionField, q: string, facilityId?: number) => {
+  suggestions: (field: SuggestionField, q: string, facilityId?: number, facilityOnly = false) => {
     const parts = [`field=${field}`, `q=${encodeURIComponent(q)}`];
     if (facilityId) parts.push(`facility_id=${facilityId}`);
+    // Only places recorded on this prevádzka (block 2, „výber z prevádzky").
+    if (facilityId && facilityOnly) parts.push('facility_only=1');
     return api<{ suggestions: string[] }>(`/api/inspections/suggestions?${parts.join('&')}`);
   },
   createDraft: (
@@ -484,7 +531,10 @@ export const Inspections = {
       | PuUdrzbaItemFields
       | NudzoveOsvetlenieItemFields
       | TsHadicItemFields
-      | VyradenieItemFields,
+      | VyradenieItemFields
+      | BozpItemFields
+      | BozpRecordFields
+      | PersonFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items`, {
@@ -504,7 +554,10 @@ export const Inspections = {
       | PuUdrzbaItemFields
       | NudzoveOsvetlenieItemFields
       | TsHadicItemFields
-      | VyradenieItemFields,
+      | VyradenieItemFields
+      | BozpItemFields
+      | BozpRecordFields
+      | PersonFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items/${itemId}`, {
@@ -558,13 +611,23 @@ export const Inspections = {
    * server defaults it to true, so omitting it keeps the appendix whenever
    * photos exist.
    */
-  generatePdf: (inspectionId: number, csrfToken: string | null, includePhotos?: boolean) =>
-    api<GeneratePdfResponse>(`/api/inspections/${inspectionId}/generate-pdf`, {
+  generatePdf: (
+    inspectionId: number,
+    csrfToken: string | null,
+    includePhotos?: boolean,
+    /** Block 2 / chapter 8.1 — a test printed blank for handwriting. */
+    formVariant?: 'vyplneny' | 'prazdny',
+  ) => {
+    const body: Record<string, unknown> = {};
+    if (includePhotos !== undefined) body.include_photos = includePhotos;
+    if (formVariant !== undefined) body.form_variant = formVariant;
+    return api<GeneratePdfResponse>(`/api/inspections/${inspectionId}/generate-pdf`, {
       method: 'POST',
-      body: includePhotos === undefined ? undefined : { include_photos: includePhotos },
+      body: Object.keys(body).length > 0 ? body : undefined,
       csrfToken,
       requireOnline: true,
-    }),
+    });
+  },
   /**
    * Reopen a locked (finalized) inspection for editing. The server discards
    * the issued PDF protocol — a fresh one gets a new number. Online only:

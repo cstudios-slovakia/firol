@@ -12,6 +12,7 @@ use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Documents\NumberAllocator;
+use Firol\Documents\PersonProtocol;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Mail\Mailer;
@@ -23,6 +24,7 @@ use Firol\Support\Address;
 use Firol\Support\Handover;
 use Firol\Support\Periodicity;
 use Firol\Support\PhotoCaption;
+use Firol\Support\PersonList;
 use Firol\Support\PkDefects;
 use Firol\Support\PokynZatva;
 
@@ -61,11 +63,19 @@ final class DocumentController
         // looked before the feature existed.
         $includePhotos = $req->jsonBool('include_photos') ?? true;
 
+        // Chapter 8.1 — tlac_formulara: a dychová skúška / kontrola omamných
+        // látok may be printed blank for handwriting. Filled is the default.
+        $formVariant = $req->jsonString('form_variant') ?? PersonList::VARIANT_FILLED;
+        if (!in_array($formVariant, PersonList::VARIANTS, true)) {
+            Response::error('Neznámy spôsob tlače formulára.', 422);
+        }
+
         $result = self::generateForInspectionInternal(
             (int) $inspection['account_id'],
             $userId,
             $inspectionId,
             $includePhotos,
+            $formVariant,
         );
         if (isset($result['error'])) {
             Response::error((string) $result['error'], (int) $result['status']);
@@ -96,6 +106,7 @@ final class DocumentController
         int $userId,
         int $inspectionId,
         bool $includePhotos,
+        string $formVariant = PersonList::VARIANT_FILLED,
     ): array {
         $inspection = self::loadInspectionForGenerate($accountId, $inspectionId);
 
@@ -138,8 +149,87 @@ final class DocumentController
             }
         }
 
+        // Block 2 — a row carried over from last time (chapter 12) arrives
+        // with its výsledok blank on purpose. The protocol must not print a
+        // blank verdict over the technician's signature.
+        if (\Firol\Support\BozpItems::supports($insType)) {
+            $unassessed = \Firol\Support\BozpItems::unassessedCount($insType, $items);
+            if ($unassessed > 0) {
+                return [
+                    'error' => $unassessed === 1
+                        ? '1 položka nemá zadaný výsledok. Doplň ho pred generovaním PDF.'
+                        : $unassessed . ($unassessed < 5 ? ' položky nemajú' : ' položiek nemá')
+                            . ' zadaný výsledok. Doplň ho pred generovaním PDF.',
+                    'status' => 422,
+                ];
+            }
+        }
+
+        // Block 2 — a single-record BOZP úkon is checked again as a whole: a
+        // record carried over from last year (chapter 12) arrives with its
+        // result blank, and chapter 7 says required fields cannot be skipped
+        // on the way to the protocol.
+        if (\Firol\Support\BozpRecords::supports($insType)) {
+            try {
+                \Firol\Support\BozpRecords::validate($insType, (array) ($items[0]['fields'] ?? []));
+            } catch (\InvalidArgumentException $e) {
+                return ['error' => 'Záznam nie je úplný: ' . $e->getMessage(), 'status' => 422];
+            }
+        }
+
+        // Block 2 — the „osoby" úkony (dychová skúška, omamné látky,
+        // oboznámenie BOZP): required fields, the blank form of chapter 8.1,
+        // and one number shared by the blank and the filled record.
+        $isPersons = PersonList::isPersonType($insType);
+        $variantColumn = null;
+        $reuse = null;
+        if ($isPersons) {
+            $personError = PersonProtocol::check($accountId, $inspection, $items, $formVariant);
+            if ($personError !== null) {
+                return $personError;
+            }
+            if (PersonList::isTestType($insType)) {
+                $variantColumn = $formVariant;
+                $reuse = PersonProtocol::issuedBlank($accountId, $inspectionId);
+            }
+        } else {
+            $formVariant = PersonList::VARIANT_FILLED;
+        }
+
         $payload = self::buildPayload($accountId, $userId, $inspection, $items);
         $stats   = $payload['stats'];
+
+        if ($isPersons) {
+            $payload += PersonProtocol::payload($accountId, $inspection, $items, $formVariant);
+            if ($reuse !== null) {
+                // The client may have signed the blank form on the screen; the
+                // next version of the same protocol keeps that handover.
+                $payload['handover'] = PersonProtocol::handoverFor($reuse['id']);
+            }
+            // Freeze the Zhotoviteľ block — the firm and its oprávnenie (vv)
+            // as printed now — so a later re-render (a signature on screen)
+            // prints what was issued, not what the settings say by then.
+            PersonProtocol::freezeContractor($inspectionId, $inspection, $payload['contractor']);
+        }
+
+        // Kniha kontrol BOZP prints the client's own „Termíny a kontroly" —
+        // every revision, check and training on record, as of this úkon's date.
+        // The rows are frozen onto the record, so signing the protocol later
+        // re-renders the table as it was issued, not as the calendar reads by
+        // then (the record is locked; unlocking and saving drops the copy).
+        if ($insType === 'kniha_bozp') {
+            $payload['client_terms'] = \Firol\Support\ClientTerms::forProtocol(
+                $accountId,
+                (int) $inspection['company_id'],
+                (int) $inspection['facility_id'],
+                (string) $inspection['executed_on'],
+                $insType,
+            );
+            $frozen = (array) ($items[0]['fields'] ?? []);
+            $frozen[\Firol\Support\ClientTerms::SNAPSHOT_KEY] = $payload['client_terms'];
+            Db::pdo()->prepare('UPDATE inspection_items SET fields = ? WHERE id = ? AND inspection_id = ?')
+                ->execute([json_encode($frozen, JSON_UNESCAPED_UNICODE), (int) $items[0]['id'], $inspectionId]);
+        }
 
         if (AuditCatalog::isAuditType($insType)) {
             $payload['audit'] = AuditProtocol::build(
@@ -149,7 +239,9 @@ final class DocumentController
             );
         }
 
-        $payload['photos'] = $includePhotos
+        // The blank form (chapter 8.1) prints no nedostatky, so it carries no
+        // photo appendix of them either.
+        $payload['photos'] = $includePhotos && $variantColumn !== PersonList::VARIANT_BLANK
             ? self::buildPhotoAppendix($inspectionId, $insType, $items)
             : [];
 
@@ -157,39 +249,72 @@ final class DocumentController
         $pdo->beginTransaction();
 
         try {
-            $allocated = NumberAllocator::allocate($accountId, $insType, $year);
+            // A test printed blank already holds its number (chapter 8.1): the
+            // filled record — or a reprint of the blank one — becomes the next
+            // version of it instead of taking a new number.
+            if ($reuse !== null) {
+                $allocated = ['number' => $reuse['number']];
+                $version = $reuse['version'] + 1;
+                $numberYear = (int) substr($reuse['number'], -8, 4);
+                $year = $numberYear >= 2000 ? $numberYear : $year;
+            } else {
+                $allocated = NumberAllocator::allocate($accountId, $insType, $year);
+                $version = 1;
+            }
             $payload['number'] = $allocated['number'];
             $payload['generated_at'] = date('c');
 
             $pdfBytes = PdfRenderer::renderForType($insType, $payload);
 
-            $relPath = Storage::documentRelative($accountId, $year, $allocated['number']);
+            $relPath = $version === 1
+                ? Storage::documentRelative($accountId, $year, $allocated['number'])
+                : Storage::documentVersionRelative($accountId, $year, $allocated['number'], $version);
             $absPath = Storage::documentAbsolute($relPath);
             Storage::ensureDir(dirname($absPath));
             if (file_put_contents($absPath, $pdfBytes) === false) {
                 throw new \RuntimeException('Failed to write PDF to storage.');
             }
 
-            $insert = $pdo->prepare(
-                'INSERT INTO documents
-                    (account_id, parent_type, parent_id, type, number, include_photos,
-                     file_path, signed, signed_at)
-                 VALUES (?, "inspection", ?, ?, ?, ?, ?, 1, NOW())'
-            );
-            $insert->execute([
-                $accountId,
-                $inspectionId,
-                $inspection['type'],
-                $allocated['number'],
-                $includePhotos ? 1 : 0,
-                $relPath,
-            ]);
-            $documentId = (int) $pdo->lastInsertId();
+            if ($reuse !== null) {
+                $documentId = $reuse['id'];
+                $pdo->prepare(
+                    'UPDATE documents
+                     SET    version = ?, file_path = ?, include_photos = ?, generated_at = NOW()
+                     WHERE  id = ? AND account_id = ?'
+                )->execute([$version, $relPath, $includePhotos ? 1 : 0, $documentId, $accountId]);
+                $pdo->prepare(
+                    'INSERT INTO document_versions (document_id, version, file_path) VALUES (?, ?, ?)'
+                )->execute([$documentId, $version, $relPath]);
+            } else {
+                $insert = $pdo->prepare(
+                    'INSERT INTO documents
+                        (account_id, parent_type, parent_id, type, number, include_photos,
+                         file_path, signed, signed_at)
+                     VALUES (?, "inspection", ?, ?, ?, ?, ?, 1, NOW())'
+                );
+                $insert->execute([
+                    $accountId,
+                    $inspectionId,
+                    $inspection['type'],
+                    $allocated['number'],
+                    $includePhotos ? 1 : 0,
+                    $relPath,
+                ]);
+                $documentId = (int) $pdo->lastInsertId();
 
-            $pdo->prepare(
-                'INSERT INTO document_versions (document_id, version, file_path)
-                 VALUES (?, 1, ?)'
-            )->execute([$documentId, $relPath]);
+                $pdo->prepare(
+                    'INSERT INTO document_versions (document_id, version, file_path)
+                     VALUES (?, 1, ?)'
+                )->execute([$documentId, $relPath]);
+            }
+
+            // Which of the two printouts of a test this version is (8.1).
+            if ($variantColumn !== null) {
+                $pdo->prepare('UPDATE documents SET form_variant = ? WHERE id = ?')
+                    ->execute([$variantColumn, $documentId]);
+                $pdo->prepare('UPDATE document_versions SET form_variant = ? WHERE document_id = ? AND version = ?')
+                    ->execute([$variantColumn, $documentId, $version]);
+            }
 
             // Freeze the inspector identity + cert that ended up on the
             // PDF, so admin/list views show the borrowed cert exactly as
@@ -521,7 +646,7 @@ final class DocumentController
         $sql = 'SELECT i.id, i.account_id, i.type, i.executed_on, i.status,
                        i.periodicity_value, i.periodicity_unit,
                        i.audit_scope,
-                       i.notes, i.inspector_user_id, i.source_inspection_id,
+                       i.notes, i.details, i.inspector_user_id, i.source_inspection_id,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
                        c.approver AS company_approver,
@@ -595,7 +720,12 @@ final class DocumentController
 
         $appendix = [];
         foreach ($items as $idx => $item) {
-            $photos = $pathsByItem[(int) $item['id']] ?? [];
+            // Photos of a nedostatok (block 2, Firol\Support\Defects) carry a
+            // defect_key and are captioned by the nedostatok's number below.
+            $photos = array_filter(
+                $pathsByItem[(int) $item['id']] ?? [],
+                static fn (array $p): bool => ($p['defect_key'] ?? null) === null,
+            );
             if ($photos === []) {
                 continue;
             }
@@ -609,7 +739,10 @@ final class DocumentController
                 ];
             }
         }
-        return $appendix;
+        // Then the nedostatky's own photos, in the order of the „Zistené
+        // nedostatky" table — the body prints the rows before the table, so
+        // the appendix follows the body.
+        return array_merge($appendix, \Firol\Support\Defects::photoAppendix($items, $pathsByItem));
     }
 
     /**
@@ -773,6 +906,9 @@ final class DocumentController
                     )
                     : null,
                 'notes'              => $inspection['notes'],
+                // Úkon-level header data (migration 042) — e.g. the opatrenia
+                // or záver of a block 2 BOZP úkon. Null for types without any.
+                'details'            => \Firol\Support\InspectionDetails::decode($inspection['details'] ?? null),
                 'status'             => $inspection['status'],
                 'source_number'      => $inspection['source_number'] ?? null,
             ],
@@ -885,6 +1021,10 @@ final class DocumentController
      */
     private static function computeStats(string $type, array $items): array
     {
+        // Block 2 — a person list counts people and, for a test, results.
+        if (PersonList::isPersonType($type)) {
+            return PersonList::stats($type, $items);
+        }
         if (AuditCatalog::isAuditType($type)) {
             $summary = AuditItems::summarize($items);
             return [
@@ -896,6 +1036,16 @@ final class DocumentController
                 'nevyhovuje' => $summary['nevyhovuje'],
                 'verdict'    => $summary['verdict'],
             ];
+        }
+
+        // Block 2 — single-record BOZP úkony (Firol\Support\BozpRecords).
+        if (\Firol\Support\BozpRecords::supports($type)) {
+            return \Firol\Support\BozpRecords::stats($type, $items);
+        }
+
+        // Block 2 — BOZP rows count by their own číselník (chapter 5.4).
+        if (\Firol\Support\BozpItems::supports($type)) {
+            return \Firol\Support\BozpItems::stats($type, $items);
         }
 
         $stats = ['total' => count($items)];
@@ -985,13 +1135,16 @@ final class DocumentController
      */
     private static function certForType(string $type, array $profile): ?string
     {
-        $key = match ($type) {
-            'php'            => 'cert_php',
-            'oprava_ts_php'  => 'cert_oprava',
-            // Block 3 — the BOZP audit carries the bezpečnostný technik's own
-            // number; every PO document carries the technik PO one.
-            'audit_bozp'     => 'cert_bt',
-            default          => 'cert_general',
+        // Every BOZP úkon (the audit and the block 2 types) carries the
+        // bezpečnostný technik's own number; every PO document carries the
+        // technik PO one. The section decides, so a new BOZP type needs no
+        // branch here.
+        $isBozp = \Firol\Support\Sections::forInspectionType($type) === \Firol\Support\Sections::BOZP;
+        $key = match (true) {
+            $type === 'php'           => 'cert_php',
+            $type === 'oprava_ts_php' => 'cert_oprava',
+            $isBozp                   => 'cert_bt',
+            default                   => 'cert_general',
         };
         $val = $profile[$key] ?? null;
         // Backward compat: fall back to the legacy single column — but never
@@ -1013,17 +1166,18 @@ final class DocumentController
      */
     private static function validityForType(string $type, array $profile): array
     {
-        [$fromKey, $toKey] = match ($type) {
-            'php'            => ['valid_from_php',     'valid_to_php'],
-            'oprava_ts_php'  => ['valid_from_oprava',  'valid_to_oprava'],
-            'audit_bozp'     => ['valid_from_bt',      'valid_to_bt'],
-            default          => ['valid_from_general', 'valid_to_general'],
+        $isBozp = \Firol\Support\Sections::forInspectionType($type) === \Firol\Support\Sections::BOZP;
+        [$fromKey, $toKey] = match (true) {
+            $type === 'php'           => ['valid_from_php',     'valid_to_php'],
+            $type === 'oprava_ts_php' => ['valid_from_oprava',  'valid_to_oprava'],
+            $isBozp                   => ['valid_from_bt',      'valid_to_bt'],
+            default                   => ['valid_from_general', 'valid_to_general'],
         };
         $from = $profile[$fromKey] ?? null;
         $to   = $profile[$toKey]   ?? null;
         // Backward compat: fall back to legacy single pair — not for the BT
         // pair, for the same reason as the number itself.
-        if ($type !== 'audit_bozp' && ($from === null || $from === '') && ($to === null || $to === '')) {
+        if (!$isBozp && ($from === null || $from === '') && ($to === null || $to === '')) {
             $from = $profile['valid_from'] ?? null;
             $to   = $profile['valid_to']   ?? null;
         }
@@ -1065,7 +1219,7 @@ final class DocumentController
     public static function listDocuments(int $accountId, string $parentType, int $parentId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT d.id, d.type, d.number, d.version, d.file_path, d.generated_at, d.signed,
+            'SELECT d.id, d.type, d.number, d.version, d.form_variant, d.file_path, d.generated_at, d.signed,
                     h.fullname AS handover_fullname, h.role_title AS handover_role,
                     h.place AS handover_place, h.signed_on AS handover_signed_on
              FROM   documents d
@@ -1081,6 +1235,9 @@ final class DocumentController
                 'type'          => $r['type'],
                 'number'        => $r['number'],
                 'version'       => (int) $r['version'],
+                // Block 2 / chapter 8.1 — „vyplneny" or „prazdny" for a test,
+                // null for every other document.
+                'form_variant'  => $r['form_variant'] ?? null,
                 'generated_at'  => $r['generated_at'],
                 'signed'        => (int) $r['signed'] === 1,
                 'download_url'  => '/api/documents/' . (int) $r['id'] . '/download',
@@ -1169,6 +1326,31 @@ final class DocumentController
         $payload['photos'] = $includePhotos
             ? self::buildPhotoAppendix($inspectionId, (string) $inspection['type'], $items)
             : [];
+        // Block 2 — a test re-rendered for a signature keeps the variant it
+        // was issued as (a blank form stays blank, chapter 8.1).
+        if (PersonList::isPersonType((string) $inspection['type'])) {
+            $variant = PersonList::isTestType((string) $inspection['type'])
+                ? PersonProtocol::currentVariant($accountId, $inspectionId)
+                : PersonList::VARIANT_FILLED;
+            // The Zhotoviteľ block as it was issued (frozen at issue time),
+            // never the account's current oprávnenie.
+            $payload += PersonProtocol::payload($accountId, $inspection, $items, $variant, true);
+            if ($variant === PersonList::VARIANT_BLANK) {
+                $payload['photos'] = [];
+            }
+        }
+        if ((string) $inspection['type'] === 'kniha_bozp') {
+            $frozen = $items[0]['fields'][\Firol\Support\ClientTerms::SNAPSHOT_KEY] ?? null;
+            $payload['client_terms'] = is_array($frozen)
+                ? $frozen
+                : \Firol\Support\ClientTerms::forProtocol(
+                    $accountId,
+                    (int) $inspection['company_id'],
+                    (int) $inspection['facility_id'],
+                    (string) $inspection['executed_on'],
+                    'kniha_bozp',
+                );
+        }
         if (AuditCatalog::isAuditType((string) $inspection['type'])) {
             $payload['audit'] = AuditProtocol::build(
                 (string) $inspection['type'],

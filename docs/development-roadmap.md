@@ -677,7 +677,7 @@ per finished block.
 |---|---|---|---|
 | 0 | Opravy chýb (Gmail, invalid token, spacebar) | A | ✅ |
 | 1 | Základ pre BOZP | 2, 5, 6, 9, 10, 12, 13 | ✅ |
-| 2 | BOZP úkony — 12 new types (audit_bozp came with block 3) | 5.3, 7, 8 | 🟡 |
+| 2 | BOZP úkony — 12 new types (audit_bozp came with block 3) | 5.3, 7, 8 | ✅ (awaiting client test) |
 | 3 | Audity | 15, 16, 17 | ✅ |
 | 4 | Denná práca — úlohy, sklad, Dnes, časová os, kalendár, fakturácia | 11, 18–22 | ⬜ |
 | 5 | Moduly a predplatné | 1, 3 | ⏸ later (user, 23. 9.) |
@@ -851,6 +851,109 @@ not only the latest.
 (block 3), sklad / úlohy / Dnes / časová os (block 4) and module subscriptions
 (block 5). The BOZP section and the výdajka rows on the potvrdenie are wired
 but empty until those land.
+
+## BOZP extension — block 2 „BOZP úkony" (POapp spec, september 2026) ✅
+
+Chapters **5.3, 7, 8** (plus their share of 12 and 26): the twelve BOZP úkony
+next to block 3's `audit_bozp`. Built on 23. 9. by three agents in parallel,
+one per Step 2 pattern. Migrations `041`–`042`; `039`–`040` stayed unused.
+
+**Shared pieces, built once:**
+- **Zistené nedostatky** (`Support/Defects.php`, `components/DefectsEditor.tsx`,
+  `Pdf/DefectsTable.php`). A defect lives in the item it concerns
+  (`fields.defects`: popis*, opatrenie, termín), and its photos hang off the
+  existing `defect_key`. Defects are numbered across the whole úkon, so the table
+  and the photo captions („Nedostatok č. N — …") always agree.
+- **`Pdf/ProtocolLayout.php`**: the mockup's fixed frame (header with the BOZP
+  tag, Základné informácie, legal sentence, Podpisy, footer). Every new
+  template uses it.
+- **`inspections.details`** (`Support/InspectionDetails.php`): úkon-level
+  fields (device, opatrenia, záver, druh oboznámenia), validated per type.
+- **Certificate rule:** every type in the BOZP section needs and prints the
+  performing technician's `cert_bt`. `skolenie_bozp` is the exception and is
+  signed under the company `vv`.
+- **Company certificates BTS / VV** (ch. 1.3.1, minimal): stored once per
+  account and entered by the main user in Nastavenia → Firemné oprávnenia.
+  They print in the „Zhotoviteľ" row. Blocking on expiry belongs to block 5.
+
+**Types:**
+- ✅ **Single record** (the požiarna kniha pattern): `kniha_bozp` (BOZP), with
+  the 11 activities from `checklist_kniha_bozp.json` and the client's
+  „Termíny a kontroly" table, frozen when the PDF is issued. Also
+  `pracovisko` (PRAC, 8 areas, each with its own result), `osamele_pracovisko`
+  (OSP) and `fajcenie` (ZF).
+- ✅ **Person lists:** `dychova_skuska` (DS) and `omamne_latky` (OPL), each
+  with „Vyplnený / Prázdny na ručné doplnenie" (ch. 8.1). The blank form is
+  version 1 of the number; „Doplniť výsledky" reopens the úkon, and the
+  filled form becomes the next version of the same number. Also
+  `skolenie_bozp` (SKB): an inspection type, not a training, because it needs
+  periodicity, visits, the calendar and handover. It never prints a tematický
+  plán, only the „odkaz na osnovu". People can be taken over from earlier
+  DS/OPL/SKB lists and from PO trainings of the same company (names and
+  positions only). Optional on-screen signatures are stored on the row.
+- ✅ **Rows / devices:** `oopp` (OOPP), `pracovne_prostriedky` (PP), `rebriky`
+  (REB), `regale` (REG) and `oznacenie` (OZN, 9 kinds from the mockup plus
+  custom ones). Rebríky and regály have „Uložiť a ďalší / Ďalší rovnaký /
+  Uložiť a prejsť na súhrn".
+
+Every type: required fields are checked in the form, on the server and again
+before the PDF. Recommended periodicity comes from the spec, and none is
+forced. Carry-over (ch. 12) keeps identification only (vyradené items stay
+behind, previous state is shown), and a carried-over úkon can't be issued
+until its results are entered. Step 1 now opens the summary when a
+„Prevziať položky" offer exists, for all types.
+
+**Choices where the spec was silent:**
+- The 9 druhy označenia come from the OZN mockup, since 05_DATA has none.
+- Pracovisko uses the mockup's longer area names.
+- PRAC and OSP rate the whole úkon „Vyhovujúci / s výhradami / Nevyhovujúci".
+- The DS/OPL device is entered at the top of Step 2.
+- There is no mockup for the blank OPL form, so it mirrors DS without the
+  value column.
+
+**Still open:**
+- ⬜ A browser click-through of the remaining forms. Kniha BOZP (through to
+  the PDF) and dychová skúška were clicked through; the other ten were tested
+  through the API and their PDFs.
+- ⬜ The Excel importer doesn't know the 12 types.
+- ⬜ External revízie in kniha BOZP's „Termíny a kontroly" wait for ch. 5.5
+  (`revizia_*` evidence).
+- ⬜ The photo caption shows no place or time per photo.
+- ⬜ Úlohy from a termín odstránenia belong to block 4.
+- ⏸ **„Zhotoviteľ" row (ch. 1.3.3) needs a decision.** The spec wants it on
+  every protocol, but the binding mockups show it on none of the BOZP ones,
+  and the PO protocols never had it. Only DS/OPL/SKB print it, because that's
+  where the company VV certificate has to appear.
+- ⬜ After the filled DS/OPL is issued, the blank form stays in
+  `document_versions` and on disk. It can't be downloaded in the app, though,
+  and the backup contains only the current version. The unsigned original of
+  a signed protocol behaves the same way.
+- ⬜ **The personal certificate isn't frozen on re-render (all types, older than
+  block 2).** Signing later rebuilds the PDF with the number currently in the
+  technician's profile. `inspections.effective_cert_number` is written at
+  issue but not used by the templates. The company VV/BTS numbers *are*
+  frozen (`details.issued_contractor`).
+- ⬜ Company certificates (`account_certificates`) are not in the backup
+  archive, and neither are inspector profiles.
+- ⬜ The DS/OPL header (device, test kit) carries over with „Opakovať" but not
+  with „Prevziať" or the person take-over.
+
+Fixed during review (23. 9.):
+- Adding people in a quick sequence lost input and created duplicates (the
+  name was cleared only after the server answered). It's now cleared
+  immediately, and adds go through a queue.
+- The periodicity picker now shows the whole ch. 5 set on every type (denne ·
+  týždenne · mesačne · 3 · 6 · 12 · 24 mesiacov), with the type's
+  recommendations first. It had shown only the recommended values, plus
+  „Vlastná" and „Bez opakovania".
+- The vyraďovací protokol still said „Za spoločnosť prevzal na vedomie". It
+  now uses the shared „Za organizáciu" signature block.
+- A re-render for a signature printed the *current* company VV number. The
+  number the protocol was issued with is now frozen on the úkon.
+- The blank DS/OPL form no longer gets a photo appendix, since its body has
+  no nedostatky.
+- A úkon reopened with „Doplniť výsledky" can't be signed until it is locked
+  again, so a signature is never put on a list that has changed since.
 
 ## BOZP extension — block 3 „Audity" (POapp spec, september 2026) ✅
 

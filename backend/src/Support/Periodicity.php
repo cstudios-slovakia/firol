@@ -49,6 +49,24 @@ final class Periodicity
         // is often followed by a second one in six months.
         'audit_bozp'         => [12],
         'audit_opp'          => [12],
+        // Block 2 — chapter 5.3 „Odporúčaná" (pracovisko and osamelé
+        // pracoviská offer 12 and 6 there). Fajčenie starts at „bez
+        // opakovania" but, like every type, accepts a period.
+        'kniha_bozp'         => [12, 6, 3],
+        'pracovisko'         => [12, 6],
+        'osamele_pracovisko' => [12, 6],
+        'fajcenie'           => [],
+        // Block 2 — typy_ukonov.json, `periodicita_predvolena`.
+        'oopp'                 => [12],
+        'pracovne_prostriedky' => [12],
+        'rebriky'              => [12],
+        'regale'               => [12],
+        'oznacenie'            => [12],
+        // „bez opakovania" by default — but a period stays settable, some
+        // firms test weekly and others once a year (chapter 5).
+        'dychova_skuska'       => [],
+        'omamne_latky'         => [],
+        'skolenie_bozp'        => [36, 24, 12],
     ];
 
     /**

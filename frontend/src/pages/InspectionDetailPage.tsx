@@ -27,6 +27,8 @@ import { Button } from '@/components/ui/Button';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 import { getTypeModule } from '@/inspection-types';
 import { AuditSummaryBlock } from '@/components/AuditSummaryBlock';
+import { PersonProtocolBlock } from '@/components/persons/PersonProtocolBlock';
+import { isPersonListType, type PersonListType } from '@/api/personList';
 import { clearDuplicateSeed } from '@/inspection-types/duplicateSeed';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { ItemPhotoStrip } from '@/components/ItemPhotos';
@@ -145,11 +147,18 @@ export function InspectionDetailPage() {
           ? { ...prev, inspection: res.inspection, items: res.items, carry_over: null }
           : prev,
       );
+      // A single-record úkon (požiarna kniha, block 2 BOZP records) carries
+      // one record whose results start blank — open it straight away, since
+      // filling those in is the only thing left to do.
+      const record = getTypeModule(res.inspection.type)?.singleItem === true ? res.items[0] : undefined;
       toast.success(
-        res.disposed_skipped > 0
-          ? `Položky prevzaté. ${disposedNotice(res.disposed_skipped)}`
-          : 'Položky z minulej kontroly prevzaté — stav zadaj nanovo.',
+        record
+          ? 'Záznam z minulej kontroly prevzatý — výsledok zadaj nanovo.'
+          : res.disposed_skipped > 0
+            ? `Položky prevzaté. ${disposedNotice(res.disposed_skipped)}`
+            : 'Položky z minulej kontroly prevzaté — stav zadaj nanovo.',
       );
+      if (record) navigate(`/inspections/${id}/items/${record.id}`);
     } catch (err) {
       setError(offlineMessage(err, 'Prevzatie položiek sa nepodarilo.'));
     } finally {
@@ -337,6 +346,9 @@ export function InspectionDetailPage() {
   // 109 checklist rows on the summary screen would be a page of scrolling
   // that tells the technician nothing (block 3 / chapter 15).
   const isAudit = isAuditType(i.type);
+  // Block 2 — a list of people is typed on its own screen and issued with
+  // the blank-form choice of chapter 8.1 (PersonProtocolBlock).
+  const isPersons = isPersonListType(i.type);
   const photoCount = items.reduce((n, it) => n + (it.photos?.length ?? 0), 0);
 
   return (
@@ -589,9 +601,10 @@ export function InspectionDetailPage() {
         <Card className="px-3 py-2 text-sm text-status-bad">{error}</Card>
       )}
 
-      {isDraft && items.length === 0 && data.carry_over && (
+      {isDraft && items.length === 0 && data.carry_over && !isPersons && (
         <CarryOverOfferCard
           offer={data.carry_over}
+          record={module?.singleItem === true}
           busy={carryingOver}
           onCarryOver={handleCarryOver}
         />
@@ -600,12 +613,16 @@ export function InspectionDetailPage() {
       {isAudit ? (
         <AuditSummaryBlock inspectionId={id} canEdit={isDraft} />
       ) : items.length === 0 ? (
-        <EmptyItems inspectionId={id} disabled={!isDraft} />
+        <EmptyItems
+          inspectionId={id}
+          disabled={!isDraft}
+          href={isPersons ? `/inspections/${id}/osoby` : undefined}
+        />
       ) : (
         <Card className="overflow-hidden">
           <div className="flex items-center justify-between gap-2 border-b border-ink-100 px-4 py-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-ink-500">
-              {i.type === 'poziarna_kniha' ? 'Záznamy' : 'Položky'}
+              {isPersons ? 'Osoby' : module?.singleItem ? 'Záznamy' : 'Položky'}
             </span>
             <span className="text-xs text-ink-500">spolu {items.length}</span>
           </div>
@@ -638,16 +655,32 @@ export function InspectionDetailPage() {
               Pre tento typ kontroly ešte nemáme zobrazenie položiek.
             </p>
           )}
-          {isDraft && !(i.type === 'poziarna_kniha' && items.length >= 1) && (
+          {isDraft && !(module?.singleItem && items.length >= 1) && (
             <Link
-              to={`/inspections/${id}/items/new`}
+              to={isPersons ? `/inspections/${id}/osoby` : `/inspections/${id}/items/new`}
               className="flex items-center justify-center gap-1.5 border-t border-ink-100 px-4 py-3 text-sm font-medium text-firol-600 transition-colors hover:bg-firol-50"
             >
               <Plus className="size-4" />
-              {i.type === 'poziarna_kniha' ? 'Pridať záznam' : 'Pridať položku'}
+              {isPersons ? 'Upraviť zoznam osôb' : module?.singleItem ? 'Pridať záznam' : 'Pridať položku'}
             </Link>
           )}
         </Card>
+      )}
+
+      {/* Úkon-level fields that belong to no single row — the opatrenia or
+          záver of a block 2 BOZP úkon. Hidden on a locked úkon when empty. */}
+      {module?.DetailsBlock && !isAudit && (
+        <module.DetailsBlock
+          inspectionId={id}
+          details={i.details ?? null}
+          canEdit={isDraft}
+          csrfToken={csrfToken}
+          onSaved={(details) =>
+            setData((prev) =>
+              prev ? { ...prev, inspection: { ...prev.inspection, details } } : prev,
+            )
+          }
+        />
       )}
 
       <FollowUpBlock
@@ -659,6 +692,25 @@ export function InspectionDetailPage() {
         onCreate={handleCreateFollowUp}
       />
 
+      {isPersons && (
+        <PersonProtocolBlock
+          type={i.type as PersonListType}
+          inspection={i}
+          items={items}
+          documents={documents}
+          csrfToken={csrfToken}
+          onChanged={async () => {
+            const [detail, docs] = await Promise.all([
+              Inspections.show(id),
+              Inspections.documents(id).catch(() => ({ items: [] as InspectionDocument[] })),
+            ]);
+            setData(detail);
+            setDocuments(docs.items);
+          }}
+        />
+      )}
+
+      {!(isPersons && documents.length === 0) && (
       <DocumentsBlock
         documents={documents}
         canGenerate={isDraft && items.length > 0 && !!i.executed_on}
@@ -669,7 +721,9 @@ export function InspectionDetailPage() {
         includePhotos={includePhotos}
         onIncludePhotosChange={setIncludePhotos}
         onSign={setSigningDocument}
+        canSign={!isDraft}
       />
+      )}
 
       {signingDocument && (
         <HandoverDialog
@@ -706,10 +760,13 @@ function disposedNotice(n: number): string {
  */
 function CarryOverOfferCard({
   offer,
+  record = false,
   busy,
   onCarryOver,
 }: {
   offer: NonNullable<InspectionDetail['carry_over']>;
+  /** Single-record úkon — the whole record travels, not a list of devices. */
+  record?: boolean;
   busy: boolean;
   onCarryOver: () => void;
 }) {
@@ -722,6 +779,17 @@ function CarryOverOfferCard({
         <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-white text-firol-600">
           <CopyPlus className="size-4" />
         </span>
+        {record ? (
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-ink-900">
+              Prevziať záznam z poslednej kontroly{when ? ` (${when})` : ''}?
+            </p>
+            <p className="mt-1 text-xs text-ink-600">
+              Prenesú sa prehliadnuté pracoviská, vykonané činnosti a kontrolované
+              oblasti. Výsledky, poznámky, nedostatky a fotky zadáš nanovo.
+            </p>
+          </div>
+        ) : (
         <div className="min-w-0">
           <p className="text-sm font-semibold text-ink-900">
             Prevziať položky z poslednej kontroly{when ? ` (${when})` : ''}?
@@ -734,6 +802,7 @@ function CarryOverOfferCard({
             {offer.disposed > 0 && ` ${disposedNotice(offer.disposed)}`}
           </p>
         </div>
+        )}
       </div>
       <Button
         type="button"
@@ -742,7 +811,7 @@ function CarryOverOfferCard({
         onClick={onCarryOver}
         leftIcon={<CopyPlus className="size-4" />}
       >
-        Prevziať položky
+        {record ? 'Prevziať záznam' : 'Prevziať položky'}
       </Button>
     </Card>
   );
@@ -882,6 +951,7 @@ function DocumentsBlock({
   includePhotos,
   onIncludePhotosChange,
   onSign,
+  canSign = true,
 }: {
   documents: InspectionDocument[];
   canGenerate: boolean;
@@ -892,6 +962,12 @@ function DocumentsBlock({
   includePhotos: boolean;
   onIncludePhotosChange: (value: boolean) => void;
   onSign: (doc: InspectionDocument) => void;
+  /**
+   * False while the úkon is open again with an issued protocol (a test
+   * printed blank whose results are being typed in, chapter 8.1): signing
+   * would re-render the document from a record that no longer matches it.
+   */
+  canSign?: boolean;
 }) {
   if (documents.length === 0) {
     return (
@@ -902,7 +978,7 @@ function DocumentsBlock({
         <h2 className="text-sm font-semibold text-ink-900">PDF protokol</h2>
         <p className="max-w-sm text-xs text-ink-500">
           {canGenerate
-            ? 'Po vygenerovaní sa kontrola uzamkne a dostane svoje číslo (napr. PHP-2026-001).'
+            ? 'Po vygenerovaní sa kontrola uzamkne a dostane svoje číslo protokolu.'
             : 'Pre vygenerovanie pridaj aspoň jednu položku a skontroluj dátum kontroly.'}
         </p>
         {photoCount > 0 && (
@@ -972,7 +1048,7 @@ function DocumentsBlock({
               </div>
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
-            <HandoverRow doc={doc} onSign={() => onSign(doc)} />
+            <HandoverRow doc={doc} canSign={canSign} onSign={() => onSign(doc)} />
             <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} />
           </li>
         ))}
@@ -991,9 +1067,11 @@ function DocumentsBlock({
 function HandoverRow({
   doc,
   onSign,
+  canSign,
 }: {
   doc: InspectionDocument;
   onSign: () => void;
+  canSign: boolean;
 }) {
   if (doc.handover) {
     return (
@@ -1011,11 +1089,15 @@ function HandoverRow({
   return (
     <div className="flex items-center justify-between gap-2 border-t border-ink-100 px-4 py-2.5">
       <p className="text-xs text-ink-500">
-        Nepodpísané — protokol sa dá odovzdať aj na podpis po vytlačení.
+        {canSign
+          ? 'Nepodpísané — protokol sa dá odovzdať aj na podpis po vytlačení.'
+          : 'Úkon je otvorený na doplnenie — podpísať sa dá, až keď bude znova uzamknutý.'}
       </p>
-      <Button type="button" size="sm" variant="secondary" onClick={onSign} leftIcon={<PenLine className="size-3.5" />}>
-        Dať podpísať
-      </Button>
+      {canSign && (
+        <Button type="button" size="sm" variant="secondary" onClick={onSign} leftIcon={<PenLine className="size-3.5" />}>
+          Dať podpísať
+        </Button>
+      )}
     </div>
   );
 }
@@ -1068,7 +1150,16 @@ function IncludePhotosToggle({
   );
 }
 
-function EmptyItems({ inspectionId, disabled }: { inspectionId: number; disabled: boolean }) {
+function EmptyItems({
+  inspectionId,
+  disabled,
+  href,
+}: {
+  inspectionId: number;
+  disabled: boolean;
+  /** Where adding starts — a person list (block 2) has its own screen. */
+  href?: string;
+}) {
   return (
     <Card className="flex flex-col items-center gap-3 px-6 py-10 text-center">
       <div className="grid size-12 place-items-center rounded-2xl bg-firol-50 text-firol-500">
@@ -1080,7 +1171,7 @@ function EmptyItems({ inspectionId, disabled }: { inspectionId: number; disabled
       </p>
       {!disabled && (
         <Link
-          to={`/inspections/${inspectionId}/items/new`}
+          to={href ?? `/inspections/${inspectionId}/items/new`}
           className="inline-flex h-11 items-center gap-1.5 rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
         >
           <Plus className="size-4" />

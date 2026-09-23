@@ -92,6 +92,10 @@ $router->patch('/api/account/users/{id}', [TeamController::class, 'update']);
 $router->delete('/api/account/users/{id}',[TeamController::class, 'destroy']);
 $router->post('/api/account/team-defaults', [TeamController::class, 'setDefault']);
 
+// Chapter 1.3.1 — firemné oprávnenia (BTS, výchova a vzdelávanie).
+$router->get('/api/account/certificates',   [\Firol\Controllers\AccountCertificateController::class, 'show']);
+$router->patch('/api/account/certificates', [\Firol\Controllers\AccountCertificateController::class, 'update']);
+
 $router->get('/api/account/invites',           [TeamController::class, 'indexInvites']);
 $router->delete('/api/account/invites/{id}',   [TeamController::class, 'cancelInvite']);
 
@@ -157,6 +161,12 @@ $router->delete('/api/inspections/{id}',            [InspectionController::class
 $router->post('/api/inspections/{id}/repeat',       [InspectionController::class, 'repeat']);
 // Chapter 12 — fill an empty draft from the previous inspection.
 $router->post('/api/inspections/{id}/carry-over',  [InspectionController::class, 'carryOver']);
+// Block 2 / chapters 7, 8, 8.1 — the person list of a test or an oboznámenie:
+// take names over from the company's earlier lists, and reopen a test printed
+// blank to type in the handwritten results.
+$router->get('/api/inspections/{id}/person-sources',     [\Firol\Controllers\PersonListController::class, 'sources']);
+$router->post('/api/inspections/{id}/persons/take-over', [\Firol\Controllers\PersonListController::class, 'takeOver']);
+$router->post('/api/inspections/{id}/fill-results',      [\Firol\Controllers\PersonListController::class, 'fillResults']);
 // "Upraviť" on a locked inspection — discards the issued protocol and puts
 // the inspection back into draft so it can be corrected.
 $router->post('/api/inspections/{id}/unlock',       [InspectionController::class, 'unlock']);

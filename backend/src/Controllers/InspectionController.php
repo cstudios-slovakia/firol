@@ -15,6 +15,7 @@ use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Storage\Storage;
 use Firol\Support\CarryOver;
+use Firol\Support\InspectionDetails;
 use Firol\Support\Periodicity;
 
 final class InspectionController
@@ -83,6 +84,15 @@ final class InspectionController
         // different is only its items, which are copied out of a checklist
         // (chapter 17) instead of typed one by one.
         'audit_bozp', 'audit_opp',
+        // Block 2 — single-record BOZP úkony (Firol\Support\BozpRecords).
+        'kniha_bozp', 'pracovisko', 'osamele_pracovisko', 'fajcenie',
+        // Block 2 — BOZP úkony whose rows are items (Firol\Support\BozpItems).
+        'oopp', 'pracovne_prostriedky', 'rebriky', 'regale', 'oznacenie',
+        // Block 2 — the „osoby" úkony: a list of people under a header
+        // (Firol\Support\PersonList). Oboznámenie BOZP is one of them rather
+        // than a training-tree record: it carries a periodicity, joins a visit,
+        // is signed „Za organizáciu" and shares its person list with the tests.
+        'dychova_skuska', 'omamne_latky', 'skolenie_bozp',
     ];
 
     /**
@@ -184,6 +194,9 @@ final class InspectionController
         $like = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
 
         $preferFacility = $field === 'location' && $facilityId !== null;
+        // Block 2 — „výber z prevádzky" for the workplaces of a BOZP record:
+        // only places already recorded on THIS prevádzka are offered.
+        $facilityOnly = $preferFacility && $req->query('facility_only') === '1';
 
         $sql = "SELECT $val AS val"
              . ($preferFacility ? ', MAX(i.facility_id = :fid) AS same_fac' : '')
@@ -194,7 +207,8 @@ final class InspectionController
                   AND  i.archived_at IS NULL
                   AND  $val IS NOT NULL
                   AND  $val <> ''
-                  AND  $valCi LIKE :like
+                  AND  $valCi LIKE :like"
+             . ($facilityOnly ? ' AND i.facility_id = :fid_only' : '') . "
                 GROUP  BY val
                 ORDER  BY " . ($preferFacility ? 'same_fac DESC, ' : '') . "uses DESC, val ASC
                 LIMIT  20";
@@ -202,6 +216,9 @@ final class InspectionController
         $params = ['acct' => $accountId, 'like' => $like];
         if ($preferFacility) {
             $params['fid'] = $facilityId;
+        }
+        if ($facilityOnly) {
+            $params['fid_only'] = $facilityId;
         }
 
         $stmt = Db::pdo()->prepare($sql);
@@ -503,6 +520,8 @@ final class InspectionController
         $inspectorUserId = $req->jsonInt('inspector_user_id') ?? $userId;
         $notes = $req->jsonString('notes');
         $visitId = $req->jsonInt('visit_id');
+        // Header data (inspections.details) — only for types that have one.
+        $details = self::readDetails($req, (string) $type);
 
         if ($type === null || !in_array($type, self::TYPES, true)) {
             Response::error('Invalid inspection type', 422);
@@ -636,6 +655,11 @@ final class InspectionController
                 in_array($type, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
             ]);
             $id = (int) $pdo->lastInsertId();
+
+            if ($details !== null) {
+                $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
+                    ->execute([InspectionDetails::encode($details), $id]);
+            }
 
             if ($auditKind !== null) {
                 AuditController::snapshotTemplate($id, (int) $auditTemplateId, (string) $auditScope);
@@ -779,6 +803,15 @@ final class InspectionController
                     notes       = COALESCE(?, notes)
              WHERE  id = ? AND account_id = ?'
         )->execute([$executedOn, $notes, $id, $scopeAccountId]);
+
+        // Header data replaces the whole object — a cleared field has to be
+        // expressible, so there is no field-by-field COALESCE here.
+        if (array_key_exists('details', $body)) {
+            $details = self::readDetails($req, (string) $row['type']);
+            Db::pdo()->prepare(
+                'UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?'
+            )->execute([InspectionDetails::encode($details), $id, $scopeAccountId]);
+        }
 
         $fresh = self::loadOrFail($scopeAccountId, $id);
         Response::json(['inspection' => self::shapeRow($fresh)]);
@@ -989,6 +1022,15 @@ final class InspectionController
                 $sourceId,
             ]);
             $newId = (int) $pdo->lastInsertId();
+
+            // The header travels in the same spirit as the items: what
+            // identifies (the device, the kind of oboznámenie) comes along,
+            // what was observed last time does not.
+            $carriedDetails = InspectionDetails::carry($type, InspectionDetails::decode($source['details'] ?? null));
+            if ($carriedDetails !== null) {
+                $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
+                    ->execute([InspectionDetails::encode($carriedDetails), $newId]);
+            }
 
             $insertItem = $pdo->prepare(
                 'INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)'
@@ -1211,6 +1253,26 @@ final class InspectionController
     }
 
     /**
+     * Read and validate the header data (`details`) off the request body.
+     * Null when absent; a 422 with a Slovak message when invalid or sent for
+     * a type that has no header.
+     *
+     * @return array<string, mixed>|null
+     */
+    private static function readDetails(Request $req, string $type): ?array
+    {
+        $body = $req->json();
+        if (!array_key_exists('details', $body) || $body['details'] === null) {
+            return null;
+        }
+        try {
+            return InspectionDetails::validate($type, $body['details']);
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422);
+        }
+    }
+
+    /**
      * Read and validate the periodicity pair off the request body, turning a
      * bad pair into a 422 with a Slovak message.
      *
@@ -1250,14 +1312,24 @@ final class InspectionController
 
         $has = static fn($v) => is_string($v) && trim($v) !== '';
 
-        // The audit BOZP is signed as a bezpečnostný technik, not as a technik
-        // PO — chapter 26, „číslo oprávnenia na protokole MUSÍ zodpovedať typu
-        // úkonu". There is no borrowing here: the oprávnenie is personal, and
-        // the audit says who looked at the building.
-        if ($type === 'audit_bozp') {
+        // Oboznámenie BOZP is signed under the account's own oprávnenie na
+        // výchovu a vzdelávanie (`vv`, chapter 5.3) — a company certificate,
+        // not a personal one — so nothing on the technician's profile is
+        // required to create it. Its presence is checked when the protocol is
+        // issued (DocumentController).
+        if ($type === 'skolenie_bozp') {
+            return;
+        }
+
+        // Every other BOZP úkon (the audit and the block 2 types) is signed as
+        // a bezpečnostný technik, not as a technik PO — chapter 26, „číslo
+        // oprávnenia na protokole MUSÍ zodpovedať typu úkonu". There is no
+        // borrowing here: the oprávnenie is personal, and the protocol says
+        // who did the work.
+        if (\Firol\Support\Sections::forInspectionType($type) === \Firol\Support\Sections::BOZP) {
             if (!$has($own['cert_bt'] ?? null)) {
                 Response::error(
-                    'Audit BOZP vyžaduje číslo oprávnenia bezpečnostného technika. Doplň ho v Profile technika.',
+                    'Tento úkon BOZP vyžaduje číslo oprávnenia bezpečnostného technika. Doplň ho v Profile technika.',
                     422,
                     ['code' => 'cert_missing', 'cert' => 'cert_bt'],
                 );
@@ -1308,7 +1380,7 @@ final class InspectionController
                        i.periodicity_value, i.periodicity_unit, i.periodicity_is_custom,
                        i.is_preventive_inspection, i.source_inspection_id,
                        i.carried_over_from_id, i.visit_id,
-                       i.executed_on, i.status, i.notes,
+                       i.executed_on, i.status, i.notes, i.details,
                        i.created_at, i.updated_at,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
                        i.facility_id, f.name AS facility_name,
@@ -1373,6 +1445,11 @@ final class InspectionController
         $row['source_inspection_id'] = isset($row['source_inspection_id'])
             ? (int) $row['source_inspection_id']
             : null;
+        // Header data (block 2). Only the detail endpoints select it; the list
+        // leaves it out, and the key is then absent rather than null.
+        if (array_key_exists('details', $row)) {
+            $row['details'] = InspectionDetails::decode($row['details']);
+        }
         unset($row['account_id']);
         return $row;
     }

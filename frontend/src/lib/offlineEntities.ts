@@ -421,7 +421,8 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
   const inspection = INSPECTION_RE.exec(pathOnly);
   if (inspection) {
     const id = Number(inspection[1]);
-    const keys = ['executed_on', 'notes', 'periodicity_value', 'periodicity_unit'];
+    // `details` — the úkon's header data (block 2, inspections.details).
+    const keys = ['executed_on', 'notes', 'periodicity_value', 'periodicity_unit', 'details'];
     return {
       label: 'Úprava kontroly',
       patches: [

@@ -74,6 +74,11 @@ final class PhotoCaption
                 self::hydrantType($fields),
                 self::str($fields, 'location'),
             ],
+            // Block 2 — a person-list row is identified by the person.
+            'dychova_skuska', 'omamne_latky', 'skolenie_bozp' => [
+                self::str($fields, 'name'),
+                self::str($fields, 'position'),
+            ],
             'pu_akcieschopnost', 'pu_udrzba' => [
                 self::puKind($fields),
                 self::str($fields, 'identifier'),
@@ -86,6 +91,30 @@ final class PhotoCaption
             ],
             'ts_hadic' => [
                 self::str($fields, 'hose_type'),
+                self::str($fields, 'location'),
+            ],
+            // Block 2 — BOZP rows (Firol\Support\BozpItems).
+            'rebriky' => [
+                self::str($fields, 'type'),
+                self::prefixed('inv. č. ', self::str($fields, 'inventory_number')),
+                self::str($fields, 'location'),
+            ],
+            'regale' => [
+                self::str($fields, 'label'),
+                self::str($fields, 'type'),
+                self::str($fields, 'location'),
+            ],
+            'pracovne_prostriedky' => [
+                self::str($fields, 'name'),
+                self::prefixed('inv. č. ', self::str($fields, 'inventory_number')),
+                self::str($fields, 'location'),
+            ],
+            'oopp' => [
+                self::str($fields, 'position'),
+                self::str($fields, 'equipment'),
+            ],
+            'oznacenie' => [
+                self::str($fields, 'kind'),
                 self::str($fields, 'location'),
             ],
             default => [],
@@ -105,6 +134,12 @@ final class PhotoCaption
             if ($defects !== '') {
                 return $defects;
             }
+        }
+        // BOZP rows record „zistené závady" under `faults` (`defects` is the
+        // numbered nedostatky list there).
+        $faults = self::str($fields, 'faults');
+        if ($faults !== '') {
+            return $faults;
         }
 
         return self::str($fields, 'notes');

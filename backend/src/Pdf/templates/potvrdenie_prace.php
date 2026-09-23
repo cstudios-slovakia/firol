@@ -37,16 +37,38 @@ $actLabels = [
   'pu_akcieschopnost'  => 'Kontrola akcieschopnosti požiarnych uzáverov',
   'pu_udrzba'          => 'Prevádzková údržba požiarnych uzáverov',
   'nudzove_osvetlenie' => 'Kontrola núdzového osvetlenia',
+  // Block 2 — single-record BOZP úkony.
+  'kniha_bozp'         => 'Kontrola stavu BOZP (kniha kontrol BOZP)',
+  'pracovisko'         => 'Kontrola pracoviska a pracovného prostredia',
+  'osamele_pracovisko' => 'Kontrola osamelých a odlúčených pracovísk',
+  'fajcenie'           => 'Kontrola dodržiavania zákazu fajčenia',
+  // Block 2 — the person-list úkony (typy_ukonov.json names).
+  'dychova_skuska'     => 'Dychová skúška na alkohol',
+  'omamne_latky'       => 'Kontrola omamných a psychotropných látok',
+  'skolenie_bozp'      => 'Oboznámenie zamestnancov v oblasti BOZP',
+  // Block 2 — BOZP úkony with a list of rows (Záznam o kontrole … titles).
+  'oopp'                 => 'Kontrola osobných ochranných pracovných prostriedkov',
+  'pracovne_prostriedky' => 'Kontrola pracovných prostriedkov',
+  'rebriky'              => 'Kontrola rebríkov',
+  'regale'               => 'Kontrola regálov',
+  'oznacenie'            => 'Kontrola bezpečnostného a zdravotného označenia',
 ];
 
 /** "12 prístrojov", "4 pracoviská" — the scope column of each line. */
 $scope = static function (string $type, int $n): string {
   [$one, $few, $many] = match ($type) {
     'poziarna_kniha' => ['záznam', 'záznamy', 'záznamov'],
+    'kniha_bozp', 'pracovisko', 'osamele_pracovisko', 'fajcenie' => ['záznam', 'záznamy', 'záznamov'],
+    'dychova_skuska', 'omamne_latky', 'skolenie_bozp' => ['osoba', 'osoby', 'osôb'],
     'hydranty'       => ['hydrant', 'hydranty', 'hydrantov'],
     'ts_hadic'       => ['hadica', 'hadice', 'hadíc'],
     'pu_akcieschopnost', 'pu_udrzba' => ['uzáver', 'uzávery', 'uzáverov'],
     'nudzove_osvetlenie' => ['svietidlo', 'svietidlá', 'svietidiel'],
+    'rebriky'        => ['rebrík', 'rebríky', 'rebríkov'],
+    'regale'         => ['regál', 'regály', 'regálov'],
+    'pracovne_prostriedky' => ['prostriedok', 'prostriedky', 'prostriedkov'],
+    'oopp'           => ['pracovná pozícia', 'pracovné pozície', 'pracovných pozícií'],
+    'oznacenie'      => ['druh označenia', 'druhy označenia', 'druhov označenia'],
     default          => ['prístroj', 'prístroje', 'prístrojov'],
   };
   return $n . ' ' . ($n === 1 ? $one : ($n < 5 ? $few : $many));

@@ -446,7 +446,7 @@ export function FacilityDetailPage() {
                             >
                                 Všetky
                             </button>
-                            {(["php", "hydranty", "oprava_ts_php", "poziarna_kniha", "pu_akcieschopnost", "pu_udrzba", "nudzove_osvetlenie", "ts_hadic", "vyradenie"] as InspectionType[])
+                            {(["php", "hydranty", "oprava_ts_php", "poziarna_kniha", "pu_akcieschopnost", "pu_udrzba", "nudzove_osvetlenie", "ts_hadic", "vyradenie", "kniha_bozp", "pracovisko", "osamele_pracovisko", "fajcenie", "oopp", "pracovne_prostriedky", "rebriky", "regale", "oznacenie", "dychova_skuska", "omamne_latky", "skolenie_bozp"] as InspectionType[])
                                 .filter((t) => inspections.some((i) => i.type === t))
                                 .map((t) => (
                                     <button

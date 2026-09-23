@@ -46,6 +46,8 @@ import {
     UsersRound,
 } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
+import { useIsMainUser } from "@/auth/useIsMainUser";
+import { BadgeCheck } from "lucide-react";
 import {
     LEGAL_PRIVACY_LABEL,
     LEGAL_PRIVACY_URL,
@@ -166,10 +168,28 @@ const ADMIN_MENU_ITEM = {
     bg: "bg-rose-50",
 } as const;
 
+// Chapter 1.3.1 — firemné oprávnenia (BTS, výchova a vzdelávanie) belong to
+// the account and are managed by its main user only, so the tab and the menu
+// entry are offered to the main user and to nobody else.
+const CERT_TAB = { to: "/settings/opravnenia", label: "Firemné oprávnenia", icon: BadgeCheck } as const;
+
+const CERT_MENU_ITEM = {
+    to: "/settings/opravnenia",
+    label: "Firemné oprávnenia",
+    description: "Bezpečnostnotechnická služba a výchova a vzdelávanie — raz pre celý účet.",
+    icon: BadgeCheck,
+    color: "text-blue-600",
+    bg: "bg-blue-50",
+} as const;
+
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
 export function SettingsLayout() {
     const { isAdmin } = useAuth();
+    const isMain = useIsMainUser();
+    const tabs = isMain
+        ? [...SECTION_TABS.slice(0, 1), CERT_TAB, ...SECTION_TABS.slice(1)]
+        : [...SECTION_TABS];
     const location = useLocation();
     const isIndex =
         location.pathname === "/settings" || location.pathname === "/settings/";
@@ -192,7 +212,7 @@ export function SettingsLayout() {
                     aria-label="Sekcie nastavení"
                     className="flex items-center gap-0.5 overflow-x-auto border-b border-ink-100 [&::-webkit-scrollbar]:hidden"
                 >
-                    {SECTION_TABS.map((tab) => (
+                    {tabs.map((tab) => (
                         <NavLink
                             key={tab.to}
                             to={tab.to}
@@ -272,7 +292,11 @@ export function SettingsIndexPage() {
         }
     }, [navigate]);
 
-    const items = isAdmin ? [...MENU_ITEMS, ADMIN_MENU_ITEM] : [...MENU_ITEMS];
+    const isMain = useIsMainUser();
+    const base = isMain
+        ? [...MENU_ITEMS.slice(0, 2), CERT_MENU_ITEM, ...MENU_ITEMS.slice(2)]
+        : [...MENU_ITEMS];
+    const items = isAdmin ? [...base, ADMIN_MENU_ITEM] : base;
 
     return (
         <div className="flex flex-col gap-2 sm:hidden">

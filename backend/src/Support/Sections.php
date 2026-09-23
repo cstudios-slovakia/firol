@@ -39,7 +39,14 @@ final class Sections
         ],
         // Block 3 opens the BOZP section with the audit. The thirteen BOZP
         // úkony of block 2 join it here.
-        self::BOZP    => ['audit_bozp'],
+        self::BOZP    => [
+            'audit_bozp',
+            // Block 2 — single-record úkony (Firol\Support\BozpRecords).
+            'kniha_bozp', 'pracovisko', 'osamele_pracovisko', 'fajcenie',
+            // Block 2 — chapter 5.3 order.
+            'oopp', 'pracovne_prostriedky', 'rebriky', 'regale', 'oznacenie',
+            'dychova_skuska', 'omamne_latky', 'skolenie_bozp',
+        ],
     ];
 
     /** Slovak label of each section, as it reads in the menu. */

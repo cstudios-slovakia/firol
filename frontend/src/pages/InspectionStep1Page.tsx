@@ -25,6 +25,7 @@ import {
   type PeriodicityUnit,
 } from '@/lib/periodicity';
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
+import { isPersonListType } from '@/api/personList';
 import { ApiError } from '@/lib/api';
 import { todayIso } from '@/lib/dates';
 import { inspectionCreateOptimistic } from '@/lib/offlineEntities';
@@ -42,6 +43,9 @@ const KNOWN_TYPES: InspectionType[] = [
   'php', 'hydranty', 'oprava_ts_php', 'poziarna_kniha',
   'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'ts_hadic',
   'vyradenie', 'audit_bozp', 'audit_opp',
+  'kniha_bozp', 'pracovisko', 'osamele_pracovisko', 'fajcenie',
+  'oopp', 'pracovne_prostriedky', 'rebriky', 'regale', 'oznacenie',
+  'dychova_skuska', 'omamne_latky', 'skolenie_bozp',
 ];
 
 function isInspectionType(s: string | undefined): s is InspectionType {
@@ -245,10 +249,19 @@ export function InspectionStep1Page() {
       toast.success(isAudit ? 'Audit vytvorený' : 'Kontrola vytvorená');
       // An audit skips the per-item form: its questions already exist, and what
       // follows is answering them on one screen.
+      // Chapter 12 — when last time's items can be carried over, the offer
+      // („Prevziať položky z poslednej kontroly") waits on the summary; going
+      // straight to an empty item form would walk the technician past it.
       navigate(
         isAudit
           ? `/inspections/${res.inspection.id}/audit`
-          : `/inspections/${res.inspection.id}/items/new`,
+          // Block 2 — a list of people is typed on one screen, row after
+          // row, with the takeover of names offered at its top.
+          : isPersonListType(type)
+            ? `/inspections/${res.inspection.id}/osoby`
+          : res.carry_over
+            ? `/inspections/${res.inspection.id}`
+            : `/inspections/${res.inspection.id}/items/new`,
         { replace: true },
       );
     } catch (err) {
@@ -616,6 +629,10 @@ function dateLabel(type: InspectionType): string {
       return 'Dátum kontroly';
     case 'audit_opp':
       return 'Dátum previerky';
+    case 'dychova_skuska':
+      return 'Dátum skúšky';
+    case 'skolenie_bozp':
+      return 'Dátum oboznámenia';
     default:
       return 'Dátum vykonania kontroly';
   }
@@ -640,6 +657,26 @@ function stepTwoCta(type: InspectionType): string {
     case 'audit_bozp':
     case 'audit_opp':
       return 'Pokračovať — vyplnenie auditu';
+    case 'kniha_bozp':
+    case 'pracovisko':
+    case 'osamele_pracovisko':
+    case 'fajcenie':
+      return 'Pokračovať — záznam kontroly';
+    case 'rebriky':
+      return 'Pokračovať — zadanie rebríkov';
+    case 'regale':
+      return 'Pokračovať — zadanie regálov';
+    case 'oopp':
+      return 'Pokračovať — zadanie pracovných pozícií';
+    case 'pracovne_prostriedky':
+      return 'Pokračovať — zadanie pracovných prostriedkov';
+    case 'oznacenie':
+      return 'Pokračovať — zadanie označenia';
+    case 'dychova_skuska':
+    case 'omamne_latky':
+      return 'Pokračovať — zoznam osôb';
+    case 'skolenie_bozp':
+      return 'Pokračovať — účastníci';
     case 'poziarna_kniha':
     default:
       return 'Pokračovať — záznam činností';

@@ -49,7 +49,17 @@ export const SECTION_INSPECTION_TYPES: Record<Section, InspectionType[]> = {
   ],
   // Block 3 opens the BOZP section with the audit; the thirteen BOZP úkony of
   // block 2 join it in the same list.
-  bozp: ['audit_bozp'],
+  bozp: [
+    'audit_bozp',
+    // Block 2 — single-record úkony (api/bozpRecords.ts).
+    'kniha_bozp', 'pracovisko', 'osamele_pracovisko', 'fajcenie',
+    // Block 2 — chapter 5.3 order.
+    'oopp', 'pracovne_prostriedky', 'rebriky', 'regale', 'oznacenie',
+    // Oboznámenie BOZP is an úkon of this list, not a training-tree record
+    // (it has a period, joins a visit and shares its person list with the
+    // tests), so the BOZP section needs no training tab.
+    'dychova_skuska', 'omamne_latky', 'skolenie_bozp',
+  ],
 };
 
 /**
@@ -63,8 +73,9 @@ export function sectionHasContent(section: Section): boolean {
 
 /**
  * Trainings live in their own table but belong to a section like anything
- * else. The six PO trainings and the Pokyn — žatevné práce are OPP; BOZP
- * oboznámenie arrives with block 2.
+ * else. The six PO trainings and the Pokyn — žatevné práce are OPP. BOZP
+ * oboznámenie (block 2) is the inspection type `skolenie_bozp` and is listed
+ * with the other BOZP úkony, so BOZP has no training tab.
  */
 export function sectionHasTrainings(section: Section): boolean {
   return section === 'opp';

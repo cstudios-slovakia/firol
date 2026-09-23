@@ -4,6 +4,7 @@ import {
   PHP_STATUS_LABELS,
   type InspectionType,
 } from '@/api/inspections';
+import { BOZP_RESULT_LABELS, OOPP_CONDITION_LABELS } from '@/api/bozpItems';
 import { cn } from '@/lib/cn';
 
 /**
@@ -30,7 +31,13 @@ function labelFor(type: InspectionType, code: string): string {
   if (type === 'php') {
     return PHP_STATUS_LABELS[code as keyof typeof PHP_STATUS_LABELS] ?? code;
   }
-  return PASS_FAIL_LABELS[code as keyof typeof PASS_FAIL_LABELS] ?? code;
+  // Block 2 — OOPP remembers its stav, rebríky / regály can be vyradené.
+  if (type === 'oopp') {
+    return OOPP_CONDITION_LABELS[code as keyof typeof OOPP_CONDITION_LABELS] ?? code;
+  }
+  return BOZP_RESULT_LABELS[code as keyof typeof BOZP_RESULT_LABELS]
+    ?? PASS_FAIL_LABELS[code as keyof typeof PASS_FAIL_LABELS]
+    ?? code;
 }
 
 export function PreviousStatusBadge({
