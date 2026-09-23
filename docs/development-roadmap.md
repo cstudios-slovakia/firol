@@ -708,6 +708,25 @@ nobody could reproduce it. What the user saw was always the literal
 and mail failures are already caught and answered in Slovak with their own log
 line; they never surfaced as a token error.
 
+**Follow-up (reported 21. 9.): the fix didn't reach a long-open tab.** An iPad
+got „Bezpečnostný token stránky vypršal" on every delete for four minutes. The
+`[auth-failure]` log named the cause — `session carries no csrf token yet`, i.e.
+the session had been renewed from the „remember me" cookie — and the access log
+showed no `/api/me` between retries: the tab was still running a build from
+before 16. 9., which has no re-sync. It recovered only once the app was loaded
+again. The browser only looks for a new build on a full page load, and a
+tablet or home-screen app can go days without one.
+
+- ✅ **An open tab now picks up new deploys.** `lib/pwa` asks for a new service
+  worker every hour and whenever the app returns to the foreground. An update
+  that arrives before the user has touched the page reloads straight away;
+  otherwise it is applied at the next screen change
+  (`ApplyUpdateOnNavigate`), so a half-filled form is never reloaded away.
+- ✅ **The message no longer says „try again".** Retrying from a stale build
+  fails identically every time (the log shows 12 attempts); it now asks the
+  user to load the app again. Being server-side, this reaches the old builds
+  still in the field too — they can't be fixed any other way.
+
 ---
 
 ## BOZP extension — block 1 „Základ" (POapp spec, september 2026) ✅
