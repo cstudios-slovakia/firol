@@ -409,6 +409,7 @@ if (!empty($trainer['certification_number'])) {
     <td class="bl">Školenie vykonal</td>
     <td colspan="3"><?= $trainerLine ?></td>
   </tr>
+  <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>
 
 <h2>Tematický plán školenia</h2>

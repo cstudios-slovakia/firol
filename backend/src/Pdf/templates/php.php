@@ -324,6 +324,7 @@ $statusLabels = ['A' => 'Akcieschopný', 'TS' => 'Tlaková skúška', 'O' => 'Vy
     <td class="bl">Kontrolu vykonal</td>
     <td class="bv"><?= $inspectorLine ?></td>
   </tr>
+  <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>
 
 <h2>Zoznam kontrolovaných hasiacich prístrojov</h2>

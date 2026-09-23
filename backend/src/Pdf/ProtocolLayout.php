@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Firol\Pdf;
 
+use Firol\Support\Contractor;
+
 /**
  * The fixed frame of a block-2 BOZP protocol — header, Základné informácie,
  * the legal sentence, Podpisy and the pätička — as laid out in the binding
@@ -31,6 +33,10 @@ namespace Firol\Pdf;
  * The Periodicita row is left out entirely when the úkon has none — the
  * protocol states the period it was issued under, and „bez opakovania" has
  * nothing to state (block 1, chapter 5).
+ *
+ * The Zhotoviteľ row (chapter 1.3.3, decision 23. 9. 2026) is on every
+ * protocol even though the binding mockup does not draw it. It is appended
+ * under the rows the mockup does show, and it does not move them.
  * ────────────────────────────────────────────────────────────────────────────
  */
 final class ProtocolLayout
@@ -157,6 +163,7 @@ CSS;
 
         $html .= '<tr><td class="bl">Prevádzka</td><td class="bv">' . $facilityCell . '</td>'
             . '<td class="bl">' . self::esc($performedLabel) . '</td><td class="bv">' . $this->inspectorCell() . '</td></tr>'
+            . Contractor::basicInfoRow(is_array($this->v['contractor'] ?? null) ? $this->v['contractor'] : [])
             . '</table>';
         return $html;
     }

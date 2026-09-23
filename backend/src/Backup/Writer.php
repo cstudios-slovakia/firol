@@ -187,6 +187,7 @@ final class Writer
                     i.is_preventive_inspection, i.executed_on,
                     i.status, i.notes, i.details, i.created_at,
                     i.effective_cert_number,
+                    i.effective_cert_valid_from, i.effective_cert_valid_to,
                     u.email  AS inspector_email,
                     eu.email AS effective_inspector_email
              FROM   inspections i

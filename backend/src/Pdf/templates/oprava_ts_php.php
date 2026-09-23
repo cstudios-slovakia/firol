@@ -138,6 +138,7 @@ $checklistItems = [
     <td class="bl">Vykonal</td>
     <td class="bv"><?= $inspectorLine ?></td>
   </tr>
+  <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>
 
 <div class="legal-box">Potvrdenie o vykonaní opravy a plnenia prenosného hasiaceho prístroja podľa § 7 ods. 4 vyhlášky Ministerstva vnútra Slovenskej republiky č. 347/2022 Z. z., ktorou sa ustanovujú vlastnosti, podmienky prevádzkovania a zabezpečenie pravidelnej kontroly prenosných hasiacich prístrojov.</div>

@@ -37,17 +37,7 @@ $duration = isset($details['duration_min']) && $details['duration_min'] !== null
     : null;
 $periodicity = $inspection['periodicity_label'] ?? null;
 $certificate = $contractor['certificate'] ?? null;
-
-$contractorCell = $e($contractor['name'] ?? '');
-if (!empty($contractor['ico'])) {
-    $contractorCell .= ', IČO ' . $e($contractor['ico']);
-}
-if (!empty($contractor['address'])) {
-    $contractorCell .= ', ' . $e($contractor['address']);
-}
-if (is_array($certificate)) {
-    $contractorCell .= '<br>' . $e($certificate['label']) . ': ' . $e($certificate['number']);
-}
+$contractorCell = \Firol\Support\Contractor::cellHtml(is_array($contractor ?? null) ? $contractor : []);
 
 // „Technik BOZP test | č. oprávnenia na výchovu a vzdelávanie: VVZ-0456/2021"
 $trainerCell = $e($inspector['fullname'] ?? '');

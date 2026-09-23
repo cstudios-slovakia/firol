@@ -384,8 +384,9 @@ final class Restorer
                  periodicity_value, periodicity_unit, periodicity_is_custom,
                  is_preventive_inspection, executed_on, inspector_user_id,
                  effective_inspector_user_id, effective_cert_number,
+                 effective_cert_valid_from, effective_cert_valid_to,
                  status, notes, details, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insertItem = $this->pdo->prepare(
             'INSERT INTO inspection_items (inspection_id, position, fields, created_at)
@@ -438,6 +439,8 @@ final class Restorer
                 $this->user($inspection, 'inspector_email') ?? $this->userId,
                 $this->user($inspection, 'effective_inspector_email'),
                 $this->str($inspection, 'effective_cert_number'),
+                $this->date($inspection, 'effective_cert_valid_from'),
+                $this->date($inspection, 'effective_cert_valid_to'),
                 $this->status($inspection),
                 $this->str($inspection, 'notes'),
                 // Header data of a block 2 úkon (inspections.details); absent in

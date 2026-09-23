@@ -897,7 +897,9 @@ final class InspectionController
                 'UPDATE inspections
                  SET    status = "draft",
                         effective_inspector_user_id = NULL,
-                        effective_cert_number       = NULL
+                        effective_cert_number       = NULL,
+                        effective_cert_valid_from   = NULL,
+                        effective_cert_valid_to     = NULL
                  WHERE  id = ? AND account_id = ?'
             )->execute([$id, $accountId]);
 
@@ -1448,7 +1450,11 @@ final class InspectionController
         // Header data (block 2). Only the detail endpoints select it; the list
         // leaves it out, and the key is then absent rather than null.
         if (array_key_exists('details', $row)) {
-            $row['details'] = InspectionDetails::decode($row['details']);
+            // issued_contractor is written by the server at issue time. The
+            // form edits the header, not that snapshot, so it is not returned.
+            $row['details'] = \Firol\Support\Contractor::visibleDetails(
+                InspectionDetails::decode($row['details']),
+            );
         }
         unset($row['account_id']);
         return $row;

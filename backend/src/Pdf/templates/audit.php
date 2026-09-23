@@ -357,6 +357,7 @@ $resultLabels = [
     <td class="bl"><?= $h($audit['performed_label']) ?></td>
     <td class="bv"><?= $inspectorLine ?></td>
   </tr>
+  <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>
 
 <div class="legal-box"><?= $h($audit['legal_sentence']) ?></div>

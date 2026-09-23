@@ -7,7 +7,7 @@ namespace Firol\Documents;
 use Firol\Db;
 use Firol\Storage\Storage;
 use Firol\Support\AccountCertificates;
-use Firol\Support\Address;
+use Firol\Support\Contractor;
 use Firol\Support\InspectionDetails;
 use Firol\Support\PersonList;
 
@@ -74,41 +74,19 @@ final class PersonProtocol
     /**
      * What the templates need beyond the standard payload.
      *
-     * `$issued` — re-rendering a protocol that was already issued (a signature
-     * added on screen): the Zhotoviteľ block is taken from the snapshot frozen
-     * at issue time ({@see freezeContractor()}), so a vv number changed or
-     * deleted in the settings since then does not rewrite a signed document.
+     * The Zhotoviteľ block itself is not built here. Every protocol gets it
+     * from {@see \Firol\Support\Contractor}, frozen at issue time, so a vv
+     * number changed in the settings does not rewrite a signed document.
      *
      * @param array<string, mixed>       $inspection
      * @param list<array<string, mixed>> $items
      * @return array<string, mixed>
      */
-    public static function payload(int $accountId, array $inspection, array $items, string $variant, bool $issued = false): array
+    public static function payload(array $inspection, array $items, string $variant): array
     {
         $type = (string) $inspection['type'];
         $details = InspectionDetails::decode($inspection['details'] ?? null) ?? [];
-
-        $frozen = $details[self::CONTRACTOR_SNAPSHOT_KEY] ?? null;
         unset($details[self::CONTRACTOR_SNAPSHOT_KEY]);
-
-        $acc = Db::pdo()->prepare(
-            'SELECT invoice_company_name, invoice_ico, invoice_street, invoice_postal_code, invoice_city
-             FROM   accounts WHERE id = ?'
-        );
-        $acc->execute([$accountId]);
-        $a = $acc->fetch() ?: [];
-
-        $certificate = null;
-        if ($type === PersonList::SKOLENIE_BOZP) {
-            $vv = AccountCertificates::get($accountId, 'vv');
-            if ($vv !== null) {
-                $certificate = [
-                    'label'        => AccountCertificates::PROTOCOL_LABELS['vv'],
-                    'number_label' => AccountCertificates::NUMBER_LABELS['vv'],
-                    'number'       => $vv['number'],
-                ];
-            }
-        }
 
         // Earliest time of the day on the list — „Dátum a čas: 12. 8. 2026,
         // 06:15" in the mockup. Never the time the PDF was made.
@@ -129,22 +107,7 @@ final class PersonProtocol
                 'first_time'   => $variant === PersonList::VARIANT_FILLED ? ($times[0] ?? null) : null,
                 'kind_label'   => $type === PersonList::SKOLENIE_BOZP ? PersonList::trainingKindLabel($details) : null,
             ],
-            // Chapter 1.3.3 — „Zhotoviteľ: názov firmy, IČO, adresa + firemné
-            // oprávnenie, ak ho typ úkonu vyžaduje".
-            'contractor' => [
-                'name'        => (string) ($a['invoice_company_name'] ?? ''),
-                'ico'         => $a['invoice_ico'] ?? null,
-                'address'     => Address::format(
-                    $a['invoice_street'] ?? null,
-                    $a['invoice_postal_code'] ?? null,
-                    $a['invoice_city'] ?? null,
-                ),
-                'certificate' => $certificate,
-            ],
         ];
-        if ($issued && is_array($frozen)) {
-            $out['contractor'] = $frozen;
-        }
         return $out;
     }
 
@@ -154,23 +117,7 @@ final class PersonProtocol
      * header validator (PersonList::validateDetails) drops it from any PATCH,
      * so editing a reopened úkon clears it and the next issue writes it anew.
      */
-    public const CONTRACTOR_SNAPSHOT_KEY = 'issued_contractor';
-
-    /**
-     * Freeze the Zhotoviteľ block (firm, IČO, address and the company
-     * oprávnenie — vv on an oboznámenie) onto the úkon at the moment its
-     * protocol is issued. Same idea as the kniha BOZP client-terms snapshot.
-     *
-     * @param array<string, mixed> $inspection row incl. `details`
-     * @param array<string, mixed> $contractor the block the protocol prints
-     */
-    public static function freezeContractor(int $inspectionId, array $inspection, array $contractor): void
-    {
-        $details = InspectionDetails::decode($inspection['details'] ?? null) ?? [];
-        $details[self::CONTRACTOR_SNAPSHOT_KEY] = $contractor;
-        Db::pdo()->prepare('UPDATE inspections SET details = ? WHERE id = ?')
-            ->execute([InspectionDetails::encode($details), $inspectionId]);
-    }
+    public const CONTRACTOR_SNAPSHOT_KEY = Contractor::SNAPSHOT_KEY;
 
     /**
      * The blank form already issued for this test, when the filled record is

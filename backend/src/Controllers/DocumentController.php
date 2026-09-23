@@ -21,6 +21,7 @@ use Firol\Mail\Templates\DocumentEmail;
 use Firol\Pdf\PdfRenderer;
 use Firol\Storage\Storage;
 use Firol\Support\Address;
+use Firol\Support\Contractor;
 use Firol\Support\Handover;
 use Firol\Support\Periodicity;
 use Firol\Support\PhotoCaption;
@@ -200,16 +201,12 @@ final class DocumentController
         $stats   = $payload['stats'];
 
         if ($isPersons) {
-            $payload += PersonProtocol::payload($accountId, $inspection, $items, $formVariant);
+            $payload += PersonProtocol::payload($inspection, $items, $formVariant);
             if ($reuse !== null) {
                 // The client may have signed the blank form on the screen; the
                 // next version of the same protocol keeps that handover.
                 $payload['handover'] = PersonProtocol::handoverFor($reuse['id']);
             }
-            // Freeze the Zhotoviteľ block — the firm and its oprávnenie (vv)
-            // as printed now — so a later re-render (a signature on screen)
-            // prints what was issued, not what the settings say by then.
-            PersonProtocol::freezeContractor($inspectionId, $inspection, $payload['contractor']);
         }
 
         // Kniha kontrol BOZP prints the client's own „Termíny a kontroly" —
@@ -317,17 +314,24 @@ final class DocumentController
             }
 
             // Freeze the inspector identity + cert that ended up on the
-            // PDF, so admin/list views show the borrowed cert exactly as
-            // printed even if the default technician changes later.
+            // PDF, so a later re-render (a signature on screen) prints the
+            // number and validity from issue time, not the profile as it
+            // reads by then. The firm in the Zhotoviteľ row is frozen the
+            // same way, onto inspections.details.
+            Contractor::freezeInspection($inspectionId, $inspection, $payload['contractor']);
             $pdo->prepare(
                 'UPDATE inspections
                  SET    status = "finalized",
                         effective_inspector_user_id = ?,
-                        effective_cert_number       = ?
+                        effective_cert_number       = ?,
+                        effective_cert_valid_from   = ?,
+                        effective_cert_valid_to     = ?
                  WHERE  id = ? AND account_id = ?'
             )->execute([
                 $payload['_effective_inspector_user_id'] ?? null,
                 $payload['_effective_cert_number']       ?? null,
+                $payload['_effective_cert_valid_from']   ?? null,
+                $payload['_effective_cert_valid_to']     ?? null,
                 $inspectionId,
                 $accountId,
             ]);
@@ -554,6 +558,10 @@ final class DocumentController
                  VALUES (?, 1, ?)'
             )->execute([$documentId, $relPath]);
 
+            // The firm printed in the Zhotoviteľ row, kept beside the pokyn
+            // text (or on its own, for an attendance školenie). A re-render
+            // reads it back instead of the account as it stands by then.
+            Contractor::freezeTraining($trainingId, $training['fields'] ?? null, $payload['contractor']);
             $pdo->prepare(
                 'UPDATE trainings SET status = "finalized" WHERE id = ? AND account_id = ?'
             )->execute([$trainingId, $accountId]);
@@ -647,6 +655,8 @@ final class DocumentController
                        i.periodicity_value, i.periodicity_unit,
                        i.audit_scope,
                        i.notes, i.details, i.inspector_user_id, i.source_inspection_id,
+                       i.effective_inspector_user_id, i.effective_cert_number,
+                       i.effective_cert_valid_from, i.effective_cert_valid_to,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
                        c.approver AS company_approver,
@@ -894,9 +904,13 @@ final class DocumentController
         $stats = self::computeStats((string) $inspection['type'], $items);
 
         $certNumber = self::certForType($insType, $profile);
+        $validity   = self::validityForType($insType, $profile);
 
         return [
             'brand' => self::buildBrand($accRow),
+            // Chapter 1.3.3 — the technician's firm. Re-render replaces this
+            // with the copy frozen at issue time.
+            'contractor' => Contractor::live($accountId, $insType),
             'inspection' => [
                 'executed_on'        => $inspection['executed_on'],
                 'periodicity_label'  => $inspection['periodicity_value'] !== null
@@ -907,8 +921,11 @@ final class DocumentController
                     : null,
                 'notes'              => $inspection['notes'],
                 // Úkon-level header data (migration 042) — e.g. the opatrenia
-                // or záver of a block 2 BOZP úkon. Null for types without any.
-                'details'            => \Firol\Support\InspectionDetails::decode($inspection['details'] ?? null),
+                // or záver of a block 2 BOZP úkon. The issued_contractor
+                // snapshot stays on the row and is not part of this copy.
+                'details'            => Contractor::visibleDetails(
+                    \Firol\Support\InspectionDetails::decode($inspection['details'] ?? null),
+                ),
                 'status'             => $inspection['status'],
                 'source_number'      => $inspection['source_number'] ?? null,
             ],
@@ -930,7 +947,7 @@ final class DocumentController
             'inspector' => [
                 'fullname'             => $userRow['fullname'] ?? '—',
                 'certification_number' => $certNumber,
-                ...self::validityForType($insType, $profile),
+                ...$validity,
                 'signature_data_uri'   => $signatureUri,
             ],
             'items' => $items,
@@ -943,6 +960,8 @@ final class DocumentController
             // row, never reaches the PDF templates.
             '_effective_inspector_user_id' => $effectiveUserId,
             '_effective_cert_number'       => $certNumber,
+            '_effective_cert_valid_from'   => $validity['valid_from'],
+            '_effective_cert_valid_to'     => $validity['valid_to'],
         ];
     }
 
@@ -1303,6 +1322,54 @@ final class DocumentController
     }
 
     /**
+     * Certificate number and validity as printed when the protocol was issued.
+     *
+     * `buildPayload()` reads the technician's profile live, which is right
+     * for a first issue and wrong for a re-render: a number edited afterwards
+     * would land on a new version of a document that already has one. The
+     * columns written at issue (migrations 017 and 043) are what version 2
+     * prints. A protocol issued before those columns were filled in has
+     * nothing frozen, and keeps the live profile.
+     *
+     * @param array<string, mixed> $payload
+     * @param array<string, mixed> $inspection
+     */
+    private static function applyIssuedInspector(array &$payload, int $accountId, array $inspection): void
+    {
+        $userId = isset($inspection['effective_inspector_user_id']) && $inspection['effective_inspector_user_id'] !== null
+            ? (int) $inspection['effective_inspector_user_id']
+            : 0;
+        $number = $inspection['effective_cert_number'] ?? null;
+        $validFrom = $inspection['effective_cert_valid_from'] ?? null;
+        $validTo = $inspection['effective_cert_valid_to'] ?? null;
+        if ($userId === 0 && $number === null && $validFrom === null && $validTo === null) {
+            return;
+        }
+
+        if ($userId > 0) {
+            $stmt = Db::pdo()->prepare(
+                'SELECT u.fullname, ip.signature_path
+                 FROM   users u
+                 LEFT   JOIN inspector_profiles ip
+                        ON ip.user_id = u.id AND ip.account_id = ?
+                 WHERE  u.id = ?'
+            );
+            $stmt->execute([$accountId, $userId]);
+            $row = $stmt->fetch() ?: [];
+            if (!empty($row['fullname'])) {
+                $payload['inspector']['fullname'] = (string) $row['fullname'];
+            }
+            $payload['inspector']['signature_data_uri'] = self::signatureToDataUri(
+                isset($row['signature_path']) && is_string($row['signature_path']) ? $row['signature_path'] : null,
+            );
+        }
+
+        $payload['inspector']['certification_number'] = is_string($number) && $number !== '' ? $number : null;
+        $payload['inspector']['valid_from'] = is_string($validFrom) && $validFrom !== '' ? $validFrom : null;
+        $payload['inspector']['valid_to'] = is_string($validTo) && $validTo !== '' ? $validTo : null;
+    }
+
+    /**
      * The renderer payload of an existing inspection protocol, rebuilt from
      * the record. Used when a protocol is re-rendered with a signature — the
      * inspection is locked at that point, so the result is byte-for-byte the
@@ -1323,6 +1390,14 @@ final class DocumentController
             $inspection,
             $items,
         );
+        // What was printed at issue, not the profile or the firm as they
+        // stand now. Protocols issued before either snapshot existed keep
+        // the live value — there is nothing frozen to put back.
+        self::applyIssuedInspector($payload, $accountId, $inspection);
+        $frozenContractor = Contractor::frozenFromInspection($inspection);
+        if ($frozenContractor !== null) {
+            $payload['contractor'] = Contractor::forDocument($accountId, (string) $inspection['type'], $frozenContractor);
+        }
         $payload['photos'] = $includePhotos
             ? self::buildPhotoAppendix($inspectionId, (string) $inspection['type'], $items)
             : [];
@@ -1332,9 +1407,7 @@ final class DocumentController
             $variant = PersonList::isTestType((string) $inspection['type'])
                 ? PersonProtocol::currentVariant($accountId, $inspectionId)
                 : PersonList::VARIANT_FILLED;
-            // The Zhotoviteľ block as it was issued (frozen at issue time),
-            // never the account's current oprávnenie.
-            $payload += PersonProtocol::payload($accountId, $inspection, $items, $variant, true);
+            $payload += PersonProtocol::payload($inspection, $items, $variant);
             if ($variant === PersonList::VARIANT_BLANK) {
                 $payload['photos'] = [];
             }
@@ -1497,9 +1570,15 @@ final class DocumentController
         }, $trainees);
 
         $type = (string) $training['type'];
+        $contractor = Contractor::forDocument(
+            $accountId,
+            $type,
+            Contractor::frozenFromJson($training['fields'] ?? null),
+        );
 
         return [
             'brand' => self::buildBrand($accRow),
+            'contractor' => $contractor,
             'training' => [
                 'type'                => $type,
                 'training_type_label' => self::TRAINING_TYPE_LABELS[$type] ?? $type,

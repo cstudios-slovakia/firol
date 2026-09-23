@@ -920,19 +920,25 @@ until its results are entered. Step 1 now opens the summary when a
   (`revizia_*` evidence).
 - ⬜ The photo caption shows no place or time per photo.
 - ⬜ Úlohy from a termín odstránenia belong to block 4.
-- ⏸ **„Zhotoviteľ" row (ch. 1.3.3) needs a decision.** The spec wants it on
-  every protocol, but the binding mockups show it on none of the BOZP ones,
-  and the PO protocols never had it. Only DS/OPL/SKB print it, because that's
-  where the company VV certificate has to appear.
+- ✅ **„Zhotoviteľ" row (ch. 1.3.3) is on every protocol** (decision 23. 9. 2026).
+  The technician's firm — account name, IČO, address — is printed in
+  Základné informácie. The mockup rows around it are unchanged. Only
+  `skolenie_bozp` adds the company line „oprávnenie na výchovu a vzdelávanie".
+  The block is frozen at issue (`inspections.details.issued_contractor`, or
+  `trainings.fields` for a školenie / pokyn), so a later signature re-renders
+  the firm that was printed, not the account as it stands by then. A missing
+  IČO or address is left out and does not block issuing. Potvrdenie o vykonaní
+  práce already names the firm in its header and was left as it is.
 - ⬜ After the filled DS/OPL is issued, the blank form stays in
   `document_versions` and on disk. It can't be downloaded in the app, though,
   and the backup contains only the current version. The unsigned original of
   a signed protocol behaves the same way.
-- ⬜ **The personal certificate isn't frozen on re-render (all types, older than
-  block 2).** Signing later rebuilds the PDF with the number currently in the
-  technician's profile. `inspections.effective_cert_number` is written at
-  issue but not used by the templates. The company VV/BTS numbers *are*
-  frozen (`details.issued_contractor`).
+- ✅ **The personal certificate is frozen on re-render** (migration `043`).
+  Signing later rebuilds the PDF with the number and validity printed at
+  issue (`effective_cert_number`, `effective_cert_valid_from`,
+  `effective_cert_valid_to`), not the ones currently in the technician's
+  profile. A protocol issued before the snapshot existed still reads the
+  profile, because there is nothing frozen to put back.
 - ⬜ Company certificates (`account_certificates`) are not in the backup
   archive, and neither are inspector profiles.
 - ⬜ The DS/OPL header (device, test kit) carries over with „Opakovať" but not

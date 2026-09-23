@@ -92,13 +92,7 @@ if ($isAlcohol) {
     $idValue = implode(' / ', array_filter([(string) ($details['batch'] ?? ''), $expiry], static fn ($v) => $v !== ''));
 }
 
-$contractorCell = $e($contractor['name'] ?? '');
-if (!empty($contractor['ico'])) {
-    $contractorCell .= ', IČO ' . $e($contractor['ico']);
-}
-if (!empty($contractor['address'])) {
-    $contractorCell .= ', ' . $e($contractor['address']);
-}
+$contractorCell = \Firol\Support\Contractor::cellHtml(is_array($contractor ?? null) ? $contractor : []);
 
 $periodicity = $inspection['periodicity_label'] ?? null;
 $measures = trim((string) ($details['measures'] ?? ''));

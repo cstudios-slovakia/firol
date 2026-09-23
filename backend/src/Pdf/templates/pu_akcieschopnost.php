@@ -140,6 +140,7 @@ foreach ($items as $idx => $it) {
     <td class="bl">Kontrolu vykonal</td>
     <td class="bv"><?= $inspectorLine ?></td>
   </tr>
+  <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>
 
 <h2>Zoznam kontrolovaných požiarnych uzáverov</h2>

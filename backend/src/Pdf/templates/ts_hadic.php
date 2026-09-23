@@ -336,6 +336,7 @@ foreach ($items as $idx => $it) {
     <td class="bl">Skúšku vykonal</td>
     <td class="bv"><?= $inspectorLine ?></td>
   </tr>
+  <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>
 
 <h2>Zoznam skúšaných hadíc</h2>

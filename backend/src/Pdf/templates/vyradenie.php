@@ -288,6 +288,7 @@ $approver = trim((string) ($company['approver'] ?? ''));
     <td class="bv"><?= $h($inspection['source_number']) ?></td>
     <?php endif ?>
   </tr>
+  <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>
 
 <h2>Oznámenie o vyradení</h2>

@@ -387,6 +387,7 @@ $contactLine = $facility['contact_person'] ?? '';
     <td class="bl">Záznam vykonal</td>
     <td class="bv"><?= $inspectorLine ?></td>
   </tr>
+  <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>
 
 <?php if ($isPreventive): ?>
