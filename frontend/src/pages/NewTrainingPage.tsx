@@ -15,6 +15,7 @@ import {
   type TrainingType,
 } from '@/api/trainings';
 import { ApiError } from '@/lib/api';
+import { todayIso } from '@/lib/dates';
 import { trainingCreateOptimistic } from '@/lib/offlineEntities';
 import { defaultPokynSections } from '@/lib/pokynZatvaTemplate';
 import { useToast } from '@/lib/toast';
@@ -45,7 +46,7 @@ export function NewTrainingPage() {
   const [companyId, setCompanyId] = useState<number | null>(presetCompanyId);
   const [facilityId, setFacilityId] = useState<number | null>(presetFacilityId);
   const [trainerId, setTrainerId] = useState<number | null>(null);
-  const [date, setDate] = useState('');
+  const [date, setDate] = useState(todayIso);
 
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ company?: string; date?: string }>({});
@@ -332,7 +333,7 @@ export function NewTrainingPage() {
           <Field
             label={pokyn ? 'Dátum vydania pokynu' : 'Dátum školenia'}
             required
-            hint={fieldErrors.date ? undefined : 'Zadaj manuálne, nemusí byť dnešný dátum.'}
+            hint={fieldErrors.date ? undefined : 'Predvyplnený je dnešný dátum, môžeš ho zmeniť aj na minulý.'}
             error={fieldErrors.date}
           >
             {(p) => (

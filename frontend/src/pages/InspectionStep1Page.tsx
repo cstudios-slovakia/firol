@@ -26,6 +26,7 @@ import {
 } from '@/lib/periodicity';
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { ApiError } from '@/lib/api';
+import { todayIso } from '@/lib/dates';
 import { inspectionCreateOptimistic } from '@/lib/offlineEntities';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -69,7 +70,7 @@ export function InspectionStep1Page() {
   // Inside a visit (chapter 9) the company, prevádzka and date were chosen
   // once at the start — skipping that repetition is the whole point of it.
   const visitId = numericParam(searchParams.get('visit_id'));
-  const presetDate = searchParams.get('executed_on') ?? '';
+  const presetDate = searchParams.get('executed_on') || todayIso();
 
   const [companies, setCompanies] = useState<CompanyListItem[] | null>(null);
   const [facilities, setFacilities] = useState<FacilityListItem[]>([]);
@@ -396,7 +397,7 @@ export function InspectionStep1Page() {
           <Field
             label={dateLabel(type)}
             required
-            hint={fieldErrors.date ? undefined : 'Zadaj manuálne, nemusí byť dnešný dátum.'}
+            hint={fieldErrors.date ? undefined : 'Predvyplnený je dnešný dátum, môžeš ho zmeniť aj na minulý.'}
             error={fieldErrors.date}
           >
             {(p) => (

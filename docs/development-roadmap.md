@@ -664,11 +664,34 @@ created + swept by `deploy.yml`. `Storage::ensureDir` now `chmod`s after
 was there for — whichever of php-fpm/CLI created a directory first would
 otherwise lock the other one out.
 
-## BOZP extension — block 0 „Opravy chýb" (POapp spec, september 2026) 🟡
+## BOZP extension — overview (POapp spec, september 2026)
+
+Package: `POapp_BOZP_pre_vyvojarov11/` (gitignored). The binding spec is
+`01_SPECIFIKACIA/POapp_specifikacia.md`, data comes from `05_DATA/*.json`, and
+protocol layouts from `02_NAHLADY/bozp_protokoly.html`. The rules in
+`POKYNY_PRE_AI.md` apply throughout. Development happens on
+`fixes-and-new-features-september-2026`, which is merged into `main` (= deploy)
+per finished block.
+
+| Block | Content | Chapters | Status |
+|---|---|---|---|
+| 0 | Opravy chýb (Gmail, invalid token, spacebar) | A | ✅ |
+| 1 | Základ pre BOZP | 2, 5, 6, 9, 10, 12, 13 | ✅ |
+| 2 | BOZP úkony — 12 new types (audit_bozp came with block 3) | 5.3, 7, 8 | 🟡 |
+| 3 | Audity | 15, 16, 17 | ✅ |
+| 4 | Denná práca — úlohy, sklad, Dnes, časová os, kalendár, fakturácia | 11, 18–22 | ⬜ |
+| 5 | Moduly a predplatné | 1, 3 | ⏸ later (user, 23. 9.) |
+| 6 | Web — new poapp.sk | separate file | ⬜ |
+
+---
+
+## BOZP extension — block 0 „Opravy chýb" (POapp spec, september 2026) ✅
 
 Bug fixes from chapter **A** of the POapp spec (`POapp_BOZP_pre_vyvojarov11/`),
 to be finished before any BOZP feature work. A.1 was closed earlier by the mail
-deliverability work; **A.3 (spacebar closing the search field) is still open.**
+deliverability work. A.3 (spacebar closing the search field) was fixed in
+`81a8ef5`: the search input's keydown no longer bubbles to the listbox handler
+in `components/ui/Select.tsx`.
 
 ### A.2 — „invalid token" ✅
 
@@ -811,8 +834,12 @@ Migrations `035`–`037`.
   Prevzal na vedomie elsewhere. Centralised in `Firol\Support\Handover` +
   `Firol\Pdf\SignatureBlock`, because nine templates had each spelled it out
   and had already drifted apart.
-- ✅ **Ch. 6** — the three-step flow already matched the spec; the date still
-  is never auto-filled, and an interrupted zápis stays a koncept.
+- ✅ **Ch. 6** — the three-step flow already matched the spec, and an
+  interrupted zápis stays a koncept. **The date is prefilled with today** (user
+  decision 23. 9., following the spec over the old „never auto-fill" rule). It
+  stays editable, including to past dates, in Step 1 and on a new training.
+  Repeat and follow-up drafts still start with no date, so the technician has
+  to confirm it before the PDF.
 
 Carried through the rest of the codebase: the Excel importer accepts a period
 in any unit (blank count = bez opakovania, blank unit = mesiac); backup
