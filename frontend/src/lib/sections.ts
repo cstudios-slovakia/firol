@@ -40,6 +40,15 @@ export const SECTION_COLORS: Record<Section, string> = {
   bozp: '#3D7FC1',
 };
 
+/**
+ * Colour of the trainings inside a section. A section's kontroly wear its own
+ * colour; the trainings next to them wear this one, so the switcher, the
+ * „Nové školenie" button and the training list read as the other half of the
+ * section at a glance. Deliberately none of the three odbor colours — a
+ * training is not a section of its own.
+ */
+export const TRAINING_COLOR = '#7A5AC8';
+
 /** Inspection types in each section. */
 export const SECTION_INSPECTION_TYPES: Record<Section, InspectionType[]> = {
   revizie: ['php', 'oprava_ts_php', 'vyradenie', 'hydranty', 'ts_hadic'],
@@ -52,7 +61,7 @@ export const SECTION_INSPECTION_TYPES: Record<Section, InspectionType[]> = {
     'oopp', 'pracovne_prostriedky', 'rebriky', 'regale', 'oznacenie',
     // Oboznámenie BOZP is an úkon of this list, not a training-tree record
     // (it has a period, joins a visit and shares its person list with the
-    // tests), so the BOZP section needs no training tab.
+    // tests), so the BOZP section has no Školenia tab.
     'dychova_skuska', 'omamne_latky', 'skolenie_bozp',
   ],
 };
@@ -72,8 +81,30 @@ export function sectionHasContent(section: Section): boolean {
  * oboznámenie (block 2) is the inspection type `skolenie_bozp` and is listed
  * with the other BOZP úkony, so BOZP has no training tab.
  */
+export const TRAINING_SECTION: Section = 'opp';
+
 export function sectionHasTrainings(section: Section): boolean {
-  return section === 'opp';
+  return section === TRAINING_SECTION;
+}
+
+/**
+ * Query that opens a section on its Školenia tab. The tab lives in the URL
+ * rather than in component state so every „Späť" out of a training lands back
+ * on the training list, not on the section's kontroly.
+ */
+export const SECTION_TAB_PARAM = 'tab';
+export const TRAININGS_TAB = 'skolenia';
+
+/** The training list — the Školenia tab of OPP. There is no /trainings page. */
+export const TRAININGS_PATH =
+  `${SECTION_PATHS[TRAINING_SECTION]}?${SECTION_TAB_PARAM}=${TRAININGS_TAB}`;
+
+/**
+ * The type picker narrowed to one section. Without a section the picker offers
+ * every type, which is right from Dnes or a firm, but never from a section.
+ */
+export function newInspectionPath(section: Section | null): string {
+  return section ? `/inspections/new?section=${section}` : '/inspections/new';
 }
 
 export function sectionForInspectionType(type: InspectionType): Section | null {

@@ -231,6 +231,9 @@ export function NewInspectionTypePicker() {
   const passthrough = new URLSearchParams();
   if (facilityId) passthrough.set('facility_id', facilityId);
   if (companyId) passthrough.set('company_id', companyId);
+  // Step 1 needs the section only for its „Späť", which must return to this
+  // same narrowed list rather than to every type.
+  if (section) passthrough.set('section', section);
 
   const offered = section
     ? TYPES.filter((m) => SECTION_INSPECTION_TYPES[section].includes(m.type))

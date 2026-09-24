@@ -785,6 +785,17 @@ Migrations `035`–`037`.
   therefore appears once block 2 ships its úkony, which is also the shape
   module gating needs in block 5. `/inspections` survives unsectioned for the
   links and bookmarks that point at it.
+  **Follow-up (24. 9., user decision):** the OPP switcher stays, but its two
+  halves wear different colours — Kontroly in the OPP red, Školenia in
+  `TRAINING_COLOR` (a violet that is none of the three odbor colours) — and
+  „Nová kontrola" + „Nové školenie" always sit side by side in the header,
+  each in its tab's colour. The tab lives in the URL (`/opp?tab=skolenia`), and
+  `/trainings` now redirects there, so no „Späť" lands on the old all-trainings
+  page. Every „Späť" stays inside the section it started in: Step 1 carries
+  `?section=` back to the narrowed type picker instead of the full one.
+  Mapping confirmed: all seven training-tree types (six PO trainings + Pokyn —
+  žatva) are OPP; oboznámenie BOZP was never in the old Školenia section — it
+  is the BOZP inspection type `skolenie_bozp`.
 - ✅ **Ch. 12 — carrying items over.** `POST /api/inspections/{id}/carry-over`
   plus a rewritten `repeat`. Identification travels; **stav, poznámky, fotky
   and nedostatky do not** — carrying a verdict forward would let a protocol

@@ -18,7 +18,7 @@ import { InspectionStep1Page } from '@/pages/InspectionStep1Page';
 import { InspectionStep2Page } from '@/pages/InspectionStep2Page';
 import { InspectionDetailPage } from '@/pages/InspectionDetailPage';
 import { InspectionsListPage } from '@/pages/InspectionsListPage';
-import { SectionPage } from '@/pages/SectionPage';
+import { SectionPage, TrainingsRedirect } from '@/pages/SectionPage';
 import { VisitNewPage } from '@/pages/VisitNewPage';
 import { PersonsFillPage } from '@/pages/PersonsFillPage';
 import { CompanyCertificatesPage } from '@/pages/CompanyCertificatesPage';
@@ -27,7 +27,6 @@ import { CalendarPage } from '@/pages/CalendarPage';
 import { TimelinePage } from '@/pages/TimelinePage';
 import { StockPage } from '@/pages/StockPage';
 import { TasksPage } from '@/pages/TasksPage';
-import { TrainingsListPage } from '@/pages/TrainingsListPage';
 import { NewTrainingPage } from '@/pages/NewTrainingPage';
 import { TrainingDetailPage } from '@/pages/TrainingDetailPage';
 import { TrainingEditPage } from '@/pages/TrainingEditPage';
@@ -124,7 +123,8 @@ export default function App() {
         <Route path="/inspections/:id/items/new" element={<InspectionStep2Page />} />
         <Route path="/inspections/:id/items/:itemId" element={<InspectionStep2Page />} />
 
-        <Route path="/trainings" element={<TrainingsListPage />} />
+        {/* The old Školenia section — its list is now the Školenia tab of OPP. */}
+        <Route path="/trainings" element={<TrainingsRedirect />} />
         <Route path="/trainings/new" element={<NewTrainingPage />} />
         <Route path="/trainings/:id" element={<TrainingDetailPage />} />
         <Route path="/trainings/:id/edit" element={<TrainingEditPage />} />

@@ -22,6 +22,7 @@ import {
 } from '@/api/trainings';
 import { ApiError } from '@/lib/api';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
+import { TRAININGS_PATH } from '@/lib/sections';
 import { useToast } from '@/lib/toast';
 import { useConfirm } from '@/lib/confirm';
 import { Card } from '@/components/ui/Card';
@@ -169,7 +170,7 @@ export function TrainingDetailPage() {
   if (error && !data) {
     return (
       <div className="flex flex-col gap-4">
-        <Link to="/trainings" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <Link to={TRAININGS_PATH} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
           <ArrowLeft className="size-4" />
           Späť
         </Link>
@@ -181,7 +182,7 @@ export function TrainingDetailPage() {
   if (!data) {
     return (
       <div className="flex flex-col gap-5">
-        <Link to="/trainings" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <Link to={TRAININGS_PATH} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
           <ArrowLeft className="size-4" />
           Späť na zoznam
         </Link>
@@ -200,7 +201,7 @@ export function TrainingDetailPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link to="/trainings" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+      <Link to={TRAININGS_PATH} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
         <ArrowLeft className="size-4" />
         Späť na zoznam
       </Link>

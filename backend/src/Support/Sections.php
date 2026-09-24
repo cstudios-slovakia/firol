@@ -76,8 +76,9 @@ final class Sections
 
     /**
      * Section of a training type. The six attendance-based PO trainings and
-     * the Pokyn — žatevné práce all belong to OPP; BOZP oboznámenie arrives
-     * with block 2.
+     * the Pokyn — žatevné práce all belong to OPP. BOZP oboznámenie is not a
+     * training of this table: it is the inspection type `skolenie_bozp`, listed
+     * under BOZP in {@see INSPECTION_TYPES}.
      */
     public static function forTrainingType(string $type): string
     {

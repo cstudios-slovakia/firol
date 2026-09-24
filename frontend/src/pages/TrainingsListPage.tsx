@@ -41,13 +41,20 @@ import {
     isUninvoiced,
     type InvoicingFields,
 } from "@/api/invoicing";
+import { TRAINING_COLOR, TRAINING_SECTION } from "@/lib/sections";
+
+const ACTIVE_CHIP_STYLE = { backgroundColor: TRAINING_COLOR };
 
 /**
- * `embedded` drops the page header — the OPP section (chapter 2) supplies its
- * own, because a training is one of that section's úkony rather than a list of
- * its own. There is no top-level "Školenia" any more.
+ * The Školenia tab of the OPP section (chapter 2). It has no page header of
+ * its own — the section supplies it, because a training is one of that
+ * section's úkony rather than a list of its own. There is no top-level
+ * "Školenia" any more; /trainings redirects here.
+ *
+ * Everything that marks the list as trainings — the row tiles, the active
+ * chip, the empty-state button — wears TRAINING_COLOR, the colour of its tab.
  */
-export function TrainingsListPage({ embedded = false }: { embedded?: boolean } = {}) {
+export function TrainingsListPage() {
     const { csrfToken } = useAuth();
     const isReadOnly = useIsReadOnly();
     const toast = useToast();
@@ -170,28 +177,6 @@ export function TrainingsListPage({ embedded = false }: { embedded?: boolean } =
 
     return (
         <div className="flex flex-col gap-4">
-            {!embedded && (
-                <header className="flex items-center justify-between gap-3">
-                    <div>
-                        <h1 className="text-xl font-semibold tracking-tight text-ink-900">
-                            Školenia
-                        </h1>
-                        <p className="mt-0.5 text-sm text-ink-500">
-                            Záznamy zo školení a pokyny vydané zamestnancom klienta.
-                        </p>
-                    </div>
-                    {!isReadOnly && (
-                        <Link
-                            to="/trainings/new"
-                            className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
-                        >
-                            <Plus className="size-4" />
-                            Nové školenie
-                        </Link>
-                    )}
-                </header>
-            )}
-
             {items && items.length > 0 && (
                 <div className="overflow-hidden rounded-2xl border border-ink-200 bg-white shadow-xs transition-all focus-within:border-firol-300">
                     <div className="flex items-center gap-2 px-3 py-2.5">
@@ -209,10 +194,11 @@ export function TrainingsListPage({ embedded = false }: { embedded?: boolean } =
                         <button
                             type="button"
                             onClick={() => setTypeFilter("")}
+                            style={typeFilter === "" ? ACTIVE_CHIP_STYLE : undefined}
                             className={cn(
                                 "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors",
                                 typeFilter === ""
-                                    ? "bg-firol-500 text-white"
+                                    ? "text-white"
                                     : "bg-ink-100 text-ink-600 hover:bg-ink-200",
                             )}
                         >
@@ -225,10 +211,11 @@ export function TrainingsListPage({ embedded = false }: { embedded?: boolean } =
                                 onClick={() =>
                                     setTypeFilter(typeFilter === val ? "" : val)
                                 }
+                                style={typeFilter === val ? ACTIVE_CHIP_STYLE : undefined}
                                 className={cn(
                                     "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors",
                                     typeFilter === val
-                                        ? "bg-firol-500 text-white"
+                                        ? "text-white"
                                         : "bg-ink-100 text-ink-600 hover:bg-ink-200",
                                 )}
                             >
@@ -277,7 +264,10 @@ export function TrainingsListPage({ embedded = false }: { embedded?: boolean } =
 
             {items && items.length === 0 && (
                 <Card className="flex flex-col items-center gap-3 px-6 py-12 text-center">
-                    <div className="grid size-14 place-items-center rounded-2xl bg-firol-50 text-firol-500">
+                    <div
+                        className="grid size-14 place-items-center rounded-2xl"
+                        style={{ backgroundColor: `${TRAINING_COLOR}1A`, color: TRAINING_COLOR }}
+                    >
                         <GraduationCap className="size-6" />
                     </div>
                     <h2 className="text-base font-semibold text-ink-900">
@@ -288,8 +278,9 @@ export function TrainingsListPage({ embedded = false }: { embedded?: boolean } =
                         dokončení vznikne PDF protokol.
                     </p>
                     <Link
-                        to="/trainings/new"
-                        className="inline-flex h-11 items-center gap-1.5 rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+                        to={`/trainings/new?section=${TRAINING_SECTION}`}
+                        style={{ backgroundColor: TRAINING_COLOR }}
+                        className="inline-flex h-11 items-center gap-1.5 rounded-2xl px-4 text-sm font-medium text-white shadow-sm transition-[filter] duration-150 hover:brightness-95"
                     >
                         <Plus className="size-4" />
                         Nové školenie
@@ -381,7 +372,8 @@ function TrainingRow({
             <div className="flex items-center gap-3">
                 <Link
                     to={`/trainings/${it.id}`}
-                    className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)] transition-colors hover:bg-firol-600"
+                    style={{ backgroundColor: TRAINING_COLOR }}
+                    className="grid size-11 shrink-0 place-items-center rounded-2xl text-white shadow-sm transition-[filter] duration-150 hover:brightness-95"
                 >
                     {isPokyn(it.type)
                         ? <Wheat className="size-5" />

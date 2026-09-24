@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { Link, Navigate, useLocation } from 'react-router-dom';
+import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { ClipboardList, GraduationCap, Plus } from 'lucide-react';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { InspectionsListPage } from '@/pages/InspectionsListPage';
@@ -9,7 +8,13 @@ import {
   SECTION_COLORS,
   SECTION_INSPECTION_TYPES,
   SECTION_LABELS,
+  SECTION_PATHS,
+  SECTION_TAB_PARAM,
+  TRAINING_COLOR,
+  TRAINING_SECTION,
+  TRAININGS_TAB,
   isSection,
+  newInspectionPath,
   sectionHasTrainings,
   type Section,
 } from '@/lib/sections';
@@ -40,17 +45,42 @@ export function SectionPage() {
   return <SectionView section={raw} />;
 }
 
+/**
+ * /trainings was the list of the old Školenia section. Bookmarks and links
+ * that still point at it open the Školenia tab of OPP instead, keeping any
+ * filter they carried (e.g. „Nevyfakturované" from Dnes).
+ */
+export function TrainingsRedirect() {
+  const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  params.set(SECTION_TAB_PARAM, TRAININGS_TAB);
+  return <Navigate to={`${SECTION_PATHS[TRAINING_SECTION]}?${params}`} replace />;
+}
+
 function SectionView({ section }: { section: Section }) {
   const isReadOnly = useIsReadOnly();
   const withTrainings = sectionHasTrainings(section);
-  const [tab, setTab] = useState<'inspections' | 'trainings'>('inspections');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: 'inspections' | 'trainings' =
+    withTrainings && searchParams.get(SECTION_TAB_PARAM) === TRAININGS_TAB
+      ? 'trainings'
+      : 'inspections';
+
+  // A tab switch starts the other list afresh, the same way its search and
+  // type filters start empty — a „Nevyfakturované" view does not carry over.
+  function selectTab(next: 'inspections' | 'trainings') {
+    setSearchParams(
+      next === 'trainings' ? { [SECTION_TAB_PARAM]: TRAININGS_TAB } : {},
+      { replace: true },
+    );
+  }
 
   const hasInspectionTypes = SECTION_INSPECTION_TYPES[section].length > 0;
   const color = SECTION_COLORS[section];
 
   return (
     <div className="flex flex-col gap-4">
-      <header className="flex items-center justify-between gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <span
             aria-hidden
@@ -67,17 +97,18 @@ function SectionView({ section }: { section: Section }) {
           </div>
         </div>
         {!isReadOnly && hasInspectionTypes && (
-          <Link
-            to={
-              tab === 'trainings'
-                ? '/trainings/new'
-                : `/inspections/new?section=${section}`
-            }
-            className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] transition-transform hover:bg-firol-600 active:scale-[0.98]"
-          >
-            <Plus className="size-4" />
-            {tab === 'trainings' ? 'Nové školenie' : 'Nová kontrola'}
-          </Link>
+          withTrainings ? (
+            <NewActionPair section={section} />
+          ) : (
+            <Link
+              id="section-nova-kontrola"
+              to={newInspectionPath(section)}
+              className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] transition-transform hover:bg-firol-600 active:scale-[0.98]"
+            >
+              <Plus className="size-4" />
+              Nová kontrola
+            </Link>
+          )
         )}
       </header>
 
@@ -92,20 +123,20 @@ function SectionView({ section }: { section: Section }) {
             color={color}
             icon={<ClipboardList className="size-4" />}
             label="Kontroly"
-            onClick={() => setTab('inspections')}
+            onClick={() => selectTab('inspections')}
           />
           <SectionTab
             active={tab === 'trainings'}
-            color={color}
+            color={TRAINING_COLOR}
             icon={<GraduationCap className="size-4" />}
             label="Školenia"
-            onClick={() => setTab('trainings')}
+            onClick={() => selectTab('trainings')}
           />
         </div>
       )}
 
       {tab === 'trainings' ? (
-        <TrainingsListPage embedded />
+        <TrainingsListPage />
       ) : hasInspectionTypes ? (
         <InspectionsListPage section={section} embedded />
       ) : (
@@ -115,6 +146,42 @@ function SectionView({ section }: { section: Section }) {
   );
 }
 
+/**
+ * „Nová kontrola" and „Nové školenie" side by side, whichever tab is open —
+ * starting either should never take a detour through the switcher. Each half
+ * wears the colour of its own tab, so the button says which list the new úkon
+ * will land in. On a phone the pair takes its own full-width row.
+ */
+function NewActionPair({ section }: { section: Section }) {
+  return (
+    <div className="grid w-full grid-cols-2 overflow-hidden rounded-2xl shadow-sm sm:w-auto">
+      <Link
+        id="section-nova-kontrola"
+        to={newInspectionPath(section)}
+        style={{ backgroundColor: SECTION_COLORS[section] }}
+        className="inline-flex h-10 items-center justify-center gap-1.5 px-3.5 text-sm font-medium text-white transition-[filter] duration-150 hover:brightness-95 active:brightness-90"
+      >
+        <ClipboardList className="size-4 shrink-0" />
+        Nová kontrola
+      </Link>
+      <Link
+        id="section-nove-skolenie"
+        to={`/trainings/new?section=${section}`}
+        style={{ backgroundColor: TRAINING_COLOR }}
+        className="inline-flex h-10 items-center justify-center gap-1.5 border-l border-white/30 px-3.5 text-sm font-medium text-white transition-[filter] duration-150 hover:brightness-95 active:brightness-90"
+      >
+        <GraduationCap className="size-4 shrink-0" />
+        Nové školenie
+      </Link>
+    </div>
+  );
+}
+
+/**
+ * One tab of the switcher, in the colour of what it lists: filled when open,
+ * and its icon keeps the colour when closed, so the two halves stay apart
+ * even at a glance.
+ */
 function SectionTab({
   active,
   color,
@@ -140,7 +207,9 @@ function SectionTab({
         active ? 'text-white shadow-sm' : 'bg-ink-100 text-ink-600 hover:bg-ink-200',
       )}
     >
-      {icon}
+      <span className="contents" style={active ? undefined : { color }}>
+        {icon}
+      </span>
       {label}
     </button>
   );

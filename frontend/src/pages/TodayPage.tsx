@@ -42,7 +42,13 @@ import { INSPECTION_TYPE_LABELS, type InspectionType } from '@/api/inspections';
 import { TRAINING_TYPE_SHORT, type TrainingType } from '@/api/trainings';
 import { ZDROJ_LABELS, type CalendarDeadline, type OwnTerm, type TerminTechnician } from '@/api/calendar';
 import { UNINVOICED_PARAM } from '@/api/invoicing';
-import { SECTION_COLORS, sectionForInspectionType, type Section } from '@/lib/sections';
+import {
+  SECTION_COLORS,
+  TRAINING_SECTION,
+  TRAININGS_PATH,
+  sectionForInspectionType,
+  type Section,
+} from '@/lib/sections';
 import { daysUntil } from '@/lib/calendarGrouping';
 import { todayIso } from '@/lib/dates';
 import { cn } from '@/lib/cn';
@@ -115,7 +121,9 @@ function ukonLabel(row: UkonRow): string {
 
 function ukonSection(row: UkonRow): Section | null {
   // Every training of the training tree belongs to OPP (lib/sections.ts).
-  return row.kind === 'training' ? 'opp' : sectionForInspectionType(row.type as InspectionType);
+  return row.kind === 'training'
+    ? TRAINING_SECTION
+    : sectionForInspectionType(row.type as InspectionType);
 }
 
 function ukonHref(row: UkonRow): string {
@@ -428,7 +436,7 @@ function buildCards(
       iconClass: 'bg-emerald-100 text-emerald-700',
       href: data.uninvoiced.some((r) => r.kind === 'inspection') || data.uninvoiced.length === 0
         ? `/inspections?${UNINVOICED_PARAM}=1`
-        : `/trainings?${UNINVOICED_PARAM}=1`,
+        : `${TRAININGS_PATH}&${UNINVOICED_PARAM}=1`,
       rows: data.uninvoiced.map((r) => ({
         key: r.key,
         href: ukonHref(r),

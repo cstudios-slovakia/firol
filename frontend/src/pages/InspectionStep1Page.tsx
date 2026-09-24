@@ -20,6 +20,7 @@ import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { isPersonListType } from '@/api/personList';
 import { ApiError } from '@/lib/api';
 import { todayIso } from '@/lib/dates';
+import { isSection, newInspectionPath } from '@/lib/sections';
 import { inspectionCreateOptimistic } from '@/lib/offlineEntities';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -227,13 +228,16 @@ export function InspectionStep1Page() {
     }
   }
 
+  // Back to the picker the type was chosen in: narrowed to the section when it
+  // was opened from one, so „Späť" never widens it to every odbor's types.
+  const sectionParam = searchParams.get('section') ?? undefined;
   const backHref = visitId !== null
     ? `/visits/${visitId}`
     : presetFacilityId
       ? `/facilities/${presetFacilityId}`
       : presetCompanyId
         ? `/companies/${presetCompanyId}`
-        : '/inspections/new';
+        : newInspectionPath(isSection(sectionParam) ? sectionParam : null);
 
   if (loadingCompanies) {
     return (

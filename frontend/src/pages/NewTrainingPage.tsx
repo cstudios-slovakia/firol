@@ -15,6 +15,7 @@ import {
   type TrainingType,
 } from '@/api/trainings';
 import { ApiError } from '@/lib/api';
+import { TRAINING_SECTION, TRAININGS_PATH } from '@/lib/sections';
 import { todayIso } from '@/lib/dates';
 import { trainingCreateOptimistic } from '@/lib/offlineEntities';
 import { defaultPokynSections } from '@/lib/pokynZatvaTemplate';
@@ -184,11 +185,15 @@ export function NewTrainingPage() {
     }
   }
 
+  // Back to where the technician came from: the firm or prevádzka, the
+  // Školenia tab of OPP, or Dnes — never a list of every section's úkony.
   const backHref = presetFacilityId
     ? `/facilities/${presetFacilityId}`
     : presetCompanyId
       ? `/companies/${presetCompanyId}`
-      : '/trainings';
+      : searchParams.get('section') === TRAINING_SECTION
+        ? TRAININGS_PATH
+        : '/';
 
   if (companies === null) {
     return (
@@ -201,7 +206,7 @@ export function NewTrainingPage() {
   if (companies.length === 0 && apiError) {
     return (
       <div className="flex flex-col gap-4">
-        <Link to="/trainings" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
           <ArrowLeft className="size-4" />
           Späť
         </Link>
@@ -213,7 +218,7 @@ export function NewTrainingPage() {
   if (companies.length === 0) {
     return (
       <div className="flex flex-col gap-4">
-        <Link to="/trainings" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
           <ArrowLeft className="size-4" />
           Späť
         </Link>

@@ -34,7 +34,7 @@ export const UNINVOICED_LABEL = 'Nevyfakturované';
 /**
  * URL switch that opens an úkon list already filtered to „Nevyfakturované"
  * — e.g. `/revizie?nevyfakturovane=1`, `/inspections?nevyfakturovane=1`,
- * `/trainings?nevyfakturovane=1` — so the Dnes card (chapter 18) can link
+ * `/opp?tab=skolenia&nevyfakturovane=1` — so the Dnes card (chapter 18) can link
  * straight to the rows it counts.
  */
 export const UNINVOICED_PARAM = 'nevyfakturovane';

@@ -315,10 +315,12 @@ export function InspectionDetailPage() {
     }
   }
 
+  // Until the inspection loads its section is unknown, so „Späť" goes to Dnes
+  // rather than to the list of every section's kontroly.
   if (error && !data) {
     return (
       <div className="flex flex-col gap-4">
-        <Link to="/inspections" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <Link to="/" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
           <ArrowLeft className="size-4" />
           Späť
         </Link>
@@ -330,7 +332,7 @@ export function InspectionDetailPage() {
   if (!data) {
     return (
       <div className="flex flex-col gap-5">
-        <Link to="/inspections" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <Link to="/" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
           <ArrowLeft className="size-4" />
           Späť
         </Link>
