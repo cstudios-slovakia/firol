@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Firol\Pdf;
 
 use Firol\Storage\Storage;
+use Firol\Support\Sections;
 use Mpdf\Mpdf;
 use Mpdf\Output\Destination;
 
@@ -115,7 +116,12 @@ final class PdfRenderer
         };
 
         $html = self::renderTemplate(__DIR__ . '/templates/' . $bodyTemplate, $payload);
-        $html .= self::renderPhotoAppendix($payload);
+        // BOZP bodies are always BOZP blue (ProtocolLayout), whatever the
+        // account's brand colour — the appendix follows the body it belongs to.
+        $html .= self::renderPhotoAppendix(
+            $payload,
+            Sections::forInspectionType($type) === Sections::BOZP ? ProtocolLayout::BOZP_COLOR : null,
+        );
 
         return self::buildPdf($html, $payload['number'] ?? 'firol');
     }
@@ -125,13 +131,19 @@ final class PdfRenderer
      * the inspection has no photos (or the technician unticked the option) —
      * in which case the PDF looks exactly as it did before 2.2 existed.
      *
+     * `$color` overrides the brand colour when the body is drawn in a fixed
+     * section colour, so the appendix never switches colour mid-document.
+     *
      * @param array<string, mixed> $payload
      */
-    public static function renderPhotoAppendix(array $payload): string
+    public static function renderPhotoAppendix(array $payload, ?string $color = null): string
     {
         $photos = $payload['photos'] ?? [];
         if (!is_array($photos) || $photos === []) {
             return '';
+        }
+        if ($color !== null) {
+            $payload['brand'] = ['color' => $color] + (is_array($payload['brand'] ?? null) ? $payload['brand'] : []);
         }
         return '<pagebreak />'
             . self::renderTemplate(__DIR__ . '/templates/photo_appendix.php', $payload);
