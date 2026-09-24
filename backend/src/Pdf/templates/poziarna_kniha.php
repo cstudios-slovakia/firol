@@ -370,22 +370,28 @@ $contactLine = $facility['contact_person'] ?? '';
     <td class="bl">Dátum záznamu</td>
     <td class="bv"><strong><?= $formatDate($inspection['executed_on'] ?? null) ?></strong></td>
   </tr>
+  <?php // "Bez opakovania" prints no Periodicita pair at all: a protocol
+        // states the period it was issued under, and where there is none
+        // there is nothing to state (chapter 5). The performer then moves up
+        // beside IČO and Prevádzka takes the full row, so no cell is empty. ?>
   <tr>
     <td class="bl">IČO</td>
-    <?php // "Bez opakovania" prints nothing at all rather than a dash: a
-          // protocol states the period it was issued under, and where there is
-          // none there is nothing to state (chapter 5). ?>
-    <td class="bv"<?= $periodicity === null ? ' colspan="3"' : '' ?>><?= $h($company['ico']) ?></td>
+    <td class="bv"><?= $h($company['ico']) ?></td>
     <?php if ($periodicity !== null): ?>
     <td class="bl">Periodicita</td>
     <td class="bv"><?= $h($periodicity) ?></td>
+    <?php else: ?>
+    <td class="bl">Záznam vykonal</td>
+    <td class="bv"><?= $inspectorLine ?></td>
     <?php endif ?>
   </tr>
   <tr>
     <td class="bl">Prevádzka</td>
-    <td class="bv"><?= $h($facility['name']) ?><?= !empty($facility['address']) ? '<br><span style="font-weight:normal;color:#555;">' . $h($facility['address']) . '</span>' : '' ?></td>
+    <td class="bv"<?= $periodicity === null ? ' colspan="3"' : '' ?>><?= $h($facility['name']) ?><?= !empty($facility['address']) ? '<br><span style="font-weight:normal;color:#555;">' . $h($facility['address']) . '</span>' : '' ?></td>
+    <?php if ($periodicity !== null): ?>
     <td class="bl">Záznam vykonal</td>
     <td class="bv"><?= $inspectorLine ?></td>
+    <?php endif ?>
   </tr>
   <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>

@@ -154,16 +154,22 @@ CSS;
             . '<tr><td class="bl">Spoločnosť</td><td class="bv">' . self::esc((string) ($company['name'] ?? '')) . '</td>'
             . '<td class="bl">' . self::esc($dateLabel) . '</td><td class="bv"><strong>' . self::esc($this->executedOn()) . '</strong></td></tr>';
 
+        $icoCells = '<td class="bl">IČO</td><td class="bv">' . self::esc((string) ($company['ico'] ?? '—')) . '</td>';
+        $performerCells = '<td class="bl">' . self::esc($performedLabel) . '</td><td class="bv">' . $this->inspectorCell() . '</td>';
+
         if ($periodicity !== null) {
-            $html .= '<tr><td class="bl">IČO</td><td class="bv">' . self::esc((string) ($company['ico'] ?? '—')) . '</td>'
-                . '<td class="bl">Periodicita</td><td class="bv">' . self::esc((string) $periodicity) . '</td></tr>';
+            $html .= '<tr>' . $icoCells
+                . '<td class="bl">Periodicita</td><td class="bv">' . self::esc((string) $periodicity) . '</td></tr>'
+                . '<tr><td class="bl">Prevádzka</td><td class="bv">' . $facilityCell . '</td>' . $performerCells . '</tr>';
         } else {
-            $html .= '<tr><td class="bl">IČO</td><td class="bv" colspan="3">' . self::esc((string) ($company['ico'] ?? '—')) . '</td></tr>';
+            // "Bez opakovania" prints no Periodicita pair at all (chapter 5).
+            // The performer moves up beside IČO and Prevádzka takes the full
+            // row, so the grid keeps no empty cell.
+            $html .= '<tr>' . $icoCells . $performerCells . '</tr>'
+                . '<tr><td class="bl">Prevádzka</td><td class="bv" colspan="3">' . $facilityCell . '</td></tr>';
         }
 
-        $html .= '<tr><td class="bl">Prevádzka</td><td class="bv">' . $facilityCell . '</td>'
-            . '<td class="bl">' . self::esc($performedLabel) . '</td><td class="bv">' . $this->inspectorCell() . '</td></tr>'
-            . Contractor::basicInfoRow(is_array($this->v['contractor'] ?? null) ? $this->v['contractor'] : [])
+        $html .= Contractor::basicInfoRow(is_array($this->v['contractor'] ?? null) ? $this->v['contractor'] : [])
             . '</table>';
         return $html;
     }
