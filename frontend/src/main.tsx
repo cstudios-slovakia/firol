@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
+import { Agentation } from 'agentation';
 import { AuthProvider } from '@/auth/AuthContext';
 import { ApplyUpdateOnNavigate } from '@/components/ApplyUpdateOnNavigate';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -28,5 +29,6 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
         </AuthProvider>
       </BrowserRouter>
     </ErrorBoundary>
+    {import.meta.env.DEV && <Agentation endpoint="http://localhost:4747" />}
   </React.StrictMode>,
 );
