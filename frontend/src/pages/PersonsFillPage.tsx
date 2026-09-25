@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, Clock, CopyPlus,
+  AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, CopyPlus,
   Lock, Plus, Trash2, UserPlus, Users, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
@@ -416,16 +416,10 @@ function PersonRow({
       {isTest && (
         <div className="flex flex-col gap-2 pl-0 sm:pl-10">
           <div className="flex gap-2">
-            <div className="flex min-w-0 flex-1 gap-1.5">
+            <div className="min-w-0 flex-1">
               <Input data-nav type="time" aria-label="Čas" value={f.time ?? ''} disabled={!canEdit}
                 onChange={(e) => setF({ ...f, time: e.target.value })}
                 onBlur={() => save({ time: f.time })} onKeyDown={focusNext} />
-              {canEdit && (
-                <Button type="button" variant="secondary" size="sm" className="h-11 shrink-0"
-                  onClick={() => save({ time: nowHm() })} leftIcon={<Clock className="size-3.5" />}>
-                  Teraz
-                </Button>
-              )}
             </div>
             {type === 'dychova_skuska' && (
               <div className="w-28 shrink-0">
@@ -441,7 +435,7 @@ function PersonRow({
               const active = f.result === r;
               return (
                 <button key={r} type="button" role="radio" aria-checked={active} disabled={!canEdit}
-                  onClick={() => save({ result: active ? null : r })}
+                  onClick={() => save(active ? { result: null } : { result: r, ...(f.time ? {} : { time: nowHm() }) })}
                   className={cn(
                     'min-h-11 rounded-xl border px-2 text-sm font-semibold transition-all duration-200 active:scale-[0.97] disabled:opacity-60',
                     active ? RESULT_TONES[r] : 'border-ink-200 bg-white text-ink-600 hover:border-ink-300',
@@ -518,7 +512,9 @@ function NewPersonRow({
     // A shift usually shares a pracovné zaradenie, so that one is kept.
     setName('');
     nameRef.current?.focus();
-    const payload = rowPayload({ name: n, position: p, defects: [] }, {}, type);
+    // A test row starts with the current time — the person is tested as
+    // they are added; the field stays editable.
+    const payload = rowPayload({ name: n, position: p, defects: [], time: nowHm() }, {}, type);
     queueRef.current = queueRef.current.then(async () => {
       try {
         const res = await Inspections.addItem(inspectionId, payload, csrfToken);
