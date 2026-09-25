@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
@@ -19,7 +20,11 @@ use Firol\Http\Response;
  * nedostatok (source_inspection_id + source_defect_key, see migration 044) —
  * it then shows the úkon's protocol number and links back to it.
  *
- * Everything is scoped to the session's active account. Tasks of an archived
+ * Everything is scoped to the session's active account — except for admins,
+ * who see and edit tasks across all accounts, the same rule the inspections
+ * list and the calendar follow. A task always lives in the account of the
+ * úkon or firma it belongs to, so an admin's task on another tenant's úkon
+ * lands with that tenant, not under the admin's own account. Tasks of an archived
  * company are left out of every list and count: the app treats an archived
  * company as gone, and chapter 25 wants it off the Dnes screen too.
  *
@@ -80,7 +85,7 @@ final class TaskController
             // Open: nearest termín first, tasks without one at the end.
             : 't.due_date IS NULL, t.due_date ASC, t.created_at ASC, t.id ASC';
 
-        Response::json(['items' => self::select($accountId, $where, $args, $order)]);
+        Response::json(['items' => self::select(self::scope($accountId, $userId), $where, $args, $order)]);
     }
 
     /**
@@ -91,14 +96,15 @@ final class TaskController
      */
     public static function count(Request $req): void
     {
-        $accountId = Tenant::currentAccountId();
+        $scope = self::scope(Tenant::currentAccountId(), Tenant::currentUserId());
         $stmt = Db::pdo()->prepare(
             'SELECT COUNT(*)
              FROM   tasks t
              LEFT   JOIN companies c ON c.id = t.company_id
-             WHERE  t.account_id = ? AND t.done = 0 AND c.archived_at IS NULL'
+             WHERE  ' . ($scope === null ? '1 = 1' : 't.account_id = ?') . '
+               AND  t.done = 0 AND c.archived_at IS NULL'
         );
-        $stmt->execute([$accountId]);
+        $stmt->execute($scope === null ? [] : [$scope]);
         Response::json(['open' => (int) $stmt->fetchColumn()]);
     }
 
@@ -131,7 +137,7 @@ final class TaskController
         }
 
         Response::json([
-            'items' => self::select($accountId, $where, $args, 't.due_date ASC, t.created_at ASC, t.id ASC'),
+            'items' => self::select(self::scope($accountId, $userId), $where, $args, 't.due_date ASC, t.created_at ASC, t.id ASC'),
             'until' => $until,
         ]);
     }
@@ -149,11 +155,11 @@ final class TaskController
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
         $userId = Tenant::currentUserId();
+        $scope = self::scope($accountId, $userId);
         $body = $req->json();
 
         $text = self::readText($req);
         $dueDate = self::readDate($body['due_date'] ?? null);
-        $assignee = self::readAssignee($body['assignee_user_id'] ?? null, $accountId);
 
         $sourceInspectionId = $req->jsonInt('source_inspection_id');
         $sourceKey = $req->jsonString('source_defect_key');
@@ -161,14 +167,17 @@ final class TaskController
             Response::error('Zdroj úlohy je neúplný.', 422);
         }
 
+        // The task is filed under the account of its úkon / firma — for an
+        // admin that may be another tenant's (see the class comment).
         if ($sourceInspectionId !== null) {
             if (!preg_match('/^[A-Za-z0-9_-]{1,40}$/', (string) $sourceKey)) {
                 Response::error('Neplatný nedostatok.', 422);
             }
-            $inspection = self::loadInspection($sourceInspectionId, $accountId);
+            $inspection = self::loadInspection($sourceInspectionId, $scope);
             if ($inspection === null) {
                 Response::error('Kontrola sa nenašla.', 404);
             }
+            $accountId = (int) $inspection['account_id'];
             $existing = self::findBySource($accountId, $sourceInspectionId, (string) $sourceKey);
             if ($existing !== null) {
                 Response::json(['task' => $existing]);
@@ -176,8 +185,11 @@ final class TaskController
             $companyId = (int) $inspection['company_id'];
             $facilityId = $inspection['facility_id'] !== null ? (int) $inspection['facility_id'] : null;
         } else {
-            [$companyId, $facilityId] = self::readPlace($body, $accountId);
+            [$companyId, $facilityId, $placeAccountId] = self::readPlace($body, $scope);
+            $accountId = $placeAccountId ?? $accountId;
         }
+
+        $assignee = self::readAssignee($body['assignee_user_id'] ?? null, $accountId, $scope === null ? $userId : null);
 
         $pdo = Db::pdo();
         try {
@@ -214,12 +226,15 @@ final class TaskController
     public static function update(Request $req, array $params): void
     {
         Csrf::require($req);
-        $accountId = Tenant::currentAccountId();
+        $userId = Tenant::currentUserId();
+        $scope = self::scope(Tenant::currentAccountId(), $userId);
         $id = (int) $params['id'];
-        $current = self::load($id, $accountId);
+        $current = self::load($id, $scope);
         if ($current === null) {
             Response::error('Úloha sa nenašla.', 404);
         }
+        // An admin editing another tenant's task keeps it in that account.
+        $accountId = $current['account_id'];
         $body = $req->json();
 
         $set = [];
@@ -238,7 +253,9 @@ final class TaskController
             // only a change has to name an active member.
             $unchanged = $raw !== null && (int) $raw === $current['assignee_user_id'];
             $set[] = 'assignee_user_id = ?';
-            $args[] = $unchanged ? $current['assignee_user_id'] : self::readAssignee($raw, $accountId);
+            $args[] = $unchanged
+                ? $current['assignee_user_id']
+                : self::readAssignee($raw, $accountId, $scope === null ? $userId : null);
         }
         if (array_key_exists('company_id', $body) || array_key_exists('facility_id', $body)) {
             [$companyId, $facilityId] = self::readPlace($body + [
@@ -277,28 +294,39 @@ final class TaskController
     public static function destroy(Request $req, array $params): void
     {
         Csrf::require($req);
-        $accountId = Tenant::currentAccountId();
+        $scope = self::scope(Tenant::currentAccountId(), Tenant::currentUserId());
         $id = (int) $params['id'];
-        if (self::load($id, $accountId) === null) {
+        $current = self::load($id, $scope);
+        if ($current === null) {
             Response::error('Úloha sa nenašla.', 404);
         }
         Db::pdo()->prepare('DELETE FROM tasks WHERE id = ? AND account_id = ?')
-            ->execute([$id, $accountId]);
+            ->execute([$id, $current['account_id']]);
         Response::noContent();
     }
 
     // ── Reads ────────────────────────────────────────────────────────────────
 
     /**
+     * The account filter for the signed-in user: their active account, or
+     * null for an admin, who works across all of them.
+     */
+    private static function scope(int $accountId, int $userId): ?int
+    {
+        return Admin::isAdmin($userId) ? null : $accountId;
+    }
+
+    /**
+     * @param ?int $accountId null = every account (admin scope)
      * @param list<string> $where extra conditions, ANDed
      * @param list<mixed> $args
      * @return list<array<string, mixed>>
      */
-    private static function select(int $accountId, array $where, array $args, string $order): array
+    private static function select(?int $accountId, array $where, array $args, string $order): array
     {
         // Source details only while the úkon still exists in the app: an
         // archived one can't be opened, so there is nothing to link to.
-        $sql = 'SELECT t.id, t.text, t.company_id, c.name AS company_name,
+        $sql = 'SELECT t.id, t.account_id, t.text, t.company_id, c.name AS company_name,
                        t.facility_id, f.name AS facility_name,
                        t.assignee_user_id, au.fullname AS assignee_name,
                        t.due_date, t.done, t.done_at,
@@ -317,19 +345,20 @@ final class TaskController
                 LEFT   JOIN inspections si ON si.id = t.source_inspection_id
                                           AND si.account_id = t.account_id
                                           AND si.archived_at IS NULL
-                WHERE  t.account_id = ? AND c.archived_at IS NULL';
+                WHERE  ' . ($accountId === null ? '1 = 1' : 't.account_id = ?') . '
+                  AND  c.archived_at IS NULL';
         foreach ($where as $condition) {
             $sql .= ' AND ' . $condition;
         }
         $sql .= ' ORDER BY ' . $order;
 
         $stmt = Db::pdo()->prepare($sql);
-        $stmt->execute([$accountId, ...$args]);
+        $stmt->execute($accountId === null ? $args : [$accountId, ...$args]);
         return array_map([self::class, 'shape'], $stmt->fetchAll());
     }
 
     /** @return array<string, mixed>|null */
-    private static function load(int $id, int $accountId): ?array
+    private static function load(int $id, ?int $accountId): ?array
     {
         $rows = self::select($accountId, ['t.id = ?'], [$id], 't.id');
         return $rows[0] ?? null;
@@ -356,7 +385,8 @@ final class TaskController
         $sourceId = $row['source_inspection_id'] !== null ? (int) $row['source_inspection_id'] : null;
         return [
             'id'               => (int) $row['id'],
-            'text'             => (string) $row['text'],
+            'account_id'       => (int) $row['account_id'],
+            'text'           => (string) $row['text'],
             'company_id'       => $row['company_id'] !== null ? (int) $row['company_id'] : null,
             'company_name'     => $row['company_name'],
             'facility_id'      => $row['facility_id'] !== null ? (int) $row['facility_id'] : null,
@@ -383,14 +413,18 @@ final class TaskController
         ];
     }
 
-    /** @return array{company_id: int, facility_id: ?int}|null */
-    private static function loadInspection(int $id, int $accountId): ?array
+    /**
+     * @param ?int $accountId null = any account (admin scope)
+     * @return array{account_id: int, company_id: int, facility_id: ?int}|null
+     */
+    private static function loadInspection(int $id, ?int $accountId): ?array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT company_id, facility_id FROM inspections
-             WHERE  id = ? AND account_id = ? AND archived_at IS NULL'
+            'SELECT account_id, company_id, facility_id FROM inspections
+             WHERE  id = ? AND archived_at IS NULL'
+            . ($accountId === null ? '' : ' AND account_id = ?')
         );
-        $stmt->execute([$id, $accountId]);
+        $stmt->execute($accountId === null ? [$id] : [$id, $accountId]);
         $row = $stmt->fetch();
         return $row ?: null;
     }
@@ -424,8 +458,12 @@ final class TaskController
         return $raw;
     }
 
-    /** The assignee must be an active member of this account. */
-    private static function readAssignee(mixed $raw, int $accountId): ?int
+    /**
+     * The assignee must be an active member of the task's account. An admin
+     * may still assign themselves on another tenant's task — the same
+     * exemption the úkon's inspector check gives them.
+     */
+    private static function readAssignee(mixed $raw, int $accountId, ?int $adminUserId = null): ?int
     {
         if ($raw === null || $raw === '') {
             return null;
@@ -434,6 +472,9 @@ final class TaskController
             Response::error('Neplatný technik.', 422);
         }
         $userId = (int) $raw;
+        if ($adminUserId !== null && $userId === $adminUserId) {
+            return $userId;
+        }
         $stmt = Db::pdo()->prepare(
             'SELECT 1 FROM account_users WHERE account_id = ? AND user_id = ? AND is_active = 1'
         );
@@ -445,12 +486,14 @@ final class TaskController
     }
 
     /**
-     * Firma and prevádzka, both optional. A prevádzka needs its firma.
+     * Firma and prevádzka, both optional. A prevádzka needs its firma. The
+     * third value is the firma's account (null without one) — with a null
+     * $accountId (admin scope) the firma may sit in any account.
      *
      * @param array<string, mixed> $body
-     * @return array{0: ?int, 1: ?int}
+     * @return array{0: ?int, 1: ?int, 2: ?int}
      */
-    private static function readPlace(array $body, int $accountId): array
+    private static function readPlace(array $body, ?int $accountId): array
     {
         $companyId = self::intOrNull($body['company_id'] ?? null);
         $facilityId = self::intOrNull($body['facility_id'] ?? null);
@@ -458,16 +501,19 @@ final class TaskController
             if ($facilityId !== null) {
                 Response::error('Prevádzka sa dá vybrať len spolu s firmou.', 422);
             }
-            return [null, null];
+            return [null, null, null];
         }
 
         $stmt = Db::pdo()->prepare(
-            'SELECT 1 FROM companies WHERE id = ? AND account_id = ? AND archived_at IS NULL'
+            'SELECT account_id FROM companies WHERE id = ? AND archived_at IS NULL'
+            . ($accountId === null ? '' : ' AND account_id = ?')
         );
-        $stmt->execute([$companyId, $accountId]);
-        if ($stmt->fetchColumn() === false) {
+        $stmt->execute($accountId === null ? [$companyId] : [$companyId, $accountId]);
+        $owner = $stmt->fetchColumn();
+        if ($owner === false) {
             Response::error('Firma sa nenašla.', 404);
         }
+        $accountId = (int) $owner;
         if ($facilityId !== null) {
             $stmt = Db::pdo()->prepare(
                 'SELECT 1 FROM facilities
@@ -478,7 +524,7 @@ final class TaskController
                 Response::error('Prevádzka sa nenašla.', 404);
             }
         }
-        return [$companyId, $facilityId];
+        return [$companyId, $facilityId, $accountId];
     }
 
     private static function intOrNull(mixed $raw): ?int
