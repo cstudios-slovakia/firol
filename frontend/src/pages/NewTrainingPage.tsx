@@ -15,6 +15,8 @@ import {
   type TrainingType,
 } from '@/api/trainings';
 import { ApiError } from '@/lib/api';
+import { TRAINING_SECTION, TRAININGS_PATH } from '@/lib/sections';
+import { todayIso } from '@/lib/dates';
 import { trainingCreateOptimistic } from '@/lib/offlineEntities';
 import { defaultPokynSections } from '@/lib/pokynZatvaTemplate';
 import { useToast } from '@/lib/toast';
@@ -45,7 +47,7 @@ export function NewTrainingPage() {
   const [companyId, setCompanyId] = useState<number | null>(presetCompanyId);
   const [facilityId, setFacilityId] = useState<number | null>(presetFacilityId);
   const [trainerId, setTrainerId] = useState<number | null>(null);
-  const [date, setDate] = useState('');
+  const [date, setDate] = useState(todayIso);
 
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ company?: string; date?: string }>({});
@@ -163,6 +165,8 @@ export function NewTrainingPage() {
           name: company?.name ?? '',
           ico: company?.ico ?? null,
           approver: company?.approver ?? null,
+          // Chapter 22 — the offline draft shows the firm's režim fakturácie.
+          billing_mode: company?.billing_mode,
         },
         facility: facility ? { id: facility.id, name: facility.name } : null,
         trainer: trainer
@@ -181,11 +185,15 @@ export function NewTrainingPage() {
     }
   }
 
+  // Back to where the technician came from: the firm or prevádzka, the
+  // Školenia tab of OPP, or Dnes — never a list of every section's úkony.
   const backHref = presetFacilityId
     ? `/facilities/${presetFacilityId}`
     : presetCompanyId
       ? `/companies/${presetCompanyId}`
-      : '/trainings';
+      : searchParams.get('section') === TRAINING_SECTION
+        ? TRAININGS_PATH
+        : '/';
 
   if (companies === null) {
     return (
@@ -198,7 +206,7 @@ export function NewTrainingPage() {
   if (companies.length === 0 && apiError) {
     return (
       <div className="flex flex-col gap-4">
-        <Link to="/trainings" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
           <ArrowLeft className="size-4" />
           Späť
         </Link>
@@ -210,7 +218,7 @@ export function NewTrainingPage() {
   if (companies.length === 0) {
     return (
       <div className="flex flex-col gap-4">
-        <Link to="/trainings" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
           <ArrowLeft className="size-4" />
           Späť
         </Link>
@@ -332,7 +340,7 @@ export function NewTrainingPage() {
           <Field
             label={pokyn ? 'Dátum vydania pokynu' : 'Dátum školenia'}
             required
-            hint={fieldErrors.date ? undefined : 'Zadaj manuálne, nemusí byť dnešný dátum.'}
+            hint={fieldErrors.date ? undefined : 'Predvyplnený je dnešný dátum, môžeš ho zmeniť aj na minulý.'}
             error={fieldErrors.date}
           >
             {(p) => (
@@ -412,6 +420,7 @@ export function NewTrainingPage() {
               contact: c.contact,
               contact_email: c.contact_email,
               approver: c.approver,
+              billing_mode: c.billing_mode,
               facilities_count: 0,
               inspections_count: 0,
               last_inspection_at: null,

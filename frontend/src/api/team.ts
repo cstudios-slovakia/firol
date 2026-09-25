@@ -1,4 +1,5 @@
 import { api } from '@/lib/api';
+import type { TeamIdentity } from '@/auth/AuthContext';
 
 export type TeamMember = {
   id: number;
@@ -19,7 +20,17 @@ export type TeamMember = {
   valid_to_oprava: string | null;
   valid_from_general: string | null;
   valid_to_general: string | null;
+  /** Chapter 11.5 — initials in the avatar circle (max 3 characters). */
+  initials: string;
+  /** Chapter 11.5 — avatar colour, unique within the account. */
+  avatar_color: string;
   created_at: string;
+};
+
+/** Body of PATCH /api/account/users/{id}/identity — either field optional. */
+export type MemberIdentityInput = {
+  initials?: string;
+  avatar_color?: string;
 };
 
 export type TeamDefaultKind = 'php' | 'oprava';
@@ -59,6 +70,21 @@ export const Team = {
   listInvites: () => api<{ items: PendingInvite[] }>('/api/account/invites'),
   cancelInvite: (id: number, csrfToken: string | null) =>
     api<void>(`/api/account/invites/${id}`, { method: 'DELETE', csrfToken }),
+
+  /** Chapter 11.5 — the fixed palette avatar colours are picked from. */
+  avatarPalette: () => api<{ palette: string[] }>('/api/account/avatar-palette'),
+
+  /**
+   * Chapter 11.5 — change a member's initials (main user, or the member
+   * themselves) and/or avatar colour (main user only). Returns the updated
+   * roster, the same shape as `team` in /api/me.
+   */
+  setIdentity: (id: number, body: MemberIdentityInput, csrfToken: string | null) =>
+    api<{ item: TeamIdentity | null; team: TeamIdentity[] }>(`/api/account/users/${id}/identity`, {
+      method: 'PATCH',
+      body,
+      csrfToken,
+    }),
 
   setDefault: (kind: TeamDefaultKind, userId: number | null, csrfToken: string | null) =>
     api<{ ok: true; kind: TeamDefaultKind; user_id: number | null }>(

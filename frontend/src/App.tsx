@@ -7,7 +7,7 @@ import { OnboardingBillingPage } from '@/pages/auth/OnboardingBillingPage';
 import { PasswordResetRequestPage } from '@/pages/auth/PasswordResetRequestPage';
 import { PasswordResetConfirmPage } from '@/pages/auth/PasswordResetConfirmPage';
 import { InviteAcceptPage } from '@/pages/auth/InviteAcceptPage';
-import { DashboardPage } from '@/pages/DashboardPage';
+import { TodayPage } from '@/pages/TodayPage';
 import { CompaniesPage } from '@/pages/CompaniesPage';
 import { CompanyDetailPage } from '@/pages/CompanyDetailPage';
 import { CompanyEditPage } from '@/pages/CompanyEditPage';
@@ -18,8 +18,15 @@ import { InspectionStep1Page } from '@/pages/InspectionStep1Page';
 import { InspectionStep2Page } from '@/pages/InspectionStep2Page';
 import { InspectionDetailPage } from '@/pages/InspectionDetailPage';
 import { InspectionsListPage } from '@/pages/InspectionsListPage';
+import { SectionPage, TrainingsRedirect } from '@/pages/SectionPage';
+import { VisitNewPage } from '@/pages/VisitNewPage';
+import { PersonsFillPage } from '@/pages/PersonsFillPage';
+import { CompanyCertificatesPage } from '@/pages/CompanyCertificatesPage';
+import { VisitDetailPage } from '@/pages/VisitDetailPage';
 import { CalendarPage } from '@/pages/CalendarPage';
-import { TrainingsListPage } from '@/pages/TrainingsListPage';
+import { TimelinePage } from '@/pages/TimelinePage';
+import { StockPage } from '@/pages/StockPage';
+import { TasksPage } from '@/pages/TasksPage';
 import { NewTrainingPage } from '@/pages/NewTrainingPage';
 import { TrainingDetailPage } from '@/pages/TrainingDetailPage';
 import { TrainingEditPage } from '@/pages/TrainingEditPage';
@@ -76,7 +83,8 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route path="/" element={<DashboardPage />} />
+        {/* Chapter 18 — „Dnes" replaces the old Prehľad as the first screen. */}
+        <Route path="/" element={<TodayPage />} />
         <Route path="/companies" element={<CompaniesPage />} />
 
         <Route path="/companies/new" element={<CompanyEditPage />} />
@@ -88,14 +96,35 @@ export default function App() {
         <Route path="/facilities/:id/edit" element={<FacilityEditPage />} />
 
         <Route path="/kalendar" element={<CalendarPage />} />
+        <Route path="/casova-os" element={<TimelinePage />} />
+        <Route path="/sklad" element={<StockPage />} />
+        <Route path="/ulohy" element={<TasksPage />} />
+
+        {/* The three sections (chapter 2), spelled out rather than matched as
+            a pattern — the router takes a literal segment, and three routes
+            read more plainly than one that has to be decoded. /inspections
+            stays as an unsectioned list: it is nowhere in the menu, but
+            in-app links and bookmarks still point at it. */}
+        <Route path="/revizie" element={<SectionPage />} />
+        <Route path="/opp" element={<SectionPage />} />
+        <Route path="/bozp" element={<SectionPage />} />
         <Route path="/inspections" element={<InspectionsListPage />} />
+
+        {/* Návšteva (chapter 9) — an activity, not a section: it belongs to no
+            odbor and offers types from all of them at once. */}
+        <Route path="/visits/new" element={<VisitNewPage />} />
+        <Route path="/visits/:id" element={<VisitDetailPage />} />
         <Route path="/inspections/new" element={<NewInspectionTypePicker />} />
         <Route path="/inspections/new/:type/step-1" element={<InspectionStep1Page />} />
         <Route path="/inspections/:id" element={<InspectionDetailPage />} />
+        {/* Block 2 — a list of people (dychová skúška, omamné látky,
+            oboznámenie BOZP) is typed row after row on one screen. */}
+        <Route path="/inspections/:id/osoby" element={<PersonsFillPage />} />
         <Route path="/inspections/:id/items/new" element={<InspectionStep2Page />} />
         <Route path="/inspections/:id/items/:itemId" element={<InspectionStep2Page />} />
 
-        <Route path="/trainings" element={<TrainingsListPage />} />
+        {/* The old Školenia section — its list is now the Školenia tab of OPP. */}
+        <Route path="/trainings" element={<TrainingsRedirect />} />
         <Route path="/trainings/new" element={<NewTrainingPage />} />
         <Route path="/trainings/:id" element={<TrainingDetailPage />} />
         <Route path="/trainings/:id/edit" element={<TrainingEditPage />} />
@@ -104,6 +133,7 @@ export default function App() {
           <Route path="profil" element={<InspectorProfilePage />} />
           <Route path="branding" element={<BrandingPage />} />
           <Route path="technici" element={<TeamPage />} />
+          <Route path="opravnenia" element={<CompanyCertificatesPage />} />
           <Route path="data" element={<DataPage />} />
           <Route path="systemove" element={<SystemPage />} />
           <Route path="admin" element={<RequireAdmin><AdminPage /></RequireAdmin>} />

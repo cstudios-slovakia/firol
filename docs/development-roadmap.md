@@ -664,15 +664,34 @@ created + swept by `deploy.yml`. `Storage::ensureDir` now `chmod`s after
 was there for — whichever of php-fpm/CLI created a directory first would
 otherwise lock the other one out.
 
+## BOZP extension — overview (POapp spec, september 2026)
+
+Package: `POapp_BOZP_pre_vyvojarov11/` (gitignored). The binding spec is
+`01_SPECIFIKACIA/POapp_specifikacia.md`, data comes from `05_DATA/*.json`, and
+protocol layouts from `02_NAHLADY/bozp_protokoly.html`. The rules in
+`POKYNY_PRE_AI.md` apply throughout. Development happens on
+`fixes-and-new-features-september-2026`, which is merged into `main` (= deploy)
+per finished block.
+
+| Block | Content | Chapters | Status |
+|---|---|---|---|
+| 0 | Opravy chýb (Gmail, invalid token, spacebar) | A | ✅ |
+| 1 | Základ pre BOZP | 2, 5, 6, 9, 10, 12, 13 | ✅ |
+| 2 | BOZP úkony — 12 new types (audit_bozp comes with block 3) | 5.3, 7, 8 | ✅ (awaiting client test) |
+| 3 | Audity | 15, 16, 17 | ⏸ parked on branch `block-3-audity` (user, 23. 9.) |
+| 4 | Denná práca — úlohy, sklad, Dnes, časová os, kalendár, fakturácia | 11, 18–22 | ✅ (awaiting client test) |
+| 5 | Moduly a predplatné | 1, 3 | ⏸ later (user, 23. 9.) |
+| 6 | Web — new poapp.sk | separate file | ⬜ |
+
 ---
 
-## BOZP extension — block 0 „Opravy chýb" (POapp spec, september 2026) 🟡
+## BOZP extension — block 0 „Opravy chýb" (POapp spec, september 2026) ✅
 
-First delivery of the BOZP extension package
-(`POapp_BOZP_pre_vyvojarov11/`), which is handed over in blocks. Block 0 is
-chapter **A** — bugs in the current version, to be closed before any BOZP
-feature work starts. A.1 was closed earlier by the mail deliverability work;
-**A.3 (spacebar closing the search field) is still open.**
+Bug fixes from chapter **A** of the POapp spec (`POapp_BOZP_pre_vyvojarov11/`),
+to be finished before any BOZP feature work. A.1 was closed earlier by the mail
+deliverability work. A.3 (spacebar closing the search field) was fixed in
+`81a8ef5`: the search input's keydown no longer bubbles to the listbox handler
+in `components/ui/Select.tsx`.
 
 ### A.2 — „invalid token" ✅
 
@@ -730,6 +749,339 @@ tablet or home-screen app can go days without one.
   fails identically every time (the log shows 12 attempts); it now asks the
   user to load the app again. Being server-side, this reaches the old builds
   still in the field too — they can't be fixed any other way.
+
+---
+
+## BOZP extension — block 1 „Základ" (POapp spec, september 2026) ✅
+
+Second delivery of the BOZP extension package
+(`POapp_BOZP_pre_vyvojarov11/`). The package is handed over in blocks; block 0
+(bug fixes) is tracked separately. Block 1 is the ground the BOZP úkony in
+block 2 stand on: chapters **2, 5, 6, 9, 10, 12, 13**.
+
+Migrations `035`–`037`.
+
+- ✅ **Ch. 5 — periodicity is the technician's decision, on every type.**
+  `inspections.periodicity_months` is replaced by
+  `periodicity_value` + `periodicity_unit` (`den` / `tyzden` / `mesiac`), with
+  both NULL meaning „bez opakovania"; `periodicity_is_custom` records that the
+  value was not one the app offered. No type has a period forced on it or
+  forbidden to it any more — `pu_akcieschopnost` offers 3/6/12, and dychová
+  skúška (block 2) will start at „bez opakovania" but still accept a weekly
+  period, because some firms have one in their smernica.
+  The arithmetic lives in `Firol\Support\Periodicity` and `lib/periodicity.ts`
+  (month addition clamps: 31. 1. + 1 mesiac is 28. 2., not 3. 3.).
+  **The phrase „zákonný termín" is gone from the UI** — the calendar now says
+  „predpripravený termín", the picker „odporúčaná lehota", and a protocol
+  prints only the bare value. A protocol with no period prints **no**
+  Periodicita row at all rather than a dash. This is a liability decision, not
+  a wording one: lehoty follow from the building, its environment and the
+  operator, and the technician who signs carries them.
+- ✅ **Ch. 2 — one section becomes three.** Revízie / OPP / BOZP
+  (`/revizie`, `/opp`, `/bozp`, `<SectionPage>`), matching the paid modules one
+  to one. **Školenia disappears as a menu item**: a training has its own
+  protocol and its own next term, so školenie PO is a tab inside OPP. A section
+  with no types is left out of the menu entirely rather than greyed — BOZP
+  therefore appears once block 2 ships its úkony, which is also the shape
+  module gating needs in block 5. `/inspections` survives unsectioned for the
+  links and bookmarks that point at it.
+  **Follow-up (24. 9., user decision):** the OPP switcher stays, but its two
+  halves wear different colours — Kontroly in the OPP red, Školenia in
+  `TRAINING_COLOR` (a violet that is none of the three odbor colours) — and
+  „Nová kontrola" + „Nové školenie" always sit side by side in the header,
+  each in its tab's colour. The tab lives in the URL (`/opp?tab=skolenia`), and
+  `/trainings` now redirects there, so no „Späť" lands on the old all-trainings
+  page. Every „Späť" stays inside the section it started in: Step 1 carries
+  `?section=` back to the narrowed type picker instead of the full one.
+  Mapping confirmed: all seven training-tree types (six PO trainings + Pokyn —
+  žatva) are OPP; oboznámenie BOZP was never in the old Školenia section — it
+  is the BOZP inspection type `skolenie_bozp`.
+- ✅ **Ch. 12 — carrying items over.** `POST /api/inspections/{id}/carry-over`
+  plus a rewritten `repeat`. Identification travels; **stav, poznámky, fotky
+  and nedostatky do not** — carrying a verdict forward would let a protocol
+  claim something nobody checked. Items disposed of last time are left behind
+  and counted, so a shorter list reads as a decision. Each carried item keeps
+  `previous_status`, shown beside it while entering results and printed on
+  nothing. `carried_over_from_id` is kept apart from `source_inspection_id` so
+  the follow-up graph doesn't blur with the "typed once, a year ago" one.
+- ✅ **Ch. 9 — návšteva.** `visits` + `inspections.visit_id`,
+  `<VisitNewPage>` / `<VisitDetailPage>`. Firma and prevádzka are picked once;
+  types due within 30 days are ticked in advance. "Generovať všetky protokoly"
+  issues each úkon's protocol from its own number series and reports what it
+  had to skip and why — one úkon that isn't ready must not cost the other
+  three.
+- ✅ **Ch. 9.1 — several protocols, one e-mail.** `document_sends`,
+  `POST /api/companies/{id}/sends`, `<BulkSendDialog>`. Reachable from a visit
+  and from the company history, where "everything from last year" is a matter
+  of ticking rows. One message per recipient (one client's address never lands
+  in another's headers); every send is recorded with its protocols, recipients
+  and outcome. **Deviation from the spec:** over 20 MB the send is refused with
+  a Slovak message naming the size, rather than shrinking the photos — the PDFs
+  are already issued, and re-rendering one would mean sending a document that
+  differs from the archived original under the same number. Both this send
+  and the single-document one now carry a Reply-To of the sending technician
+  (`Firol\Mail\ReplyTo`), falling back to the account's main user for an
+  admin sending on a client's behalf — MAIL_FROM stays a shared noreply@, so
+  without it a client's reply reached nobody.
+- ✅ **Ch. 10 — potvrdenie o vykonaní práce.** `work_confirmations`,
+  `POST /api/work-confirmations`, template `potvrdenie_prace.php` (grey,
+  SPOLOČNÉ, `POT-RRRR-NNN`). Built from a visit, a single úkon, or a company
+  and a day. It names the technician's own firm as zhotoviteľ and lists
+  protocol NUMBERS only — no nedostatky, no stavy. Times are optional; without
+  them the row and the summary figure are left off. The "odovzdaný materiál"
+  section waits for the sklad in block 4 and is omitted while empty.
+- ✅ **Ch. 13 — prevzatie podpisom.** `company_persons` (several signatories
+  per client, pinned to a prevádzka or valid company-wide, one default),
+  `document_handovers`, `POST /api/documents/{id}/handover`,
+  `<HandoverDialog>`. Signing re-renders the protocol as a **new version of the
+  same number** (`documents.version` + `document_versions`); the earlier file
+  stays, because the client may already hold it. Signing is optional by design
+  — printing and signing on paper is ordinary practice, so the PDF always
+  carries an empty line for it.
+  The client column is headed **„Za organizáciu"** on every document, never
+  „Za spoločnosť" (a third of the clients are schools, obce and združenia), and
+  the line above the signature follows the document: **Schválil** on a požiarna
+  kniha (§ 29 vyhl. 121/2002 — the vedúci zamestnanec approves the record),
+  Prevzal na vedomie elsewhere. Centralised in `Firol\Support\Handover` +
+  `Firol\Pdf\SignatureBlock`, because nine templates had each spelled it out
+  and had already drifted apart.
+- ✅ **Ch. 6** — the three-step flow already matched the spec, and an
+  interrupted zápis stays a koncept. **The date is prefilled with today** (user
+  decision 23. 9., following the spec over the old „never auto-fill" rule). It
+  stays editable, including to past dates, in Step 1 and on a new training.
+  Repeat and follow-up drafts still start with no date, so the technician has
+  to confirm it before the PDF.
+
+Carried through the rest of the codebase: the Excel importer accepts a period
+in any unit (blank count = bez opakovania, blank unit = mesiac); backup
+archives written before block 1 are read through their old
+`periodicity_months`; `unlock` deletes every version of a discarded protocol,
+not only the latest.
+
+**Not in block 1, by design:** the BOZP úkony themselves (block 2), audits
+(block 3), sklad / úlohy / Dnes / časová os (block 4) and module subscriptions
+(block 5). The BOZP section and the výdajka rows on the potvrdenie are wired
+but empty until those land.
+
+## BOZP extension — block 2 „BOZP úkony" (POapp spec, september 2026) ✅
+
+Chapters **5.3, 7, 8** (plus their share of 12 and 26): the twelve BOZP úkony
+(`audit_bozp` comes with block 3). Built on 23. 9. by three agents in parallel,
+one per Step 2 pattern. Migrations `038` (`cert_bt` on the inspector profile)
+and `041`–`042`; `039`–`040` stayed unused.
+
+**Shared pieces, built once:**
+- **Zistené nedostatky** (`Support/Defects.php`, `components/DefectsEditor.tsx`,
+  `Pdf/DefectsTable.php`). A defect lives in the item it concerns
+  (`fields.defects`: popis*, opatrenie, termín), and its photos hang off the
+  existing `defect_key`. Defects are numbered across the whole úkon, so the table
+  and the photo captions („Nedostatok č. N — …") always agree.
+- **`Pdf/ProtocolLayout.php`**: the mockup's fixed frame (header with the BOZP
+  tag, Základné informácie, legal sentence, Podpisy, footer). Every new
+  template uses it.
+- **`inspections.details`** (`Support/InspectionDetails.php`): úkon-level
+  fields (device, opatrenia, záver, druh oboznámenia), validated per type.
+- **Certificate rule:** every type in the BOZP section needs and prints the
+  performing technician's `cert_bt`. `skolenie_bozp` is the exception and is
+  signed under the company `vv`.
+- **Company certificates BTS / VV** (ch. 1.3.1, minimal): stored once per
+  account and entered by the main user in Nastavenia → Firemné oprávnenia.
+  They print in the „Zhotoviteľ" row. Blocking on expiry belongs to block 5.
+
+**Types:**
+- ✅ **Single record** (the požiarna kniha pattern): `kniha_bozp` (BOZP), with
+  the 11 activities from `checklist_kniha_bozp.json` and the client's
+  „Termíny a kontroly" table, frozen when the PDF is issued. Also
+  `pracovisko` (PRAC, 8 areas, each with its own result), `osamele_pracovisko`
+  (OSP) and `fajcenie` (ZF).
+- ✅ **Person lists:** `dychova_skuska` (DS) and `omamne_latky` (OPL), each
+  with „Vyplnený / Prázdny na ručné doplnenie" (ch. 8.1). The blank form is
+  version 1 of the number; „Doplniť výsledky" reopens the úkon, and the
+  filled form becomes the next version of the same number. Also
+  `skolenie_bozp` (SKB): an inspection type, not a training, because it needs
+  periodicity, visits, the calendar and handover. It never prints a tematický
+  plán, only the „odkaz na osnovu". People can be taken over from earlier
+  DS/OPL/SKB lists and from PO trainings of the same company (names and
+  positions only). Optional on-screen signatures are stored on the row.
+- ✅ **Rows / devices:** `oopp` (OOPP), `pracovne_prostriedky` (PP), `rebriky`
+  (REB), `regale` (REG) and `oznacenie` (OZN, 9 kinds from the mockup plus
+  custom ones). Rebríky and regály have „Uložiť a ďalší / Ďalší rovnaký /
+  Uložiť a prejsť na súhrn".
+
+Every type: required fields are checked in the form, on the server and again
+before the PDF. Recommended periodicity comes from the spec, and none is
+forced. Carry-over (ch. 12) keeps identification only (vyradené items stay
+behind, previous state is shown), and a carried-over úkon can't be issued
+until its results are entered. Step 1 now opens the summary when a
+„Prevziať položky" offer exists, for all types.
+
+**Choices where the spec was silent:**
+- The 9 druhy označenia come from the OZN mockup, since 05_DATA has none.
+- Pracovisko uses the mockup's longer area names.
+- PRAC and OSP rate the whole úkon „Vyhovujúci / s výhradami / Nevyhovujúci".
+- The DS/OPL device is entered at the top of Step 2.
+- There is no mockup for the blank OPL form, so it mirrors DS without the
+  value column.
+
+**Still open:**
+- ⬜ A browser click-through of the remaining forms. Kniha BOZP (through to
+  the PDF) and dychová skúška were clicked through; the other ten were tested
+  through the API and their PDFs.
+- ⬜ The Excel importer doesn't know the 12 types.
+- ⬜ External revízie in kniha BOZP's „Termíny a kontroly" wait for ch. 5.5
+  (`revizia_*` evidence).
+- ⬜ The photo caption shows no place or time per photo.
+- ✅ Úlohy from a termín odstránenia came with block 4 (ch. 20).
+- ✅ **„Zhotoviteľ" row (ch. 1.3.3) is on every protocol** (decision 23. 9. 2026).
+  The technician's firm — account name, IČO, address — is printed in
+  Základné informácie. The mockup rows around it are unchanged. Only
+  `skolenie_bozp` adds the company line „oprávnenie na výchovu a vzdelávanie".
+  The block is frozen at issue (`inspections.details.issued_contractor`, or
+  `trainings.fields` for a školenie / pokyn), so a later signature re-renders
+  the firm that was printed, not the account as it stands by then. A missing
+  IČO or address is left out and does not block issuing. Potvrdenie o vykonaní
+  práce already names the firm in its header and was left as it is.
+- ⬜ **Potvrdenie o vykonaní práce: the firm isn't frozen on re-render.**
+  Signing it on screen rebuilds the PDF from `WorkConfirmationController::payload()`,
+  which reads the account's firm (name, IČO, address) live. A firm renamed
+  between issue and signing appears on version 2 of the same number.
+- ⬜ After the filled DS/OPL is issued, the blank form stays in
+  `document_versions` and on disk. It can't be downloaded in the app, though,
+  and the backup contains only the current version. The unsigned original of
+  a signed protocol behaves the same way.
+- ✅ **The personal certificate is frozen on re-render** (migration `043`).
+  Signing later rebuilds the PDF with the number and validity printed at
+  issue (`effective_cert_number`, `effective_cert_valid_from`,
+  `effective_cert_valid_to`), not the ones currently in the technician's
+  profile. A protocol issued before the snapshot existed still reads the
+  profile, because there is nothing frozen to put back.
+- ⬜ Company certificates (`account_certificates`) are not in the backup
+  archive, and neither are inspector profiles.
+- ⬜ The DS/OPL header (device, test kit) carries over with „Opakovať" but not
+  with „Prevziať" or the person take-over.
+
+Fixed during review (23. 9.):
+- Adding people in a quick sequence lost input and created duplicates (the
+  name was cleared only after the server answered). It's now cleared
+  immediately, and adds go through a queue.
+- The periodicity picker now shows the whole ch. 5 set on every type (denne ·
+  týždenne · mesačne · 3 · 6 · 12 · 24 mesiacov), with the type's
+  recommendations first. It had shown only the recommended values, plus
+  „Vlastná" and „Bez opakovania".
+- The vyraďovací protokol still said „Za spoločnosť prevzal na vedomie". It
+  now uses the shared „Za organizáciu" signature block.
+- A re-render for a signature printed the *current* company VV number. The
+  number the protocol was issued with is now frozen on the úkon.
+- The blank DS/OPL form no longer gets a photo appendix, since its body has
+  no nedostatky.
+- A úkon reopened with „Doplniť výsledky" can't be signed until it is locked
+  again, so a signature is never put on a list that has changed since.
+
+---
+
+## BOZP extension — block 4 „Denná práca" (POapp spec, september 2026) ✅
+
+Chapters **11, 18, 19, 20, 21, 22**. Built on 23. 9. by six agents: four in
+parallel (úlohy, sklad, fakturácia, kalendár), then Dnes and časová os on
+top of them. Migrations `044`–`047`. Block 3 (audity) was taken out of the
+app the same day and parked on branch `block-3-audity`. Merging that branch
+brings it back, with its tables in `039_audits.sql`.
+
+- ✅ **Ch. 20 — úlohy** (`044_tasks.sql`, `TaskController`, `/ulohy`).
+  A plain list: text, optional firma/prevádzka, assignee and termín, done
+  with a timestamp. No priorities, tags or subtasks. Filters by person and
+  state, and a menu badge with the open count. Saving a nedostatok with a
+  termín offers „Overiť odstránenie nedostatku — …" with that termín. The
+  offer can be declined and is never repeated for the same defect: it's
+  remembered per device, and the server refuses a second task for one
+  defect. A task points back to the defect by inspection id + defect key.
+  Removing a member unassigns their tasks. Tasks of an archived firm are
+  hidden.
+- ✅ **Ch. 21 — sklad a výdajka** (`045_stock.sql`, `Support/Stock.php`,
+  `/sklad`). Items, one balance per holder (Sklad + each technician), and an
+  append-only journal. The journal has no edit or delete routes.
+  - A presun or použitie that would overdraw is refused under a row lock,
+    with „Na {držiteľ} toľko nie je (N {jednotka})".
+  - Použité at a firma offers both „Pridať na faktúru" and „Vystaviť
+    výdajku". „Pridať na faktúru" marks the movement to invoice; it is
+    ticked off in Sklad → Na faktúru. The výdajka is `VYD-RRRR-NNN`, laid out
+    per the mockup, dated with the movement, and can be signed, e-mailed and
+    bulk-sent. It covers the day's použitia at that firma.
+  - The potvrdenie o vykonaní práce lists the day's výdajky under
+    „Odovzdaný materiál".
+  - A removed technician's stock goes back to Sklad as a recorded presun.
+  - Sklad writes are online only, with a Slovak notice when offline.
+- ✅ **Ch. 22 — fakturácia úkonu** (`046_billing.sql`, `Support/Invoicing.php`).
+  - Every inspection and training has a režim (paušál / na faktúru /
+    nefakturuje sa), prefilled from the firm's new setting. It also has a
+    vyfakturované check-off with a date, and a poznámka. There is no payment
+    field.
+  - Billing stays editable on a locked úkon and never touches the PDF.
+  - Under paušál the check-off isn't shown.
+  - The úkon lists have a „Nevyfakturované" filter
+    (`?nevyfakturovane=1`), with a one-tap tick on each row.
+  - Úkony from before this change keep NULL, so years of history don't flood
+    the list.
+  - The spec says it „extends existing fakturácia", but there was no
+    per-úkon billing to extend, so this is the first version of it.
+- ✅ **Ch. 11 — kalendár** (`047_calendar_team.php`, `Support/Deadlines.php`,
+  `Support/TeamIdentity.php`).
+  - Deadlines are grouped by firma (4 in a month = one group) or by mesto.
+  - Colours follow the odbor. Po termíne is listed first and red; splnené is
+    greyed.
+  - Zdroj labels (Predpripravený termín / Vlastná udalosť / Tvoj termín).
+    The technician's own certificate validity is shown apart from client
+    termíny.
+  - Initials and avatar colour are stored per membership, and the colour is
+    unique per account. The main user can change colours; initials are
+    editable.
+  - „Kto: Všetci / Len moje" is shared by the calendar and the časová os. It
+    is hidden for a solo technician and remembered per account.
+  - Automatic client notice: off by default, 7/14/30 days ahead, main user
+    only, sent by `backend/bin/send-deadline-notices.php` from a daily 06:00
+    cron that deploy installs. It goes out at most once per deadline
+    (`deadline_notices`), only to a firm with a contact e-mail, and carries
+    the manual notice's text (`Support/ClientNotice.php`, kept in step with
+    `lib/clientNoticeEmail.ts`).
+  - Archived firms and prevádzky produce no deadlines.
+- ✅ **Ch. 18 — Dnes** (`TodayController`, `GET /api/today`, `TodayPage`).
+  - Replaces Prehľad as the first screen.
+  - Seven cards in the spec's order. Empty cards aren't rendered, and the
+    header count always equals the rows after „+ N ďalšie".
+  - Po termíne has a red frame.
+  - The main user of a team gets a Moje / Celý tím switch. Celý tím shows
+    avatars.
+  - Otvorené nedostatky counts a defect that has a termín, sits on a
+    finalized úkon not superseded by a later one, and has no completed
+    „overiť" task.
+  - Tvoje termíny shows certificates that have expired or expire within 120
+    days.
+  - Dnes v teréne lists today's visits, plans and own events. There is no
+    time-of-day field, so it is ordered by kind and then by creation.
+- ✅ **Ch. 19 — časová os** (`/casova-os`, `lib/timeline.ts`).
+  - Open client deadlines only.
+  - „Po termíne" is always the first group; grouping by mesiac, mesto or
+    firma. The odbor and „Kto" filters apply.
+  - Each row shows the last control, a countdown and an avatar.
+  - „Naplánovať" reuses the calendar's plan editor.
+- ✅ **Mobile menu.** Ten items don't fit a 360px bar. The bar keeps Dnes,
+  Firmy and the odbor sections; Kalendár, Časová os, Sklad, Úlohy and
+  Nastavenia open from „Viac", which carries the task badge.
+
+**Still open:**
+- ⬜ A browser click-through of sklad, fakturácia, the calendar and the „Viac"
+  sheet. Úlohy, Dnes and the časová os were clicked through; the rest was
+  tested through the API.
+- ⬜ Úlohy of an archived firm aren't marked „zrušené — firma archivovaná"
+  (ch. 25); they're only hidden.
+- ⬜ Unsynced offline drafts don't appear in Dnes → Rozrobené koncepty.
+- ⬜ Sklad items can't be renamed or deleted (the spec only has „Nová
+  položka"), and a movement can't be back-dated.
+- ⬜ `calendar_plans` / `calendar_events` aren't in the backup archive
+  (predates block 4); nor are potvrdenia and handover signatures.
+  `calendar_events` may also have the SET NULL + account-cascade FK problem
+  that `044_tasks.sql` had to avoid.
+- ⬜ The automatic notice cron reaches the server on the next deploy.
 
 ---
 

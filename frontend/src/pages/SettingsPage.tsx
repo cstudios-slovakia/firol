@@ -46,6 +46,8 @@ import {
     UsersRound,
 } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
+import { useIsMainUser } from "@/auth/useIsMainUser";
+import { BadgeCheck } from "lucide-react";
 import {
     LEGAL_PRIVACY_LABEL,
     LEGAL_PRIVACY_URL,
@@ -57,6 +59,8 @@ import { DataApi, type RestoreMode, type RestoreResult } from "@/api/data";
 import { ImportApi, type ImportKind, type ImportResult } from "@/api/import";
 import { BackupReminderModal } from "@/components/BackupReminderModal";
 import { InstallAppCard } from "@/components/InstallAppCard";
+import { ClientNoticeSettingsCard } from "@/components/ClientNoticeSettingsCard";
+import { MemberIdentityEditor } from "@/components/team/MemberIdentityEditor";
 import {
     InspectorProfileApi,
     type InspectorProfile,
@@ -156,10 +160,28 @@ const ADMIN_MENU_ITEM = {
     bg: "bg-rose-50",
 } as const;
 
+// Chapter 1.3.1 — firemné oprávnenia (BTS, výchova a vzdelávanie) belong to
+// the account and are managed by its main user only, so the tab and the menu
+// entry are offered to the main user and to nobody else.
+const CERT_TAB = { to: "/settings/opravnenia", label: "Firemné oprávnenia", icon: BadgeCheck } as const;
+
+const CERT_MENU_ITEM = {
+    to: "/settings/opravnenia",
+    label: "Firemné oprávnenia",
+    description: "Bezpečnostnotechnická služba a výchova a vzdelávanie — raz pre celý účet.",
+    icon: BadgeCheck,
+    color: "text-blue-600",
+    bg: "bg-blue-50",
+} as const;
+
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
 export function SettingsLayout() {
     const { isAdmin } = useAuth();
+    const isMain = useIsMainUser();
+    const tabs = isMain
+        ? [...SECTION_TABS.slice(0, 1), CERT_TAB, ...SECTION_TABS.slice(1)]
+        : [...SECTION_TABS];
     const location = useLocation();
     const isIndex =
         location.pathname === "/settings" || location.pathname === "/settings/";
@@ -182,7 +204,7 @@ export function SettingsLayout() {
                     aria-label="Sekcie nastavení"
                     className="flex items-center gap-0.5 overflow-x-auto border-b border-ink-100 [&::-webkit-scrollbar]:hidden"
                 >
-                    {SECTION_TABS.map((tab) => (
+                    {tabs.map((tab) => (
                         <NavLink
                             key={tab.to}
                             to={tab.to}
@@ -262,7 +284,11 @@ export function SettingsIndexPage() {
         }
     }, [navigate]);
 
-    const items = isAdmin ? [...MENU_ITEMS, ADMIN_MENU_ITEM] : [...MENU_ITEMS];
+    const isMain = useIsMainUser();
+    const base = isMain
+        ? [...MENU_ITEMS.slice(0, 2), CERT_MENU_ITEM, ...MENU_ITEMS.slice(2)]
+        : [...MENU_ITEMS];
+    const items = isAdmin ? [...base, ADMIN_MENU_ITEM] : base;
 
     return (
         <div className="flex flex-col gap-2 sm:hidden">
@@ -385,6 +411,11 @@ function InspectorProfileSection() {
     const [certGeneral, setCertGeneral] = useState("");
     const [validFromGeneral, setValidFromGeneral] = useState("");
     const [validToGeneral, setValidToGeneral] = useState("");
+    // Bezpečnostný technik. Personal, like the three above, and the number
+    // every BOZP úkon prints (chapter 26).
+    const [certBt, setCertBt] = useState("");
+    const [validFromBt, setValidFromBt] = useState("");
+    const [validToBt, setValidToBt] = useState("");
 
     const [showSigPicker, setShowSigPicker] = useState(false);
 
@@ -422,6 +453,9 @@ function InspectorProfileSection() {
         setCertGeneral(p.cert_general ?? "");
         setValidFromGeneral(p.valid_from_general ?? "");
         setValidToGeneral(p.valid_to_general ?? "");
+        setCertBt(p.cert_bt ?? "");
+        setValidFromBt(p.valid_from_bt ?? "");
+        setValidToBt(p.valid_to_bt ?? "");
     }
 
     async function onSubmit(e: FormEvent) {
@@ -440,6 +474,9 @@ function InspectorProfileSection() {
                     valid_to_oprava: validToOprava || null,
                     valid_from_general: validFromGeneral || null,
                     valid_to_general: validToGeneral || null,
+                    cert_bt: certBt.trim() || null,
+                    valid_from_bt: validFromBt || null,
+                    valid_to_bt: validToBt || null,
                 },
                 csrfToken,
             );
@@ -586,6 +623,19 @@ function InspectorProfileSection() {
                         validTo={validToGeneral}
                         onValidFromChange={setValidFromGeneral}
                         onValidToChange={setValidToGeneral}
+                    />
+
+                    <CertCard
+                        color="emerald"
+                        title="Bezpečnostný technik"
+                        subtitle="Úkony v oblasti BOZP"
+                        certValue={certBt}
+                        certPlaceholder="napr. 0123/2019-BT"
+                        onCertChange={setCertBt}
+                        validFrom={validFromBt}
+                        validTo={validToBt}
+                        onValidFromChange={setValidFromBt}
+                        onValidToChange={setValidToBt}
                     />
 
                     {error && (
@@ -1506,9 +1556,14 @@ function TeamSection() {
                                     className="flex flex-col gap-2.5 rounded-2xl border border-ink-100 px-3 py-2.5"
                                 >
                                     <div className="flex items-center gap-3">
-                                        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-firol-50 text-firol-600">
-                                            <User className="size-4" />
-                                        </span>
+                                        {/* Chapter 11.5 — initials + avatar colour. */}
+                                        <MemberIdentityEditor
+                                            member={m}
+                                            members={members}
+                                            isMain={isMain}
+                                            isSelf={isSelf}
+                                            onSaved={reloadMembers}
+                                        />
                                         <div className="min-w-0 flex-1">
                                             <p className="truncate text-sm font-semibold text-ink-900">
                                                 {m.fullname}
@@ -1617,7 +1672,7 @@ function TeamSection() {
 
 // ─── Cert Card ────────────────────────────────────────────────────────────────
 
-type CertCardColor = "firol" | "violet" | "blue";
+type CertCardColor = "firol" | "violet" | "blue" | "emerald";
 
 const CERT_CARD_STYLES: Record<
     CertCardColor,
@@ -1640,6 +1695,12 @@ const CERT_CARD_STYLES: Record<
         bg: "bg-blue-50/40",
         iconBg: "bg-blue-100",
         iconColor: "text-blue-600",
+    },
+    emerald: {
+        border: "border-emerald-200",
+        bg: "bg-emerald-50/40",
+        iconBg: "bg-emerald-100",
+        iconColor: "text-emerald-600",
     },
 };
 
@@ -2109,6 +2170,7 @@ export function SystemPage() {
         <>
             <SectionBack label="Systémové" />
             <InstallAppCard />
+            <ClientNoticeSettingsCard className="mt-4" />
             <LegalDocumentsCard />
         </>
     );
@@ -2507,6 +2569,9 @@ const RESTORE_LABELS: Record<string, string> = {
     trainings: "školení",
     trainees: "účastníkov",
     documents: "PDF protokolov",
+    stock_items: "skladových položiek",
+    stock_movements: "pohybov v sklade",
+    tasks: "úloh",
 };
 
 const RESTORE_MODES: {

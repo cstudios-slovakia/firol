@@ -28,7 +28,7 @@ final class CompanyController
         // tenant via the account_id condition on the parent query.
         // Admins get all companies across all accounts (no tenant filter).
         if ($isAdmin) {
-            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver,
+            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver, c.billing_mode,
                            c.account_id,
                            a.invoice_company_name AS account_name,
                            (SELECT COUNT(*) FROM facilities f
@@ -44,7 +44,7 @@ final class CompanyController
                     WHERE  c.archived_at IS NULL';
             $params = [];
         } else {
-            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver,
+            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver, c.billing_mode,
                            (SELECT COUNT(*) FROM facilities f
                              WHERE f.company_id = c.id AND f.archived_at IS NULL) AS facilities_count,
                            (SELECT MAX(i.executed_on) FROM inspections i
@@ -92,14 +92,16 @@ final class CompanyController
         $facStmt->execute([$id]);
         $facilities = $facStmt->fetchAll();
 
-        // Last-used periodicity per (facility, inspection type) — used by
-        // Step 1 to prefill the periodicity dropdown for types where it's
-        // selectable (PHP, požiarna kniha). The window function picks the
-        // most recent finalized inspection per facility+type.
+        // Last-used periodicity per (facility, inspection type) — Step 1
+        // prefills it, because what this prevádzka was on last time is a far
+        // better guess than the catalogue's recommendation. Carries the unit
+        // too: since block 1 a period can be days or weeks, not only months.
+        // The window function picks the most recent inspection per
+        // facility+type.
         $defStmt = Db::pdo()->prepare(
-            'SELECT facility_id, type, periodicity_months
+            'SELECT facility_id, type, periodicity_value, periodicity_unit
              FROM (
-                 SELECT i.facility_id, i.type, i.periodicity_months,
+                 SELECT i.facility_id, i.type, i.periodicity_value, i.periodicity_unit,
                         ROW_NUMBER() OVER (
                             PARTITION BY i.facility_id, i.type
                             ORDER BY i.executed_on DESC, i.id DESC
@@ -117,7 +119,10 @@ final class CompanyController
         foreach ($defStmt->fetchAll() as $r) {
             $fid = (int) $r['facility_id'];
             $defaultsByFacility[$fid] ??= [];
-            $defaultsByFacility[$fid][(string) $r['type']] = (int) $r['periodicity_months'];
+            $defaultsByFacility[$fid][(string) $r['type']] = [
+                'value' => $r['periodicity_value'] !== null ? (int) $r['periodicity_value'] : null,
+                'unit'  => $r['periodicity_unit'] !== null ? (string) $r['periodicity_unit'] : null,
+            ];
         }
         foreach ($facilities as &$fac) {
             $fac['id'] = (int) $fac['id'];
@@ -138,6 +143,8 @@ final class CompanyController
         $accountId = Tenant::currentAccountId();
 
         [$name, $ico, $addr, $contact, $contactEmail, $approver] = self::readBody($req);
+        // Chapter 22 — validated up front so a bad value never half-saves the firm.
+        $billingMode = self::readBillingMode($req);
 
         $stmt = Db::pdo()->prepare(
             'INSERT INTO companies (account_id, name, ico, street, postal_code, city, contact, contact_email, approver)
@@ -145,6 +152,12 @@ final class CompanyController
         );
         $stmt->execute([$accountId, $name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $contactEmail, $approver]);
         $id = (int) Db::pdo()->lastInsertId();
+
+        // Chapter 22 — absent means the column default (na faktúru).
+        if ($billingMode !== null) {
+            Db::pdo()->prepare('UPDATE companies SET billing_mode = ? WHERE id = ?')
+                ->execute([$billingMode, $id]);
+        }
 
         Response::json(['company' => self::shape(self::findOrFail($accountId, $id))], 201);
     }
@@ -160,12 +173,22 @@ final class CompanyController
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
         [$name, $ico, $addr, $contact, $contactEmail, $approver] = self::readBody($req);
+        // Chapter 22 — validated up front so a bad value never half-saves the firm.
+        $billingMode = self::readBillingMode($req);
 
         $stmt = Db::pdo()->prepare(
             'UPDATE companies SET name = ?, ico = ?, street = ?, postal_code = ?, city = ?, contact = ?, contact_email = ?, approver = ?
              WHERE  id = ? AND account_id = ?'
         );
         $stmt->execute([$name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $contactEmail, $approver, $id, $scopeAccountId]);
+
+        // Chapter 22 — absent keeps the current setting (older offline
+        // clients replay the edit without it). Changing it affects only úkony
+        // created from now on; existing ones keep their own režim.
+        if ($billingMode !== null) {
+            Db::pdo()->prepare('UPDATE companies SET billing_mode = ? WHERE id = ? AND account_id = ?')
+                ->execute([$billingMode, $id, $scopeAccountId]);
+        }
 
         Response::json(['company' => self::shape(self::findOrFail($isAdmin ? null : $accountId, $id))]);
     }
@@ -237,19 +260,35 @@ final class CompanyController
         return [$name, $ico, $addr, $contact, $contactEmail, $approver !== '' ? $approver : null];
     }
 
+    /**
+     * The firm's default režim fakturácie (chapter 22) — paušál or na faktúru;
+     * null when the body does not carry it.
+     */
+    private static function readBillingMode(Request $req): ?string
+    {
+        $mode = $req->jsonString('billing_mode');
+        if ($mode === null) {
+            return null;
+        }
+        if (!in_array($mode, \Firol\Support\Invoicing::COMPANY_MODES, true)) {
+            Response::error('Neplatný režim fakturácie firmy.', 422);
+        }
+        return $mode;
+    }
+
     /** @return array<string, mixed> */
     private static function findOrFail(?int $accountId, int $id): array
     {
         if ($accountId === null) {
             $stmt = Db::pdo()->prepare(
-                'SELECT id, account_id, name, ico, street, postal_code, city, contact, contact_email, approver, created_at
+                'SELECT id, account_id, name, ico, street, postal_code, city, contact, contact_email, approver, billing_mode, created_at
                  FROM   companies
                  WHERE  id = ? AND archived_at IS NULL'
             );
             $stmt->execute([$id]);
         } else {
             $stmt = Db::pdo()->prepare(
-                'SELECT id, account_id, name, ico, street, postal_code, city, contact, contact_email, approver, created_at
+                'SELECT id, account_id, name, ico, street, postal_code, city, contact, contact_email, approver, billing_mode, created_at
                  FROM   companies
                  WHERE  id = ? AND account_id = ? AND archived_at IS NULL'
             );

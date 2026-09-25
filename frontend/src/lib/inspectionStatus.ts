@@ -1,4 +1,7 @@
-import type { InspectionListItem } from "@/api/inspections";
+import { periodicityOf, type InspectionListItem } from "@/api/inspections";
+import { daysUntilNext } from "@/lib/periodicity";
+
+export { daysUntilNext };
 
 /**
  * Validity status of a finalized inspection, derived from its execution date
@@ -20,31 +23,11 @@ type StatusInput = Pick<
     InspectionListItem,
     | "status"
     | "executed_on"
-    | "periodicity_months"
+    | "periodicity_value"
+    | "periodicity_unit"
     | "is_superseded"
     | "is_preventive_inspection"
 >;
-
-/**
- * Days from today until the next due date (executed_on + periodicity_months).
- * Negative when already past due. Null when there is no execution date yet.
- */
-export function daysUntilNext(
-    executedOn: string | null,
-    periodicityMonths: number,
-): number | null {
-    if (!executedOn) return null;
-    const base = new Date(executedOn);
-    if (isNaN(base.getTime())) return null;
-    const next = new Date(base);
-    next.setMonth(next.getMonth() + periodicityMonths);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    next.setHours(0, 0, 0, 0);
-    return Math.round(
-        (next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-    );
-}
 
 /**
  * Resolve the validity status. Supersession wins over the date math: once a
@@ -61,7 +44,7 @@ export function getInspectionStatus(it: StatusInput): {
     if (it.is_preventive_inspection === false) return { kind: "entry", days: null };
     if (it.is_superseded) return { kind: "superseded", days: null };
 
-    const days = daysUntilNext(it.executed_on, it.periodicity_months);
+    const days = daysUntilNext(it.executed_on, periodicityOf(it));
     if (days === null) return { kind: "valid", days: null };
     if (days < 0) return { kind: "overdue", days };
     if (days <= SOON_THRESHOLD_DAYS) return { kind: "soon", days };

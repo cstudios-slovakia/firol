@@ -27,6 +27,18 @@ export const INSPECTION_TYPE_ACCUSATIVE: Record<InspectionType, string> = {
   nudzove_osvetlenie: 'kontrolu núdzového osvetlenia',
   ts_hadic: 'tlakovú skúšku hadíc',
   vyradenie: 'vyradenie hasiacich prístrojov',
+  kniha_bozp: 'kontrolu stavu bezpečnosti a ochrany zdravia pri práci',
+  pracovisko: 'kontrolu pracoviska a pracovného prostredia',
+  osamele_pracovisko: 'kontrolu osamelých a odlúčených pracovísk',
+  fajcenie: 'kontrolu dodržiavania zákazu fajčenia',
+  oopp: 'kontrolu osobných ochranných pracovných prostriedkov',
+  pracovne_prostriedky: 'kontrolu pracovných prostriedkov',
+  rebriky: 'kontrolu rebríkov',
+  regale: 'kontrolu regálov',
+  oznacenie: 'kontrolu bezpečnostného a zdravotného označenia',
+  dychova_skuska: 'dychovú skúšku na alkohol',
+  omamne_latky: 'kontrolu na zistenie požitia omamných a psychotropných látok',
+  skolenie_bozp: 'oboznámenie zamestnancov v oblasti BOZP',
 };
 
 /** "2026-08-15" → "15. 8. 2026" (no leading zeros, as the spec's sample). */

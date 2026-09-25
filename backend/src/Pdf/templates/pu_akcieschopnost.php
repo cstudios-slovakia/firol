@@ -5,7 +5,7 @@
  * @var string $number
  * @var string $generated_at
  * @var array  $brand          name, color, logo_data_uri
- * @var array  $inspection     executed_on, periodicity_months, notes, status
+ * @var array  $inspection     executed_on, periodicity_label, notes, status
  * @var array  $company        name, ico, address
  * @var array  $facility       name, address, contact_person
  * @var array  $inspector      fullname, certification_number, valid_from, valid_to, signature_data_uri
@@ -21,16 +21,9 @@ $formatDate = static function (?string $iso): string {
     return $ts ? date('j. n. Y', $ts) : $iso;
 };
 
-$formatPeriodicity = static function (int $m): string {
-    $w = $m === 1 ? 'mesiac' : ($m <= 4 ? 'mesiace' : 'mesiacov');
-    $s = "$m $w";
-    if ($m >= 24 && $m % 12 === 0) {
-        $y = intdiv($m, 12);
-        $yw = $y === 1 ? 'rok' : ($y <= 4 ? 'roky' : 'rokov');
-        $s .= " ($y $yw)";
-    }
-    return $s;
-};
+// Already formatted by DocumentController — the label is Slovak prose
+// ("12 mesiacov", "2 týždne") and null when the úkon does not recur.
+$periodicity = $inspection['periodicity_label'] ?? null;
 
 $kindLabels = [
     'dvere'  => 'Požiarne dvere',
@@ -130,18 +123,30 @@ foreach ($items as $idx => $it) {
     <td class="bl">Dátum kontroly</td>
     <td class="bv"><strong><?= $formatDate($inspection['executed_on'] ?? null) ?></strong></td>
   </tr>
+  <?php // "Bez opakovania" prints no Periodicita pair at all: a protocol
+        // states the period it was issued under, and where there is none
+        // there is nothing to state (chapter 5). The performer then moves up
+        // beside IČO and Prevádzka takes the full row, so no cell is empty. ?>
   <tr>
     <td class="bl">IČO</td>
     <td class="bv"><?= $h($company['ico']) ?></td>
+    <?php if ($periodicity !== null): ?>
     <td class="bl">Periodicita</td>
-    <td class="bv"><?= $h($formatPeriodicity((int) ($inspection['periodicity_months'] ?? 0))) ?></td>
+    <td class="bv"><?= $h($periodicity) ?></td>
+    <?php else: ?>
+    <td class="bl">Kontrolu vykonal</td>
+    <td class="bv"><?= $inspectorLine ?></td>
+    <?php endif ?>
   </tr>
   <tr>
     <td class="bl">Prevádzka</td>
-    <td class="bv"><?= $h($facility['name']) ?><?= !empty($facility['address']) ? '<br><span style="font-weight:normal;color:#555;">' . $h($facility['address']) . '</span>' : '' ?></td>
+    <td class="bv"<?= $periodicity === null ? ' colspan="3"' : '' ?>><?= $h($facility['name']) ?><?= !empty($facility['address']) ? '<br><span style="font-weight:normal;color:#555;">' . $h($facility['address']) . '</span>' : '' ?></td>
+    <?php if ($periodicity !== null): ?>
     <td class="bl">Kontrolu vykonal</td>
     <td class="bv"><?= $inspectorLine ?></td>
+    <?php endif ?>
   </tr>
+  <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>
 
 <h2>Zoznam kontrolovaných požiarnych uzáverov</h2>
@@ -193,13 +198,13 @@ foreach ($items as $idx => $it) {
 <table class="sig-tbl">
   <tr>
     <th width="38%">Kontrolu vykonal</th>
-    <th width="38%">Predložené na podpis</th>
+    <th width="38%"><?= \Firol\Pdf\SignatureBlock::heading('pu_akcieschopnost') ?></th>
     <th width="24%">Miesto a dátum</th>
   </tr>
   <tr>
     <td><?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?><br><span style="font-size:8pt; color:#555;">č. oprávnenia: <?= $h($inspector['certification_number']) ?></span><?php endif ?></td>
-    <td>Štatutárny zástupca / zodpovedná osoba</td>
-    <td><?= $h($miesto) ?></td>
+    <td><?= \Firol\Pdf\SignatureBlock::nameCell($handover ?? null) ?></td>
+    <td><?= \Firol\Pdf\SignatureBlock::placeAndDate($handover ?? null, $miesto) ?></td>
   </tr>
   <tr class="sig-row">
     <td>
@@ -209,7 +214,7 @@ foreach ($items as $idx => $it) {
       <div class="sig-line"></div>
     </td>
     <td>
-      <div class="sig-line">Podpis zodpovednej osoby</div>
+      <?= \Firol\Pdf\SignatureBlock::signCell($handover ?? null, 'pu_akcieschopnost') ?>
     </td>
     <td></td>
   </tr>

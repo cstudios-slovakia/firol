@@ -12,7 +12,9 @@ use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Storage\Storage;
-use PDO;
+use Firol\Support\CarryOver;
+use Firol\Support\InspectionDetails;
+use Firol\Support\Periodicity;
 
 final class InspectionController
 {
@@ -59,26 +61,31 @@ final class InspectionController
                        ) AS is_superseded";
 
     /**
-     * Allowed periodicities per inspection type. Source of truth: locked
-     * decisions in docs/Firol base document and docs/development-roadmap.md.
-     * Step 1 must reject anything outside this map.
+     * Every inspection type the app knows. Which periodicity each one
+     * SUGGESTS lives in {@see Periodicity::RECOMMENDED_MONTHS} — the suggestion
+     * is the only thing fixed per type. Since block 1 (chapter 5) the value
+     * itself is the technician's to set, in days, weeks or months, or to drop
+     * entirely ("bez opakovania"); nothing here constrains it.
      *
-     * @var array<string, list<int>>
+     * @var list<string>
      */
-    private const TYPE_PERIODICITIES = [
-        'php' => [12, 24],
-        'hydranty' => [12],
-        'oprava_ts_php' => [60],
-        'poziarna_kniha' => [3, 6, 12],
-        'pu_akcieschopnost' => [3],
-        'pu_udrzba' => [12],
-        'nudzove_osvetlenie' => [12],
-        'ts_hadic' => [12],
+    private const TYPES = [
+        'php', 'hydranty', 'oprava_ts_php', 'poziarna_kniha',
+        'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'ts_hadic',
         // Pokyn — žatevné práce is not here: it is a document issued to the
         // client's employees, so it lives in the training tree (see
         // TrainingController), not among the inspection types.
         // One-off document — a disposal has no recurrence (change request 2.1).
-        'vyradenie' => [0],
+        'vyradenie',
+        // Block 2 — single-record BOZP úkony (Firol\Support\BozpRecords).
+        'kniha_bozp', 'pracovisko', 'osamele_pracovisko', 'fajcenie',
+        // Block 2 — BOZP úkony whose rows are items (Firol\Support\BozpItems).
+        'oopp', 'pracovne_prostriedky', 'rebriky', 'regale', 'oznacenie',
+        // Block 2 — the „osoby" úkony: a list of people under a header
+        // (Firol\Support\PersonList). Oboznámenie BOZP is one of them rather
+        // than a training-tree record: it carries a periodicity, joins a visit,
+        // is signed „Za organizáciu" and shares its person list with the tests.
+        'dychova_skuska', 'omamne_latky', 'skolenie_bozp',
     ];
 
     /**
@@ -101,8 +108,10 @@ final class InspectionController
         $facilityId = self::queryInt($req, 'facility_id');
         $type = $req->query('type');
 
-        $sql = 'SELECT i.id, i.type, i.periodicity_months, i.executed_on,
+        $sql = 'SELECT i.id, i.type, i.executed_on,
+                       i.periodicity_value, i.periodicity_unit, i.periodicity_is_custom,
                        i.is_preventive_inspection, i.source_inspection_id,
+                       i.carried_over_from_id, i.visit_id,
                        i.status, i.notes, i.created_at,
                        i.company_id, c.name AS company_name,
                        i.facility_id, f.name AS facility_name,
@@ -110,6 +119,7 @@ final class InspectionController
                        i.effective_inspector_user_id,
                        eu.fullname AS effective_inspector_name,
                        i.effective_cert_number,
+                       i.billing_mode, i.invoiced, i.invoiced_at, i.billing_note,
                        ' . self::SUPERSEDED_EXPR . '
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
@@ -118,6 +128,12 @@ final class InspectionController
                 LEFT JOIN users    eu ON eu.id = i.effective_inspector_user_id
                 WHERE  i.archived_at IS NULL';
         $params = [];
+        // Chapter 22 — „Nevyfakturované": filtered here rather than on the
+        // client, so the 200-row cap below never hides an older úkon that is
+        // still waiting to be invoiced.
+        if ($req->query('uninvoiced') === '1') {
+            $sql .= ' AND ' . \Firol\Support\Invoicing::uninvoicedCondition('i');
+        }
         if (!$isAdmin) {
             $sql .= ' AND i.account_id = :account_id';
             $params['account_id'] = $accountId;
@@ -178,6 +194,9 @@ final class InspectionController
         $like = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
 
         $preferFacility = $field === 'location' && $facilityId !== null;
+        // Block 2 — „výber z prevádzky" for the workplaces of a BOZP record:
+        // only places already recorded on THIS prevádzka are offered.
+        $facilityOnly = $preferFacility && $req->query('facility_only') === '1';
 
         $sql = "SELECT $val AS val"
              . ($preferFacility ? ', MAX(i.facility_id = :fid) AS same_fac' : '')
@@ -188,7 +207,8 @@ final class InspectionController
                   AND  i.archived_at IS NULL
                   AND  $val IS NOT NULL
                   AND  $val <> ''
-                  AND  $valCi LIKE :like
+                  AND  $valCi LIKE :like"
+             . ($facilityOnly ? ' AND i.facility_id = :fid_only' : '') . "
                 GROUP  BY val
                 ORDER  BY " . ($preferFacility ? 'same_fac DESC, ' : '') . "uses DESC, val ASC
                 LIMIT  20";
@@ -196,6 +216,9 @@ final class InspectionController
         $params = ['acct' => $accountId, 'like' => $like];
         if ($preferFacility) {
             $params['fid'] = $facilityId;
+        }
+        if ($facilityOnly) {
+            $params['fid_only'] = $facilityId;
         }
 
         $stmt = Db::pdo()->prepare($sql);
@@ -255,10 +278,23 @@ final class InspectionController
             ];
         }, $fuStmt->fetchAll());
 
+        // Chapter 12 — a draft with nothing in it yet can still be filled
+        // from last time's devices, so the offer travels with the detail as
+        // well as with the freshly created draft.
+        $carryOver = ($row['status'] === 'draft' && $items === [])
+            ? self::carryOverOffer(
+                (int) $row['account_id'],
+                (int) $row['facility_id'],
+                (string) $row['type'],
+                $id,
+            )
+            : null;
+
         Response::json([
             'inspection' => self::shapeRow($row),
             'items' => $items,
             'follow_ups' => $followUps,
+            'carry_over' => $carryOver,
         ]);
     }
 
@@ -333,27 +369,37 @@ final class InspectionController
             Response::json(['inspection_id' => (int) $existingId, 'created' => false], 200);
         }
 
-        $periodicity = self::TYPE_PERIODICITIES[$targetType][0];
+        // Follow-up drafts start from the target type's recommended period;
+        // the technician revisits it in Step 1 like any other úkon.
+        $recommended = Periodicity::RECOMMENDED_MONTHS[$targetType] ?? [];
+        $fuValue = $recommended[0] ?? null;
+        $fuUnit  = $fuValue === null ? null : 'mesiac';
 
         $pdo->beginTransaction();
         try {
             $pdo->prepare(
                 'INSERT INTO inspections
                     (account_id, company_id, facility_id, source_inspection_id, type,
-                     periodicity_months, executed_on, inspector_user_id, status, notes,
-                     is_preventive_inspection)
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, "draft", NULL, ?)'
+                     periodicity_value, periodicity_unit, executed_on, inspector_user_id,
+                     status, notes, is_preventive_inspection)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", NULL, ?)'
             )->execute([
                 $accountId,
                 $source['company_id'],
                 $source['facility_id'],
                 $sourceId,
                 $targetType,
-                $periodicity,
+                $fuValue,
+                $fuUnit,
                 $source['inspector_user_id'],
                 in_array($targetType, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
             ]);
             $newId = (int) $pdo->lastInsertId();
+
+            // Chapter 22 — a follow-up is a new úkon; its režim comes from
+            // the firm, not from the source úkon.
+            $pdo->prepare('UPDATE inspections SET billing_mode = ? WHERE id = ?')
+                ->execute([\Firol\Support\Invoicing::companyMode((int) $source['company_id']), $newId]);
 
             $ins = $pdo->prepare(
                 'INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)'
@@ -473,22 +519,22 @@ final class InspectionController
         $isAdmin = Admin::isAdmin($userId);
 
         $type = $req->jsonString('type');
-        $periodicityMonths = $req->jsonInt('periodicity_months');
         $executedOn = $req->jsonString('executed_on');
         $companyId = $req->jsonInt('company_id');
         $facilityId = $req->jsonInt('facility_id');
         $inspectorUserId = $req->jsonInt('inspector_user_id') ?? $userId;
         $notes = $req->jsonString('notes');
+        $visitId = $req->jsonInt('visit_id');
+        // Header data (inspections.details) — only for types that have one.
+        $details = self::readDetails($req, (string) $type);
 
-        if ($type === null || !isset(self::TYPE_PERIODICITIES[$type])) {
+        if ($type === null || !in_array($type, self::TYPES, true)) {
             Response::error('Invalid inspection type', 422);
         }
-        if (
-            $periodicityMonths === null
-            || !in_array($periodicityMonths, self::TYPE_PERIODICITIES[$type], true)
-        ) {
-            Response::error('Invalid periodicity for this type', 422);
-        }
+        // Any value in days/weeks/months, or none at all. The type only
+        // decides what the app SUGGESTS (chapter 5) — it never limits what the
+        // technician may choose.
+        [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
         if ($companyId === null || $facilityId === null) {
             Response::error('Field required: company_id, facility_id', 422);
         }
@@ -548,29 +594,67 @@ final class InspectionController
             self::assertCanInspect($accountId, $inspectorUserId, $type);
         }
 
-        $stmt = Db::pdo()->prepare(
-            'INSERT INTO inspections
-                (account_id, company_id, facility_id, type, periodicity_months,
-                 executed_on, inspector_user_id, status, notes,
-                 is_preventive_inspection)
-             VALUES (?, ?, ?, ?, ?, ?, ?, "draft", ?, ?)'
-        );
-        $stmt->execute([
-            $accountId,
-            $companyId,
-            $facilityId,
-            $type,
-            $periodicityMonths,
-            $executedOn,
-            $inspectorUserId,
-            $notes,
-            in_array($type, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
-        ]);
-        $id = (int) Db::pdo()->lastInsertId();
+        // A visit (chapter 9) collects several úkony under one trip; the
+        // inspection must sit in the same account and on the same prevádzka,
+        // or the visit summary would list a protocol from somewhere else.
+        if ($visitId !== null) {
+            $visitCheck = Db::pdo()->prepare(
+                'SELECT 1 FROM visits
+                 WHERE  id = ? AND account_id = ? AND facility_id = ? AND archived_at IS NULL'
+            );
+            $visitCheck->execute([$visitId, $accountId, $facilityId]);
+            if ($visitCheck->fetchColumn() === false) {
+                Response::error('Návšteva sa nenašla.', 404);
+            }
+        }
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare(
+                'INSERT INTO inspections
+                    (account_id, company_id, facility_id, visit_id, type,
+                     periodicity_value, periodicity_unit, periodicity_is_custom,
+                     executed_on, inspector_user_id, status, notes,
+                     is_preventive_inspection)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?)'
+            );
+            $stmt->execute([
+                $accountId,
+                $companyId,
+                $facilityId,
+                $visitId,
+                $type,
+                $periodicityValue,
+                $periodicityUnit,
+                Periodicity::isCustom($type, $periodicityValue, $periodicityUnit) ? 1 : 0,
+                $executedOn,
+                $inspectorUserId,
+                $notes,
+                in_array($type, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
+            ]);
+            $id = (int) $pdo->lastInsertId();
+
+            // Chapter 22 — the režim starts from the firm's setting.
+            $pdo->prepare('UPDATE inspections SET billing_mode = ? WHERE id = ?')
+                ->execute([\Firol\Support\Invoicing::companyMode($companyId), $id]);
+
+            if ($details !== null) {
+                $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
+                    ->execute([InspectionDetails::encode($details), $id]);
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
 
         Response::json([
             'inspection' => self::shapeRow(self::loadOrFail($accountId, $id)),
             'items' => [],
+            // Chapter 12 — offer to carry the devices over from last time
+            // instead of typing them again.
+            'carry_over' => self::carryOverOffer($accountId, $facilityId, $type, $id),
         ], 201);
     }
 
@@ -592,26 +676,51 @@ final class InspectionController
 
         $executedOn = $req->jsonString('executed_on');
         $notes = $req->jsonString('notes');
-        $periodicityMonths = $req->jsonInt('periodicity_months');
 
         if ($executedOn !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $executedOn)) {
             Response::error('Invalid executed_on (expected YYYY-MM-DD)', 422);
         }
-        if ($periodicityMonths !== null) {
-            $allowed = self::TYPE_PERIODICITIES[$row['type']] ?? [];
-            if (!in_array($periodicityMonths, $allowed, true)) {
-                Response::error('Invalid periodicity for this type', 422);
-            }
+
+        // Periodicity is edited as a whole: "bez opakovania" has to be
+        // expressible, and a COALESCE over two columns cannot tell "leave it
+        // alone" from "clear it". Sending either key means the technician
+        // touched the field.
+        $body = $req->json();
+        $touchesPeriodicity = array_key_exists('periodicity_value', $body)
+            || array_key_exists('periodicity_unit', $body);
+        if ($touchesPeriodicity) {
+            [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
+            Db::pdo()->prepare(
+                'UPDATE inspections
+                 SET    periodicity_value     = ?,
+                        periodicity_unit      = ?,
+                        periodicity_is_custom = ?
+                 WHERE  id = ? AND account_id = ?'
+            )->execute([
+                $periodicityValue,
+                $periodicityUnit,
+                Periodicity::isCustom((string) $row['type'], $periodicityValue, $periodicityUnit) ? 1 : 0,
+                $id,
+                $scopeAccountId,
+            ]);
         }
 
         // COALESCE keeps existing values when the field is not in the body.
         Db::pdo()->prepare(
             'UPDATE inspections
-             SET    executed_on        = COALESCE(?, executed_on),
-                    notes              = COALESCE(?, notes),
-                    periodicity_months = COALESCE(?, periodicity_months)
+             SET    executed_on = COALESCE(?, executed_on),
+                    notes       = COALESCE(?, notes)
              WHERE  id = ? AND account_id = ?'
-        )->execute([$executedOn, $notes, $periodicityMonths, $id, $scopeAccountId]);
+        )->execute([$executedOn, $notes, $id, $scopeAccountId]);
+
+        // Header data replaces the whole object — a cleared field has to be
+        // expressible, so there is no field-by-field COALESCE here.
+        if (array_key_exists('details', $body)) {
+            $details = self::readDetails($req, (string) $row['type']);
+            Db::pdo()->prepare(
+                'UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?'
+            )->execute([InspectionDetails::encode($details), $id, $scopeAccountId]);
+        }
 
         $fresh = self::loadOrFail($scopeAccountId, $id);
         Response::json(['inspection' => self::shapeRow($fresh)]);
@@ -675,6 +784,17 @@ final class InspectionController
         $docsStmt->execute([$accountId, $id]);
         $docs = $docsStmt->fetchAll();
 
+        // A protocol signed on the screen was re-rendered into further
+        // versions (chapter 13); every one of those files has to go too, or
+        // the discarded protocol stays readable under its old version path.
+        $versionsStmt = $pdo->prepare(
+            'SELECT v.file_path FROM document_versions v
+             JOIN   documents d ON d.id = v.document_id
+             WHERE  d.account_id = ? AND d.parent_type = "inspection" AND d.parent_id = ?'
+        );
+        $versionsStmt->execute([$accountId, $id]);
+        $versionFiles = $versionsStmt->fetchAll(\PDO::FETCH_COLUMN);
+
         $pdo->beginTransaction();
         try {
             $pdo->prepare(
@@ -686,7 +806,9 @@ final class InspectionController
                 'UPDATE inspections
                  SET    status = "draft",
                         effective_inspector_user_id = NULL,
-                        effective_cert_number       = NULL
+                        effective_cert_number       = NULL,
+                        effective_cert_valid_from   = NULL,
+                        effective_cert_valid_to     = NULL
                  WHERE  id = ? AND account_id = ?'
             )->execute([$id, $accountId]);
 
@@ -698,8 +820,12 @@ final class InspectionController
 
         // Files are unlinked only after the commit: an orphaned PDF nobody
         // links to is harmless, a missing file behind a live row is not.
-        foreach ($docs as $doc) {
-            $abs = Storage::documentAbsolute((string) $doc['file_path']);
+        $paths = array_unique(array_merge(
+            array_map(static fn (array $d): string => (string) $d['file_path'], $docs),
+            array_map(static fn ($p): string => (string) $p, $versionFiles),
+        ));
+        foreach ($paths as $rel) {
+            $abs = Storage::documentAbsolute($rel);
             if (is_file($abs) && !@unlink($abs)) {
                 error_log('[unlock-inspection] failed to delete PDF: ' . $abs);
             }
@@ -736,10 +862,17 @@ final class InspectionController
     }
 
     /**
-     * "Opakovať" — clone a finalized inspection into a fresh draft so the
-     * technician can re-issue the protocol with a new date and minor edits
-     * (items copied verbatim). The source inspection and its document
-     * remain untouched.
+     * "Opakovať" — start this year's inspection from last year's, block 1 /
+     * chapter 12.
+     *
+     * The devices come across; the verdict on them does not. Stav, výsledok,
+     * poznámka, photos and nedostatky all start empty, and a device disposed
+     * of last time is left behind entirely (the response says how many, so the
+     * technician can see it was a decision). Each carried item remembers what
+     * it scored last time in `previous_status`, shown beside it while entering
+     * results but printed on nothing.
+     *
+     * The source inspection and its protocol are untouched.
      */
     public static function repeat(Request $req, array $params): void
     {
@@ -768,186 +901,310 @@ final class InspectionController
             );
         }
 
+        $type = (string) $source['type'];
+        $sourceItems = self::loadItemFields($sourceId);
+        $carried = self::carryItems($type, $sourceItems);
+
         $pdo = Db::pdo();
         $pdo->beginTransaction();
-        /** @var list<string> $copiedFiles absolute paths written by clonePhotos() */
-        $copiedFiles = [];
-
         try {
             // executed_on is intentionally NULL — Step 3 forces the
             // technician to enter a fresh date before generating PDF.
+            // The periodicity travels: it was the technician's decision for
+            // this prevádzka and there is no reason to make them repeat it.
             $pdo->prepare(
                 'INSERT INTO inspections
-                    (account_id, company_id, facility_id, type, periodicity_months,
-                     is_preventive_inspection, executed_on, inspector_user_id, status, notes)
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, "draft", ?)'
+                    (account_id, company_id, facility_id, type,
+                     periodicity_value, periodicity_unit, periodicity_is_custom,
+                     is_preventive_inspection, executed_on, inspector_user_id,
+                     status, notes, carried_over_from_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", ?, ?)'
             )->execute([
-                        $accountId,
-                        $source['company_id'],
-                        $source['facility_id'],
-                        $source['type'],
-                        $source['periodicity_months'],
-                        !empty($source['is_preventive_inspection']) ? 1 : 0,
-                        $source['inspector_user_id'],
-                        $source['notes'],
-                    ]);
+                $accountId,
+                $source['company_id'],
+                $source['facility_id'],
+                $type,
+                $source['periodicity_value'],
+                $source['periodicity_unit'],
+                !empty($source['periodicity_is_custom']) ? 1 : 0,
+                !empty($source['is_preventive_inspection']) ? 1 : 0,
+                $source['inspector_user_id'],
+                $source['notes'],
+                $sourceId,
+            ]);
             $newId = (int) $pdo->lastInsertId();
 
-            // Row by row rather than INSERT … SELECT: cloning the photo
-            // documentation below needs to know which new item each source
-            // item became.
-            $srcItems = $pdo->prepare(
-                'SELECT id, position, fields
-                 FROM   inspection_items
-                 WHERE  inspection_id = ?
-                 ORDER  BY position ASC, id ASC'
-            );
-            $srcItems->execute([$sourceId]);
+            // Chapter 22 — a repeat is a new úkon to invoice: režim from the
+            // firm's current setting, check-off and note start empty.
+            $pdo->prepare('UPDATE inspections SET billing_mode = ? WHERE id = ?')
+                ->execute([\Firol\Support\Invoicing::companyMode((int) $source['company_id']), $newId]);
+
+            // The header travels in the same spirit as the items: what
+            // identifies (the device, the kind of oboznámenie) comes along,
+            // what was observed last time does not.
+            $carriedDetails = InspectionDetails::carry($type, InspectionDetails::decode($source['details'] ?? null));
+            if ($carriedDetails !== null) {
+                $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
+                    ->execute([InspectionDetails::encode($carriedDetails), $newId]);
+            }
+
             $insertItem = $pdo->prepare(
                 'INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)'
             );
-            /** @var array<int, int> $itemIdMap source item id => cloned item id */
-            $itemIdMap = [];
-            foreach ($srcItems->fetchAll() as $srcItem) {
-                $insertItem->execute([$newId, $srcItem['position'], $srcItem['fields']]);
-                $itemIdMap[(int) $srcItem['id']] = (int) $pdo->lastInsertId();
+            foreach ($carried['items'] as $pos => $fields) {
+                $insertItem->execute([
+                    $newId,
+                    $pos + 1,
+                    json_encode($fields, JSON_UNESCAPED_UNICODE),
+                ]);
             }
-
-            $copiedFiles = self::clonePhotos($pdo, $sourceId, $newId, $accountId, $itemIdMap);
 
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
-            // The image files are outside the transaction, so undo them by hand.
-            foreach ($copiedFiles as $path) {
-                if (is_file($path)) {
-                    @unlink($path);
-                }
-            }
             throw $e;
         }
 
-        // Re-use show()'s loader so the response shape matches what the
-        // frontend expects when navigating directly to the new inspection.
-        $fresh = self::loadOrFail($accountId, $newId);
-        $itemsStmt = Db::pdo()->prepare(
+        Response::json([
+            'inspection' => self::shapeRow(self::loadOrFail($accountId, $newId)),
+            'items' => self::loadItemsForResponse($newId),
+            'source_id' => $sourceId,
+            'disposed_skipped' => $carried['disposed'],
+        ], 201);
+    }
+
+    /**
+     * Pull the previous inspection's devices into a draft that was just
+     * created in Step 1 — the same carry-over as "Opakovať", offered at the
+     * other end of the flow (chapter 12).
+     *
+     * Only ever fills an EMPTY draft: a technician who already typed three
+     * devices must not have them silently joined by forty from last year.
+     */
+    public static function carryOver(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $id = (int) $params['id'];
+
+        $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        $accountId = (int) $row['account_id'];
+        self::assertUnlocked($row);
+
+        $type = (string) $row['type'];
+        $existing = Db::pdo()->prepare('SELECT COUNT(*) FROM inspection_items WHERE inspection_id = ?');
+        $existing->execute([$id]);
+        if ((int) $existing->fetchColumn() > 0) {
+            Response::error(
+                'Kontrola už obsahuje položky — prevzatie z minulej kontroly sa dá spustiť len na prázdnej kontrole.',
+                409,
+            );
+        }
+
+        $sourceId = $req->jsonInt('source_id')
+            ?? self::lastFinalizedId($accountId, (int) $row['facility_id'], $type, $id);
+        if ($sourceId === null) {
+            Response::error('Pre túto prevádzku a typ kontroly zatiaľ nie je z čoho prevziať položky.', 404);
+        }
+        $source = self::loadOrFail($accountId, $sourceId);
+        if ((string) $source['type'] !== $type || (int) $source['facility_id'] !== (int) $row['facility_id']) {
+            Response::error('Prevziať položky možno len z kontroly rovnakého typu na tej istej prevádzke.', 422);
+        }
+
+        $carried = self::carryItems($type, self::loadItemFields($sourceId));
+        if ($carried['items'] === []) {
+            Response::error('Minulá kontrola neobsahuje položky, ktoré by sa dali prevziať.', 422);
+        }
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            $insertItem = $pdo->prepare(
+                'INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)'
+            );
+            foreach ($carried['items'] as $pos => $fields) {
+                $insertItem->execute([$id, $pos + 1, json_encode($fields, JSON_UNESCAPED_UNICODE)]);
+            }
+            $pdo->prepare(
+                'UPDATE inspections SET carried_over_from_id = ? WHERE id = ? AND account_id = ?'
+            )->execute([$sourceId, $id, $accountId]);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        Response::json([
+            'inspection' => self::shapeRow(self::loadOrFail($accountId, $id)),
+            'items' => self::loadItemsForResponse($id),
+            'source_id' => $sourceId,
+            'disposed_skipped' => $carried['disposed'],
+        ]);
+    }
+
+    /**
+     * Map a source inspection's items onto carried-over ones.
+     *
+     * @param list<array<string, mixed>> $sourceFields
+     * @return array{items: list<array<string, mixed>>, disposed: int}
+     */
+    private static function carryItems(string $type, array $sourceFields): array
+    {
+        if (!CarryOver::supports($type)) {
+            // An unknown type carries nothing rather than guessing which of
+            // its fields are identification and which are a verdict.
+            return ['items' => [], 'disposed' => 0];
+        }
+        $items = [];
+        $disposed = 0;
+        foreach ($sourceFields as $fields) {
+            $mapped = CarryOver::mapItem($type, $fields);
+            if ($mapped === null) {
+                $disposed++;
+                continue;
+            }
+            $items[] = $mapped;
+        }
+        return ['items' => $items, 'disposed' => $disposed];
+    }
+
+    /**
+     * The offer shown right after Step 1: "Prevziať položky z poslednej
+     * kontroly (12. 8. 2026)". Null when there is nothing to carry over.
+     *
+     * @return array{source_id: int, executed_on: string|null, item_count: int, disposed: int}|null
+     */
+    private static function carryOverOffer(
+        int $accountId,
+        int $facilityId,
+        string $type,
+        int $exceptId,
+    ): ?array {
+        if (!CarryOver::supports($type)) {
+            return null;
+        }
+        $sourceId = self::lastFinalizedId($accountId, $facilityId, $type, $exceptId);
+        if ($sourceId === null) {
+            return null;
+        }
+        $stmt = Db::pdo()->prepare('SELECT executed_on FROM inspections WHERE id = ?');
+        $stmt->execute([$sourceId]);
+        $executedOn = $stmt->fetchColumn();
+
+        $carried = self::carryItems($type, self::loadItemFields($sourceId));
+        if ($carried['items'] === []) {
+            return null;
+        }
+        return [
+            'source_id'   => $sourceId,
+            'executed_on' => $executedOn !== false ? (string) $executedOn : null,
+            'item_count'  => count($carried['items']),
+            'disposed'    => $carried['disposed'],
+        ];
+    }
+
+    /** Most recent finalized inspection of this type on this prevádzka. */
+    private static function lastFinalizedId(
+        int $accountId,
+        int $facilityId,
+        string $type,
+        int $exceptId,
+    ): ?int {
+        $stmt = Db::pdo()->prepare(
+            'SELECT id FROM inspections
+             WHERE  account_id = ? AND facility_id = ? AND type = ?
+                AND status = "finalized" AND archived_at IS NULL AND id <> ?
+             ORDER  BY COALESCE(executed_on, "1000-01-01") DESC, id DESC
+             LIMIT  1'
+        );
+        $stmt->execute([$accountId, $facilityId, $type, $exceptId]);
+        $id = $stmt->fetchColumn();
+        return $id === false ? null : (int) $id;
+    }
+
+    /**
+     * Just the decoded `fields` of an inspection's items, in order.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function loadItemFields(int $inspectionId): array
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT fields FROM inspection_items
+             WHERE  inspection_id = ? ORDER BY position ASC, id ASC'
+        );
+        $stmt->execute([$inspectionId]);
+        return array_map(
+            static fn (array $r): array => json_decode((string) $r['fields'], true) ?: [],
+            $stmt->fetchAll(),
+        );
+    }
+
+    /**
+     * Items shaped the way show() returns them, so a client can swap its state
+     * for the response of repeat()/carryOver() without a second round trip.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function loadItemsForResponse(int $inspectionId): array
+    {
+        $stmt = Db::pdo()->prepare(
             'SELECT id, position, fields, created_at, updated_at
              FROM   inspection_items
              WHERE  inspection_id = ?
              ORDER  BY position ASC, id ASC'
         );
-        $itemsStmt->execute([$newId]);
-        $items = array_map(static function (array $r): array {
+        $stmt->execute([$inspectionId]);
+        return array_map(static function (array $r): array {
             return [
                 'id' => (int) $r['id'],
                 'position' => (int) $r['position'],
                 'fields' => json_decode((string) $r['fields'], true) ?? [],
+                'photos' => [],
                 'created_at' => $r['created_at'],
                 'updated_at' => $r['updated_at'],
             ];
-        }, $itemsStmt->fetchAll());
-
-        Response::json([
-            'inspection' => self::shapeRow($fresh),
-            'items' => $items,
-            'source_id' => $sourceId,
-        ], 201);
+        }, $stmt->fetchAll());
     }
 
     /**
-     * Clone the photo documentation of a repeated inspection, keeping each
-     * photo on the same item (and, for Požiarna kniha, the same nedostatok —
-     * `defect_key` travels with the item's `fields`, so the cloned defects
-     * still match their photos).
+     * Read and validate the header data (`details`) off the request body.
+     * Null when absent; a 422 with a Slovak message when invalid or sent for
+     * a type that has no header.
      *
-     * The image files are copied, not shared: each protocol owns its photos,
-     * so deleting one in the repeat — or archiving the source — must never
-     * take the other protocol's image with it.
-     *
-     * @param array<int, int> $itemIdMap source item id => cloned item id
-     * @return list<string> absolute paths written, so a failed transaction can clean up
+     * @return array<string, mixed>|null
      */
-    private static function clonePhotos(
-        PDO $pdo,
-        int $sourceId,
-        int $newId,
-        int $accountId,
-        array $itemIdMap,
-    ): array {
-        if (!$itemIdMap) {
-            return [];
+    private static function readDetails(Request $req, string $type): ?array
+    {
+        $body = $req->json();
+        if (!array_key_exists('details', $body) || $body['details'] === null) {
+            return null;
         }
-
-        $stmt = $pdo->prepare(
-            'SELECT item_id, defect_key, position, file_path, thumb_path, byte_size, width, height
-             FROM   inspection_item_photos
-             WHERE  inspection_id = ?
-             ORDER  BY item_id ASC, position ASC, id ASC'
-        );
-        $stmt->execute([$sourceId]);
-        $rows = $stmt->fetchAll();
-        if (!$rows) {
-            return [];
+        try {
+            return InspectionDetails::validate($type, $body['details']);
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422);
         }
+    }
 
-        Storage::ensureDir(Storage::photoDir($accountId, $newId));
-
-        $insert = $pdo->prepare(
-            'INSERT INTO inspection_item_photos
-                (account_id, inspection_id, item_id, defect_key, position,
-                 file_path, thumb_path, byte_size, width, height)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-
-        $written = [];
-        foreach ($rows as $row) {
-            $newItemId = $itemIdMap[(int) $row['item_id']] ?? null;
-            if ($newItemId === null) {
-                continue;
-            }
-
-            $srcFull  = Storage::absolute((string) $row['file_path']);
-            $srcThumb = Storage::absolute((string) $row['thumb_path']);
-            if (!is_file($srcFull)) {
-                // A photo whose file went missing must not block the repeat —
-                // skip it the same way PDF generation does.
-                error_log('[repeat-photos] file missing: ' . $srcFull);
-                continue;
-            }
-
-            // Fresh unguessable token per copy, same as a real upload.
-            $token    = bin2hex(random_bytes(16));
-            $relFull  = Storage::photoRelative($accountId, $newId, $token);
-            $relThumb = Storage::photoThumbRelative($accountId, $newId, $token);
-            $absFull  = Storage::absolute($relFull);
-            $absThumb = Storage::absolute($relThumb);
-
-            if (!copy($srcFull, $absFull)) {
-                throw new \RuntimeException('Failed to copy photo: ' . $srcFull);
-            }
-            $written[] = $absFull;
-            // A missing thumbnail falls back to the full size rather than
-            // failing — re-encoding needs GD-JPEG, which isn't guaranteed.
-            if (!copy(is_file($srcThumb) ? $srcThumb : $srcFull, $absThumb)) {
-                throw new \RuntimeException('Failed to copy photo thumbnail: ' . $srcThumb);
-            }
-            $written[] = $absThumb;
-
-            $insert->execute([
-                $accountId,
-                $newId,
-                $newItemId,
-                $row['defect_key'],
-                (int) $row['position'],
-                $relFull,
-                $relThumb,
-                (int) $row['byte_size'],
-                (int) $row['width'],
-                (int) $row['height'],
-            ]);
+    /**
+     * Read and validate the periodicity pair off the request body, turning a
+     * bad pair into a 422 with a Slovak message.
+     *
+     * @return array{0: int|null, 1: string|null}
+     */
+    private static function readPeriodicity(Request $req): array
+    {
+        $body = $req->json();
+        try {
+            return Periodicity::normalize(
+                $body['periodicity_value'] ?? null,
+                $body['periodicity_unit'] ?? null,
+            );
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422);
         }
-
-        return $written;
     }
 
     /**
@@ -961,14 +1218,40 @@ final class InspectionController
     private static function assertCanInspect(int $accountId, int $inspectorUserId, string $type): void
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT cert_php, cert_oprava, cert_general
+            'SELECT cert_php, cert_oprava, cert_general, cert_bt
              FROM   inspector_profiles
              WHERE  user_id = ? AND account_id = ?'
         );
         $stmt->execute([$inspectorUserId, $accountId]);
-        $own = $stmt->fetch() ?: ['cert_php' => null, 'cert_oprava' => null, 'cert_general' => null];
+        $own = $stmt->fetch()
+            ?: ['cert_php' => null, 'cert_oprava' => null, 'cert_general' => null, 'cert_bt' => null];
 
         $has = static fn($v) => is_string($v) && trim($v) !== '';
+
+        // Oboznámenie BOZP is signed under the account's own oprávnenie na
+        // výchovu a vzdelávanie (`vv`, chapter 5.3) — a company certificate,
+        // not a personal one — so nothing on the technician's profile is
+        // required to create it. Its presence is checked when the protocol is
+        // issued (DocumentController).
+        if ($type === 'skolenie_bozp') {
+            return;
+        }
+
+        // Every other BOZP úkon is signed as a bezpečnostný technik, not as a
+        // technik PO — chapter 26, „číslo oprávnenia na protokole MUSÍ
+        // zodpovedať typu úkonu". There is no
+        // borrowing here: the oprávnenie is personal, and the protocol says
+        // who did the work.
+        if (\Firol\Support\Sections::forInspectionType($type) === \Firol\Support\Sections::BOZP) {
+            if (!$has($own['cert_bt'] ?? null)) {
+                Response::error(
+                    'Tento úkon BOZP vyžaduje číslo oprávnenia bezpečnostného technika. Doplň ho v Profile technika.',
+                    422,
+                    ['code' => 'cert_missing', 'cert' => 'cert_bt'],
+                );
+            }
+            return;
+        }
 
         if ($type === 'php' || $type === 'oprava_ts_php') {
             $certKey = $type === 'php' ? 'cert_php' : 'cert_oprava';
@@ -1009,9 +1292,11 @@ final class InspectionController
     /** @return array<string, mixed> */
     private static function loadOrFail(?int $accountId, int $id): array
     {
-        $sql = 'SELECT i.id, i.account_id, i.type, i.periodicity_months,
+        $sql = 'SELECT i.id, i.account_id, i.type,
+                       i.periodicity_value, i.periodicity_unit, i.periodicity_is_custom,
                        i.is_preventive_inspection, i.source_inspection_id,
-                       i.executed_on, i.status, i.notes,
+                       i.carried_over_from_id, i.visit_id,
+                       i.executed_on, i.status, i.notes, i.details,
                        i.created_at, i.updated_at,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
                        i.facility_id, f.name AS facility_name,
@@ -1019,6 +1304,7 @@ final class InspectionController
                        i.effective_inspector_user_id,
                        eu.fullname AS effective_inspector_name,
                        i.effective_cert_number,
+                       i.billing_mode, i.invoiced, i.invoiced_at, i.billing_note,
                        ' . self::SUPERSEDED_EXPR . '
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
@@ -1050,7 +1336,22 @@ final class InspectionController
         $row['company_id'] = (int) $row['company_id'];
         $row['facility_id'] = (int) $row['facility_id'];
         $row['inspector_user_id'] = (int) $row['inspector_user_id'];
-        $row['periodicity_months'] = (int) $row['periodicity_months'];
+        $row['periodicity_value'] = isset($row['periodicity_value'])
+            ? (int) $row['periodicity_value']
+            : null;
+        $row['periodicity_unit'] = $row['periodicity_unit'] ?? null;
+        $row['periodicity_is_custom'] = (bool) ($row['periodicity_is_custom'] ?? false);
+        // Derived, never stored: the same arithmetic would otherwise be
+        // repeated in the list view, the calendar and the detail badge.
+        $row['valid_until'] = Periodicity::validUntil(
+            $row['executed_on'] ?? null,
+            $row['periodicity_value'],
+            $row['periodicity_unit'],
+        );
+        $row['visit_id'] = isset($row['visit_id']) ? (int) $row['visit_id'] : null;
+        $row['carried_over_from_id'] = isset($row['carried_over_from_id'])
+            ? (int) $row['carried_over_from_id']
+            : null;
         $row['effective_inspector_user_id'] = isset($row['effective_inspector_user_id'])
             ? (int) $row['effective_inspector_user_id']
             : null;
@@ -1061,6 +1362,18 @@ final class InspectionController
         $row['source_inspection_id'] = isset($row['source_inspection_id'])
             ? (int) $row['source_inspection_id']
             : null;
+        // Header data (block 2). Only the detail endpoints select it; the list
+        // leaves it out, and the key is then absent rather than null.
+        if (array_key_exists('details', $row)) {
+            // issued_contractor is written by the server at issue time. The
+            // form edits the header, not that snapshot, so it is not returned.
+            $row['details'] = \Firol\Support\Contractor::visibleDetails(
+                InspectionDetails::decode($row['details']),
+            );
+        }
+        // Chapter 22 — fakturácia úkonu (billing_mode null = recorded before
+        // the app tracked invoicing).
+        $row = \Firol\Support\Invoicing::shape($row);
         unset($row['account_id']);
         return $row;
     }

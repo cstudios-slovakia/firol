@@ -1,4 +1,5 @@
 import { api, buildUrl, type OptimisticSpec } from '@/lib/api';
+import type { InvoicingFields } from '@/api/invoicing';
 
 export type TrainingType =
   | 'vstupne'
@@ -64,7 +65,8 @@ export type PokynZatvaFields = {
 
 export type TrainingStatus = 'draft' | 'finalized';
 
-export type TrainingListItem = {
+/** Chapter 22 — a training is an úkon, so it carries fakturácia too. */
+export type TrainingListItem = InvoicingFields & {
   id: number;
   type: TrainingType;
   date: string | null;
@@ -150,6 +152,8 @@ export type TrainingListFilters = {
   company_id?: number;
   facility_id?: number;
   type?: TrainingType;
+  /** Chapter 22 — only úkony na faktúru not yet checked off, filtered server-side. */
+  uninvoiced?: boolean;
 };
 
 function buildQuery(filters: TrainingListFilters = {}): string {
@@ -157,6 +161,7 @@ function buildQuery(filters: TrainingListFilters = {}): string {
   if (filters.company_id) parts.push(`company_id=${filters.company_id}`);
   if (filters.facility_id) parts.push(`facility_id=${filters.facility_id}`);
   if (filters.type) parts.push(`type=${encodeURIComponent(filters.type)}`);
+  if (filters.uninvoiced) parts.push('uninvoiced=1');
   return parts.length > 0 ? `?${parts.join('&')}` : '';
 }
 

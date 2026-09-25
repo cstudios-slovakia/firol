@@ -3,13 +3,15 @@ import {
     AlertTriangle,
     Building2,
     CalendarClock,
-    ClipboardList,
+    ChartNoAxesGantt,
     CreditCard,
-    GraduationCap,
-    LayoutDashboard,
+    ListTodo,
     LogOut,
+    MoreHorizontal,
+    Package,
     Settings,
     Sparkles,
+    Sun,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
@@ -23,14 +25,68 @@ import { AuroraBackground } from "./AuroraBackground";
 import { FeedbackFloater } from "./FeedbackFloater";
 import { InstallPrompt } from "./InstallPrompt";
 import { TermsUpdateNotice } from "./TermsUpdateNotice";
+import { DefectTaskOfferHost } from "./DefectTaskOffer";
+import { TasksNavBadge } from "./TasksNavBadge";
 import { BrandMark } from "./Logo";
+import { SECTION_ICONS } from "./SectionIcons";
 import { cn } from "@/lib/cn";
+import {
+    SECTIONS,
+    SECTION_COLORS,
+    SECTION_LABELS,
+    SECTION_PATHS,
+    sectionHasContent,
+} from "@/lib/sections";
+
+type Tab = {
+    readonly to: string;
+    readonly label: string;
+    readonly icon: React.ComponentType<{
+        className?: string;
+        style?: React.CSSProperties;
+    }>;
+    readonly activeColor: string;
+    /**
+     * Section tabs carry the odbor's colour as an inline style, not a class —
+     * always, so the module reads by colour even when it is not the open one.
+     */
+    readonly iconStyle?: React.CSSProperties;
+    readonly activeBg: string;
+    readonly iconBg: string;
+    /** Chapter 20 — the Úlohy item carries the open-task count. */
+    readonly badge?: "tasks";
+};
+
+/**
+ * Menu — block 1 / chapter 2.
+ *
+ * The one item "Kontroly" becomes Revízie / OPP / BOZP, matching the paid
+ * modules one to one, and the item "Školenia" disappears: a training is an
+ * úkon of its odbor, so školenie PO now lives inside OPP.
+ *
+ * A section with nothing in it is left out entirely rather than greyed — a
+ * disabled menu item invites a tap that leads nowhere. BOZP therefore appears
+ * once block 2 ships its úkony, which is also how module gating will read once
+ * block 5 lands.
+ */
+const SECTION_TABS = SECTIONS.filter(sectionHasContent).map((section) => ({
+    to: SECTION_PATHS[section],
+    label: SECTION_LABELS[section],
+    icon: SECTION_ICONS[section],
+    // The odbor's own colour, so the section reads the same in the menu as it
+    // does on its protocols.
+    activeColor: "",
+    iconStyle: { color: SECTION_COLORS[section] },
+    activeBg: "bg-ink-50 shadow-[inset_0_0_0_1px_var(--color-ink-100)]",
+    iconBg: "bg-ink-100",
+}));
 
 const TOP_TABS = [
     {
+        // Chapter 18 — „Dnes" replaces Prehľad (texty_ui.json → navigacia.dnes).
         to: "/",
-        label: "Prehľad",
-        icon: LayoutDashboard,
+        label: "Dnes",
+        icon: Sun,
         activeColor: "text-firol-600",
         activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
         iconBg: "bg-firol-100",
@@ -43,15 +99,7 @@ const TOP_TABS = [
         activeBg: "bg-blue-50 shadow-[inset_0_0_0_1px_theme(colors.blue.100)]",
         iconBg: "bg-blue-100",
     },
-    {
-        to: "/inspections",
-        label: "Kontroly",
-        icon: ClipboardList,
-        activeColor: "text-orange-600",
-        activeBg:
-            "bg-orange-50 shadow-[inset_0_0_0_1px_theme(colors.orange.100)]",
-        iconBg: "bg-orange-100",
-    },
+    ...SECTION_TABS,
     {
         to: "/kalendar",
         label: "Kalendár",
@@ -60,16 +108,52 @@ const TOP_TABS = [
         activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
         iconBg: "bg-firol-100",
     },
+    // Chapter 19 — časová os termínov, right after Kalendár (navigacia order).
     {
-        to: "/trainings",
-        label: "Školenia",
-        icon: GraduationCap,
-        activeColor: "text-emerald-600",
-        activeBg:
-            "bg-emerald-50 shadow-[inset_0_0_0_1px_theme(colors.emerald.100)]",
-        iconBg: "bg-emerald-100",
+        to: "/casova-os",
+        label: "Časová os",
+        icon: ChartNoAxesGantt,
+        activeColor: "text-firol-600",
+        activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
+        iconBg: "bg-firol-100",
+    },
+    // Chapter 21 — sklad (materiál a značenie), shared by all modules.
+    {
+        to: "/sklad",
+        label: "Sklad",
+        icon: Package,
+        activeColor: "text-firol-600",
+        activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
+        iconBg: "bg-firol-100",
+    },
+    // Chapter 20. Menu order (texty_ui.json → navigacia): … Kalendár,
+    // Časová os, Sklad, Úlohy, Nastavenia.
+    {
+        to: "/ulohy",
+        label: "Úlohy",
+        icon: ListTodo,
+        activeColor: "text-firol-600",
+        activeBg: "bg-firol-50 shadow-[inset_0_0_0_1px_var(--color-firol-200)]",
+        iconBg: "bg-firol-100",
+        badge: "tasks",
     },
 ] as const;
+
+const TOP_TABS_BY_PATH = new Map<string, Tab>(
+    TOP_TABS.map((tab): [string, Tab] => [tab.to, tab]),
+);
+
+/**
+ * Desktop sidebar grouping. Only the sidebar reads this — the mobile bar keeps
+ * its own order (TOP_TABS), so regrouping here never reshuffles the phone menu.
+ * A path with no tab (a section with nothing in it) simply drops out.
+ */
+const NAV_GROUPS: readonly { label?: string; paths: readonly string[] }[] = [
+    { paths: ["/"] },
+    { label: "Plánovanie", paths: ["/kalendar", "/casova-os", "/ulohy"] },
+    { label: "Moduly", paths: SECTION_TABS.map((t) => t.to) },
+    { label: "Evidencia", paths: ["/companies", "/sklad"] },
+];
 
 const SETTINGS_TAB = {
     to: "/settings",
@@ -93,17 +177,15 @@ const DESKTOP_BOTTOM_TABS = [
     SETTINGS_TAB,
 ] as const;
 
-// Mobile bottom nav — the top tabs plus settings.
-const MOBILE_TABS = [...TOP_TABS, SETTINGS_TAB] as const;
-
-type Tab = {
-    readonly to: string;
-    readonly label: string;
-    readonly icon: typeof Settings;
-    readonly activeColor: string;
-    readonly activeBg: string;
-    readonly iconBg: string;
-};
+// Mobile bottom nav. Block 4 took the menu to ten items, which a 360px phone
+// cannot show side by side, so the bar keeps where the work is entered (Dnes,
+// Firmy, the odbor sections) and the rest opens from „Viac" as a sheet.
+const MOBILE_BAR_PATHS = new Set<string>(["/", "/companies", ...SECTION_TABS.map((t) => t.to)]);
+const MOBILE_TABS: Tab[] = TOP_TABS.filter((tab) => MOBILE_BAR_PATHS.has(tab.to));
+const MOBILE_MORE_TABS: Tab[] = [
+    ...TOP_TABS.filter((tab) => !MOBILE_BAR_PATHS.has(tab.to)),
+    SETTINGS_TAB,
+];
 
 export function AppShell() {
     const { logout } = useAuth();
@@ -204,6 +286,7 @@ export function AppShell() {
             <FeedbackFloater />
             <InstallPrompt />
             <TermsUpdateNotice />
+            <DefectTaskOfferHost />
         </div>
     );
 }
@@ -409,6 +492,7 @@ function SideNav({ topOffset }: { topOffset: number }) {
                 {({ isActive }) => (
                     <>
                         <tab.icon
+                            style={tab.iconStyle}
                             className={cn(
                                 "size-4 shrink-0 transition-transform duration-150",
                                 isActive && "scale-110",
@@ -416,13 +500,20 @@ function SideNav({ topOffset }: { topOffset: number }) {
                             )}
                         />
                         <span>{tab.label}</span>
+                        {tab.badge === "tasks" && <TasksNavBadge variant="side" />}
                     </>
                 )}
             </NavLink>
         </li>
     );
 
-    const [dashboardTab, ...sectionTabs] = TOP_TABS;
+    const groups = NAV_GROUPS.map((group) => ({
+        label: group.label,
+        tabs: group.paths.flatMap((path) => {
+            const tab = TOP_TABS_BY_PATH.get(path);
+            return tab ? [tab] : [];
+        }),
+    })).filter((group) => group.tabs.length > 0);
 
     return (
         <aside
@@ -433,13 +524,23 @@ function SideNav({ topOffset }: { topOffset: number }) {
                 className="sticky flex flex-col pt-5 sm:pt-8"
                 style={{ top: topOffset, height: `calc(100vh - ${topOffset}px)` }}
             >
-                <ul className="flex flex-col gap-1">
-                    {renderItem(dashboardTab)}
-                </ul>
-                <div className="my-3 border-t border-ink-100" />
-                <ul className="flex flex-col gap-1">
-                    {sectionTabs.map(renderItem)}
-                </ul>
+                {groups.map((group, i) => (
+                    <div
+                        key={group.label ?? "top"}
+                        role="group"
+                        aria-label={group.label}
+                        className={cn(i > 0 && "mt-3 border-t border-ink-100 pt-3")}
+                    >
+                        {group.label && (
+                            <p className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wider text-ink-400">
+                                {group.label}
+                            </p>
+                        )}
+                        <ul className="flex flex-col gap-1">
+                            {group.tabs.map(renderItem)}
+                        </ul>
+                    </div>
+                ))}
                 <div className="mt-auto pt-4 pb-5 sm:pb-8">
                     <div className="mb-2 border-t border-ink-100" />
                     <ul className="flex flex-col gap-1">
@@ -452,20 +553,80 @@ function SideNav({ topOffset }: { topOffset: number }) {
 }
 
 function BottomTabBar() {
+    const location = useLocation();
+    const [moreOpen, setMoreOpen] = useState(false);
+    const moreActive = MOBILE_MORE_TABS.some(
+        (tab) => location.pathname === tab.to || location.pathname.startsWith(`${tab.to}/`),
+    );
+
+    // Any navigation closes the sheet, including the browser's back button.
+    useEffect(() => {
+        setMoreOpen(false);
+    }, [location.pathname]);
+
+    useEffect(() => {
+        if (!moreOpen) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setMoreOpen(false);
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [moreOpen]);
+
     return (
+        <>
+        {moreOpen && (
+            <div className="fixed inset-0 z-10 sm:hidden" role="presentation">
+                <button
+                    type="button"
+                    aria-label="Zavrieť ponuku"
+                    className="absolute inset-0 bg-ink-900/20 backdrop-blur-[2px] animate-fade-up"
+                    onClick={() => setMoreOpen(false)}
+                />
+                <div
+                    id="mobile-more-menu"
+                    className="absolute inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] rounded-3xl border border-ink-100 bg-white p-2 shadow-xl animate-fade-up"
+                >
+                    <ul className="flex flex-col gap-0.5">
+                        {MOBILE_MORE_TABS.map((tab) => (
+                            <li key={tab.to} className="relative">
+                                <NavLink
+                                    to={tab.to}
+                                    className={({ isActive }) =>
+                                        cn(
+                                            "flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition-all duration-150 active:scale-[0.98]",
+                                            isActive
+                                                ? cn("text-ink-900", tab.activeBg)
+                                                : "text-ink-700 hover:bg-ink-50",
+                                        )
+                                    }
+                                >
+                                    <tab.icon className={cn("size-5 shrink-0", tab.activeColor)} />
+                                    <span>{tab.label}</span>
+                                    {tab.badge === "tasks" && <TasksNavBadge variant="side" />}
+                                </NavLink>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            </div>
+        )}
         <nav
             aria-label="Hlavná navigácia"
             className="fixed inset-x-0 bottom-0 z-10 border-t border-ink-100 bg-white/95 backdrop-blur sm:hidden"
         >
-            <ul className="mx-auto flex max-w-2xl items-stretch justify-around px-2 py-1.5">
+            {/* Equal flex basis, a tighter label and truncation, so a 360px
+                phone — what a technician actually holds — shows every item
+                of the bar without scrolling. */}
+            <ul className="mx-auto flex max-w-2xl items-stretch justify-around px-1 py-1.5">
                 {MOBILE_TABS.map((tab) => (
-                    <li key={tab.to} className="flex-1">
+                    <li key={tab.to} className="relative min-w-0 flex-1">
                         <NavLink
                             to={tab.to}
                             end={tab.to === "/"}
                             className={({ isActive }) =>
                                 cn(
-                                    "flex flex-col items-center gap-0.5 rounded-2xl py-2 text-[11px] font-medium transition-all duration-150",
+                                    "flex min-w-0 flex-col items-center gap-0.5 rounded-2xl px-0.5 py-2 text-[10px] font-medium transition-all duration-150",
                                     isActive
                                         ? cn(tab.activeColor, tab.activeBg)
                                         : "text-ink-400 hover:text-ink-600",
@@ -475,19 +636,47 @@ function BottomTabBar() {
                             {({ isActive }) => (
                                 <>
                                     <tab.icon
+                                        style={tab.iconStyle}
                                         className={cn(
                                             "size-5 transition-transform duration-150",
                                             tab.activeColor,
                                             isActive && "scale-110 stroke-[2.25px]",
                                         )}
                                     />
-                                    <span>{tab.label}</span>
+                                    <span className="w-full truncate text-center">
+                                        {tab.label}
+                                    </span>
                                 </>
                             )}
                         </NavLink>
+                        {tab.badge === "tasks" && <TasksNavBadge variant="bottom" />}
                     </li>
                 ))}
+                <li className="relative min-w-0 flex-1">
+                    <button
+                        type="button"
+                        aria-expanded={moreOpen}
+                        aria-controls="mobile-more-menu"
+                        onClick={() => setMoreOpen((open) => !open)}
+                        className={cn(
+                            "flex w-full min-w-0 flex-col items-center gap-0.5 rounded-2xl px-0.5 py-2 text-[10px] font-medium transition-all duration-150 active:scale-95",
+                            moreActive || moreOpen
+                                ? "bg-ink-50 text-ink-900 shadow-[inset_0_0_0_1px_var(--color-ink-100)]"
+                                : "text-ink-400 hover:text-ink-600",
+                        )}
+                    >
+                        <MoreHorizontal
+                            className={cn(
+                                "size-5 transition-transform duration-150",
+                                (moreActive || moreOpen) && "scale-110 stroke-[2.25px]",
+                            )}
+                        />
+                        <span className="w-full truncate text-center">Viac</span>
+                    </button>
+                    <TasksNavBadge variant="bottom" />
+                </li>
             </ul>
         </nav>
+        </>
     );
 }

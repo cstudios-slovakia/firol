@@ -403,6 +403,10 @@ final class AuthController
             'csrfToken'       => Csrf::token(),
             'isAdmin'         => \Firol\Auth\Admin::isAdmin($userId),
             'terms'           => $terms,
+            // Chapter 11.5 — every member of the active account with their
+            // initials and avatar colour, for the calendar, the timeline and
+            // Dnes (avatars and the technician filter).
+            'team'            => $user ? \Firol\Support\TeamIdentity::roster($pdo, $accountId) : [],
         ];
     }
 }

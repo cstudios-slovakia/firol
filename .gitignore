@@ -25,6 +25,7 @@ vendor/
 # contain machine-specific paths and design notes that don't belong
 # in version control.
 .claude/
+.cursor/
 
 # Veľké materiály k handoffu (referenčné, nie v repe)
 firol.pdf
@@ -33,6 +34,7 @@ docs/*
 # …ale roadmap je tracked (referencuje sa z CLAUDE.md)
 !docs/development-roadmap.md
 opravy-pdf/
+POapp_BOZP_pre_vyvojarov11/
 
 # Deploy artefakty (zostavujú sa v CI)
 deploy/

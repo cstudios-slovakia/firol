@@ -1,4 +1,9 @@
 import { api, buildUrl, type OptimisticSpec } from '@/lib/api';
+import type { Periodicity, PeriodicityUnit } from '@/lib/periodicity';
+import type { BozpItemFields } from '@/api/bozpItems';
+import type { BozpRecordFields } from '@/api/bozpRecords';
+import type { PersonFields } from '@/api/personList';
+import type { InvoicingFields } from '@/api/invoicing';
 
 /**
  * Inspection types — locked slugs from docs/Firol base document.
@@ -13,7 +18,22 @@ export type InspectionType =
   | 'pu_udrzba'
   | 'nudzove_osvetlenie'
   | 'ts_hadic'
-  | 'vyradenie';
+  | 'vyradenie'
+  // Block 2 — single-record BOZP úkony (api/bozpRecords.ts).
+  | 'kniha_bozp'
+  | 'pracovisko'
+  | 'osamele_pracovisko'
+  | 'fajcenie'
+  // Block 2 — BOZP úkony whose rows are items (api/bozpItems.ts).
+  | 'oopp'
+  | 'pracovne_prostriedky'
+  | 'rebriky'
+  | 'regale'
+  | 'oznacenie'
+  // Block 2 — the person-list úkony (api/personList.ts).
+  | 'dychova_skuska'
+  | 'omamne_latky'
+  | 'skolenie_bozp';
 
 export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   php: 'Hasiace prístroje (PHP)',
@@ -25,27 +45,42 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   nudzove_osvetlenie: 'Núdzové osvetlenie',
   ts_hadic: 'Tlaková skúška hadíc',
   vyradenie: 'Vyraďovací protokol PHP',
-};
-
-export const INSPECTION_TYPE_PERIODICITIES: Record<InspectionType, number[]> = {
-  php: [12, 24],
-  hydranty: [12],
-  oprava_ts_php: [60],
-  poziarna_kniha: [3, 6, 12],
-  pu_akcieschopnost: [3],
-  pu_udrzba: [12],
-  nudzove_osvetlenie: [12],
-  ts_hadic: [12],
-  // One-off document — a disposal doesn't recur.
-  vyradenie: [0],
+  // Block 2 — typy_ukonov.json `nazov`.
+  kniha_bozp: 'Kniha kontrol BOZP',
+  pracovisko: 'Kontrola pracoviska',
+  osamele_pracovisko: 'Kontrola osamelých pracovísk',
+  fajcenie: 'Kontrola dodržiavania zákazu fajčenia',
+  oopp: 'Kontrola OOPP',
+  pracovne_prostriedky: 'Kontrola pracovných prostriedkov',
+  rebriky: 'Kontrola rebríkov',
+  regale: 'Kontrola regálov',
+  oznacenie: 'Kontrola bezpečnostného označenia',
+  dychova_skuska: 'Dychová skúška na alkohol',
+  omamne_latky: 'Kontrola omamných a psychotropných látok',
+  skolenie_bozp: 'Oboznámenie zamestnancov v oblasti BOZP',
 };
 
 export type InspectionStatus = 'draft' | 'finalized';
 
-export type InspectionListItem = {
+/**
+ * Chapter 22 — fakturácia úkonu (`billing_mode`, `invoiced`, `invoiced_at`,
+ * `billing_note`) rides along on every row; see api/invoicing.ts.
+ */
+export type InspectionListItem = InvoicingFields & {
   id: number;
   type: InspectionType;
-  periodicity_months: number;
+  /**
+   * Periodicity as chosen for THIS úkon (chapter 5) — value plus unit, both
+   * null for „bez opakovania". Stored with the úkon, not with the type: when
+   * the technician changes the period next year, older protocols keep the one
+   * they were issued under and are never recomputed.
+   */
+  periodicity_value: number | null;
+  periodicity_unit: PeriodicityUnit | null;
+  /** The technician set a value the app had not offered for this type. */
+  periodicity_is_custom: boolean;
+  /** Derived server-side from executed_on + periodicity. Null without either. */
+  valid_until: string | null;
   executed_on: string | null;
   status: InspectionStatus;
   notes: string | null;
@@ -73,11 +108,21 @@ export type InspectionListItem = {
   // Set when this inspection is a follow-up draft the app pre-filled from
   // another inspection (change request 2.1); null otherwise.
   source_inspection_id: number | null;
+  /** The previous inspection this one's devices were carried over from (chapter 12). */
+  carried_over_from_id: number | null;
+  /** The visit this úkon was recorded under, when it came out of one (chapter 9). */
+  visit_id: number | null;
 };
 
 export type Inspection = InspectionListItem & {
   updated_at: string;
   company_ico: string | null;
+  /**
+   * Header data of the úkon (`inspections.details`, migration 042) — what
+   * belongs to the úkon as a whole rather than to one row. Null for types
+   * without any. Validated per type on the server (Support\InspectionDetails).
+   */
+  details?: Record<string, unknown> | null;
 };
 
 export type PhpStatus = 'A' | 'TS' | 'O' | 'V';
@@ -308,20 +353,56 @@ export type FollowUpRef = {
   status: InspectionStatus;
 };
 
+/**
+ * The offer to fill an empty draft from last time's devices (chapter 12).
+ * Null when this prevádzka has no earlier úkon of this type to draw on.
+ */
+export type CarryOverOffer = {
+  source_id: number;
+  executed_on: string | null;
+  item_count: number;
+  /** Devices disposed of last time — counted, but deliberately not carried. */
+  disposed: number;
+};
+
 export type InspectionDetail = {
   inspection: Inspection;
   items: InspectionItem[];
   /** Present on show(); follow-up drafts created from this inspection. */
   follow_ups?: FollowUpRef[];
+  /** Present on show() and on create, when carrying over is possible. */
+  carry_over?: CarryOverOffer | null;
+};
+
+/** Who took the protocol over and signed for it (chapter 13). */
+export type DocumentHandover = {
+  fullname: string;
+  role_title: string;
+  place: string;
+  signed_on: string;
 };
 
 export type InspectionDocument = {
   id: number;
   type: InspectionType;
   number: string;
+  /**
+   * Goes up when a signature is added: the protocol is re-rendered under the
+   * SAME number, and the earlier file stays retrievable because the client may
+   * already hold a copy of it.
+   */
+  version: number;
+  /**
+   * Block 2 / chapter 8.1 — which printout of a test this version is: the
+   * blank form for handwriting or the filled record. Both share the number.
+   * Null (or absent) for every other document.
+   */
+  form_variant?: 'vyplneny' | 'prazdny' | null;
   generated_at: string;
   signed: boolean;
   download_url: string;
+  /** Null until the client signs on the screen. */
+  handover: DocumentHandover | null;
 };
 
 export type GeneratePdfResponse = {
@@ -336,24 +417,37 @@ export type GeneratePdfResponse = {
 
 export type InspectionDraftPayload = {
   type: InspectionType;
-  periodicity_months: number;
+  periodicity_value: number | null;
+  periodicity_unit: PeriodicityUnit | null;
   executed_on: string;
   company_id: number;
   facility_id: number;
   inspector_user_id?: number;
   notes?: string;
+  /** Set when the úkon is being recorded as part of a visit (chapter 9). */
+  visit_id?: number;
 };
 
 export type InspectionUpdatePayload = {
   executed_on?: string;
-  periodicity_months?: number;
+  /**
+   * Sending either key edits the periodicity as a whole. That is deliberate:
+   * „bez opakovania" is null + null, and a partial update could not tell it
+   * apart from "leave the period alone".
+   */
+  periodicity_value?: number | null;
+  periodicity_unit?: PeriodicityUnit | null;
   notes?: string;
+  /** Replaces the whole header object (see `Inspection.details`). */
+  details?: Record<string, unknown>;
 };
 
 export type InspectionListFilters = {
   company_id?: number;
   facility_id?: number;
   type?: InspectionType;
+  /** Chapter 22 — only úkony na faktúru not yet checked off, filtered server-side. */
+  uninvoiced?: boolean;
 };
 
 function buildQuery(filters: InspectionListFilters = {}): string {
@@ -361,6 +455,7 @@ function buildQuery(filters: InspectionListFilters = {}): string {
   if (filters.company_id) parts.push(`company_id=${filters.company_id}`);
   if (filters.facility_id) parts.push(`facility_id=${filters.facility_id}`);
   if (filters.type) parts.push(`type=${encodeURIComponent(filters.type)}`);
+  if (filters.uninvoiced) parts.push('uninvoiced=1');
   return parts.length > 0 ? `?${parts.join('&')}` : '';
 }
 
@@ -375,9 +470,11 @@ export const Inspections = {
    * location), drawn from the account's own history (change request 2.4.1).
    * Pass facilityId for `location` to float that facility's values to the top.
    */
-  suggestions: (field: SuggestionField, q: string, facilityId?: number) => {
+  suggestions: (field: SuggestionField, q: string, facilityId?: number, facilityOnly = false) => {
     const parts = [`field=${field}`, `q=${encodeURIComponent(q)}`];
     if (facilityId) parts.push(`facility_id=${facilityId}`);
+    // Only places recorded on this prevádzka (block 2, „výber z prevádzky").
+    if (facilityId && facilityOnly) parts.push('facility_only=1');
     return api<{ suggestions: string[] }>(`/api/inspections/suggestions?${parts.join('&')}`);
   },
   createDraft: (
@@ -419,7 +516,10 @@ export const Inspections = {
       | PuUdrzbaItemFields
       | NudzoveOsvetlenieItemFields
       | TsHadicItemFields
-      | VyradenieItemFields,
+      | VyradenieItemFields
+      | BozpItemFields
+      | BozpRecordFields
+      | PersonFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items`, {
@@ -439,7 +539,10 @@ export const Inspections = {
       | PuUdrzbaItemFields
       | NudzoveOsvetlenieItemFields
       | TsHadicItemFields
-      | VyradenieItemFields,
+      | VyradenieItemFields
+      | BozpItemFields
+      | BozpRecordFields
+      | PersonFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items/${itemId}`, {
@@ -493,13 +596,23 @@ export const Inspections = {
    * server defaults it to true, so omitting it keeps the appendix whenever
    * photos exist.
    */
-  generatePdf: (inspectionId: number, csrfToken: string | null, includePhotos?: boolean) =>
-    api<GeneratePdfResponse>(`/api/inspections/${inspectionId}/generate-pdf`, {
+  generatePdf: (
+    inspectionId: number,
+    csrfToken: string | null,
+    includePhotos?: boolean,
+    /** Block 2 / chapter 8.1 — a test printed blank for handwriting. */
+    formVariant?: 'vyplneny' | 'prazdny',
+  ) => {
+    const body: Record<string, unknown> = {};
+    if (includePhotos !== undefined) body.include_photos = includePhotos;
+    if (formVariant !== undefined) body.form_variant = formVariant;
+    return api<GeneratePdfResponse>(`/api/inspections/${inspectionId}/generate-pdf`, {
       method: 'POST',
-      body: includePhotos === undefined ? undefined : { include_photos: includePhotos },
+      body: Object.keys(body).length > 0 ? body : undefined,
       csrfToken,
       requireOnline: true,
-    }),
+    });
+  },
   /**
    * Reopen a locked (finalized) inspection for editing. The server discards
    * the issued PDF protocol — a fresh one gets a new number. Online only:
@@ -512,14 +625,41 @@ export const Inspections = {
       csrfToken,
       requireOnline: true,
     }),
+  /**
+   * Start this year's inspection from last year's (chapter 12). The devices
+   * come across; their stav, poznámky, photos and nedostatky do not, and
+   * anything disposed of last time is left behind — `disposed_skipped` says
+   * how many, so a shorter list reads as a decision rather than a bug.
+   */
   repeat: (inspectionId: number, csrfToken: string | null) =>
-    api<InspectionDetail & { source_id: number }>(
+    api<InspectionDetail & { source_id: number; disposed_skipped: number }>(
       `/api/inspections/${inspectionId}/repeat`,
       { method: 'POST', csrfToken, requireOnline: true },
+    ),
+  /** The same carry-over, offered on an empty draft created in Step 1. */
+  carryOver: (inspectionId: number, csrfToken: string | null, sourceId?: number) =>
+    api<InspectionDetail & { source_id: number; disposed_skipped: number }>(
+      `/api/inspections/${inspectionId}/carry-over`,
+      {
+        method: 'POST',
+        body: sourceId === undefined ? undefined : { source_id: sourceId },
+        csrfToken,
+        requireOnline: true,
+      },
     ),
   documents: (inspectionId: number) =>
     api<{ items: InspectionDocument[] }>(`/api/inspections/${inspectionId}/documents`),
 };
+
+/** Pull the periodicity pair off an inspection row as a single value. */
+export function periodicityOf(
+  inspection: Pick<InspectionListItem, 'periodicity_value' | 'periodicity_unit'>,
+): Periodicity {
+  return {
+    value: inspection.periodicity_value,
+    unit: inspection.periodicity_unit,
+  };
+}
 
 /**
  * Build the URL the browser should open to fetch a generated PDF. The

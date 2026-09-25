@@ -72,14 +72,15 @@ final class InspectionItemController
         // supports many items but the domain doesn't, so block it at the
         // controller. The UI enforces this too — this is the belt-and-braces
         // server-side check.
-        if ($inspection['type'] === 'poziarna_kniha') {
+        if ($inspection['type'] === 'poziarna_kniha'
+            || \Firol\Support\BozpRecords::supports((string) $inspection['type'])) {
             $existing = Db::pdo()->prepare(
                 'SELECT COUNT(*) FROM inspection_items WHERE inspection_id = ?'
             );
             $existing->execute([$inspectionId]);
             if ((int) $existing->fetchColumn() > 0) {
                 Response::error(
-                    'Požiarna kniha má len jeden záznam — uprav existujúci namiesto pridania nového.',
+                    'Tento úkon má len jeden záznam — uprav existujúci namiesto pridania nového.',
                     409,
                 );
             }
@@ -195,6 +196,33 @@ final class InspectionItemController
      */
     private static function validateFields(string $type, array $body): array
     {
+        // Block 2 — single-record BOZP úkony (kniha BOZP, pracovisko,
+        // osamelé pracoviská, fajčenie): one record holds the whole úkon.
+        if (\Firol\Support\BozpRecords::supports($type)) {
+            try {
+                return \Firol\Support\BozpRecords::validate($type, $body);
+            } catch (\InvalidArgumentException $e) {
+                self::failValidation($e->getMessage());
+            }
+        }
+        // Block 2 — the BOZP úkony whose rows are items. Their field sets and
+        // Slovak messages live together in one class.
+        if (\Firol\Support\BozpItems::supports($type)) {
+            try {
+                return \Firol\Support\BozpItems::validate($type, $body);
+            } catch (\InvalidArgumentException $e) {
+                self::failValidation($e->getMessage());
+            }
+        }
+        // Block 2 — the „osoby" úkony (dychová skúška, omamné látky,
+        // oboznámenie BOZP): one row per person.
+        if (\Firol\Support\PersonList::isPersonType($type)) {
+            try {
+                return \Firol\Support\PersonList::validateRow($type, $body);
+            } catch (\InvalidArgumentException $e) {
+                self::failValidation($e->getMessage());
+            }
+        }
         return match ($type) {
             'php'                => self::validatePhpFields($body),
             'hydranty'           => self::validateHydrantyFields($body),

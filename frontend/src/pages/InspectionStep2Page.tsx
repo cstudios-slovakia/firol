@@ -14,6 +14,7 @@ import { Card } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import { cn } from '@/lib/cn';
 import { getTypeModule } from '@/inspection-types';
+import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStatusBadge';
 import type { SubmitAction } from '@/inspection-types/common';
 
 /**
@@ -175,6 +176,12 @@ export function InspectionStep2Page() {
         />
       )}
 
+      {/* Chapter 12 — the stav this device had last time, shown while the
+          technician enters this year's. It is never prefilled as the answer. */}
+      {initialItem && previousStatusOf(initialItem.fields) && (
+        <PreviousStatusBadge type={i.type} fields={initialItem.fields} className="self-start" />
+      )}
+
       <FormComponent
         key={editing ? `edit-${itemId}` : `new-${detail.items.length}`}
         inspectionId={inspectionId}
@@ -182,6 +189,7 @@ export function InspectionStep2Page() {
         initialItem={initialItem}
         csrfToken={csrfToken}
         onSaved={handleSaved}
+        items={detail.items}
       />
     </div>
   );

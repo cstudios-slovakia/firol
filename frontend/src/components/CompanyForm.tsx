@@ -9,6 +9,13 @@ import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/auth/AuthContext';
+import {
+  BILLING_MODE_LABELS,
+  COMPANY_BILLING_DEFAULT,
+  COMPANY_BILLING_MODES,
+  type CompanyBillingMode,
+} from '@/api/invoicing';
+import { cn } from '@/lib/cn';
 
 type CompanyFormProps = {
   /** Pass to render an Edit form prefilled with this row. Omit for create. */
@@ -46,6 +53,10 @@ export function CompanyForm({
   const [contact, setContact] = useState(initial?.contact ?? '');
   const [contactEmail, setContactEmail] = useState(initial?.contact_email ?? '');
   const [approver, setApprover] = useState(initial?.approver ?? '');
+  // Chapter 22 — what a new úkon for this firm is prefilled with.
+  const [billingMode, setBillingMode] = useState<CompanyBillingMode>(
+    initial?.billing_mode ?? COMPANY_BILLING_DEFAULT,
+  );
 
   const [submitting, setSubmitting] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -75,6 +86,7 @@ export function CompanyForm({
       contact: contact.trim() || undefined,
       contact_email: contactEmail.trim() || undefined,
       approver: approver.trim() || undefined,
+      billing_mode: billingMode,
     };
     try {
       const optimistic = companyCreateOptimistic({
@@ -86,6 +98,7 @@ export function CompanyForm({
         contact: payload.contact ?? null,
         contact_email: payload.contact_email ?? null,
         approver: payload.approver ?? null,
+        billing_mode: billingMode,
       });
       const res = mode === 'edit' && initial
         ? await Companies.update(initial.id, payload, csrfToken)
@@ -218,6 +231,42 @@ export function CompanyForm({
             onChange={(e) => setApprover(e.target.value)}
             placeholder="Ján Novák, konateľ"
           />
+        )}
+      </Field>
+
+      <Field
+        label="Fakturácia úkonov"
+        hint="Predvyplní sa pri každom novom úkone tejto firmy — pri konkrétnom úkone sa dá zmeniť."
+      >
+        {(p) => (
+          <div
+            id={p.id}
+            role="radiogroup"
+            aria-label="Fakturácia úkonov"
+            className="grid grid-cols-2 gap-1 rounded-2xl bg-ink-100 p-1"
+          >
+            {COMPANY_BILLING_MODES.map((m) => {
+              const active = billingMode === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setBillingMode(m)}
+                  className={cn(
+                    'h-10 rounded-xl px-3 text-sm font-medium transition-all duration-200',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300 active:scale-[0.98]',
+                    active
+                      ? 'bg-white text-ink-900 shadow-sm'
+                      : 'text-ink-600 hover:bg-white/60 hover:text-ink-800',
+                  )}
+                >
+                  {BILLING_MODE_LABELS[m]}
+                </button>
+              );
+            })}
+          </div>
         )}
       </Field>
 

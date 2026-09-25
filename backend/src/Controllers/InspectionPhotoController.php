@@ -34,6 +34,14 @@ final class InspectionPhotoController
     public const MAX_PER_ITEM = 20;
 
     /**
+     * Per-úkon cap of chapter 4.5 („maximum 20 fotiek na položku, 50 na
+     * úkon"). Applied to the BOZP úkony, which arrived with that chapter; the
+     * PO and revízne types keep the per-item cap they have always had, so a
+     * forty-extinguisher inspection that is fine today is not refused tomorrow.
+     */
+    public const MAX_PER_INSPECTION_BOZP = 50;
+
+    /**
      * Upload ceiling for the raw bytes we accept. The browser normally sends
      * ~300 KB; this only catches a client that skipped resizing (an old
      * browser, or a gallery pick that failed to decode).
@@ -86,6 +94,17 @@ final class InspectionPhotoController
         }
         if (!is_string($mime) || !in_array($mime, ImageProcessor::acceptedMimeTypes(), true)) {
             Response::error('Podporované sú len obrázky vo formáte JPEG alebo PNG.', 422);
+        }
+
+        if (\Firol\Support\Sections::forInspectionType((string) ($inspection['type'] ?? '')) === \Firol\Support\Sections::BOZP) {
+            $totalStmt = Db::pdo()->prepare('SELECT COUNT(*) FROM inspection_item_photos WHERE inspection_id = ?');
+            $totalStmt->execute([$inspectionId]);
+            if ((int) $totalStmt->fetchColumn() >= self::MAX_PER_INSPECTION_BOZP) {
+                Response::error(
+                    'K jednému úkonu je možné pripojiť najviac ' . self::MAX_PER_INSPECTION_BOZP . ' fotiek.',
+                    422,
+                );
+            }
         }
 
         $countStmt = Db::pdo()->prepare(
@@ -385,7 +404,7 @@ final class InspectionPhotoController
     /** @return array<string, mixed> */
     private static function loadInspectionOrFail(?int $accountId, int $inspectionId): array
     {
-        $sql = 'SELECT id, account_id, status FROM inspections
+        $sql = 'SELECT id, account_id, type, status FROM inspections
                 WHERE id = ? AND archived_at IS NULL';
         $params = [$inspectionId];
         if ($accountId !== null) {

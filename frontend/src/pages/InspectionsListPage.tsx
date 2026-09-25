@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
     Building2,
     CalendarDays,
     ClipboardList,
     Edit2,
     Plus,
+    Receipt,
     Repeat,
     Search,
     Trash2,
@@ -14,9 +15,16 @@ import {
 import {
     INSPECTION_TYPE_LABELS,
     Inspections,
+    periodicityOf,
     type InspectionListItem,
     type InspectionType,
 } from "@/api/inspections";
+import { periodicityShort } from "@/lib/periodicity";
+import {
+    SECTION_INSPECTION_TYPES,
+    SECTION_LABELS,
+    type Section,
+} from "@/lib/sections";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { daysUntilNext, getInspectionStatus } from "@/lib/inspectionStatus";
@@ -31,17 +39,24 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Pagination } from "@/components/ui/Pagination";
 import { SkeletonList } from "@/components/ui/Skeleton";
 import { Spinner } from "@/components/ui/Spinner";
+import { InvoiceTickButton } from "@/components/InvoicingBlock";
+import {
+    UNINVOICED_LABEL,
+    UNINVOICED_PARAM,
+    isUninvoiced,
+    type InvoicingFields,
+} from "@/api/invoicing";
 
 const PAGE_SIZE = 10;
 
 /**
- * List sections, rendered (and paginated) in this order. Drafts are their own
+ * Validity buckets, rendered (and paginated) in this order. Drafts are their own
  * group — a concept is unfinished work, not a valid inspection — and sit above
  * "Platné" so they stay reachable without paging past every finalized record.
  */
 type GroupKey = "overdue" | "soon" | "drafts" | "valid";
 
-const SECTIONS: { key: GroupKey; label: string; color: string }[] = [
+const GROUPS: { key: GroupKey; label: string; color: string }[] = [
     { key: "overdue", label: "Po termíne", color: "var(--color-status-bad)" },
     { key: "soon", label: "Blíži sa termín", color: "var(--color-status-warn)" },
     { key: "drafts", label: "Koncepty", color: "var(--color-ink-400)" },
@@ -71,15 +86,40 @@ const TYPE_CHIPS: [InspectionType, string][] = [
     ["nudzove_osvetlenie", "Nú. osvetlenie"],
     ["ts_hadic", "TS hadíc"],
     ["vyradenie", "Vyradenie PHP"],
+    ["kniha_bozp", "Kniha BOZP"],
+    ["pracovisko", "Pracovisko"],
+    ["osamele_pracovisko", "Osamelé prac."],
+    ["fajcenie", "Zákaz fajčenia"],
+    ["oopp", "OOPP"],
+    ["pracovne_prostriedky", "Prac. prostriedky"],
+    ["rebriky", "Rebríky"],
+    ["regale", "Regály"],
+    ["oznacenie", "Označenie"],
+    ["dychova_skuska", "Dychová skúška"],
+    ["omamne_latky", "Omamné látky"],
+    ["skolenie_bozp", "Oboznámenie BOZP"],
 ];
 
-export function InspectionsListPage() {
+/**
+ * `section` scopes the page to one odbor (chapter 2) — its label, its types and
+ * its "Nová kontrola" button. Leaving it out shows every type, which is what
+ * the /inspections compatibility route uses.
+ *
+ * `embedded` drops the page header, for when a section page supplies its own.
+ */
+export function InspectionsListPage({
+    section,
+    embedded = false,
+}: {
+    section?: Section;
+    embedded?: boolean;
+} = {}) {
     const { csrfToken } = useAuth();
     const isReadOnly = useIsReadOnly();
     const toast = useToast();
     const navigate = useNavigate();
 
-    const [items, setItems] = useState<InspectionListItem[] | null>(null);
+    const [allItems, setAllItems] = useState<InspectionListItem[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState<InspectionType | "">("");
@@ -88,12 +128,54 @@ export function InspectionsListPage() {
     const [deleting, setDeleting] = useState(false);
     const [repeatingId, setRepeatingId] = useState<number | null>(null);
     const [page, setPage] = useState(1);
+    // Chapter 22 — „Nevyfakturované": úkony na faktúru not yet checked off.
+    // Fetched on its own, filtered server-side, because the main list is
+    // capped and an older úkon still waiting for its invoice must not vanish.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const uninvoicedOnly = searchParams.get(UNINVOICED_PARAM) === "1";
+    const [uninvoicedItems, setUninvoicedItems] = useState<InspectionListItem[] | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        Inspections.list({ uninvoiced: true })
+            .then((res) => {
+                if (!cancelled) setUninvoicedItems(res.items);
+            })
+            .catch(() => {
+                // The chip just stays at zero; the main list reports errors.
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    function setUninvoicedOnly(on: boolean) {
+        setSearchParams(
+            (prev) => {
+                const next = new URLSearchParams(prev);
+                if (on) next.set(UNINVOICED_PARAM, "1");
+                else next.delete(UNINVOICED_PARAM);
+                return next;
+            },
+            { replace: true },
+        );
+    }
+
+    /** A row was ticked off as vyfakturované — it leaves the filtered list. */
+    function handleInvoiced(id: number, next: InvoicingFields) {
+        setUninvoicedItems((prev) =>
+            prev?.filter((it) => it.id !== id || isUninvoiced(next)) ?? null,
+        );
+        setAllItems((prev) =>
+            prev?.map((it) => (it.id === id ? { ...it, ...next } : it)) ?? null,
+        );
+    }
 
     useEffect(() => {
         let cancelled = false;
         Inspections.list()
             .then((res) => {
-                if (!cancelled) setItems(res.items);
+                if (!cancelled) setAllItems(res.items);
             })
             .catch((err: unknown) => {
                 if (cancelled) return;
@@ -108,12 +190,35 @@ export function InspectionsListPage() {
         };
     }, []);
 
+    // Everything in this section. Filtering here rather than at the fetch keeps
+    // one request behind all three sections, and the list is small enough per
+    // account that paging it server-side would buy nothing.
+    const sectionTypes = section ? SECTION_INSPECTION_TYPES[section] : null;
+    const items = useMemo(() => {
+        if (!allItems) return null;
+        if (!sectionTypes) return allItems;
+        return allItems.filter((it) => sectionTypes.includes(it.type));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [allItems, section]);
+
+    // The same section scoping over the „Nevyfakturované" set.
+    const uninvoicedInSection = useMemo(() => {
+        if (!uninvoicedItems) return null;
+        if (!sectionTypes) return uninvoicedItems;
+        return uninvoicedItems.filter((it) => sectionTypes.includes(it.type));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [uninvoicedItems, section]);
+
+    // What the filters below work on: the whole section, or only what is
+    // still waiting to be invoiced.
+    const pool = uninvoicedOnly ? uninvoicedInSection : items;
+
     // Search + type only. The validity chips count against this set, so their
     // numbers stay stable while switching between them.
     const searched = useMemo(() => {
-        if (!items) return null;
+        if (!pool) return null;
         const q = query.trim().toLowerCase();
-        return items.filter((it) => {
+        return pool.filter((it) => {
             if (typeFilter && it.type !== typeFilter) return false;
             if (!q) return true;
             return (
@@ -124,7 +229,7 @@ export function InspectionsListPage() {
                 INSPECTION_TYPE_LABELS[it.type].toLowerCase().includes(q)
             );
         });
-    }, [items, query, typeFilter]);
+    }, [pool, query, typeFilter]);
 
     const statusCounts = useMemo(() => {
         if (!searched) return null;
@@ -150,9 +255,9 @@ export function InspectionsListPage() {
         // orders — it is the one thing the technician still has to fill in.
         const byDaysAsc = (a: InspectionListItem, b: InspectionListItem) => {
             const da =
-                daysUntilNext(a.executed_on, a.periodicity_months) ?? -Infinity;
+                daysUntilNext(a.executed_on, periodicityOf(a)) ?? -Infinity;
             const db =
-                daysUntilNext(b.executed_on, b.periodicity_months) ?? -Infinity;
+                daysUntilNext(b.executed_on, periodicityOf(b)) ?? -Infinity;
             return da - db;
         };
         const byDateDesc = (a: InspectionListItem, b: InspectionListItem) => {
@@ -185,14 +290,14 @@ export function InspectionsListPage() {
 
     useEffect(() => {
         setPage(1);
-    }, [query, typeFilter, statusFilter]);
+    }, [query, typeFilter, statusFilter, uninvoicedOnly]);
 
     // Paginate across the ordered groups so each page holds at most PAGE_SIZE
     // rows; section headers render only for the items that fall on the current
     // page.
     const pageIds = useMemo(() => {
         if (!grouped) return null;
-        const ordered = SECTIONS.flatMap((s) => grouped[s.key]);
+        const ordered = GROUPS.flatMap((g) => grouped[g.key]);
         const slice = ordered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
         return new Set(slice.map((it) => it.id));
     }, [grouped, page]);
@@ -200,9 +305,9 @@ export function InspectionsListPage() {
     const pagedGroups = useMemo(() => {
         if (!grouped || !pageIds) return null;
         return Object.fromEntries(
-            SECTIONS.map((s) => [
-                s.key,
-                grouped[s.key].filter((it) => pageIds.has(it.id)),
+            GROUPS.map((g) => [
+                g.key,
+                grouped[g.key].filter((it) => pageIds.has(it.id)),
             ]),
         ) as Record<GroupKey, InspectionListItem[]>;
     }, [grouped, pageIds]);
@@ -212,7 +317,7 @@ export function InspectionsListPage() {
         setDeleting(true);
         try {
             await Inspections.archive(pendingDeleteId, csrfToken);
-            setItems(
+            setAllItems(
                 (prev) => prev?.filter((i) => i.id !== pendingDeleteId) ?? null,
             );
             setPendingDeleteId(null);
@@ -242,27 +347,33 @@ export function InspectionsListPage() {
         }
     }
 
+    const newHref = section
+        ? `/inspections/new?section=${section}`
+        : "/inspections/new";
+
     return (
         <div className="flex flex-col gap-4">
-            <header className="flex items-center justify-between gap-3">
-                <div>
-                    <h1 className="text-xl font-semibold tracking-tight text-ink-900">
-                        Kontroly
-                    </h1>
-                    <p className="mt-0.5 text-sm text-ink-500">
-                        Všetky vykonané kontroly a rozpracované koncepty.
-                    </p>
-                </div>
-                {!isReadOnly && (
-                    <Link
-                        to="/inspections/new"
-                        className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
-                    >
-                        <Plus className="size-4" />
-                        Nová kontrola
-                    </Link>
-                )}
-            </header>
+            {!embedded && (
+                <header className="flex items-center justify-between gap-3">
+                    <div>
+                        <h1 className="text-xl font-semibold tracking-tight text-ink-900">
+                            {section ? SECTION_LABELS[section] : "Kontroly"}
+                        </h1>
+                        <p className="mt-0.5 text-sm text-ink-500">
+                            Vykonané úkony a rozpracované koncepty.
+                        </p>
+                    </div>
+                    {!isReadOnly && (
+                        <Link
+                            to={newHref}
+                            className="inline-flex h-10 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+                        >
+                            <Plus className="size-4" />
+                            Nová kontrola
+                        </Link>
+                    )}
+                </header>
+            )}
 
             {items && items.length > 0 && (
                 <div className="overflow-hidden rounded-2xl border border-ink-200 bg-white shadow-xs transition-all focus-within:border-firol-300">
@@ -290,7 +401,9 @@ export function InspectionsListPage() {
                         >
                             Všetky
                         </button>
-                        {TYPE_CHIPS.map(([val, label]) => (
+                        {TYPE_CHIPS.filter(
+                            ([val]) => !sectionTypes || sectionTypes.includes(val),
+                        ).map(([val, label]) => (
                             <button
                                 key={val}
                                 type="button"
@@ -323,7 +436,7 @@ export function InspectionsListPage() {
                         >
                             Všetky stavy
                         </button>
-                        {SECTIONS.map(({ key, label, color }) => {
+                        {GROUPS.map(({ key, label, color }) => {
                             const count = statusCounts?.[key] ?? 0;
                             const active = statusFilter === key;
                             return (
@@ -357,6 +470,32 @@ export function InspectionsListPage() {
                                 </button>
                             );
                         })}
+                        {/* Chapter 22 — the end-of-month round: what is
+                            still to be invoiced (server-side filter). */}
+                        <button
+                            type="button"
+                            id="filter-uninvoiced"
+                            aria-pressed={uninvoicedOnly}
+                            disabled={(uninvoicedInSection?.length ?? 0) === 0 && !uninvoicedOnly}
+                            onClick={() => setUninvoicedOnly(!uninvoicedOnly)}
+                            className={cn(
+                                "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all duration-150",
+                                uninvoicedOnly
+                                    ? "bg-ink-800 text-white scale-[1.04]"
+                                    : "bg-ink-100 text-ink-600 hover:bg-ink-200 disabled:opacity-40 disabled:hover:bg-ink-100",
+                            )}
+                        >
+                            <Receipt className="size-3 shrink-0" />
+                            {UNINVOICED_LABEL}
+                            <span
+                                className={cn(
+                                    "tabular-nums",
+                                    uninvoicedOnly ? "text-white/70" : "text-ink-400",
+                                )}
+                            >
+                                {uninvoicedInSection?.length ?? 0}
+                            </span>
+                        </button>
                     </div>
                 </div>
             )}
@@ -378,11 +517,11 @@ export function InspectionsListPage() {
                         Zatiaľ žiadne kontroly
                     </h2>
                     <p className="max-w-xs text-sm text-ink-500">
-                        Začni výberom firmy a typu kontroly. Drafty zostávajú
+                        Začni výberom firmy a typu kontroly. Koncepty zostávajú
                         uložené, kým nevygeneruješ PDF protokol.
                     </p>
                     <Link
-                        to="/inspections/new"
+                        to={newHref}
                         className="inline-flex h-11 items-center gap-1.5 rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
                     >
                         <Plus className="size-4" />
@@ -395,15 +534,17 @@ export function InspectionsListPage() {
                 <Card className="flex flex-col items-center gap-2 px-6 py-10 text-center">
                     <Search className="size-6 text-ink-300" />
                     <p className="text-sm text-ink-500">
-                        Žiadne kontroly nevyhovujú filtru.
+                        {uninvoicedOnly && !query && !typeFilter && !statusFilter
+                            ? "Všetko je vyfakturované."
+                            : "Žiadne kontroly nevyhovujú filtru."}
                     </p>
                 </Card>
             )}
 
-            {pagedGroups && SECTIONS.some((s) => pagedGroups[s.key].length > 0) && (
+            {pagedGroups && GROUPS.some((g) => pagedGroups[g.key].length > 0) && (
                 <>
                     <div className="flex flex-col gap-5">
-                        {SECTIONS.map(({ key, label, color }) =>
+                        {GROUPS.map(({ key, label, color }) =>
                             pagedGroups[key].length === 0 ? null : (
                                 <section key={key}>
                                     <div className="mb-2 flex items-center gap-2">
@@ -421,7 +562,7 @@ export function InspectionsListPage() {
                                     <ul className="flex flex-col gap-2">
                                         {pagedGroups[key].map((it) => (
                                             <li key={it.id}>
-                                                <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} />
+                                                <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} onInvoiced={uninvoicedOnly ? handleInvoiced : undefined} />
                                             </li>
                                         ))}
                                     </ul>
@@ -477,17 +618,27 @@ function InspectionRow({
     onRepeat,
     repeatingId,
     isReadOnly,
+    onInvoiced,
 }: {
     it: InspectionListItem;
     onDelete: (id: number) => void;
     onRepeat: (id: number) => void;
     repeatingId: number | null;
     isReadOnly: boolean;
+    /** Set in the „Nevyfakturované" view — offers the one-tap check-off. */
+    onInvoiced?: (id: number, next: InvoicingFields) => void;
 }) {
     const isRepeating = repeatingId === it.id;
 
     const actions = isReadOnly ? null : (
         <>
+            {onInvoiced && isUninvoiced(it) && (
+                <InvoiceTickButton
+                    target="inspections"
+                    id={it.id}
+                    onDone={(next) => onInvoiced(it.id, next)}
+                />
+            )}
             {it.status === "finalized" && (
                 <button
                     type="button"
@@ -556,7 +707,7 @@ function InspectionRow({
                             ? new Date(it.executed_on + "T00:00:00").toLocaleDateString("sk-SK")
                             : "—"}
                         <span className="mx-1.5 text-ink-300">·</span>
-                        {it.periodicity_months} mes.
+                        {periodicityShort(periodicityOf(it))}
                         <span className="mx-1.5 text-ink-300">·</span>
                         {it.effective_inspector_name ?? it.inspector_name}
                     </p>

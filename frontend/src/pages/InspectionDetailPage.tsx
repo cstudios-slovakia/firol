@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, Download, FileText,
-  GitBranch, History, Images, Link2, Lock, LockOpen, NotebookPen, Pencil, Plus, Repeat,
-  Warehouse,
+  ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, CopyPlus, Download,
+  FileText, GitBranch, History, Images, Link2, Lock, LockOpen, NotebookPen, Pencil,
+  PenLine, Plus, Repeat, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
   INSPECTION_TYPE_LABELS,
   Inspections,
   documentDownloadUrl,
+  periodicityOf,
   type InspectionDetail,
   type InspectionDocument,
   type InspectionType,
@@ -24,11 +25,21 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 import { getTypeModule } from '@/inspection-types';
+import { PersonProtocolBlock } from '@/components/persons/PersonProtocolBlock';
+import { isPersonListType, type PersonListType } from '@/api/personList';
 import { clearDuplicateSeed } from '@/inspection-types/duplicateSeed';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { ItemPhotoStrip } from '@/components/ItemPhotos';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { InspectionStatusBadge } from '@/components/InspectionStatusBadge';
+import { HandoverDialog } from '@/components/HandoverDialog';
+import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStatusBadge';
+import { PeriodicityPicker } from '@/components/PeriodicityPicker';
+import { periodicityLabel, type Periodicity } from '@/lib/periodicity';
+import { sectionPathForType } from '@/lib/sections';
+import { InvoicingBlock } from '@/components/InvoicingBlock';
+import { invoicingOf } from '@/api/invoicing';
+import { useIsReadOnly } from '@/auth/useIsReadOnly';
 
 /**
  * Step 3 — summary screen. Final review before PDF generation.
@@ -45,12 +56,14 @@ export function InspectionDetailPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
+  const isReadOnly = useIsReadOnly();
 
   const [data, setData] = useState<InspectionDetail | null>(null);
   const [documents, setDocuments] = useState<InspectionDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [savingDate, setSavingDate] = useState(false);
+  const [savingPeriodicity, setSavingPeriodicity] = useState(false);
   const [localDate, setLocalDate] = useState<string>('');
   const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -60,6 +73,10 @@ export function InspectionDetailPage() {
   const [unlockPrompt, setUnlockPrompt] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [creatingFollowUp, setCreatingFollowUp] = useState(false);
+  // Chapter 12 — pulling last time's devices into an empty draft.
+  const [carryingOver, setCarryingOver] = useState(false);
+  // Chapter 13 — the document currently being handed over for signature.
+  const [signingDocument, setSigningDocument] = useState<InspectionDocument | null>(null);
   // "Priložiť fotodokumentáciu" (change request 2.2) — on by default, and only
   // shown at all when the inspection actually has photos.
   const [includePhotos, setIncludePhotos] = useState(true);
@@ -102,12 +119,61 @@ export function InspectionDetailPage() {
     setRepeating(true);
     try {
       const res = await Inspections.repeat(id, csrfToken);
+      // Devices disposed of last time are deliberately left behind (chapter
+      // 12). Saying so turns a shorter list from a suspected bug into a
+      // decision the technician can see was made.
+      if (res.disposed_skipped > 0) {
+        toast.success(disposedNotice(res.disposed_skipped));
+      }
       navigate(`/inspections/${res.inspection.id}`, { replace: false });
     } catch (err) {
       setError(offlineMessage(err, 'Opakovať sa nepodarilo.'));
     } finally {
       setRepeating(false);
     }
+  }
+
+  /**
+   * Fill an empty draft from the previous inspection at this prevádzka
+   * (chapter 12). The devices come across; their stav does not — the
+   * technician enters this year's results themselves.
+   */
+  async function handleCarryOver() {
+    if (!data) return;
+    setError(null);
+    setCarryingOver(true);
+    try {
+      const res = await Inspections.carryOver(id, csrfToken);
+      setData((prev) =>
+        prev
+          ? { ...prev, inspection: res.inspection, items: res.items, carry_over: null }
+          : prev,
+      );
+      // A single-record úkon (požiarna kniha, block 2 BOZP records) carries
+      // one record whose results start blank — open it straight away, since
+      // filling those in is the only thing left to do.
+      const record = getTypeModule(res.inspection.type)?.singleItem === true ? res.items[0] : undefined;
+      toast.success(
+        record
+          ? 'Záznam z minulej kontroly prevzatý — výsledok zadaj nanovo.'
+          : res.disposed_skipped > 0
+            ? `Položky prevzaté. ${disposedNotice(res.disposed_skipped)}`
+            : 'Položky z minulej kontroly prevzaté — stav zadaj nanovo.',
+      );
+      if (record) navigate(`/inspections/${id}/items/${record.id}`);
+    } catch (err) {
+      setError(offlineMessage(err, 'Prevzatie položiek sa nepodarilo.'));
+    } finally {
+      setCarryingOver(false);
+    }
+  }
+
+  /** Reload the documents list after a signature produced a new version. */
+  async function refreshDocuments() {
+    const docs = await Inspections.documents(id).catch(
+      () => ({ items: [] as InspectionDocument[] }),
+    );
+    setDocuments(docs.items);
   }
 
   /**
@@ -170,6 +236,47 @@ export function InspectionDetailPage() {
     }
   }
 
+  /**
+   * Change the period on a draft (chapter 5).
+   *
+   * Reachable here and not only in Step 1 because "Opakovať" skips Step 1
+   * entirely: the repeat inherits last year's period, and without this the
+   * technician would have no way to change it before issuing the protocol.
+   */
+  async function handlePeriodicityChange(next: Periodicity) {
+    if (!data) return;
+    setSavingPeriodicity(true);
+    try {
+      const res = await Inspections.update(
+        id,
+        { periodicity_value: next.value, periodicity_unit: next.unit },
+        csrfToken,
+      );
+      setData((prev) =>
+        prev ? { ...prev, inspection: { ...prev.inspection, ...res.inspection } } : prev,
+      );
+    } catch (err) {
+      if (handleOfflineSave(err, toast)) {
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                inspection: {
+                  ...prev.inspection,
+                  periodicity_value: next.value,
+                  periodicity_unit: next.unit,
+                },
+              }
+            : prev,
+        );
+        return;
+      }
+      setError(err instanceof ApiError ? err.message : 'Periodicitu sa nepodarilo uložiť.');
+    } finally {
+      setSavingPeriodicity(false);
+    }
+  }
+
   async function handleDateChange(value: string) {
     if (!data || !value) return;
     setSavingDate(true);
@@ -208,10 +315,12 @@ export function InspectionDetailPage() {
     }
   }
 
+  // Until the inspection loads its section is unknown, so „Späť" goes to Dnes
+  // rather than to the list of every section's kontroly.
   if (error && !data) {
     return (
       <div className="flex flex-col gap-4">
-        <Link to="/inspections" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <Link to="/" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
           <ArrowLeft className="size-4" />
           Späť
         </Link>
@@ -223,7 +332,7 @@ export function InspectionDetailPage() {
   if (!data) {
     return (
       <div className="flex flex-col gap-5">
-        <Link to="/inspections" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+        <Link to="/" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
           <ArrowLeft className="size-4" />
           Späť
         </Link>
@@ -237,12 +346,15 @@ export function InspectionDetailPage() {
   const { inspection: i, items } = data;
   const isDraft = i.status === 'draft';
   const module = getTypeModule(i.type);
+  // Block 2 — a list of people is typed on its own screen and issued with
+  // the blank-form choice of chapter 8.1 (PersonProtocolBlock).
+  const isPersons = isPersonListType(i.type);
   const photoCount = items.reduce((n, it) => n + (it.photos?.length ?? 0), 0);
 
   return (
     <div className="flex flex-col gap-5">
       <Link
-        to="/inspections"
+        to={sectionPathForType(i.type)}
         className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start"
       >
         <ArrowLeft className="size-4" />
@@ -443,6 +555,30 @@ export function InspectionDetailPage() {
             Uložiť dátum
           </Button>
         )}
+
+        <div className="border-t border-ink-100/70 pt-3">
+          <p
+            className={cn(
+              'text-xs font-semibold uppercase tracking-wider',
+              isDraft ? 'text-status-warn' : 'text-ink-500',
+            )}
+          >
+            Periodicita
+          </p>
+          {isDraft ? (
+            <div className="mt-2">
+              <PeriodicityPicker
+                type={i.type}
+                value={periodicityOf(i)}
+                executedOn={localDate || null}
+                disabled={savingPeriodicity}
+                onChange={handlePeriodicityChange}
+              />
+            </div>
+          ) : (
+            <p className="mt-0.5 text-sm text-ink-700">{periodicityLabel(periodicityOf(i))}</p>
+          )}
+        </div>
       </Card>
 
       {i.notes && (
@@ -465,13 +601,26 @@ export function InspectionDetailPage() {
         <Card className="px-3 py-2 text-sm text-status-bad">{error}</Card>
       )}
 
+      {isDraft && items.length === 0 && data.carry_over && !isPersons && (
+        <CarryOverOfferCard
+          offer={data.carry_over}
+          record={module?.singleItem === true}
+          busy={carryingOver}
+          onCarryOver={handleCarryOver}
+        />
+      )}
+
       {items.length === 0 ? (
-        <EmptyItems inspectionId={id} disabled={!isDraft} />
+        <EmptyItems
+          inspectionId={id}
+          disabled={!isDraft}
+          href={isPersons ? `/inspections/${id}/osoby` : undefined}
+        />
       ) : (
         <Card className="overflow-hidden">
           <div className="flex items-center justify-between gap-2 border-b border-ink-100 px-4 py-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-ink-500">
-              {i.type === 'poziarna_kniha' ? 'Záznamy' : 'Položky'}
+              {isPersons ? 'Osoby' : module?.singleItem ? 'Záznamy' : 'Položky'}
             </span>
             <span className="text-xs text-ink-500">spolu {items.length}</span>
           </div>
@@ -487,6 +636,14 @@ export function InspectionDetailPage() {
                     deleting={deletingItemId === it.id}
                     onDelete={() => handleDeleteItem(it.id)}
                   />
+                  {/* Chapter 12 — what this device scored last time, so the
+                      technician can see at a glance which one was on tlaková
+                      skúška a year ago. Display only. */}
+                  {previousStatusOf(it.fields) && (
+                    <div className="px-4 pb-2">
+                      <PreviousStatusBadge type={i.type} fields={it.fields} />
+                    </div>
+                  )}
                   <ItemPhotoStrip photos={it.photos} />
                 </li>
               ))}
@@ -496,16 +653,32 @@ export function InspectionDetailPage() {
               Pre tento typ kontroly ešte nemáme zobrazenie položiek.
             </p>
           )}
-          {isDraft && !(i.type === 'poziarna_kniha' && items.length >= 1) && (
+          {isDraft && !(module?.singleItem && items.length >= 1) && (
             <Link
-              to={`/inspections/${id}/items/new`}
+              to={isPersons ? `/inspections/${id}/osoby` : `/inspections/${id}/items/new`}
               className="flex items-center justify-center gap-1.5 border-t border-ink-100 px-4 py-3 text-sm font-medium text-firol-600 transition-colors hover:bg-firol-50"
             >
               <Plus className="size-4" />
-              {i.type === 'poziarna_kniha' ? 'Pridať záznam' : 'Pridať položku'}
+              {isPersons ? 'Upraviť zoznam osôb' : module?.singleItem ? 'Pridať záznam' : 'Pridať položku'}
             </Link>
           )}
         </Card>
+      )}
+
+      {/* Úkon-level fields that belong to no single row — the opatrenia or
+          záver of a block 2 BOZP úkon. Hidden on a locked úkon when empty. */}
+      {module?.DetailsBlock && (
+        <module.DetailsBlock
+          inspectionId={id}
+          details={i.details ?? null}
+          canEdit={isDraft}
+          csrfToken={csrfToken}
+          onSaved={(details) =>
+            setData((prev) =>
+              prev ? { ...prev, inspection: { ...prev.inspection, details } } : prev,
+            )
+          }
+        />
       )}
 
       <FollowUpBlock
@@ -517,6 +690,25 @@ export function InspectionDetailPage() {
         onCreate={handleCreateFollowUp}
       />
 
+      {isPersons && (
+        <PersonProtocolBlock
+          type={i.type as PersonListType}
+          inspection={i}
+          items={items}
+          documents={documents}
+          csrfToken={csrfToken}
+          onChanged={async () => {
+            const [detail, docs] = await Promise.all([
+              Inspections.show(id),
+              Inspections.documents(id).catch(() => ({ items: [] as InspectionDocument[] })),
+            ]);
+            setData(detail);
+            setDocuments(docs.items);
+          }}
+        />
+      )}
+
+      {!(isPersons && documents.length === 0) && (
       <DocumentsBlock
         documents={documents}
         canGenerate={isDraft && items.length > 0 && !!i.executed_on}
@@ -526,8 +718,114 @@ export function InspectionDetailPage() {
         photoCount={photoCount}
         includePhotos={includePhotos}
         onIncludePhotosChange={setIncludePhotos}
+        onSign={setSigningDocument}
+        canSign={!isDraft}
       />
+      )}
+
+      {/* Chapter 22 — fakturácia úkonu. Editable on a locked úkon as well:
+          invoicing follows the issued protocol and never changes it. */}
+      <InvoicingBlock
+        target="inspections"
+        id={id}
+        value={invoicingOf(i)}
+        disabled={isReadOnly}
+        onChange={(next) =>
+          setData((prev) =>
+            prev ? { ...prev, inspection: { ...prev.inspection, ...next } } : prev,
+          )
+        }
+      />
+
+      {signingDocument && (
+        <HandoverDialog
+          open
+          onClose={() => setSigningDocument(null)}
+          documentId={signingDocument.id}
+          documentNumber={signingDocument.number}
+          documentType={i.type}
+          companyId={i.company_id}
+          facilityId={i.facility_id}
+          defaultPlace={i.facility_name}
+          defaultDate={i.executed_on}
+          onSigned={refreshDocuments}
+        />
+      )}
     </div>
+  );
+}
+
+/** "Z minulej kontroly boli 2 prístroje vyradené — neprenášam ich." */
+function disposedNotice(n: number): string {
+  const word = n === 1 ? 'položka bola vyradená' : n < 5 ? 'položky boli vyradené' : 'položiek bolo vyradených';
+  return `Z minulej kontroly ${n} ${word} — neprenášam ich.`;
+}
+
+/**
+ * "Prevziať položky z poslednej kontroly" — block 1 / chapter 12, and the
+ * single biggest time saver in the field: a technician standing in a boiler
+ * room does not retype forty extinguishers they already typed a year ago.
+ *
+ * What travels is identification. Stav, poznámky, fotky and nedostatky start
+ * empty, because carrying a verdict forward would let a protocol claim
+ * something nobody checked this time.
+ */
+function CarryOverOfferCard({
+  offer,
+  record = false,
+  busy,
+  onCarryOver,
+}: {
+  offer: NonNullable<InspectionDetail['carry_over']>;
+  /** Single-record úkon — the whole record travels, not a list of devices. */
+  record?: boolean;
+  busy: boolean;
+  onCarryOver: () => void;
+}) {
+  const when = offer.executed_on
+    ? new Date(`${offer.executed_on}T00:00:00`).toLocaleDateString('sk-SK')
+    : null;
+  return (
+    <Card className="flex flex-col gap-3 border-firol-200 bg-firol-50/60 p-4">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-white text-firol-600">
+          <CopyPlus className="size-4" />
+        </span>
+        {record ? (
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-ink-900">
+              Prevziať záznam z poslednej kontroly{when ? ` (${when})` : ''}?
+            </p>
+            <p className="mt-1 text-xs text-ink-600">
+              Prenesú sa prehliadnuté pracoviská, vykonané činnosti a kontrolované
+              oblasti. Výsledky, poznámky, nedostatky a fotky zadáš nanovo.
+            </p>
+          </div>
+        ) : (
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-ink-900">
+            Prevziať položky z poslednej kontroly{when ? ` (${when})` : ''}?
+          </p>
+          <p className="mt-1 text-xs text-ink-600">
+            Prenesie sa {offer.item_count}{' '}
+            {offer.item_count === 1 ? 'položka' : offer.item_count < 5 ? 'položky' : 'položiek'} aj
+            s označením a umiestnením. Stav, poznámky a fotky zadáš nanovo — pri
+            každej položke uvidíš, aký stav mala minule.
+            {offer.disposed > 0 && ` ${disposedNotice(offer.disposed)}`}
+          </p>
+        </div>
+        )}
+      </div>
+      <Button
+        type="button"
+        className="self-start"
+        loading={busy}
+        onClick={onCarryOver}
+        leftIcon={<CopyPlus className="size-4" />}
+      >
+        {record ? 'Prevziať záznam' : 'Prevziať položky'}
+      </Button>
+    </Card>
   );
 }
 
@@ -664,6 +962,8 @@ function DocumentsBlock({
   photoCount,
   includePhotos,
   onIncludePhotosChange,
+  onSign,
+  canSign = true,
 }: {
   documents: InspectionDocument[];
   canGenerate: boolean;
@@ -673,6 +973,13 @@ function DocumentsBlock({
   photoCount: number;
   includePhotos: boolean;
   onIncludePhotosChange: (value: boolean) => void;
+  onSign: (doc: InspectionDocument) => void;
+  /**
+   * False while the úkon is open again with an issued protocol (a test
+   * printed blank whose results are being typed in, chapter 8.1): signing
+   * would re-render the document from a record that no longer matches it.
+   */
+  canSign?: boolean;
 }) {
   if (documents.length === 0) {
     return (
@@ -683,7 +990,7 @@ function DocumentsBlock({
         <h2 className="text-sm font-semibold text-ink-900">PDF protokol</h2>
         <p className="max-w-sm text-xs text-ink-500">
           {canGenerate
-            ? 'Po vygenerovaní sa kontrola uzamkne a dostane svoje číslo (napr. PHP-2026-001).'
+            ? 'Po vygenerovaní sa kontrola uzamkne a dostane svoje číslo protokolu.'
             : 'Pre vygenerovanie pridaj aspoň jednu položku a skontroluj dátum kontroly.'}
         </p>
         {photoCount > 0 && (
@@ -739,18 +1046,71 @@ function DocumentsBlock({
                 <FileText className="size-4" />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="font-mono text-sm text-ink-900">{doc.number}</p>
+                <p className="font-mono text-sm text-ink-900">
+                  {doc.number}
+                  {doc.version > 1 && (
+                    <span className="ml-1.5 text-xs font-sans text-ink-400">
+                      verzia {doc.version}
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-ink-500">
                   Vystavený {new Date(doc.generated_at.replace(' ', 'T')).toLocaleString('sk-SK')}
                 </p>
               </div>
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
+            <HandoverRow doc={doc} canSign={canSign} onSign={() => onSign(doc)} />
             <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} />
           </li>
         ))}
       </ul>
     </Card>
+  );
+}
+
+/**
+ * Whether the client has taken this protocol over on the screen (chapter 13).
+ *
+ * An unsigned protocol is a finished protocol: printing it and collecting the
+ * signature on paper is ordinary practice, and the PDF carries an empty line
+ * for exactly that. So this row offers the signature rather than demanding it.
+ */
+function HandoverRow({
+  doc,
+  onSign,
+  canSign,
+}: {
+  doc: InspectionDocument;
+  onSign: () => void;
+  canSign: boolean;
+}) {
+  if (doc.handover) {
+    return (
+      <div className="flex items-start gap-2 border-t border-ink-100 bg-[var(--color-status-ok-bg)]/40 px-4 py-2.5 text-xs text-ink-600">
+        <PenLine className="mt-0.5 size-3.5 shrink-0 text-status-ok" />
+        <p>
+          Prevzal <span className="font-medium text-ink-800">{doc.handover.fullname}</span>
+          {doc.handover.role_title && ` — ${doc.handover.role_title}`},{' '}
+          {doc.handover.place},{' '}
+          {new Date(`${doc.handover.signed_on}T00:00:00`).toLocaleDateString('sk-SK')}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-between gap-2 border-t border-ink-100 px-4 py-2.5">
+      <p className="text-xs text-ink-500">
+        {canSign
+          ? 'Nepodpísané — protokol sa dá odovzdať aj na podpis po vytlačení.'
+          : 'Úkon je otvorený na doplnenie — podpísať sa dá, až keď bude znova uzamknutý.'}
+      </p>
+      {canSign && (
+        <Button type="button" size="sm" variant="secondary" onClick={onSign} leftIcon={<PenLine className="size-3.5" />}>
+          Dať podpísať
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -802,7 +1162,16 @@ function IncludePhotosToggle({
   );
 }
 
-function EmptyItems({ inspectionId, disabled }: { inspectionId: number; disabled: boolean }) {
+function EmptyItems({
+  inspectionId,
+  disabled,
+  href,
+}: {
+  inspectionId: number;
+  disabled: boolean;
+  /** Where adding starts — a person list (block 2) has its own screen. */
+  href?: string;
+}) {
   return (
     <Card className="flex flex-col items-center gap-3 px-6 py-10 text-center">
       <div className="grid size-12 place-items-center rounded-2xl bg-firol-50 text-firol-500">
@@ -814,7 +1183,7 @@ function EmptyItems({ inspectionId, disabled }: { inspectionId: number; disabled
       </p>
       {!disabled && (
         <Link
-          to={`/inspections/${inspectionId}/items/new`}
+          to={href ?? `/inspections/${inspectionId}/items/new`}
           className="inline-flex h-11 items-center gap-1.5 rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
         >
           <Plus className="size-4" />

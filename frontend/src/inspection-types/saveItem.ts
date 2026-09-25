@@ -16,6 +16,7 @@ import { Inspections } from '@/api/inspections';
 import { OfflineQueuedError } from '@/lib/api';
 import { queuedClientId } from '@/lib/offline';
 import type { PhotoStaging } from '@/components/ItemPhotos';
+import { offerDefectTasks } from '@/components/DefectTaskOffer';
 
 /** The per-type field payload, as accepted by the items API. */
 export type ItemFields = Parameters<typeof Inspections.addItem>[1];
@@ -73,6 +74,10 @@ export async function saveItemWithPhotos(args: {
     // report it rather than silently dropping the technician's photos.
     photosFailed = photosList.reduce((sum, p) => sum + (p.total > 0 ? p.staged.length : 0), 0);
   }
+
+  // Chapter 20 — a nedostatok saved with a termín odstránenia gets the offer
+  // of a follow-up task. Every form with nedostatky saves through here.
+  offerDefectTasks(inspectionId, fields as unknown as Record<string, unknown>);
 
   return { queued, photosFailed };
 }

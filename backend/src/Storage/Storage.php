@@ -79,6 +79,29 @@ final class Storage
         return "documents/$accountId/$year/$number.pdf";
     }
 
+    /**
+     * Path of a re-rendered protocol. The number never changes when a
+     * signature is added (chapter 13) — only the version does, and every
+     * version keeps its own file because a customer may already hold the
+     * earlier one.
+     */
+    public static function documentVersionRelative(
+        int $accountId,
+        int $year,
+        string $number,
+        int $version,
+    ): string {
+        return $version <= 1
+            ? self::documentRelative($accountId, $year, $number)
+            : "documents/$accountId/$year/$number-v$version.pdf";
+    }
+
+    /** Signature captured when the client took the protocol over (chapter 13). */
+    public static function handoverSignatureRelative(int $accountId, int $documentId): string
+    {
+        return "handovers/$accountId/$documentId.png";
+    }
+
     public static function documentAbsolute(string $relativePath): string
     {
         return self::root() . '/' . $relativePath;

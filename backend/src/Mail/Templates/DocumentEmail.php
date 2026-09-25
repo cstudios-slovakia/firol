@@ -10,6 +10,9 @@ use Firol\Mail\Message;
  * Email used when a technician forwards a generated protocol PDF to a
  * customer. The PDF is sent as an attachment; the body is a short cover
  * note naming the protocol and the issuing company.
+ *
+ * `$replyTo` carries the sending technician's address (see Firol\Mail\ReplyTo)
+ * so a reply reaches a person rather than the platform's noreply@ From.
  */
 final class DocumentEmail
 {
@@ -20,6 +23,7 @@ final class DocumentEmail
         string $pdfFilename,
         string $pdfBytes,
         ?string $note = null,
+        ?string $replyTo = null,
     ): Message {
         $numEsc   = htmlspecialchars($documentNumber, ENT_QUOTES, 'UTF-8');
         $brandEsc = htmlspecialchars($brandName, ENT_QUOTES, 'UTF-8');
@@ -51,6 +55,7 @@ HTML;
             subject: 'Protokol ' . $documentNumber . ' — ' . $brandName,
             html:    Layout::render('Protokol', 'Protokol ' . $documentNumber, $bodyHtml, 'PDF protokol ' . $documentNumber . ' v prílohe.'),
             text:    $text,
+            replyTo: $replyTo,
             attachments: [
                 [
                     'filename' => $pdfFilename,

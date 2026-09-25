@@ -1,15 +1,25 @@
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, Ban, BookOpen, ChevronRight, DoorClosed, Droplets, Flame,
-  Gauge, Lightbulb, ShieldCheck, Wrench,
+  ArrowLeft, Ban, BookOpen, ChevronRight, DoorClosed, Droplets,
+  Flame, Gauge, LibraryBig, Lightbulb, Shield, ShieldCheck, Signpost, TrainTrack, Wrench,
+  TestTube, Users, Wind,
 } from 'lucide-react';
+// Block 2 — single-record BOZP úkony.
+import { BookCheck, CigaretteOff, Factory, PhoneCall } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import {
   INSPECTION_TYPE_LABELS,
-  INSPECTION_TYPE_PERIODICITIES,
   type InspectionType,
 } from '@/api/inspections';
+import { RECOMMENDED_MONTHS } from '@/lib/periodicity';
+import {
+  SECTION_INSPECTION_TYPES,
+  SECTION_LABELS,
+  SECTION_PATHS,
+  isSection,
+  type Section,
+} from '@/lib/sections';
 
 type TypeMeta = {
   type: InspectionType;
@@ -98,6 +108,105 @@ const TYPES: TypeMeta[] = [
     icon: <Ban className="size-5" />,
     enabled: true,
   },
+  // Block 2 — single-record BOZP úkony (kniha, pracovisko, osamelé, fajčenie).
+  {
+    type: 'kniha_bozp',
+    shortLabel: 'Kniha kontrol BOZP',
+    description: 'Záznam o kontrole stavu BOZP s prehľadom termínov klienta.',
+    intervalLabel: '12 / 6 / 3 mes.',
+    icon: <BookCheck className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'pracovisko',
+    shortLabel: 'Kontrola pracoviska',
+    description: 'Pracovisko a pracovné prostredie po oblastiach.',
+    intervalLabel: '12 / 6 mes.',
+    icon: <Factory className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'osamele_pracovisko',
+    shortLabel: 'Osamelé pracoviská',
+    description: 'Spojenie a kontrola prítomnosti osamotene pracujúcich.',
+    intervalLabel: '12 / 6 mes.',
+    icon: <PhoneCall className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'fajcenie',
+    shortLabel: 'Zákaz fajčenia',
+    description: 'Kontrola dodržiavania zákazu fajčenia v priestoroch.',
+    intervalLabel: 'bez opakovania',
+    icon: <CigaretteOff className="size-5" />,
+    enabled: true,
+  },
+  // Block 2 — BOZP úkony, chapter 5.3 order.
+  {
+    type: 'oopp',
+    shortLabel: 'Kontrola OOPP',
+    description: 'Poskytovanie a používanie osobných ochranných pracovných prostriedkov.',
+    intervalLabel: '12 mes.',
+    icon: <Shield className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'pracovne_prostriedky',
+    shortLabel: 'Pracovné prostriedky',
+    description: 'Zoznam pracovných prostriedkov s výsledkom a opatreniami.',
+    intervalLabel: '12 mes.',
+    icon: <Wrench className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'rebriky',
+    shortLabel: 'Rebríky',
+    description: 'Kontrola rebríkov — vyhovuje / nevyhovuje / vyradené.',
+    intervalLabel: '12 mes.',
+    icon: <TrainTrack className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'regale',
+    shortLabel: 'Regály',
+    description: 'Kontrola regálov vrátane označenia nosnosti.',
+    intervalLabel: '12 mes.',
+    icon: <LibraryBig className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'oznacenie',
+    shortLabel: 'Bezpečnostné označenie',
+    description: 'Kontrola bezpečnostného a zdravotného označenia pri práci.',
+    intervalLabel: '12 mes.',
+    icon: <Signpost className="size-5" />,
+    enabled: true,
+  },
+  // Block 2 — the person-list úkony (chapters 7, 8, 8.1).
+  {
+    type: 'dychova_skuska',
+    shortLabel: 'Dychová skúška',
+    description: 'Zoznam osôb s výsledkom — aj prázdny formulár na ručné doplnenie.',
+    intervalLabel: 'bez opakovania',
+    icon: <Wind className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'omamne_latky',
+    shortLabel: 'Omamné látky',
+    description: 'Kontrola omamných a psychotropných látok — aj prázdny formulár.',
+    intervalLabel: 'bez opakovania',
+    icon: <TestTube className="size-5" />,
+    enabled: true,
+  },
+  {
+    type: 'skolenie_bozp',
+    shortLabel: 'Oboznámenie BOZP',
+    description: 'Prezenčná listina s odkazom na osnovu — bez tematického plánu.',
+    intervalLabel: '36 / 24 / 12 mes.',
+    icon: <Users className="size-5" />,
+    enabled: true,
+  },
 ];
 
 export function NewInspectionTypePicker() {
@@ -106,15 +215,29 @@ export function NewInspectionTypePicker() {
   // we forward those IDs so Step 1 can prefill them.
   const facilityId = params.get('facility_id');
   const companyId = params.get('company_id');
+  // Which section the technician came from (chapter 2). It narrows the list to
+  // that odbor's types — arriving from Revízie and being offered a požiarna
+  // kniha would just be noise to scroll past.
+  const sectionParam = params.get('section') ?? undefined;
+  const section: Section | null = isSection(sectionParam) ? sectionParam : null;
   const backHref = facilityId
     ? `/facilities/${facilityId}`
     : companyId
       ? `/companies/${companyId}`
-      : '/';
+      : section
+        ? SECTION_PATHS[section]
+        : '/';
 
   const passthrough = new URLSearchParams();
   if (facilityId) passthrough.set('facility_id', facilityId);
   if (companyId) passthrough.set('company_id', companyId);
+  // Step 1 needs the section only for its „Späť", which must return to this
+  // same narrowed list rather than to every type.
+  if (section) passthrough.set('section', section);
+
+  const offered = section
+    ? TYPES.filter((m) => SECTION_INSPECTION_TYPES[section].includes(m.type))
+    : TYPES;
   const passthroughQs = passthrough.toString();
   const stepOnePathFor = (type: InspectionType) =>
     `/inspections/new/${type}/step-1${passthroughQs ? `?${passthroughQs}` : ''}`;
@@ -130,14 +253,16 @@ export function NewInspectionTypePicker() {
       </Link>
 
       <header>
-        <h1 className="text-xl font-semibold tracking-tight text-ink-900">Nová kontrola</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-ink-900">
+          Nová kontrola{section ? ` — ${SECTION_LABELS[section]}` : ''}
+        </h1>
         <p className="mt-0.5 text-sm text-ink-500">
           Vyber typ kontroly. Periodicitu si zvolíš v ďalšom kroku.
         </p>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {TYPES.map((meta, i) => (
+        {offered.map((meta, i) => (
           <div key={meta.type} className="animate-fade-up" style={{ animationDelay: `${i * 40}ms` }}>
             <TypeCard meta={meta} href={stepOnePathFor(meta.type)} />
           </div>
@@ -149,7 +274,12 @@ export function NewInspectionTypePicker() {
 
 function TypeCard({ meta, href }: { meta: TypeMeta; href: string }) {
   const fullLabel = INSPECTION_TYPE_LABELS[meta.type];
-  const periodicities = INSPECTION_TYPE_PERIODICITIES[meta.type].join(' / ');
+  // What the app suggests for this type — a starting point the technician
+  // overrides freely in Step 1 (chapter 5), never a fixed interval.
+  const recommended = RECOMMENDED_MONTHS[meta.type] ?? [];
+  const periodicities = recommended.length > 0
+    ? `odporúčané ${recommended.join(' / ')} mes.`
+    : 'bez opakovania';
 
   if (!meta.enabled) {
     return (
@@ -167,7 +297,7 @@ function TypeCard({ meta, href }: { meta: TypeMeta; href: string }) {
             <Badge tone="neutral">Čoskoro</Badge>
           </div>
           <p className="mt-0.5 line-clamp-2 text-xs text-ink-400">{meta.description}</p>
-          <p className="mt-1 text-[11px] text-ink-400">{meta.intervalLabel} · {periodicities} mes.</p>
+          <p className="mt-1 text-[11px] text-ink-400">{periodicities}</p>
         </div>
       </Card>
     );
@@ -186,7 +316,7 @@ function TypeCard({ meta, href }: { meta: TypeMeta; href: string }) {
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold text-ink-900">{meta.shortLabel}</h3>
           <p className="mt-0.5 line-clamp-2 text-xs text-ink-500">{meta.description}</p>
-          <p className="mt-1 text-[11px] text-ink-400">{meta.intervalLabel}</p>
+          <p className="mt-1 text-[11px] text-ink-400">{periodicities}</p>
         </div>
         <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-firol-500" />
       </Card>

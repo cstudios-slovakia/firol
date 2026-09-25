@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Firol\Pdf;
 
 use Firol\Storage\Storage;
+use Firol\Support\Sections;
 use Mpdf\Mpdf;
 use Mpdf\Output\Destination;
 
@@ -42,6 +43,33 @@ final class PdfRenderer
     }
 
     /**
+     * Potvrdenie o vykonaní práce (block 1 / chapter 10). Its own entry point
+     * rather than a branch of renderForType(): it is not an inspection
+     * protocol, it has no items or stats, and its header names the
+     * technician's firm instead of the client's.
+     *
+     * @param array<string, mixed> $payload
+     */
+    public static function renderWorkConfirmation(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/potvrdenie_prace.php', $payload);
+        return self::buildPdf($html, $payload['number'] ?? 'potvrdenie');
+    }
+
+    /**
+     * Výdajka materiálu (block 4 / chapter 21). A shared document with its
+     * own entry point, like the potvrdenie: it lists material from the sklad,
+     * not the items of an úkon.
+     *
+     * @param array<string, mixed> $payload
+     */
+    public static function renderStockIssue(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/vydajka.php', $payload);
+        return self::buildPdf($html, $payload['number'] ?? 'vydajka');
+    }
+
+    /**
      * Type-aware dispatcher. Adding a new inspection type means adding a
      * branch here + the corresponding template under templates/.
      *
@@ -68,11 +96,32 @@ final class PdfRenderer
             'nudzove_osvetlenie' => 'nudzove_osvetlenie.php',
             'ts_hadic'           => 'ts_hadic.php',
             'vyradenie'          => 'vyradenie.php',
+            // Block 2 — single-record BOZP úkony (Firol\Support\BozpRecords).
+            'kniha_bozp'         => 'kniha_bozp.php',
+            'pracovisko'         => 'pracovisko.php',
+            'osamele_pracovisko' => 'osamele_pracovisko.php',
+            'fajcenie'           => 'fajcenie.php',
+            // Block 2 — both tests share one template; the filled record and
+            // the blank form for handwriting are two modes of it (8.1).
+            'dychova_skuska',
+            'omamne_latky'       => 'osoby_skuska.php',
+            'skolenie_bozp'      => 'skolenie_bozp.php',
+            // Block 2 — BOZP úkony with a list of rows (Firol\Support\BozpItems).
+            'oopp'                 => 'oopp.php',
+            'pracovne_prostriedky' => 'pracovne_prostriedky.php',
+            'rebriky'              => 'rebriky.php',
+            'regale'               => 'regale.php',
+            'oznacenie'            => 'oznacenie.php',
             default => throw new \InvalidArgumentException("No renderer for type: $type"),
         };
 
         $html = self::renderTemplate(__DIR__ . '/templates/' . $bodyTemplate, $payload);
-        $html .= self::renderPhotoAppendix($payload);
+        // BOZP bodies are always BOZP blue (ProtocolLayout), whatever the
+        // account's brand colour — the appendix follows the body it belongs to.
+        $html .= self::renderPhotoAppendix(
+            $payload,
+            Sections::forInspectionType($type) === Sections::BOZP ? ProtocolLayout::BOZP_COLOR : null,
+        );
 
         return self::buildPdf($html, $payload['number'] ?? 'firol');
     }
@@ -82,13 +131,19 @@ final class PdfRenderer
      * the inspection has no photos (or the technician unticked the option) —
      * in which case the PDF looks exactly as it did before 2.2 existed.
      *
+     * `$color` overrides the brand colour when the body is drawn in a fixed
+     * section colour, so the appendix never switches colour mid-document.
+     *
      * @param array<string, mixed> $payload
      */
-    public static function renderPhotoAppendix(array $payload): string
+    public static function renderPhotoAppendix(array $payload, ?string $color = null): string
     {
         $photos = $payload['photos'] ?? [];
         if (!is_array($photos) || $photos === []) {
             return '';
+        }
+        if ($color !== null) {
+            $payload['brand'] = ['color' => $color] + (is_array($payload['brand'] ?? null) ? $payload['brand'] : []);
         }
         return '<pagebreak />'
             . self::renderTemplate(__DIR__ . '/templates/photo_appendix.php', $payload);

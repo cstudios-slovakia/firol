@@ -12,11 +12,16 @@ use PHPMailer\PHPMailer\PHPMailer;
  * SMTP transport via PHPMailer. Single static entry point (`Mailer::send`)
  * keeps the call sites in controllers compact.
  *
- * If SMTP is not configured or the delivery fails, the mail is logged via
+ * If SMTP is not configured or the handoff fails, the mail is logged via
  * error_log() instead — so dev/staging keep working and an SMTP outage
  * cannot break the underlying flow (password reset, invite, invoice
- * receipt). The caller is never made aware of the failure; the return
- * value is informational.
+ * receipt). The return value says whether the SMTP server accepted the
+ * message; platform mail ignores it, protocol mail acts on it
+ * (DocumentController::emailDocument, DocumentSendController::store).
+ *
+ * A `true` return means accepted for delivery, NOT delivered. The relay
+ * accepts first and attempts delivery afterwards, so a remote rejection
+ * comes back as a bounce minutes later and is invisible here.
  *
  * Templates live in `Firol\Mail\Templates` and return a Message struct.
  */
@@ -147,9 +152,10 @@ final class Mailer
 
     /**
      * Resolves the `From:` address as a (email, name) pair for PHPMailer.
-     * In dev (no MAIL_FROM) we fall back to no-reply@localhost so the
-     * library doesn't reject an empty sender; production must set
-     * MAIL_FROM to a domain authorized by the SMTP server.
+     * In dev (no MAIL_FROM) we fall back to a syntactically valid dummy
+     * address so the library doesn't reject an empty sender — the domain
+     * needs a dot, PHPMailer rejects bare `@localhost`. Production must
+     * set MAIL_FROM to a domain authorized by the SMTP server.
      *
      * @return array{0: string, 1: string}
      */
@@ -159,7 +165,7 @@ final class Mailer
         $name  = trim((string) ($_ENV['MAIL_FROM_NAME'] ?? 'POapp'));
 
         if ($email === '') {
-            $email = 'no-reply@localhost';
+            $email = 'no-reply@localhost.localdomain';
         }
         return [$email, $name];
     }

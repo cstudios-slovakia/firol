@@ -36,6 +36,29 @@ final class NumberAllocator
         // tree but keeps its own series: it is a document for the client's
         // employees, not one of the attendance-based trainings below.
         'pokyn_zatva'        => 'ZAT',
+        // Block 1 / chapter 10 — potvrdenie o vykonaní práce. A shared
+        // document (grey, SPOLOČNÉ) with its own series, because it is issued
+        // per visit rather than per úkon.
+        'potvrdenie_prace'   => 'POT',
+        // Block 4 / chapter 21 — výdajka materiálu. Shared (SPOLOČNÉ), own
+        // series per account and year.
+        'vydajka'            => 'VYD',
+        // Block 2 / chapter 26 — single-record BOZP úkony.
+        'kniha_bozp'         => 'BOZP',
+        'pracovisko'         => 'PRAC',
+        'osamele_pracovisko' => 'OSP',
+        'fajcenie'           => 'ZF',
+        // Block 2 / chapter 26 — the „osoby" úkony. The blank form and the
+        // filled record of one test share its number (chapter 8.1).
+        'dychova_skuska'     => 'DS',
+        'omamne_latky'       => 'OPL',
+        'skolenie_bozp'      => 'SKB',
+        // Block 2 — chapter 26 numbering.
+        'oopp'                 => 'OOPP',
+        'pracovne_prostriedky' => 'PP',
+        'rebriky'              => 'REB',
+        'regale'               => 'REG',
+        'oznacenie'            => 'OZN',
         // Trainings: per spec, all 6 attendance-based training types share
         // the SKO prefix and a single per-account+year sequence. The training
         // type itself is stored in the body, not encoded in the number.

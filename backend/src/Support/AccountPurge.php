@@ -38,15 +38,63 @@ final class AccountPurge
         // Collect the file paths before the rows that name them are gone.
         $documentPaths = self::documentPaths($accountId, $pdo);
         $signaturePaths = self::traineeSignaturePaths($accountId, $pdo);
+        $handoverPaths = self::handoverSignaturePaths($accountId, $pdo);
         $photoPaths = self::photoPaths($accountId, $pdo);
 
         // documents has no FK to inspections/trainings, so it goes first.
         $pdo->prepare('DELETE FROM documents WHERE account_id = ?')->execute([$accountId]);
+        // Úlohy (chapter 20): a firm's tasks would go with the company cascade,
+        // but „všeobecné" ones hang off nothing, and a replace-mode restore
+        // writes them back from the backup — leaving them would duplicate them.
+        $pdo->prepare('DELETE FROM tasks WHERE account_id = ?')->execute([$accountId]);
+        // Výdajky (chapter 21) go with the company cascade; the sklad itself
+        // is not firm data and stays — see stock() for the restore case.
+        // Visits and work confirmations describe work done at a company, so the
+        // company cascade takes them — but only once their protocols are gone.
         $pdo->prepare('DELETE FROM companies WHERE account_id = ?')->execute([$accountId]);
 
-        self::unlink(array_merge($documentPaths, $signaturePaths, $photoPaths));
+        self::unlink(array_merge($documentPaths, $signaturePaths, $handoverPaths, $photoPaths));
         self::pruneDocumentDirs($accountId);
         self::prunePhotoDirs($accountId);
+
+        return $count;
+    }
+
+    /**
+     * The sklad (chapter 21): items, balances, the movements journal and the
+     * výdajky with their PDFs. Only for a replace-mode restore, which writes
+     * the sklad back whole — left in place, every balance would be doubled.
+     * Deleting the firms does not touch the sklad: material is not firm data,
+     * and the journal is never edited or deleted from the app.
+     *
+     * @return int number of items removed
+     */
+    public static function stock(int $accountId): int
+    {
+        $pdo = Db::pdo();
+
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM stock_items WHERE account_id = ?');
+        $stmt->execute([$accountId]);
+        $count = (int) $stmt->fetchColumn();
+
+        $docStmt = $pdo->prepare(
+            "SELECT file_path FROM documents WHERE account_id = ? AND parent_type = 'stock_issue'"
+        );
+        $docStmt->execute([$accountId]);
+        $documentPaths = array_merge(
+            $docStmt->fetchAll(PDO::FETCH_COLUMN),
+            self::versionPaths($accountId, $pdo, ['stock_issue']),
+        );
+
+        $pdo->prepare("DELETE FROM documents WHERE account_id = ? AND parent_type = 'stock_issue'")
+            ->execute([$accountId]);
+        // Movements point at výdajky and items; balances cascade with items.
+        $pdo->prepare('DELETE FROM stock_movements WHERE account_id = ?')->execute([$accountId]);
+        $pdo->prepare('DELETE FROM stock_issues WHERE account_id = ?')->execute([$accountId]);
+        $pdo->prepare('DELETE FROM stock_items WHERE account_id = ?')->execute([$accountId]);
+
+        self::unlink($documentPaths);
+        self::pruneDocumentDirs($accountId);
 
         return $count;
     }
@@ -60,19 +108,31 @@ final class AccountPurge
         $stmt->execute([$accountId]);
         $count = (int) $stmt->fetchColumn();
 
+        // A potvrdenie o vykonaní práce only lists protocols of these
+        // inspections, and a visit is only the thread between them — neither
+        // survives the work it describes, so their PDFs go in the same sweep.
         $docStmt = $pdo->prepare(
-            "SELECT file_path FROM documents WHERE account_id = ? AND parent_type = 'inspection'"
+            "SELECT file_path FROM documents
+             WHERE  account_id = ? AND parent_type IN ('inspection', 'work_confirmation')"
         );
         $docStmt->execute([$accountId]);
-        $documentPaths = $docStmt->fetchAll(PDO::FETCH_COLUMN);
+        $documentPaths = array_merge(
+            $docStmt->fetchAll(PDO::FETCH_COLUMN),
+            self::versionPaths($accountId, $pdo, ['inspection', 'work_confirmation']),
+        );
         $photoPaths = self::photoPaths($accountId, $pdo);
+        $handoverPaths = self::handoverSignaturePaths($accountId, $pdo);
 
-        $pdo->prepare("DELETE FROM documents WHERE account_id = ? AND parent_type = 'inspection'")
-            ->execute([$accountId]);
+        $pdo->prepare(
+            "DELETE FROM documents
+             WHERE  account_id = ? AND parent_type IN ('inspection', 'work_confirmation')"
+        )->execute([$accountId]);
+        $pdo->prepare('DELETE FROM work_confirmations WHERE account_id = ?')->execute([$accountId]);
         // inspection_items — and their photos — cascade with the inspections.
         $pdo->prepare('DELETE FROM inspections WHERE account_id = ?')->execute([$accountId]);
+        $pdo->prepare('DELETE FROM visits WHERE account_id = ?')->execute([$accountId]);
 
-        self::unlink(array_merge($documentPaths, $photoPaths));
+        self::unlink(array_merge($documentPaths, $photoPaths, $handoverPaths));
         self::pruneDocumentDirs($accountId);
         self::prunePhotoDirs($accountId);
 
@@ -92,7 +152,10 @@ final class AccountPurge
             "SELECT file_path FROM documents WHERE account_id = ? AND parent_type = 'training'"
         );
         $docStmt->execute([$accountId]);
-        $documentPaths = $docStmt->fetchAll(PDO::FETCH_COLUMN);
+        $documentPaths = array_merge(
+            $docStmt->fetchAll(PDO::FETCH_COLUMN),
+            self::versionPaths($accountId, $pdo, ['training']),
+        );
         $signaturePaths = self::traineeSignaturePaths($accountId, $pdo);
 
         $pdo->prepare("DELETE FROM documents WHERE account_id = ? AND parent_type = 'training'")
@@ -112,6 +175,47 @@ final class AccountPurge
     private static function documentPaths(int $accountId, PDO $pdo): array
     {
         $stmt = $pdo->prepare('SELECT file_path FROM documents WHERE account_id = ?');
+        $stmt->execute([$accountId]);
+        $paths = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $versions = $pdo->prepare(
+            'SELECT v.file_path FROM document_versions v
+             JOIN   documents d ON d.id = v.document_id
+             WHERE  d.account_id = ?'
+        );
+        $versions->execute([$accountId]);
+        return array_merge($paths, $versions->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Every superseded version of a protocol. Since chapter 13 a signature
+     * re-renders the document under the same number, so `documents.file_path`
+     * names only the newest file and the earlier ones would be left on disk.
+     *
+     * @param list<string> $parentTypes
+     * @return list<string>
+     */
+    private static function versionPaths(int $accountId, PDO $pdo, array $parentTypes): array
+    {
+        $placeholders = implode(',', array_fill(0, count($parentTypes), '?'));
+        $stmt = $pdo->prepare(
+            "SELECT v.file_path FROM document_versions v
+             JOIN   documents d ON d.id = v.document_id
+             WHERE  d.account_id = ? AND d.parent_type IN ($placeholders)"
+        );
+        $stmt->execute(array_merge([$accountId], $parentTypes));
+        return $stmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    /** Signatures captured when a client took a protocol over (chapter 13).
+     *
+     * @return list<string>
+     */
+    private static function handoverSignaturePaths(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT signature_path FROM document_handovers WHERE account_id = ?'
+        );
         $stmt->execute([$accountId]);
         return $stmt->fetchAll(PDO::FETCH_COLUMN);
     }

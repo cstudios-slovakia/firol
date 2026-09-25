@@ -73,6 +73,19 @@ export type TermsSnapshot = {
   privacy: LegalDocStatus;
 };
 
+/**
+ * A member of the active account as the calendar, the timeline and Dnes draw
+ * them (chapter 11.5): initials in a circle of the member's avatar colour.
+ * Inactive members are included — their úkony still carry their avatar.
+ */
+export type TeamIdentity = {
+  id: number;
+  fullname: string;
+  initials: string;
+  avatar_color: string;
+  is_active: boolean;
+};
+
 type Snapshot = {
   user: User | null;
   accounts: Account[];
@@ -80,6 +93,8 @@ type Snapshot = {
   csrfToken: string;
   isAdmin: boolean;
   terms?: TermsSnapshot;
+  /** Members of the active account with their initials and colour (11.5). */
+  team?: TeamIdentity[];
 };
 
 export type AuthStatus = 'loading' | 'authed' | 'unauthed';
@@ -105,6 +120,8 @@ type AuthContextValue = {
   csrfToken: string | null;
   isAdmin: boolean;
   terms: TermsSnapshot | null;
+  /** Members of the active account with initials + avatar colour (11.5). */
+  team: TeamIdentity[];
   login(email: string, password: string, remember?: boolean): Promise<void>;
   register(payload: RegisterPayload): Promise<string>;
   logout(): Promise<void>;
@@ -115,6 +132,9 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+/** Stable empty roster, so consumers' memo dependencies don't churn. */
+const EMPTY_TEAM: TeamIdentity[] = [];
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
@@ -223,6 +243,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       csrfToken: snap?.csrfToken ?? null,
       isAdmin: snap?.isAdmin ?? false,
       terms: snap?.terms ?? null,
+      team: snap?.team ?? EMPTY_TEAM,
       login,
       register,
       logout,

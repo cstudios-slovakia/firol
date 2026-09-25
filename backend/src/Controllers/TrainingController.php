@@ -51,6 +51,7 @@ final class TrainingController
                        t.company_id, c.name AS company_name,
                        t.facility_id, f.name AS facility_name,
                        t.trainer_id, tr.fullname AS trainer_name,
+                       t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
                        (SELECT COUNT(*) FROM trainees WHERE training_id = t.id) AS trainees_count
                 FROM   trainings t
                 JOIN   companies  c  ON c.id = t.company_id
@@ -58,6 +59,11 @@ final class TrainingController
                 LEFT JOIN users      tr ON tr.id = t.trainer_id
                 WHERE  t.archived_at IS NULL';
         $params = [];
+        // Chapter 22 — „Nevyfakturované", filtered server-side so the row cap
+        // below never hides an older training still waiting to be invoiced.
+        if ($req->query('uninvoiced') === '1') {
+            $sql .= ' AND ' . \Firol\Support\Invoicing::uninvoicedCondition('t');
+        }
         if (!$isAdmin) {
             $sql .= ' AND t.account_id = :account_id';
             $params['account_id'] = $accountId;
@@ -220,6 +226,10 @@ final class TrainingController
         ]);
         $id = (int) Db::pdo()->lastInsertId();
 
+        // Chapter 22 — the režim starts from the firm's setting.
+        Db::pdo()->prepare('UPDATE trainings SET billing_mode = ? WHERE id = ?')
+            ->execute([\Firol\Support\Invoicing::companyMode($companyId), $id]);
+
         Response::json(['training' => self::shape(self::loadOrFail($accountId, $id))], 201);
     }
 
@@ -317,6 +327,7 @@ final class TrainingController
                        t.facility_id, f.name AS facility_name,
                        t.trainer_id, tr.fullname AS trainer_name,
                        ip.cert_general AS trainer_certification_number,
+                       t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
                        (SELECT COUNT(*) FROM trainees WHERE training_id = t.id) AS trainees_count
                 FROM   trainings t
                 JOIN   companies   c  ON c.id = t.company_id
@@ -359,6 +370,8 @@ final class TrainingController
         if (array_key_exists('pokyn_year', $row)) {
             $row['pokyn_year'] = $row['pokyn_year'] !== null ? (int) $row['pokyn_year'] : null;
         }
+        // Chapter 22 — fakturácia úkonu.
+        $row = \Firol\Support\Invoicing::shape($row);
         unset($row['account_id']);
         return $row;
     }

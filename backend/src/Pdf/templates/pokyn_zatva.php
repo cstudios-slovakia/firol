@@ -337,6 +337,7 @@ $renderBody = static function (string $text) use ($h): string {
     <td class="bl">Schválil</td>
     <td colspan="3"><?= $approver !== '' ? $h($approver) : '—' ?></td>
   </tr>
+  <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>
 
 <div class="scope">

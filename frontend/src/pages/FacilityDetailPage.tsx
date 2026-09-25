@@ -25,9 +25,11 @@ import { Facilities, type Facility } from "@/api/facilities";
 import {
     INSPECTION_TYPE_LABELS,
     Inspections,
+    periodicityOf,
     type InspectionListItem,
     type InspectionType,
 } from "@/api/inspections";
+import { periodicityShort } from "@/lib/periodicity";
 import {
     TRAINING_TYPE_LABELS,
     TRAINING_TYPES,
@@ -444,7 +446,7 @@ export function FacilityDetailPage() {
                             >
                                 Všetky
                             </button>
-                            {(["php", "hydranty", "oprava_ts_php", "poziarna_kniha", "pu_akcieschopnost", "pu_udrzba", "nudzove_osvetlenie", "ts_hadic", "vyradenie"] as InspectionType[])
+                            {(["php", "hydranty", "oprava_ts_php", "poziarna_kniha", "pu_akcieschopnost", "pu_udrzba", "nudzove_osvetlenie", "ts_hadic", "vyradenie", "kniha_bozp", "pracovisko", "osamele_pracovisko", "fajcenie", "oopp", "pracovne_prostriedky", "rebriky", "regale", "oznacenie", "dychova_skuska", "omamne_latky", "skolenie_bozp"] as InspectionType[])
                                 .filter((t) => inspections.some((i) => i.type === t))
                                 .map((t) => (
                                     <button
@@ -513,7 +515,7 @@ export function FacilityDetailPage() {
                                                     <CalendarDays className="-mt-0.5 mr-1 inline size-3" />
                                                     {ins.executed_on ?? "—"}
                                                     <span className="mx-1.5 text-ink-300">·</span>
-                                                    {ins.periodicity_months} mes.
+                                                    {periodicityShort(periodicityOf(ins))}
                                                     <span className="mx-1.5 text-ink-300">·</span>
                                                     {ins.effective_inspector_name ?? ins.inspector_name}
                                                 </p>

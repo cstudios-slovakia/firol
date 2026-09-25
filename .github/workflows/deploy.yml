@@ -92,6 +92,14 @@ jobs:
             ( crontab -l 2>/dev/null | grep -qF "$ROOT/backend/db/prune.php" ) \
               || ( crontab -l 2>/dev/null; echo "$PRUNE_CMD" ) | crontab -
 
+            # Daily automatic client notice of upcoming termíny (chapter 11.3).
+            # Sends only for accounts that switched it on in Nastavenia; the
+            # script records every notice so a client never gets one twice.
+            # 06:00 so the mail arrives at the start of the working day.
+            NOTICE_CMD="0 6 * * * php $ROOT/backend/bin/send-deadline-notices.php >> $BACKUP_DIR/deadline-notices.log 2>&1"
+            ( crontab -l 2>/dev/null | grep -qF "$ROOT/backend/bin/send-deadline-notices.php" ) \
+              || ( crontab -l 2>/dev/null; echo "$NOTICE_CMD" ) | crontab -
+
       # Smoke-test the freshly deployed app from the GitHub runner. Fails
       # the workflow if /api/health doesn't return 200 — a stronger signal
       # than "ssh command succeeded" because it exercises the actual

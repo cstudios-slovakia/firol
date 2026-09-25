@@ -9,6 +9,16 @@ import { puUdrzbaModule } from './pu_udrzba';
 import { nudzoveOsvetlenieModule } from './nudzove_osvetlenie';
 import { tsHadicModule } from './ts_hadic';
 import { vyradenieModule } from './vyradenie';
+import { knihaBozpModule } from './kniha_bozp';
+import { pracoviskoModule } from './pracovisko';
+import { osamelePracoviskoModule } from './osamele_pracovisko';
+import { fajcenieModule } from './fajcenie';
+import { ooppModule } from './oopp';
+import { pracovneProstriedkyModule } from './pracovne_prostriedky';
+import { rebrikyModule } from './rebriky';
+import { regaleModule } from './regale';
+import { oznacenieModule } from './oznacenie';
+import { dychovaSkuskaModule, omamneLatkyModule, skolenieBozpModule } from './osoby';
 
 /**
  * Per-inspection-type form/row registry. Pages dispatch via
@@ -27,6 +37,22 @@ const REGISTRY: Partial<Record<InspectionType, InspectionTypeModule>> = {
   nudzove_osvetlenie: nudzoveOsvetlenieModule,
   ts_hadic: tsHadicModule,
   vyradenie: vyradenieModule,
+  // Block 2 — single-record BOZP úkony.
+  kniha_bozp: knihaBozpModule,
+  pracovisko: pracoviskoModule,
+  osamele_pracovisko: osamelePracoviskoModule,
+  fajcenie: fajcenieModule,
+  // Block 2 — BOZP úkony whose rows are items.
+  oopp: ooppModule,
+  pracovne_prostriedky: pracovneProstriedkyModule,
+  rebriky: rebrikyModule,
+  regale: regaleModule,
+  oznacenie: oznacenieModule,
+  // Block 2 — the person-list úkony; the list itself is typed on
+  // pages/PersonsFillPage (/inspections/:id/osoby).
+  dychova_skuska: dychovaSkuskaModule,
+  omamne_latky: omamneLatkyModule,
+  skolenie_bozp: skolenieBozpModule,
 };
 
 export function getTypeModule(type: InspectionType): InspectionTypeModule | null {

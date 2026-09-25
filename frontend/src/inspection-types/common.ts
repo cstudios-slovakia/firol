@@ -27,6 +27,25 @@ export type Step2FormProps = {
   csrfToken: string | null;
   /** Called after a successful save with the action the user picked. */
   onSaved: (action: SubmitAction) => void;
+  /**
+   * Items already saved in this inspection. Lets a form start a new row from
+   * where the list left off (označenie walks its predefined kinds).
+   */
+  items?: InspectionItem[];
+};
+
+/**
+ * Úkon-level fields that belong to no single row — the opatrenia or záver of
+ * a block 2 BOZP úkon, stored in `inspection.details` and edited on Step 3.
+ */
+export type DetailsBlockProps = {
+  inspectionId: number;
+  details: Record<string, unknown> | null;
+  /** Drafts only — a locked protocol shows the saved text read-only. */
+  canEdit: boolean;
+  csrfToken: string | null;
+  /** Called with the details as saved, so the page keeps its copy current. */
+  onSaved: (details: Record<string, unknown>) => void;
 };
 
 export type ItemRowProps = {
@@ -72,4 +91,9 @@ export type InspectionTypeModule = {
    * progress dots so the UI doesn't suggest more items can be added.
    */
   singleItem?: boolean;
+  /**
+   * Optional card on the Step 3 summary for úkon-level fields (block 2 BOZP:
+   * opatrenia, záver). Rendered under the item list.
+   */
+  DetailsBlock?: React.ComponentType<DetailsBlockProps>;
 };

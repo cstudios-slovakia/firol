@@ -2,17 +2,25 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, NotebookPen,
-  Plus, Repeat, Warehouse,
+  Plus, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type CompanyListItem, type FacilityListItem } from '@/api/companies';
 import {
   INSPECTION_TYPE_LABELS,
-  INSPECTION_TYPE_PERIODICITIES,
   Inspections,
   type InspectionType,
 } from '@/api/inspections';
+import {
+  defaultPeriodicity,
+  type Periodicity,
+  type PeriodicityUnit,
+} from '@/lib/periodicity';
+import { PeriodicityPicker } from '@/components/PeriodicityPicker';
+import { isPersonListType } from '@/api/personList';
 import { ApiError } from '@/lib/api';
+import { todayIso } from '@/lib/dates';
+import { isSection, newInspectionPath } from '@/lib/sections';
 import { inspectionCreateOptimistic } from '@/lib/offlineEntities';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -23,12 +31,14 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { NewCompanyDialog } from '@/components/NewCompanyDialog';
 import { NewFacilityDialog } from '@/components/NewFacilityDialog';
-import { cn } from '@/lib/cn';
 
 const KNOWN_TYPES: InspectionType[] = [
   'php', 'hydranty', 'oprava_ts_php', 'poziarna_kniha',
   'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'ts_hadic',
   'vyradenie',
+  'kniha_bozp', 'pracovisko', 'osamele_pracovisko', 'fajcenie',
+  'oopp', 'pracovne_prostriedky', 'rebriky', 'regale', 'oznacenie',
+  'dychova_skuska', 'omamne_latky', 'skolenie_bozp',
 ];
 
 function isInspectionType(s: string | undefined): s is InspectionType {
@@ -50,26 +60,25 @@ export function InspectionStep1Page() {
     return <UnknownTypeError />;
   }
   const type = typeParam;
-  const allowedPeriodicities = INSPECTION_TYPE_PERIODICITIES[type];
-  const periodicityFixed = allowedPeriodicities.length === 1;
-  // A periodicity of 0 marks a one-off document (vyraďovací protokol) — it has
-  // no recurrence to choose, so the whole field is hidden.
-  const recurring = allowedPeriodicities[0] !== 0;
 
   // Optional context coming from the company/facility detail screens.
   const presetCompanyId = numericParam(searchParams.get('company_id'));
   const presetFacilityId = numericParam(searchParams.get('facility_id'));
+  // Inside a visit (chapter 9) the company, prevádzka and date were chosen
+  // once at the start — skipping that repetition is the whole point of it.
+  const visitId = numericParam(searchParams.get('visit_id'));
+  const presetDate = searchParams.get('executed_on') || todayIso();
 
   const [companies, setCompanies] = useState<CompanyListItem[] | null>(null);
   const [facilities, setFacilities] = useState<FacilityListItem[]>([]);
   const [companyId, setCompanyId] = useState<number | null>(presetCompanyId);
   const [facilityId, setFacilityId] = useState<number | null>(presetFacilityId);
-  const [executedOn, setExecutedOn] = useState('');
-  const [periodicity, setPeriodicity] = useState<number>(allowedPeriodicities[0]);
+  const [executedOn, setExecutedOn] = useState(presetDate);
+  const [periodicity, setPeriodicity] = useState<Periodicity>(() => defaultPeriodicity(type));
   const [notes, setNotes] = useState('');
-  // Tracks whether the user has manually picked a periodicity. We only
-  // auto-prefill from the facility's history when they haven't, so the
-  // sensible default doesn't keep overriding their choice.
+  // Tracks whether the user has picked a periodicity themselves. The prefill
+  // from history only runs while they haven't, so a sensible default never
+  // overrides a deliberate choice.
   const [periodicityTouched, setPeriodicityTouched] = useState(false);
 
   const [loadingCompanies, setLoadingCompanies] = useState(true);
@@ -140,20 +149,18 @@ export function InspectionStep1Page() {
     };
   }, [companyId, presetFacilityId]);
 
-  // Prefill periodicity from this facility's history. Only kicks in for
-  // types where the user actually has a choice (allowedPeriodicities > 1)
-  // and only as long as they haven't manually picked a value yet — so
-  // returning to a different facility within the same flow can still
-  // refresh the suggestion, but typing then switching won't surprise
-  // them. Phase 5b: "default periodicities per facility per type".
+  // Prefill the periodicity from this prevádzka's history: what was chosen
+  // here last time is a better guess than the catalogue's recommendation, and
+  // since chapter 5 it can be any value in any unit, so it is worth carrying.
+  // Only runs while the technician hasn't picked one themselves.
   useEffect(() => {
-    if (periodicityFixed || periodicityTouched || facilityId === null) return;
+    if (periodicityTouched || facilityId === null) return;
     const facility = facilities.find((f) => f.id === facilityId);
     const last = facility?.last_periodicities?.[type];
-    if (typeof last === 'number' && allowedPeriodicities.includes(last)) {
-      setPeriodicity(last);
+    if (last && typeof last.value === 'number' && last.unit) {
+      setPeriodicity({ value: last.value, unit: last.unit as PeriodicityUnit });
     }
-  }, [facilityId, facilities, type, allowedPeriodicities, periodicityFixed, periodicityTouched]);
+  }, [facilityId, facilities, type, periodicityTouched]);
 
   const ctaText = useMemo(() => stepTwoCta(type), [type]);
 
@@ -173,11 +180,13 @@ export function InspectionStep1Page() {
     try {
       const payload = {
         type,
-        periodicity_months: periodicity,
+        periodicity_value: periodicity.value,
+        periodicity_unit: periodicity.unit,
         executed_on: executedOn,
         company_id: companyId!,
         facility_id: facilityId!,
         notes: notes.trim() || undefined,
+        ...(visitId !== null ? { visit_id: visitId } : {}),
       };
       const company = (companies ?? []).find((c) => c.id === companyId);
       const facility = facilities.find((f) => f.id === facilityId);
@@ -185,15 +194,31 @@ export function InspectionStep1Page() {
       // entirely when the create POST reaches the server.
       const optimistic = inspectionCreateOptimistic({
         payload,
-        company: { id: companyId!, name: company?.name ?? '', ico: company?.ico ?? null },
+        company: {
+          id: companyId!,
+          name: company?.name ?? '',
+          ico: company?.ico ?? null,
+          // Chapter 22 — the offline draft shows the firm's režim fakturácie.
+          billing_mode: company?.billing_mode,
+        },
         facility: { id: facilityId!, name: facility?.name ?? '' },
         inspector: { id: user?.id ?? 0, name: user?.fullname ?? '' },
       });
       const res = await Inspections.createDraft(payload, csrfToken, optimistic);
-      // Move straight into Step 2 — adding the first prístroj. The
-      // inspection itself is already persisted at this point.
       toast.success('Kontrola vytvorená');
-      navigate(`/inspections/${res.inspection.id}/items/new`, { replace: true });
+      // Chapter 12 — when last time's items can be carried over, the offer
+      // („Prevziať položky z poslednej kontroly") waits on the summary; going
+      // straight to an empty item form would walk the technician past it.
+      navigate(
+        // Block 2 — a list of people is typed on one screen, row after
+        // row, with the takeover of names offered at its top.
+        isPersonListType(type)
+          ? `/inspections/${res.inspection.id}/osoby`
+          : res.carry_over
+            ? `/inspections/${res.inspection.id}`
+            : `/inspections/${res.inspection.id}/items/new`,
+        { replace: true },
+      );
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
       setError(msg);
@@ -203,11 +228,16 @@ export function InspectionStep1Page() {
     }
   }
 
-  const backHref = presetFacilityId
-    ? `/facilities/${presetFacilityId}`
-    : presetCompanyId
-      ? `/companies/${presetCompanyId}`
-      : '/inspections/new';
+  // Back to the picker the type was chosen in: narrowed to the section when it
+  // was opened from one, so „Späť" never widens it to every odbor's types.
+  const sectionParam = searchParams.get('section') ?? undefined;
+  const backHref = visitId !== null
+    ? `/visits/${visitId}`
+    : presetFacilityId
+      ? `/facilities/${presetFacilityId}`
+      : presetCompanyId
+        ? `/companies/${presetCompanyId}`
+        : newInspectionPath(isSection(sectionParam) ? sectionParam : null);
 
   if (loadingCompanies) {
     return (
@@ -338,7 +368,7 @@ export function InspectionStep1Page() {
           <Field
             label={dateLabel(type)}
             required
-            hint={fieldErrors.date ? undefined : 'Zadaj manuálne, nemusí byť dnešný dátum.'}
+            hint={fieldErrors.date ? undefined : 'Predvyplnený je dnešný dátum, môžeš ho zmeniť aj na minulý.'}
             error={fieldErrors.date}
           >
             {(p) => (
@@ -353,42 +383,19 @@ export function InspectionStep1Page() {
             )}
           </Field>
 
-          {recurring && (
-          <Field
-            label="Periodicita"
-            hint={periodicityFixed
-              ? `Pre tento typ je periodicita pevná: ${allowedPeriodicities[0]} mesiacov.`
-              : undefined}
-          >
+          <Field label="Periodicita">
             {() => (
-              <div className="flex gap-2" role="group" aria-label="Periodicita">
-                {allowedPeriodicities.map((months) => {
-                  const active = periodicity === months;
-                  return (
-                    <button
-                      key={months}
-                      type="button"
-                      disabled={periodicityFixed && allowedPeriodicities.length === 1}
-                      onClick={() => { setPeriodicity(months); setPeriodicityTouched(true); }}
-                      className={cn(
-                        'h-11 flex-1 rounded-xl border text-sm font-medium transition-colors',
-                        active
-                          ? 'border-firol-500 bg-firol-50 text-firol-700'
-                          : 'border-ink-200 bg-white text-ink-700 hover:border-ink-300',
-                        'disabled:opacity-70 disabled:cursor-default',
-                      )}
-                    >
-                      <span className="flex items-center justify-center gap-1.5">
-                        <Repeat className="size-4" />
-                        {months} mesiacov
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+              <PeriodicityPicker
+                type={type}
+                value={periodicity}
+                executedOn={executedOn || null}
+                onChange={(next) => {
+                  setPeriodicity(next);
+                  setPeriodicityTouched(true);
+                }}
+              />
             )}
           </Field>
-          )}
 
           <Field label="Kontrolu vykonal">
             {() => (
@@ -460,6 +467,7 @@ export function InspectionStep1Page() {
               contact: c.contact,
               contact_email: c.contact_email,
               approver: c.approver,
+              billing_mode: c.billing_mode,
               facilities_count: 0,
               inspections_count: 0,
               last_inspection_at: null,
@@ -535,6 +543,10 @@ function dateLabel(type: InspectionType): string {
   switch (type) {
     case 'vyradenie':
       return 'Dátum vyradenia';
+    case 'dychova_skuska':
+      return 'Dátum skúšky';
+    case 'skolenie_bozp':
+      return 'Dátum oboznámenia';
     default:
       return 'Dátum vykonania kontroly';
   }
@@ -556,6 +568,26 @@ function stepTwoCta(type: InspectionType): string {
       return 'Pokračovať — zadanie svietidiel';
     case 'vyradenie':
       return 'Pokračovať — zadanie prístrojov';
+    case 'kniha_bozp':
+    case 'pracovisko':
+    case 'osamele_pracovisko':
+    case 'fajcenie':
+      return 'Pokračovať — záznam kontroly';
+    case 'rebriky':
+      return 'Pokračovať — zadanie rebríkov';
+    case 'regale':
+      return 'Pokračovať — zadanie regálov';
+    case 'oopp':
+      return 'Pokračovať — zadanie pracovných pozícií';
+    case 'pracovne_prostriedky':
+      return 'Pokračovať — zadanie pracovných prostriedkov';
+    case 'oznacenie':
+      return 'Pokračovať — zadanie označenia';
+    case 'dychova_skuska':
+    case 'omamne_latky':
+      return 'Pokračovať — zoznam osôb';
+    case 'skolenie_bozp':
+      return 'Pokračovať — účastníci';
     case 'poziarna_kniha':
     default:
       return 'Pokračovať — záznam činností';

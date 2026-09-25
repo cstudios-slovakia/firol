@@ -288,6 +288,7 @@ $approver = trim((string) ($company['approver'] ?? ''));
     <td class="bv"><?= $h($inspection['source_number']) ?></td>
     <?php endif ?>
   </tr>
+  <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>
 
 <h2>Oznámenie o vyradení</h2>
@@ -339,15 +340,15 @@ $approver = trim((string) ($company['approver'] ?? ''));
 <table class="sig-tbl">
   <tr>
     <th width="38%">Vyradenie navrhol</th>
-    <th width="38%">Za spoločnosť prevzal na vedomie</th>
+    <th width="38%"><?= \Firol\Pdf\SignatureBlock::heading('vyradenie') ?></th>
     <th width="24%">Miesto a dátum</th>
   </tr>
   <tr>
     <td><?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?><br><span
           style="font-size:8pt; color:#555;">technik PO, č. oprávnenia:
           <?= $h($inspector['certification_number']) ?></span><?php endif ?></td>
-    <td><?= $approver !== '' ? $h($approver) : 'Štatutárny zástupca / zodpovedná osoba' ?></td>
-    <td><?= $h(($city ? $city . ', ' : '') . $formatDate($inspection['executed_on'] ?? null)) ?></td>
+    <td><?= \Firol\Pdf\SignatureBlock::nameCell($handover ?? null, $approver) ?></td>
+    <td><?= \Firol\Pdf\SignatureBlock::placeAndDate($handover ?? null, ($city ? $city . ', ' : '') . $formatDate($inspection['executed_on'] ?? null)) ?></td>
   </tr>
   <tr class="sig-row">
     <td>
@@ -357,7 +358,7 @@ $approver = trim((string) ($company['approver'] ?? ''));
       <div class="sig-line"></div>
     </td>
     <td>
-      <div class="sig-line">Podpis zodpovednej osoby</div>
+      <?= \Firol\Pdf\SignatureBlock::signCell($handover ?? null, 'vyradenie') ?>
     </td>
     <td></td>
   </tr>

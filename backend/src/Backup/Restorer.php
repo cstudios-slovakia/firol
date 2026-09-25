@@ -9,6 +9,8 @@ use Firol\Documents\NumberAllocator;
 use Firol\Storage\Storage;
 use Firol\Support\AccountPurge;
 use Firol\Support\Address;
+use Firol\Support\Invoicing;
+use Firol\Support\Periodicity;
 use PDO;
 use ZipArchive;
 
@@ -54,6 +56,9 @@ final class Restorer
         'trainings'   => 0,
         'trainees'    => 0,
         'documents'   => 0,
+        'stock_items'     => 0,
+        'stock_movements' => 0,
+        'tasks'       => 0,
     ];
 
     /** @var array<string, int> */
@@ -63,6 +68,8 @@ final class Restorer
         'inspections' => 0,
         'trainings'   => 0,
         'documents'   => 0,
+        'stock_items' => 0,
+        'tasks'       => 0,
     ];
 
     /** @var list<string> */
@@ -76,6 +83,8 @@ final class Restorer
     private array $inspectionMap = [];
     /** @var array<int, int> old training id → new */
     private array $trainingMap = [];
+    /** @var array<int, int> old výdajka (stock_issues) id → new */
+    private array $stockIssueMap = [];
     /** @var array<string, int> lowercased email → user id on this account */
     private array $userMap = [];
 
@@ -165,6 +174,9 @@ final class Restorer
         // inside one — and a great deal of lock contention to lose.
         if ($mode === self::MODE_REPLACE) {
             AccountPurge::everything($this->accountId);
+            // The sklad is not firm data, so the firm purge leaves it; a
+            // replace restore writes it back whole and has to clear it first.
+            AccountPurge::stock($this->accountId);
         }
 
         $this->pdo->beginTransaction();
@@ -172,8 +184,15 @@ final class Restorer
             $this->restoreCompanies($this->list($manifest, 'companies'));
             $this->restoreInspections($this->list($manifest, 'inspections'));
             $this->restoreTrainings($this->list($manifest, 'trainings'));
+            // Chapter 21 — before the documents, which map výdajky onto it.
+            $this->restoreStock(is_array($manifest['stock'] ?? null) ? $manifest['stock'] : []);
             $this->restoreDocuments($this->list($manifest, 'documents'));
             $this->relinkFollowUps($this->list($manifest, 'inspections'));
+            // Chapter 20 — last, because a task points at companies,
+            // facilities and (for one born from a nedostatok) an inspection.
+            $this->restoreTasks($this->list($manifest, 'tasks'));
+            // Chapter 11.3 — after the inspections, whose ids it maps onto.
+            $this->restoreDeadlineNotices($this->list($manifest, 'deadline_notices'));
 
             $this->pdo->commit();
         } catch (\Throwable $e) {
@@ -243,6 +262,7 @@ final class Restorer
                 $newId = (int) $this->pdo->lastInsertId();
                 $existingCompanies[$key] = $newId;
                 $this->restored['companies']++;
+                $this->restoreCompanyBillingMode($newId, $company);
             }
             $this->companyMap[$oldId] = $newId;
 
@@ -281,6 +301,33 @@ final class Restorer
 
     // ── Inspections, items, photos ───────────────────────────────────────────
 
+    /**
+     * Periodicity of a backed-up inspection as [value, unit, is_custom].
+     *
+     * Archives written before block 1 carry `periodicity_months` instead; they
+     * are read as months, and the 0 that used to mean "one-off" becomes the
+     * NULL pair that says the same thing today.
+     *
+     * @param array<string, mixed> $inspection
+     * @return array{0: int|null, 1: string|null, 2: int}
+     */
+    private function periodicity(array $inspection): array
+    {
+        if (array_key_exists('periodicity_value', $inspection)) {
+            $value = $inspection['periodicity_value'];
+            $unit  = $inspection['periodicity_unit'] ?? null;
+            $value = is_numeric($value) ? (int) $value : null;
+            $unit  = is_string($unit) && in_array($unit, Periodicity::UNITS, true) ? $unit : null;
+            if ($value === null || $unit === null) {
+                return [null, null, 0];
+            }
+            return [$value, $unit, (int) ($inspection['periodicity_is_custom'] ?? 0)];
+        }
+
+        $months = (int) ($inspection['periodicity_months'] ?? 0);
+        return $months > 0 ? [$months, 'mesiac', 0] : [null, null, 0];
+    }
+
     /** @param list<array<string, mixed>> $inspections */
     private function restoreInspections(array $inspections): void
     {
@@ -288,11 +335,13 @@ final class Restorer
 
         $insert = $this->pdo->prepare(
             'INSERT INTO inspections
-                (account_id, company_id, facility_id, type, periodicity_months,
+                (account_id, company_id, facility_id, type,
+                 periodicity_value, periodicity_unit, periodicity_is_custom,
                  is_preventive_inspection, executed_on, inspector_user_id,
                  effective_inspector_user_id, effective_cert_number,
-                 status, notes, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 effective_cert_valid_from, effective_cert_valid_to,
+                 status, notes, details, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insertItem = $this->pdo->prepare(
             'INSERT INTO inspection_items (inspection_id, position, fields, created_at)
@@ -332,17 +381,23 @@ final class Restorer
                 $companyId,
                 $facilityId,
                 $type,
-                (int) ($inspection['periodicity_months'] ?? 12),
+                ...$this->periodicity($inspection),
                 (int) ($inspection['is_preventive_inspection'] ?? 1),
                 $executedOn,
                 $this->user($inspection, 'inspector_email') ?? $this->userId,
                 $this->user($inspection, 'effective_inspector_email'),
                 $this->str($inspection, 'effective_cert_number'),
+                $this->date($inspection, 'effective_cert_valid_from'),
+                $this->date($inspection, 'effective_cert_valid_to'),
                 $this->status($inspection),
                 $this->str($inspection, 'notes'),
+                // Header data of a block 2 úkon (inspections.details); absent in
+                // archives written before it existed.
+                self::details($inspection['details'] ?? null),
                 $createdAt,
             ]);
             $inspectionId = (int) $this->pdo->lastInsertId();
+            $this->restoreInvoicing('inspections', $inspectionId, $inspection);
             $this->inspectionMap[$oldId] = $inspectionId;
             $existing[$key] = $inspectionId;
             $this->restored['inspections']++;
@@ -421,6 +476,36 @@ final class Restorer
         }
     }
 
+    /**
+     * Automatic client notices already sent (chapter 11.3). Without them a
+     * restored account would announce the same deadlines to its clients
+     * again. A notice whose úkon was not restored has nothing to attach to;
+     * INSERT IGNORE keeps an existing record on a merge.
+     *
+     * @param list<array<string, mixed>> $notices
+     */
+    private function restoreDeadlineNotices(array $notices): void
+    {
+        $insert = $this->pdo->prepare(
+            'INSERT IGNORE INTO deadline_notices (account_id, inspection_id, notice_date, recipient, sent_at)
+             VALUES (?, ?, ?, ?, ?)'
+        );
+        foreach ($notices as $notice) {
+            $inspectionId = $this->inspectionMap[(int) ($notice['inspection_id'] ?? 0)] ?? null;
+            $noticeDate   = $this->date($notice, 'notice_date');
+            if ($inspectionId === null || $noticeDate === null) {
+                continue;
+            }
+            $insert->execute([
+                $this->accountId,
+                $inspectionId,
+                $noticeDate,
+                mb_substr((string) ($this->str($notice, 'recipient') ?? ''), 0, 191),
+                $this->dateTime($notice, 'sent_at') ?? date('Y-m-d H:i:s'),
+            ]);
+        }
+    }
+
     // ── Trainings & trainees ─────────────────────────────────────────────────
 
     /** @param list<array<string, mixed>> $trainings */
@@ -483,6 +568,7 @@ final class Restorer
                 $createdAt,
             ]);
             $trainingId = (int) $this->pdo->lastInsertId();
+            $this->restoreInvoicing('trainings', $trainingId, $training);
             $this->trainingMap[$oldId] = $trainingId;
             $existing[$key] = $trainingId;
             $this->restored['trainings']++;
@@ -524,9 +610,9 @@ final class Restorer
 
         $insert = $this->pdo->prepare(
             'INSERT INTO documents
-                (account_id, parent_type, parent_id, type, number, file_path,
+                (account_id, parent_type, parent_id, type, number, form_variant, file_path,
                  generated_at, signed, signed_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
 
         /** @var array<string, int> highest sequence seen per "type|year" */
@@ -547,6 +633,7 @@ final class Restorer
             $parentId = match ($parentType) {
                 'inspection' => $this->inspectionMap[(int) ($document['parent_id'] ?? 0)] ?? null,
                 'training'   => $this->trainingMap[(int) ($document['parent_id'] ?? 0)] ?? null,
+                'stock_issue' => $this->stockIssueMap[(int) ($document['parent_id'] ?? 0)] ?? null,
                 default      => null,
             };
             if ($parentId === null) {
@@ -573,6 +660,10 @@ final class Restorer
                 $parentId,
                 (string) ($document['type'] ?? ''),
                 $number,
+                // Chapter 8.1 — which printout of a test this is.
+                in_array($document['form_variant'] ?? null, ['vyplneny', 'prazdny'], true)
+                    ? (string) $document['form_variant']
+                    : null,
                 $relative,
                 $generatedAt,
                 (int) ($document['signed'] ?? 1),
@@ -589,6 +680,21 @@ final class Restorer
         }
 
         $this->bumpSequences($sequences);
+    }
+
+    /**
+     * inspections.details as stored in an archive — a JSON string (Writer
+     * dumps the column as is) or, defensively, an already decoded object.
+     */
+    private static function details(mixed $raw): ?string
+    {
+        if (is_array($raw)) {
+            return json_encode($raw, JSON_UNESCAPED_UNICODE);
+        }
+        if (!is_string($raw) || $raw === '' || !is_array(json_decode($raw, true))) {
+            return null;
+        }
+        return $raw;
     }
 
     /**
@@ -625,6 +731,245 @@ final class Restorer
             return null;
         }
         return (int) $m[1];
+    }
+
+    // ── Úlohy (chapter 20) ───────────────────────────────────────────────────
+
+    /**
+     * Tasks, remapped onto the restored firms, prevádzky and úkony. Merge key:
+     * created_at + text. A task whose firm didn't make it into the account is
+     * skipped rather than turned into a „všeobecná" one — that would change
+     * what the task is about. Assignee and author are matched by e-mail like
+     * the inspector of an úkon; an unknown one is left unassigned.
+     *
+     * @param list<array<string, mixed>> $tasks
+     */
+    private function restoreTasks(array $tasks): void
+    {
+        $stmt = $this->pdo->prepare('SELECT created_at, text FROM tasks WHERE account_id = ?');
+        $stmt->execute([$this->accountId]);
+        $existing = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $existing[self::normalizeDateTime((string) $row['created_at']) . '|' . $row['text']] = true;
+        }
+
+        $insert = $this->pdo->prepare(
+            'INSERT INTO tasks
+                (account_id, text, company_id, facility_id, assignee_user_id, due_date, done, done_at,
+                 source_inspection_id, source_defect_key, created_by_user_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+
+        foreach ($tasks as $task) {
+            $text = $this->str($task, 'text');
+            if ($text === null) {
+                continue;
+            }
+            $createdAt = $this->createdAt($task);
+            $key = $createdAt . '|' . $text;
+            if (isset($existing[$key])) {
+                $this->skipped['tasks']++;
+                continue;
+            }
+
+            $companyId = null;
+            if (($task['company_id'] ?? null) !== null) {
+                $companyId = $this->companyMap[(int) $task['company_id']] ?? null;
+                if ($companyId === null) {
+                    $this->warnings[] = "Úloha „$text\" sa nedala priradiť k firme — preskočená.";
+                    continue;
+                }
+            }
+            $facilityId = $companyId !== null && ($task['facility_id'] ?? null) !== null
+                ? ($this->facilityMap[(int) $task['facility_id']] ?? null)
+                : null;
+            $inspectionId = ($task['source_inspection_id'] ?? null) !== null
+                ? ($this->inspectionMap[(int) $task['source_inspection_id']] ?? null)
+                : null;
+            $defectKey = $inspectionId !== null ? $this->str($task, 'source_defect_key') : null;
+            $done = (int) ($task['done'] ?? 0) === 1;
+
+            $insert->execute([
+                $this->accountId,
+                $text,
+                $companyId,
+                $facilityId,
+                $this->user($task, 'assignee_email'),
+                $this->date($task, 'due_date'),
+                $done ? 1 : 0,
+                $done ? ($this->dateTime($task, 'done_at') ?? $createdAt) : null,
+                $defectKey !== null ? $inspectionId : null,
+                $defectKey,
+                $this->user($task, 'created_by_email') ?? $this->userId,
+                $createdAt,
+            ]);
+            $existing[$key] = true;
+            $this->restored['tasks']++;
+        }
+    }
+
+    // ── Sklad (chapter 21) ───────────────────────────────────────────────────
+
+    /**
+     * Items with their balances, the výdajky and the movements journal.
+     *
+     * Balances are written as backed up, not replayed from the journal, so
+     * the sum over holders is the same number it was. A technician who is
+     * not on this account any more cannot hold anything: their balance goes
+     * to Sklad, as removing them from the team would have done.
+     *
+     * Merging two sklady would double every count, so a merge restores the
+     * sklad only into an account that has none yet; otherwise it is skipped
+     * as a whole and the warning says why. (Replace mode has cleared it.)
+     *
+     * @param array<string, mixed> $stock
+     */
+    private function restoreStock(array $stock): void
+    {
+        $items = $this->list($stock, 'items');
+        if ($items === []) {
+            return;
+        }
+        $count = $this->pdo->prepare('SELECT COUNT(*) FROM stock_items WHERE account_id = ?');
+        $count->execute([$this->accountId]);
+        if ((int) $count->fetchColumn() > 0) {
+            $this->skipped['stock_items'] += count($items);
+            $this->warnings[] = 'Sklad v účte už má položky — sklad zo zálohy sa nepridal, aby sa stavy nezdvojili.';
+            return;
+        }
+
+        $insertItem = $this->pdo->prepare(
+            'INSERT INTO stock_items (account_id, name, unit, warehouse_qty, created_by_user_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $insertBalance = $this->pdo->prepare(
+            'INSERT INTO stock_balances (item_id, user_id, account_id, qty) VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE qty = qty + VALUES(qty)'
+        );
+        $addToWarehouse = $this->pdo->prepare(
+            'UPDATE stock_items SET warehouse_qty = warehouse_qty + ? WHERE id = ?'
+        );
+        $units = ['ks', 'bal', 'm'];
+
+        /** @var array<int, int> $itemMap */
+        $itemMap = [];
+        foreach ($items as $item) {
+            $name = $this->str($item, 'name');
+            if ($name === null) {
+                continue;
+            }
+            $unit = in_array($item['unit'] ?? null, $units, true) ? (string) $item['unit'] : 'ks';
+            $insertItem->execute([
+                $this->accountId,
+                mb_substr($name, 0, 191),
+                $unit,
+                max(0, (int) ($item['warehouse_qty'] ?? 0)),
+                $this->userId,
+                $this->createdAt($item),
+            ]);
+            $newId = (int) $this->pdo->lastInsertId();
+            $itemMap[(int) ($item['id'] ?? 0)] = $newId;
+            $this->restored['stock_items']++;
+
+            foreach ($this->list($item, 'balances') as $balance) {
+                $qty = max(0, (int) ($balance['qty'] ?? 0));
+                if ($qty === 0) {
+                    continue;
+                }
+                $holderId = $this->user($balance, 'email');
+                if ($holderId === null) {
+                    $addToWarehouse->execute([$qty, $newId]);
+                    $this->warnings[] = "Sklad — „{$name}\": {$qty} {$unit} technika, ktorý už nie je v tíme, sa vrátilo na Sklad.";
+                    continue;
+                }
+                $insertBalance->execute([$newId, $holderId, $this->accountId, $qty]);
+            }
+        }
+
+        $insertIssue = $this->pdo->prepare(
+            'INSERT INTO stock_issues
+                (account_id, company_id, facility_id, inspection_id, issued_on,
+                 issuer_user_id, issuer_name, issuer_cert, contractor, created_by_user_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($this->list($stock, 'issues') as $issue) {
+            $companyId = $this->companyMap[(int) ($issue['company_id'] ?? 0)] ?? null;
+            $issuedOn  = $this->date($issue, 'issued_on');
+            if ($companyId === null || $issuedOn === null) {
+                $this->warnings[] = 'Výdajka sa nedala priradiť k firme — preskočená.';
+                continue;
+            }
+            $facilityId = ($issue['facility_id'] ?? null) !== null
+                ? ($this->facilityMap[(int) $issue['facility_id']] ?? null)
+                : null;
+            $inspectionId = ($issue['inspection_id'] ?? null) !== null
+                ? ($this->inspectionMap[(int) $issue['inspection_id']] ?? null)
+                : null;
+            $insertIssue->execute([
+                $this->accountId,
+                $companyId,
+                $facilityId,
+                $inspectionId,
+                $issuedOn,
+                $this->user($issue, 'issuer_email'),
+                (string) ($this->str($issue, 'issuer_name') ?? ''),
+                $this->str($issue, 'issuer_cert'),
+                is_array($issue['contractor'] ?? null) ? json_encode($issue['contractor'], JSON_UNESCAPED_UNICODE) : null,
+                $this->userId,
+                $this->createdAt($issue, $issuedOn),
+            ]);
+            $this->stockIssueMap[(int) ($issue['id'] ?? 0)] = (int) $this->pdo->lastInsertId();
+        }
+
+        $insertMovement = $this->pdo->prepare(
+            'INSERT INTO stock_movements
+                (account_id, item_id, item_name, unit, action,
+                 from_holder, from_user_id, from_name, to_holder, to_user_id, to_name,
+                 qty, company_id, inspection_id, note, issue_id,
+                 to_invoice, invoiced, invoiced_at, created_by_user_id, created_by_name, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $holder = static fn (mixed $v): ?string => in_array($v, ['sklad', 'technik'], true) ? (string) $v : null;
+        foreach ($this->list($stock, 'movements') as $m) {
+            $itemId = $itemMap[(int) ($m['item_id'] ?? 0)] ?? null;
+            $action = in_array($m['action'] ?? null, ['nakup', 'presun', 'pouzite'], true) ? (string) $m['action'] : null;
+            $qty = (int) ($m['qty'] ?? 0);
+            if ($itemId === null || $action === null || $qty < 1) {
+                continue;
+            }
+            $fromHolder = $holder($m['from_holder'] ?? null);
+            $toHolder = $holder($m['to_holder'] ?? null);
+            $companyId = ($m['company_id'] ?? null) !== null ? ($this->companyMap[(int) $m['company_id']] ?? null) : null;
+            $inspectionId = ($m['inspection_id'] ?? null) !== null ? ($this->inspectionMap[(int) $m['inspection_id']] ?? null) : null;
+            $issueId = ($m['issue_id'] ?? null) !== null ? ($this->stockIssueMap[(int) $m['issue_id']] ?? null) : null;
+            $toInvoice = $companyId !== null && (int) ($m['to_invoice'] ?? 0) === 1;
+            $invoiced = $toInvoice && (int) ($m['invoiced'] ?? 0) === 1;
+            $insertMovement->execute([
+                $this->accountId,
+                $itemId,
+                mb_substr((string) ($this->str($m, 'item_name') ?? ''), 0, 191),
+                in_array($m['unit'] ?? null, $units, true) ? (string) $m['unit'] : 'ks',
+                $action,
+                $fromHolder,
+                $fromHolder === 'technik' ? $this->user($m, 'from_email') : null,
+                $this->str($m, 'from_name'),
+                $toHolder,
+                $toHolder === 'technik' ? $this->user($m, 'to_email') : null,
+                $this->str($m, 'to_name'),
+                $qty,
+                $companyId,
+                $inspectionId,
+                $this->str($m, 'note'),
+                $issueId,
+                $toInvoice ? 1 : 0,
+                $invoiced ? 1 : 0,
+                $invoiced ? $this->date($m, 'invoiced_at') : null,
+                $this->user($m, 'created_by_email'),
+                (string) ($this->str($m, 'created_by_name') ?? ''),
+                $this->createdAt($m),
+            ]);
+            $this->restored['stock_movements']++;
+        }
     }
 
     // ── Archive extraction ───────────────────────────────────────────────────
@@ -794,6 +1139,63 @@ final class Restorer
     }
 
     /** @param array<string, mixed> $row */
+    /**
+     * Chapter 22 — the firm's default režim fakturácie. Archives written before
+     * migration 046 have no key; the firm then keeps the column default.
+     *
+     * @param array<string, mixed> $company
+     */
+    private function restoreCompanyBillingMode(int $companyId, array $company): void
+    {
+        $mode = $company['billing_mode'] ?? null;
+        if (!is_string($mode) || !in_array($mode, Invoicing::COMPANY_MODES, true)) {
+            return;
+        }
+        $this->pdo->prepare('UPDATE companies SET billing_mode = ? WHERE id = ? AND account_id = ?')
+            ->execute([$mode, $companyId, $this->accountId]);
+    }
+
+    /**
+     * Chapter 22 — fakturácia úkonu on a freshly restored inspection or
+     * training. Written as its own UPDATE so archives without the keys (older
+     * than migration 046) simply leave the úkon at NULL = "before invoicing
+     * was tracked", the same state such an úkon had in the live app. Values
+     * go through the same rules as the API, so a hand-edited archive cannot
+     * produce a paušál úkon marked vyfakturované.
+     *
+     * @param 'inspections'|'trainings' $table
+     * @param array<string, mixed> $row
+     */
+    private function restoreInvoicing(string $table, int $id, array $row): void
+    {
+        $mode = $row['billing_mode'] ?? null;
+        if (!is_string($mode) || !in_array($mode, Invoicing::MODES, true)) {
+            return;
+        }
+        $body = [
+            'billing_mode' => $mode,
+            'invoiced'     => (bool) ($row['invoiced'] ?? false),
+            'invoiced_at'  => $this->date($row, 'invoiced_at'),
+            'billing_note' => $this->str($row, 'billing_note'),
+        ];
+        try {
+            $next = Invoicing::merge([], $body);
+        } catch (\InvalidArgumentException) {
+            return;
+        }
+        $this->pdo->prepare(
+            "UPDATE $table SET billing_mode = ?, invoiced = ?, invoiced_at = ?, billing_note = ?
+             WHERE  id = ? AND account_id = ?"
+        )->execute([
+            $next['billing_mode'],
+            $next['invoiced'],
+            $next['invoiced_at'],
+            $next['billing_note'],
+            $id,
+            $this->accountId,
+        ]);
+    }
+
     private function str(array $row, string $key): ?string
     {
         $value = $row[$key] ?? null;
