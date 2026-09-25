@@ -29,15 +29,12 @@ const INPUT =
 export const fieldClasses = { textarea: TEXTAREA, input: INPUT };
 
 /** Section heading with the required star, matching <Field>'s label. */
-export function SectionLabel({ children, required, aside }: { children: ReactNode; required?: boolean; aside?: ReactNode }) {
+export function SectionLabel({ children, required }: { children: ReactNode; required?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
-        {children}
-        {required && <span className="ml-1 text-firol-500">*</span>}
-      </h3>
-      {aside}
-    </div>
+    <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+      {children}
+      {required && <span className="ml-1 text-firol-500">*</span>}
+    </h3>
   );
 }
 

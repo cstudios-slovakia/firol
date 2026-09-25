@@ -59,8 +59,6 @@ function KnihaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSa
     setErrors({});
   }, [initialItem]);
 
-  const allChecked = KNIHA_BOZP_ACTIVITIES.every((a) => activities.includes(a));
-
   function toggle(a: string) {
     setActivities((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
     setErrors((e) => ({ ...e, activities: null }));
@@ -133,18 +131,7 @@ function KnihaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSa
         />
 
         <div className="flex flex-col gap-2">
-          <SectionLabel required aside={
-            <button type="button"
-              onClick={() => {
-                setActivities(allChecked ? [] : [...KNIHA_BOZP_ACTIVITIES]);
-                setErrors((e) => ({ ...e, activities: null }));
-              }}
-              className="min-h-10 rounded-xl px-3 text-xs font-semibold text-firol-600 transition-colors hover:bg-firol-50">
-              {allChecked ? 'Zrušiť označenie' : 'Označiť všetky'}
-            </button>
-          }>
-            Vykonané činnosti
-          </SectionLabel>
+          <SectionLabel required>Vykonané činnosti</SectionLabel>
           {KNIHA_BOZP_ACTIVITIES.map((a) => (
             <CheckRow key={a} label={a} checked={activities.includes(a)} onToggle={() => toggle(a)} />
           ))}

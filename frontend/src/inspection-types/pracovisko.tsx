@@ -4,9 +4,7 @@
  * own result, plus own areas), zistené nedostatky, celkové hodnotenie *.
  *
  * An area counts as checked the moment it has a result — tapping „Vyhovuje"
- * is the check. „Všetky nevyhodnotené vyhovujú" answers only the areas still
- * open, so the technician marks the lot and then corrects the one that
- * failed, without overwriting anything already answered.
+ * is the check.
  */
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AlertTriangle, Plus, X } from 'lucide-react';
@@ -90,8 +88,6 @@ function PracoviskoStep2Form({ inspectionId, facilityId, initialItem, csrfToken,
     setErrors((e) => ({ ...e, areas: null }));
   }
 
-  const open = areas.filter((a) => a.result === '' && a.name.trim()).length;
-
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const evaluated = areas.filter((a) => a.name.trim() && a.result !== '');
@@ -150,18 +146,7 @@ function PracoviskoStep2Form({ inspectionId, facilityId, initialItem, csrfToken,
         />
 
         <div className="flex flex-col gap-2">
-          <SectionLabel required aside={open > 0 ? (
-            <button type="button"
-              onClick={() => {
-                setAreas((prev) => prev.map((a) => (a.result === '' && a.name.trim() ? { ...a, result: 'vyhovuje' } : a)));
-                setErrors((e) => ({ ...e, areas: null }));
-              }}
-              className="min-h-10 rounded-xl px-3 text-xs font-semibold text-firol-600 transition-colors hover:bg-firol-50">
-              Nevyhodnotené označiť ako vyhovuje ({open})
-            </button>
-          ) : undefined}>
-            Oblasti
-          </SectionLabel>
+          <SectionLabel required>Oblasti</SectionLabel>
           <p className="text-xs text-ink-400">
             Oblasť je súčasťou kontroly, keď jej zadáš výsledok. Oblasti bez výsledku sa do protokolu nevypíšu.
           </p>
