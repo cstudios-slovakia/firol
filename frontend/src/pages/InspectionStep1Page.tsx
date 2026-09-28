@@ -19,7 +19,8 @@ import {
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { VisitSharedFields, VisitSharedFieldsSkeleton } from '@/components/VisitSharedFields';
 import { Visits, type Visit } from '@/api/visits';
-import { visitUkonPosition } from '@/lib/visits';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { visitTrail, visitUkonPosition } from '@/lib/visits';
 import { isPersonListType } from '@/api/personList';
 import { ApiError } from '@/lib/api';
 import { todayIso } from '@/lib/dates';
@@ -359,10 +360,19 @@ export function InspectionStep1Page() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
-        <ArrowLeft className="size-4" />
-        Späť
-      </Link>
+      {visit ? (
+        <Breadcrumb
+          items={[
+            ...visitTrail({ id: visit.id, companyName: visit.company_name, date: visit.visit_date }),
+            { label: INSPECTION_TYPE_LABELS[type] },
+          ]}
+        />
+      ) : (
+        <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť
+        </Link>
+      )}
 
       <header className="flex items-start justify-between gap-3">
         <div>

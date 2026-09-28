@@ -23,6 +23,8 @@ import { BulkSendDialog } from '@/components/BulkSendDialog';
 import { WorkConfirmationDialog } from '@/components/WorkConfirmationDialog';
 import { SECTION_COLORS, sectionForInspectionType } from '@/lib/sections';
 import { cn } from '@/lib/cn';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { visitTrail, visitUkonPath } from '@/lib/visits';
 
 /**
  * A návšteva in progress — block 1 / chapter 9.
@@ -79,23 +81,13 @@ export function VisitDetailPage() {
 
   /**
    * Open the úkon for a planned type: continue the one already started, or
-   * begin a new one with the visit's company, prevádzka and date already
-   * filled in — Step 1 is what the visit exists to skip.
+   * begin a new one. Step 1 still opens, with the visit's company, prevádzka
+   * and date locked — only periodicity and notes differ per úkon.
    */
   function openType(type: InspectionType, existing: VisitInspection | undefined) {
-    if (existing) {
-      navigate(`/inspections/${existing.id}`);
-      return;
-    }
-    if (!visit) return;
-    setStartingType(type);
-    const params = new URLSearchParams({
-      company_id: String(visit.company_id),
-      facility_id: String(visit.facility_id),
-      visit_id: String(visit.id),
-      executed_on: visit.visit_date,
-    });
-    navigate(`/inspections/new/${type}/step-1?${params.toString()}`);
+    if (!existing && !visit) return;
+    if (!existing) setStartingType(type);
+    navigate(visitUkonPath(visit!, type));
   }
 
   async function handleGenerateAll() {
@@ -169,7 +161,9 @@ export function VisitDetailPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <BackLink />
+      <Breadcrumb
+        items={visitTrail({ id: visit.id, companyName: visit.company_name, date: visit.visit_date })}
+      />
 
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-2.5">
@@ -239,7 +233,12 @@ export function VisitDetailPage() {
           ))}
         </ul>
         <Link
-          to={`/inspections/new?company_id=${visit.company_id}&facility_id=${visit.facility_id}`}
+          to={`/inspections/new?${new URLSearchParams({
+            company_id: String(visit.company_id),
+            facility_id: String(visit.facility_id),
+            visit_id: String(visit.id),
+            executed_on: visit.visit_date,
+          }).toString()}`}
           className="flex items-center justify-center gap-1.5 border-t border-ink-100 px-4 py-3 text-sm font-medium text-firol-600 transition-colors hover:bg-firol-50"
         >
           <Plus className="size-4" />

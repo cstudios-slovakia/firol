@@ -215,12 +215,18 @@ export function NewInspectionTypePicker() {
   // we forward those IDs so Step 1 can prefill them.
   const facilityId = params.get('facility_id');
   const companyId = params.get('company_id');
+  // Set when an úkon is being added to a visit on the spot (chapter 9): the
+  // new úkon must end up under that visit, and „Späť" returns to it.
+  const visitId = params.get('visit_id');
+  const executedOn = params.get('executed_on');
   // Which section the technician came from (chapter 2). It narrows the list to
   // that odbor's types — arriving from Revízie and being offered a požiarna
   // kniha would just be noise to scroll past.
   const sectionParam = params.get('section') ?? undefined;
   const section: Section | null = isSection(sectionParam) ? sectionParam : null;
-  const backHref = facilityId
+  const backHref = visitId
+    ? `/visits/${visitId}`
+    : facilityId
     ? `/facilities/${facilityId}`
     : companyId
       ? `/companies/${companyId}`
@@ -231,6 +237,10 @@ export function NewInspectionTypePicker() {
   const passthrough = new URLSearchParams();
   if (facilityId) passthrough.set('facility_id', facilityId);
   if (companyId) passthrough.set('company_id', companyId);
+  if (visitId) {
+    passthrough.set('visit_id', visitId);
+    if (executedOn) passthrough.set('executed_on', executedOn);
+  }
   // Step 1 needs the section only for its „Späť", which must return to this
   // same narrowed list rather than to every type.
   if (section) passthrough.set('section', section);

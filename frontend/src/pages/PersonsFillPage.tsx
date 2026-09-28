@@ -27,6 +27,8 @@ import {
   type PersonSource,
 } from '@/api/personList';
 import { TRAINING_TYPE_LABELS, type TrainingType } from '@/api/trainings';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { visitTrail } from '@/lib/visits';
 import { ApiError } from '@/lib/api';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
@@ -159,7 +161,17 @@ export function PersonsFillPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <BackLink to={`/inspections/${id}`} label="Súhrn" />
+      {i.visit_id !== null ? (
+        <Breadcrumb
+          items={[
+            ...visitTrail({ id: i.visit_id, companyName: i.company_name, date: i.executed_on }),
+            { label: INSPECTION_TYPE_LABELS[i.type], to: `/inspections/${id}` },
+            { label: type === 'skolenie_bozp' ? 'Účastníci' : 'Osoby' },
+          ]}
+        />
+      ) : (
+        <BackLink to={`/inspections/${id}`} label="Súhrn" />
+      )}
       <PendingSyncBanner resource="inspections" id={id} />
 
       <header className="min-w-0">

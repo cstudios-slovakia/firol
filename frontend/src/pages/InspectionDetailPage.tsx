@@ -37,6 +37,9 @@ import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStat
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { periodicityLabel, type Periodicity } from '@/lib/periodicity';
 import { sectionPathForType } from '@/lib/sections';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { VisitNextUkon } from '@/components/VisitNextUkon';
+import { visitTrail } from '@/lib/visits';
 import { InvoicingBlock } from '@/components/InvoicingBlock';
 import { invoicingOf } from '@/api/invoicing';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
@@ -353,13 +356,24 @@ export function InspectionDetailPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link
-        to={sectionPathForType(i.type)}
-        className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start"
-      >
-        <ArrowLeft className="size-4" />
-        Späť na zoznam kontrol
-      </Link>
+      {/* Inside a visit „Späť" climbs one level — to the visit — instead of
+          leaving it for the section's list. */}
+      {i.visit_id !== null ? (
+        <Breadcrumb
+          items={[
+            ...visitTrail({ id: i.visit_id, companyName: i.company_name, date: i.executed_on }),
+            { label: INSPECTION_TYPE_LABELS[i.type] },
+          ]}
+        />
+      ) : (
+        <Link
+          to={sectionPathForType(i.type)}
+          className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start"
+        >
+          <ArrowLeft className="size-4" />
+          Späť na zoznam kontrol
+        </Link>
+      )}
 
       <PendingSyncBanner resource="inspections" id={id} />
 
@@ -722,6 +736,9 @@ export function InspectionDetailPage() {
         canSign={!isDraft}
       />
       )}
+
+      {/* Chapter 29.2, step 5 — once the protocol exists, the visit goes on. */}
+      {i.visit_id !== null && !isDraft && <VisitNextUkon visitId={i.visit_id} />}
 
       {/* Chapter 22 — fakturácia úkonu. Editable on a locked úkon as well:
           invoicing follows the issued protocol and never changes it. */}
