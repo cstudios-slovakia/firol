@@ -810,6 +810,26 @@ Migrations `035`–`037`.
   issues each úkon's protocol from its own number series and reports what it
   had to skip and why — one úkon that isn't ready must not cost the other
   three.
+  **Step 1 inside a visit (user decision, 28. 9. 2026):** it is still shown —
+  periodicity and the notes differ per úkon — but company, prevádzka and date
+  are read from the loaded visit and shown as locked rows („Spoločné pre celú
+  návštevu"); the server overrides them again on create
+  (`VisitController::findForUkon`). The eyebrow reads „Úkon N z M". Every
+  screen inside a visit carries a `Dnes › Návšteva › Úkon › Položka` breadcrumb
+  (`<Breadcrumb>`, collapsing to „‹ parent" on a phone) so „Späť" climbs one
+  level and ends at the visit; a finished úkon offers „Ďalší úkon" (the next
+  unfinished planned type) or „Späť na návštevu". „Pridať ďalší úkon" carries
+  `visit_id`, so an úkon added on the spot joins the visit.
+  **Školenie PO on a visit (done):** `trainings.visit_id` (migration `048`,
+  which also adds `work_confirmations.training_ids`). `skolenie_po` is a planned
+  type — offered in the OPP group of `<VisitNewPage>`, never pre-ticked because
+  trainings carry no periodicity yet — and the visit lists its trainings, counts
+  them in „N z M hotové", starts them at `/trainings/new?visit_id=…` (company,
+  prevádzka and date locked, type / trainer editable) and continues them.
+  „Generovať všetky protokoly" calls `DocumentController::generateForTrainingInternal`
+  (the training screen's own generator), the bulk send accepts and lists the
+  `skolenie` protocol, and the potvrdenie lists it after the inspections. The
+  Pokyn — žatevné práce is not a školenie PO and is refused under a visit.
 - ✅ **Ch. 9.1 — several protocols, one e-mail.** `document_sends`,
   `POST /api/companies/{id}/sends`, `<BulkSendDialog>`. Reachable from a visit
   and from the company history, where "everything from last year" is a matter
