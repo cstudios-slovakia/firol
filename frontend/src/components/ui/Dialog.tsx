@@ -34,10 +34,20 @@ export function Dialog({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const { mounted, entered } = useDelayedMount(open, 200);
 
+  // Callers routinely pass an inline `onClose`, which is a new function on
+  // every render. Keeping the latest one in a ref lets the effect below run
+  // only when the dialog opens or closes — otherwise each keystroke in a field
+  // inside the dialog re-ran it and its `focus()` call pulled focus out of the
+  // input after a character or two.
+  const onCloseRef = useRef(onClose);
+  const dismissibleRef = useRef(dismissible);
+  onCloseRef.current = onClose;
+  dismissibleRef.current = dismissible;
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && dismissible) onClose();
+      if (e.key === 'Escape' && dismissibleRef.current) onCloseRef.current();
     };
     document.addEventListener('keydown', onKey);
     // Prevent the body from scrolling while the dialog is open. The
@@ -51,7 +61,7 @@ export function Dialog({
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
     };
-  }, [open, dismissible, onClose]);
+  }, [open]);
 
   if (!mounted) return null;
 
