@@ -193,8 +193,27 @@ final class VisitController
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $visitDate)) {
                 Response::error('Zadaj dátum návštevy.', 422);
             }
-            Db::pdo()->prepare('UPDATE visits SET visit_date = ? WHERE id = ? AND account_id = ?')
-                ->execute([$visitDate, $id, $scopeAccountId]);
+            $pdo = Db::pdo();
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare('UPDATE visits SET visit_date = ? WHERE id = ? AND account_id = ?')
+                    ->execute([$visitDate, $id, $scopeAccountId]);
+                // The date is the visit's, shared by all its úkony (chapter 9),
+                // so the ones still being worked on follow it. An issued
+                // protocol keeps the date it was printed with.
+                $pdo->prepare(
+                    'UPDATE inspections SET executed_on = ?
+                     WHERE  visit_id = ? AND account_id = ? AND status = "draft" AND archived_at IS NULL'
+                )->execute([$visitDate, $id, $scopeAccountId]);
+                $pdo->prepare(
+                    'UPDATE trainings SET date = ?
+                     WHERE  visit_id = ? AND account_id = ? AND status = "draft" AND archived_at IS NULL'
+                )->execute([$visitDate, $id, $scopeAccountId]);
+                $pdo->commit();
+            } catch (\Throwable $e) {
+                $pdo->rollBack();
+                throw $e;
+            }
         }
 
         $fresh = self::loadOrFail($scopeAccountId, $id);
