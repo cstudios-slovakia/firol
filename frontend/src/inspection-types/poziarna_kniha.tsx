@@ -62,6 +62,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
   const [activities, setActivities] = useState<PkActivity[]>([]);
   const [customActivities, setCustomActivities] = useState<CustomActivity[]>([]);
   const [result, setResult] = useState<PkResult>('bez_nedostatkov');
+  const [noDefectsFound, setNoDefectsFound] = useState(false);
   const [defects, setDefects] = useState<DefectRow[]>([]);
   const [notes, setNotes] = useState('');
 
@@ -112,6 +113,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
       setCustomActivities(fromCustom);
       const resultVal = isPkResult(f.result) ? f.result : 'bez_nedostatkov';
       setResult(resultVal);
+      setNoDefectsFound(f.no_defects_found === true && resultVal === 'bez_nedostatkov');
       // Prefer new per-defect list. Legacy fallback: split notes by newlines
       // using the single deadline for each row, so re-opening an old record
       // keeps all the data the technician originally entered.
@@ -139,6 +141,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
       setActivities([]);
       setCustomActivities([]);
       setResult('bez_nedostatkov');
+      setNoDefectsFound(false);
       setDefects([]);
       setNotes('');
     }
@@ -203,6 +206,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           activities: [],
           custom_activities: [],
           result: 'bez_nedostatkov',
+          no_defects_found: false,
           defects: [],
           notes: notes.trim(),
         };
@@ -260,6 +264,7 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           .filter((x) => x.checked && x.label.trim())
           .map((x) => x.label.trim()),
         result,
+        no_defects_found: noDefectsFound && result === 'bez_nedostatkov',
         defects: result === 'zistene_nedostatky' ? cleanedDefects : [],
         notes: notes.trim() || null,
       };
@@ -411,10 +416,36 @@ function PkStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2For
           {() => (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Výsledok záznamu">
               <ResultButton value="bez_nedostatkov" active={result === 'bez_nedostatkov'} onClick={() => { cleanupDefectPhotos(defects.map((d) => d.defectKey)); setResult('bez_nedostatkov'); setDefects([]); setDefectsError(null); }} />
-              <ResultButton value="zistene_nedostatky" active={result === 'zistene_nedostatky'} onClick={() => { setResult('zistene_nedostatky'); if (defects.length === 0) addDefect(); }} />
+              <ResultButton value="zistene_nedostatky" active={result === 'zistene_nedostatky'} onClick={() => { setNoDefectsFound(false); setResult('zistene_nedostatky'); if (defects.length === 0) addDefect(); }} />
             </div>
           )}
         </Field>
+
+        {/* Optional statement; only available while no nedostatok is entered.
+            Entering one (result "zistené nedostatky") clears and disables it. */}
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={noDefectsFound}
+          disabled={result === 'zistene_nedostatky'}
+          onClick={() => setNoDefectsFound((v) => !v)}
+          className={cn(
+            'flex items-start gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+            noDefectsFound
+              ? 'border-firol-500 bg-firol-50'
+              : 'border-ink-200 bg-white enabled:hover:border-firol-300',
+          )}
+        >
+          <span className={cn(
+            'mt-0.5 grid size-5 shrink-0 place-items-center rounded-md border transition-colors',
+            noDefectsFound ? 'border-firol-500 bg-firol-500 text-white' : 'border-ink-300 bg-white',
+          )}>
+            {noDefectsFound && <Check className="size-3.5" strokeWidth={3} />}
+          </span>
+          <span className="min-w-0 flex-1 text-sm font-semibold text-ink-900">
+            V čase kontroly na kontrolovaných pracoviskách neboli zistené žiadne nedostatky
+          </span>
+        </button>
 
         {result === 'zistene_nedostatky' && (
           <Field

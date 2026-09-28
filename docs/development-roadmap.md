@@ -1085,6 +1085,21 @@ brings it back, with its tables in `039_audits.sql`.
 
 ---
 
+## Požiarna kniha supplement — „bez nedostatkov" checkbox (28. 9. 2026) ✅
+
+Spec: `POapp doplnok poziarna kniha.md`. Optional checkbox in step 2 of
+`poziarna_kniha`: „V čase kontroly na kontrolovaných pracoviskách neboli
+zistené žiadne nedostatky".
+
+- ✅ Item field `no_defects_found` (JSON, no migration). Checked → the result is
+  forced to `bez_nedostatkov` and the PDF prints a **ZISTENIA** section with
+  the sentence instead of „Zistené nedostatky".
+- ✅ Only available with no nedostatok: choosing „Zistené nedostatky" clears and
+  disables the box; the backend rejects the flag together with a defect.
+- ✅ Unchecked → protocol renders as before. Opakovať blanks the flag.
+
+---
+
 ## Open questions (must be answered before the relevant phase starts)
 - **Company entity:** base doc says only "name, IČO, address, contact".
   Proposed full set (need confirmation):

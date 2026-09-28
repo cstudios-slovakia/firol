@@ -44,6 +44,8 @@ $miesto = ($city ? $city . ', ' : '') . $formatDate($inspection['executed_on'] ?
 $record = $items[0]['fields'] ?? [];
 $activeSlugs = is_array($record['activities'] ?? null) ? $record['activities'] : [];
 $hasDefects = PkDefects::hasDefects($record);
+// Optional statement that replaces the nedostatky section (ZISTENIA).
+$noDefectsFound = ($record['no_defects_found'] ?? false) === true && !$hasDefects;
 $workspaces = (string) ($record['workspaces'] ?? '');
 $notes = (string) ($record['notes'] ?? '');
 // A plain fire-book entry (not a preventive inspection) carries no statutory
@@ -442,6 +444,9 @@ $contactLine = $facility['contact_person'] ?? '';
       <?php endforeach ?>
     </tbody>
   </table>
+<?php elseif ($isPreventive && $noDefectsFound): ?>
+  <h2>Zistenia</h2>
+  <div class="workspaces-line">V čase kontroly na kontrolovaných pracoviskách neboli zistené žiadne nedostatky.</div>
 <?php endif ?>
 
 <?php if ($isPreventive && $notes !== '' && !$notesUsedAsDefects): ?>

@@ -84,7 +84,7 @@ final class CarryOver
         'pu_udrzba'          => ['maintenance_work' => '', 'result' => '', 'notes' => null],
         'nudzove_osvetlenie' => ['duration_min' => null, 'result' => '', 'notes' => null],
         'ts_hadic'           => ['working_pressure' => null, 'test_pressure' => null, 'result' => '', 'notes' => null],
-        'poziarna_kniha'     => ['result' => '', 'defects' => [], 'notes' => null],
+        'poziarna_kniha'     => ['result' => '', 'no_defects_found' => false, 'defects' => [], 'notes' => null],
         'kniha_bozp'         => ['result' => '', 'defects' => []],
         'pracovisko'         => ['overall' => '', 'defects' => []],
         'osamele_pracovisko' => ['overall' => '', 'defects' => []],
