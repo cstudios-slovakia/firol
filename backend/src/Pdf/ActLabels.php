@@ -31,6 +31,9 @@ final class ActLabels
         'dychova_skuska'     => 'Dychová skúška na alkohol',
         'omamne_latky'       => 'Kontrola omamných a psychotropných látok',
         'skolenie_bozp'      => 'Oboznámenie zamestnancov v oblasti BOZP',
+        // A training is an úkon of a visit too (chapter 9); all kinds share
+        // the one name, the kind itself is printed on the protocol.
+        'skolenie_po'        => 'Školenie o ochrane pred požiarmi',
         // Block 2 — BOZP úkony with a list of rows (Záznam o kontrole … titles).
         'oopp'                 => 'Kontrola osobných ochranných pracovných prostriedkov',
         'pracovne_prostriedky' => 'Kontrola pracovných prostriedkov',

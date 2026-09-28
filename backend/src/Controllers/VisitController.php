@@ -25,9 +25,16 @@ use Firol\Support\Sections;
  * The visit owns nothing of its own: each úkon is a full inspection with its
  * own number, its own periodicity and its own next term. The visit is the
  * thread between them.
+ *
+ * The one úkon that is not an inspection is the školenie PO (`skolenie_po`): a
+ * training lives in its own table, so the visit lists the trainings recorded
+ * under it next to its inspections.
  */
 final class VisitController
 {
+    /** Planned type of the školenie PO — a training, not an inspection type. */
+    public const TYPE_SKOLENIE_PO = 'skolenie_po';
+
     public static function index(Request $req): void
     {
         $accountId = Tenant::currentAccountId();
@@ -60,7 +67,7 @@ final class VisitController
 
         $items = [];
         foreach ($rows as $row) {
-            $items[] = self::shape($row, self::loadInspections((int) $row['id']));
+            $items[] = self::shape($row);
         }
         Response::json(['items' => $items]);
     }
@@ -72,7 +79,7 @@ final class VisitController
         $id = (int) $params['id'];
 
         $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
-        Response::json(['visit' => self::shape($row, self::loadInspections($id))]);
+        Response::json(['visit' => self::shape($row)]);
     }
 
     /**
@@ -146,7 +153,7 @@ final class VisitController
         $id = (int) Db::pdo()->lastInsertId();
 
         Response::json([
-            'visit' => self::shape(self::loadOrFail($accountId, $id), []),
+            'visit' => self::shape(self::loadOrFail($accountId, $id)),
         ], 201);
     }
 
@@ -191,7 +198,7 @@ final class VisitController
         }
 
         $fresh = self::loadOrFail($scopeAccountId, $id);
-        Response::json(['visit' => self::shape($fresh, self::loadInspections($id))]);
+        Response::json(['visit' => self::shape($fresh)]);
     }
 
     public static function archive(Request $req, array $params): void
@@ -244,7 +251,31 @@ final class VisitController
             if (isset($result['error'])) {
                 $skipped[] = [
                     'inspection_id' => (int) $inspection['id'],
+                    'training_id'   => null,
                     'type'          => $inspection['type'],
+                    'reason'        => $result['error'],
+                ];
+                continue;
+            }
+            $generated[] = $result['document'];
+        }
+
+        // The školenie PO goes through the very same generator the training's
+        // own screen uses; a training that is not ready (no trainer, no
+        // trainees) is reported like an úkon that is not.
+        foreach (self::loadTrainings($id) as $training) {
+            if ($training['status'] === 'finalized') {
+                continue;
+            }
+            $result = DocumentController::generateForTrainingInternal(
+                $scopeAccountId,
+                (int) $training['id'],
+            );
+            if (isset($result['error'])) {
+                $skipped[] = [
+                    'inspection_id' => null,
+                    'training_id'   => (int) $training['id'],
+                    'type'          => self::TYPE_SKOLENIE_PO,
                     'reason'        => $result['error'],
                 ];
                 continue;
@@ -255,7 +286,7 @@ final class VisitController
         Response::json([
             'generated' => $generated,
             'skipped'   => $skipped,
-            'visit'     => self::shape(self::loadOrFail($scopeAccountId, $id), self::loadInspections($id)),
+            'visit'     => self::shape(self::loadOrFail($scopeAccountId, $id)),
         ]);
     }
 
@@ -330,10 +361,45 @@ final class VisitController
         ];
     }
 
+    /**
+     * Trainings (školenia PO) recorded under this visit, with their protocol
+     * when one exists.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function loadTrainings(int $visitId): array
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT t.id, t.type, t.status, t.date,
+                    (SELECT COUNT(*) FROM trainees tr WHERE tr.training_id = t.id) AS trainees_count,
+                    d.id AS document_id, d.number AS document_number
+             FROM   trainings t
+             LEFT   JOIN documents d
+                    ON d.parent_type = "training" AND d.parent_id = t.id
+             WHERE  t.visit_id = ? AND t.archived_at IS NULL
+             ORDER  BY t.id ASC'
+        );
+        $stmt->execute([$visitId]);
+
+        return array_map(static function (array $r): array {
+            return [
+                'id'              => (int) $r['id'],
+                'type'            => (string) $r['type'],
+                'status'          => (string) $r['status'],
+                'date'            => $r['date'],
+                'trainees_count'  => (int) $r['trainees_count'],
+                'document_id'     => $r['document_id'] !== null ? (int) $r['document_id'] : null,
+                'document_number' => $r['document_number'],
+            ];
+        }, $stmt->fetchAll());
+    }
+
     /** @return list<string> */
     private static function knownTypes(): array
     {
-        $types = [];
+        // The školenie PO is a planned type like any other, though it is a
+        // training rather than an inspection.
+        $types = [self::TYPE_SKOLENIE_PO];
         foreach (Sections::INSPECTION_TYPES as $sectionTypes) {
             foreach ($sectionTypes as $t) {
                 $types[] = $t;
@@ -370,10 +436,9 @@ final class VisitController
 
     /**
      * @param array<string, mixed> $row
-     * @param list<array<string, mixed>> $inspections
      * @return array<string, mixed>
      */
-    private static function shape(array $row, array $inspections): array
+    private static function shape(array $row): array
     {
         $planned = json_decode((string) $row['planned_types'], true);
         return [
@@ -388,7 +453,8 @@ final class VisitController
             'planned_types'      => is_array($planned) ? $planned : [],
             'status'             => (string) $row['status'],
             'created_at'         => $row['created_at'],
-            'inspections'        => $inspections,
+            'inspections'        => self::loadInspections((int) $row['id']),
+            'trainings'          => self::loadTrainings((int) $row['id']),
         ];
     }
 

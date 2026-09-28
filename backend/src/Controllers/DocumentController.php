@@ -439,33 +439,56 @@ final class DocumentController
         $isAdmin    = Admin::isAdmin(Tenant::currentUserId());
         $trainingId = (int) $params['id'];
 
+        // Resolve the training first so the PDF is filed under ITS account,
+        // not under the (possibly impersonating) admin's session account.
         $training = self::loadTrainingForGenerate($isAdmin ? null : $accountId, $trainingId);
-        $accountId = (int) $training['account_id'];
+
+        $result = self::generateForTrainingInternal((int) $training['account_id'], $trainingId);
+        if (isset($result['error'])) {
+            Response::error((string) $result['error'], (int) $result['status']);
+        }
+
+        Response::json(['document' => $result['document']], 201);
+    }
+
+    /**
+     * Issue the PDF protocol of one training.
+     *
+     * Returns the document descriptor, or an `error` + `status` pair rather
+     * than ending the request — a visit generates all its protocols in a row
+     * (chapter 9) and one training that is not ready yet (no trainer, no
+     * trainees) must not abort the rest.
+     *
+     * @return array{document?: array<string,mixed>, error?: string, status?: int}
+     */
+    public static function generateForTrainingInternal(int $accountId, int $trainingId): array
+    {
+        $training = self::loadTrainingForGenerate($accountId, $trainingId);
         $isPokyn   = $training['type'] === TrainingController::TYPE_POKYN;
 
         if ($training['status'] === 'finalized') {
-            Response::error(
-                $isPokyn
+            return [
+                'error' => $isPokyn
                     ? 'Pokyn už je uzamknutý a má vystavený PDF dokument.'
                     : 'Školenie už je uzamknuté a má vystavený PDF protokol.',
-                409,
-            );
+                'status' => 409,
+            ];
         }
         if ($training['date'] === null) {
-            Response::error(
-                $isPokyn
+            return [
+                'error' => $isPokyn
                     ? 'Doplň dátum vydania pokynu pred generovaním PDF.'
                     : 'Doplň dátum školenia pred generovaním PDF.',
-                422,
-            );
+                'status' => 422,
+            ];
         }
         if ($training['trainer_id'] === null) {
-            Response::error(
-                $isPokyn
+            return [
+                'error' => $isPokyn
                     ? 'Vyber technika, ktorý pokyn vypracoval, pred generovaním PDF.'
                     : 'Vyber školiteľa pred generovaním PDF.',
-                422,
-            );
+                'status' => 422,
+            ];
         }
 
         // A Pokyn is an instruction addressed to the client's employees, not a
@@ -475,15 +498,12 @@ final class DocumentController
         if ($isPokyn) {
             $pokyn = PokynZatva::decode($training['fields']);
             if ($pokyn === null) {
-                Response::error('Doplň text pokynu pred generovaním PDF.', 422);
+                return ['error' => 'Doplň text pokynu pred generovaním PDF.', 'status' => 422];
             }
         } else {
             $trainees = self::loadTrainees($trainingId);
             if (count($trainees) === 0) {
-                Response::error(
-                    'Pridaj aspoň jedného účastníka pred generovaním PDF.',
-                    422,
-                );
+                return ['error' => 'Pridaj aspoň jedného účastníka pred generovaním PDF.', 'status' => 422];
             }
         }
 
@@ -547,12 +567,10 @@ final class DocumentController
                 }
             }
             error_log('[generate-pdf-training] ' . $e::class . ': ' . $e->getMessage());
-            Response::error('PDF sa nepodarilo vygenerovať.', 500);
+            return ['error' => 'PDF sa nepodarilo vygenerovať.', 'status' => 500];
         }
 
-        Response::json([
-            'document' => self::loadDocument($accountId, $documentId),
-        ], 201);
+        return ['document' => self::loadDocument($accountId, $documentId)];
     }
 
     public static function indexForTraining(Request $req, array $params): void

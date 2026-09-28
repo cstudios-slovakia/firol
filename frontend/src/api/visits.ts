@@ -1,5 +1,6 @@
 import { api } from '@/lib/api';
 import type { InspectionType } from '@/api/inspections';
+import type { TrainingType } from '@/api/trainings';
 
 /**
  * Návšteva — one trip to a client, several úkony (block 1 / chapter 9).
@@ -12,6 +13,15 @@ import type { InspectionType } from '@/api/inspections';
 
 export type VisitStatus = 'prebieha' | 'dokoncena';
 
+/**
+ * Planned type of the školenie PO. It is an OPP úkon like any other, but a
+ * training lives in its own table, so it is not an `InspectionType`.
+ */
+export const SKOLENIE_PO = 'skolenie_po' as const;
+
+/** A type ticked on the visit: an inspection type, or the školenie PO. */
+export type VisitType = InspectionType | typeof SKOLENIE_PO;
+
 /** One úkon recorded under a visit, as the visit screen needs it. */
 export type VisitInspection = {
   id: number;
@@ -20,6 +30,17 @@ export type VisitInspection = {
   executed_on: string | null;
   item_count: number;
   valid_until: string | null;
+  document_id: number | null;
+  document_number: string | null;
+};
+
+/** The školenie PO recorded under a visit, as the visit screen needs it. */
+export type VisitTraining = {
+  id: number;
+  type: TrainingType;
+  status: 'draft' | 'finalized';
+  date: string | null;
+  trainees_count: number;
   document_id: number | null;
   document_number: string | null;
 };
@@ -34,17 +55,18 @@ export type Visit = {
   technician_user_id: number;
   technician_name: string;
   /** The types ticked at the start. A plan, not a contract — it can change. */
-  planned_types: InspectionType[];
+  planned_types: VisitType[];
   status: VisitStatus;
   created_at: string;
   inspections: VisitInspection[];
+  trainings: VisitTraining[];
 };
 
 export type VisitPayload = {
   company_id: number;
   facility_id: number;
   visit_date: string;
-  planned_types: InspectionType[];
+  planned_types: VisitType[];
   technician_user_id?: number;
 };
 
@@ -57,8 +79,11 @@ export type GeneratedDocument = {
 
 /** An úkon the bulk generation had to skip, and why. */
 export type SkippedInspection = {
-  inspection_id: number;
-  type: InspectionType;
+  /** Set for an inspection; null for the školenie PO. */
+  inspection_id: number | null;
+  /** Set for the školenie PO; null for an inspection. */
+  training_id: number | null;
+  type: VisitType;
   reason: string;
 };
 

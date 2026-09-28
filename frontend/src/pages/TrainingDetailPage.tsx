@@ -31,6 +31,9 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Spinner } from '@/components/ui/Spinner';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { VisitNextUkon } from '@/components/VisitNextUkon';
+import { visitTrail } from '@/lib/visits';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 // SIGNATURE DISABLED — import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
@@ -201,10 +204,21 @@ export function TrainingDetailPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link to={TRAININGS_PATH} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
-        <ArrowLeft className="size-4" />
-        Späť na zoznam
-      </Link>
+      {/* Inside a visit „Späť" climbs one level — to the visit — instead of
+          leaving it for the training list. */}
+      {t.visit_id !== null ? (
+        <Breadcrumb
+          items={[
+            ...visitTrail({ id: t.visit_id, companyName: t.company_name, date: t.date }),
+            { label: 'Školenie PO' },
+          ]}
+        />
+      ) : (
+        <Link to={TRAININGS_PATH} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť na zoznam
+        </Link>
+      )}
 
       <PendingSyncBanner resource="trainings" id={id} />
 
@@ -371,6 +385,9 @@ export function TrainingDetailPage() {
         pdfError={pdfError}
         pokyn={pokyn}
       />
+
+      {/* Chapter 29.2, step 5 — once the protocol exists, the visit goes on. */}
+      {t.visit_id !== null && !isDraft && <VisitNextUkon visitId={t.visit_id} />}
 
       {/* Chapter 22 — a training is an úkon, so it is invoiced like one.
           Editable after the PDF is issued; the protocol never shows it. */}

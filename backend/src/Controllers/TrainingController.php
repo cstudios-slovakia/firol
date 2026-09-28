@@ -49,7 +49,7 @@ final class TrainingController
                        t.created_at,
                        JSON_UNQUOTE(JSON_EXTRACT(t.fields, \'$.year\')) AS pokyn_year,
                        t.company_id, c.name AS company_name,
-                       t.facility_id, f.name AS facility_name,
+                       t.facility_id, f.name AS facility_name, t.visit_id,
                        t.trainer_id, tr.fullname AS trainer_name,
                        t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
                        (SELECT COUNT(*) FROM trainees WHERE training_id = t.id) AS trainees_count
@@ -144,9 +144,31 @@ final class TrainingController
         $trainerId   = $req->jsonInt('trainer_id');
         $topics      = $req->jsonString('topics');
         $durationMin = $req->jsonInt('duration_min');
+        $visitId     = $req->jsonInt('visit_id');
 
         if ($type === null || !in_array($type, self::TYPES, true)) {
             Response::error('Invalid training type', 422);
+        }
+        // Inside a visit (chapter 9) the company, prevádzka and date were chosen
+        // once, when the visit started: they are the visit's, not the request's.
+        // Overriding is friendlier offline than rejecting a queued draft. The
+        // Pokyn is a document for the client's employees, not a školenie PO, so
+        // it is never recorded under a visit.
+        if ($visitId !== null) {
+            if ($type === self::TYPE_POKYN) {
+                Response::error('Pokyn sa nezapisuje v návšteve — nie je to školenie PO.', 422);
+            }
+            $visit = VisitController::findForUkon(
+                $visitId,
+                Admin::isAdmin(Tenant::currentUserId()),
+                $accountId,
+            );
+            if ($visit === null) {
+                Response::error('Návšteva sa nenašla.', 404);
+            }
+            $companyId  = $visit['company_id'];
+            $facilityId = $visit['facility_id'];
+            $date       = $visit['visit_date'];
         }
         // The Pokyn's text may be supplied at creation (the UI seeds it from
         // the template) or filled in afterwards on the detail page — it is only
@@ -216,11 +238,11 @@ final class TrainingController
 
         Db::pdo()->prepare(
             'INSERT INTO trainings
-                (account_id, company_id, facility_id, type, date,
+                (account_id, company_id, facility_id, visit_id, type, date,
                  trainer_id, topics, duration_min, fields, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "draft")'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft")'
         )->execute([
-            $accountId, $companyId, $facilityId, $type, $date,
+            $accountId, $companyId, $facilityId, $visitId, $type, $date,
             $trainerId, $topics, $durationMin,
             $fields !== null ? json_encode($fields, JSON_UNESCAPED_UNICODE) : null,
         ]);
@@ -324,7 +346,7 @@ final class TrainingController
                        t.fields, t.status, t.created_at, t.updated_at,
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.approver AS company_approver,
-                       t.facility_id, f.name AS facility_name,
+                       t.facility_id, f.name AS facility_name, t.visit_id,
                        t.trainer_id, tr.fullname AS trainer_name,
                        ip.cert_general AS trainer_certification_number,
                        t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
@@ -359,6 +381,7 @@ final class TrainingController
         $row['id']             = (int) $row['id'];
         $row['company_id']     = (int) $row['company_id'];
         $row['facility_id']    = $row['facility_id'] !== null ? (int) $row['facility_id'] : null;
+        $row['visit_id']       = isset($row['visit_id']) ? (int) $row['visit_id'] : null;
         $row['trainer_id']     = $row['trainer_id'] !== null ? (int) $row['trainer_id'] : null;
         $row['duration_min']   = $row['duration_min'] !== null ? (int) $row['duration_min'] : null;
         $row['trainees_count'] = isset($row['trainees_count']) ? (int) $row['trainees_count'] : 0;

@@ -224,7 +224,8 @@ final class DocumentSendController
         $accountId = self::assertCompany($companyId);
 
         // Výdajky (block 4 / chapter 21) are this client's documents too, so
-        // they can go out in the same e-mail as the protocols.
+        // they can go out in the same e-mail as the protocols — and so is the
+        // protocol of a školenie PO (chapter 9: it is an úkon of the visit).
         $stmt = Db::pdo()->prepare(
             'SELECT * FROM (
                 SELECT d.id, d.type, d.number, d.generated_at, d.file_path,
@@ -240,11 +241,19 @@ final class DocumentSendController
                 JOIN   stock_issues si ON si.id = d.parent_id AND d.parent_type = "stock_issue"
                 LEFT   JOIN facilities f ON f.id = si.facility_id
                 WHERE  d.account_id = ? AND si.company_id = ?
+                UNION ALL
+                SELECT d.id, d.type, d.number, d.generated_at, d.file_path,
+                       t.date AS executed_on, t.facility_id, f.name AS facility_name
+                FROM   documents d
+                JOIN   trainings t ON t.id = d.parent_id AND d.parent_type = "training"
+                LEFT   JOIN facilities f ON f.id = t.facility_id
+                WHERE  d.account_id = ? AND t.company_id = ? AND d.type = "skolenie"
+                   AND t.archived_at IS NULL
              ) x
              ORDER  BY COALESCE(executed_on, generated_at) DESC, id DESC
              LIMIT  300'
         );
-        $stmt->execute([$accountId, $companyId, $accountId, $companyId]);
+        $stmt->execute([$accountId, $companyId, $accountId, $companyId, $accountId, $companyId]);
 
         $items = array_map(static function (array $r): array {
             $abs = Storage::documentAbsolute((string) $r['file_path']);
@@ -325,7 +334,8 @@ final class DocumentSendController
              FROM   documents d
              LEFT   JOIN inspections  i  ON i.id  = d.parent_id AND d.parent_type = 'inspection'
              LEFT   JOIN stock_issues si ON si.id = d.parent_id AND d.parent_type = 'stock_issue'
-             WHERE  d.account_id = ? AND COALESCE(i.company_id, si.company_id) = ?
+             LEFT   JOIN trainings    tr ON tr.id = d.parent_id AND d.parent_type = 'training'
+             WHERE  d.account_id = ? AND COALESCE(i.company_id, si.company_id, tr.company_id) = ?
                AND  d.id IN ($placeholders)
              ORDER  BY d.id ASC"
         );

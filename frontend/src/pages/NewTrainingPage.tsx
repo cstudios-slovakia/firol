@@ -4,7 +4,7 @@ import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, GraduationCap, Plus, Wheat,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
-import { Companies, type CompanyListItem, type FacilityListItem } from '@/api/companies';
+import { Companies, type Company, type CompanyListItem, type FacilityListItem } from '@/api/companies';
 import { Team, type TeamMember } from '@/api/team';
 import {
   isPokyn,
@@ -14,6 +14,7 @@ import {
   Trainings,
   type TrainingType,
 } from '@/api/trainings';
+import { Visits, type Visit } from '@/api/visits';
 import { ApiError } from '@/lib/api';
 import { TRAINING_SECTION, TRAININGS_PATH } from '@/lib/sections';
 import { todayIso } from '@/lib/dates';
@@ -26,6 +27,9 @@ import { Field } from '@/components/ui/Field';
 import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { VisitSharedFields, VisitSharedFieldsSkeleton } from '@/components/VisitSharedFields';
+import { visitTrail, visitUkonPosition } from '@/lib/visits';
 import { NewCompanyDialog } from '@/components/NewCompanyDialog';
 import { NewFacilityDialog } from '@/components/NewFacilityDialog';
 import { cn } from '@/lib/cn';
@@ -36,18 +40,28 @@ export function NewTrainingPage() {
   const { csrfToken } = useAuth();
   const toast = useToast();
 
-  const presetCompanyId = numericParam(searchParams.get('company_id'));
-  const presetFacilityId = numericParam(searchParams.get('facility_id'));
+  // Inside a visit (chapter 9) the company, prevádzka and date were chosen
+  // once at its start: they are read from the loaded visit (never from the
+  // query string, which can be edited by hand), shown locked, and overridden
+  // again by the server on create.
+  const visitId = numericParam(searchParams.get('visit_id'));
+  const presetCompanyId = visitId !== null ? null : numericParam(searchParams.get('company_id'));
+  const presetFacilityId = visitId !== null ? null : numericParam(searchParams.get('facility_id'));
 
   const { user } = useAuth();
   const [type, setType] = useState<TrainingType>('vstupne');
+  const [visit, setVisit] = useState<Visit | null>(null);
+  const [visitError, setVisitError] = useState<string | null>(null);
+  // The visit's company in full (IČO, schvaľujúca osoba, režim fakturácie) —
+  // the offline draft shows them, and the company list is not loaded in a visit.
+  const [visitCompany, setVisitCompany] = useState<Company | null>(null);
   const [companies, setCompanies] = useState<CompanyListItem[] | null>(null);
   const [facilities, setFacilities] = useState<FacilityListItem[]>([]);
   const [members, setMembers] = useState<TeamMember[] | null>(null);
   const [companyId, setCompanyId] = useState<number | null>(presetCompanyId);
   const [facilityId, setFacilityId] = useState<number | null>(presetFacilityId);
   const [trainerId, setTrainerId] = useState<number | null>(null);
-  const [date, setDate] = useState(todayIso);
+  const [date, setDate] = useState(visitId !== null ? '' : todayIso());
 
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ company?: string; date?: string }>({});
@@ -56,13 +70,34 @@ export function NewTrainingPage() {
   const [newFacilityOpen, setNewFacilityOpen] = useState(false);
 
   useEffect(() => {
+    if (visitId === null) return;
+    let cancelled = false;
+    Visits.show(visitId)
+      .then((res) => {
+        if (cancelled) return;
+        setVisit(res.visit);
+        setCompanyId(res.visit.company_id);
+        setFacilityId(res.visit.facility_id);
+        setDate(res.visit.visit_date);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setVisitError(err instanceof ApiError ? err.message : 'Návštevu sa nepodarilo načítať.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visitId]);
+
+  useEffect(() => {
     let cancelled = false;
     // The companies list drives the page (served from cache offline). The team
     // list is best-effort — offline it may be uncached, in which case the
     // trainer picker simply has no options. Loading them together with
     // Promise.all would let an uncached team list reject the whole load and
     // leave the page stuck on the spinner.
-    Companies.list()
+    // Not needed in a visit: the company is fixed there.
+    (visitId !== null ? Promise.resolve({ items: [] as CompanyListItem[] }) : Companies.list())
       .then(async (cs) => {
         if (cancelled) return;
         setCompanies(cs.items);
@@ -91,7 +126,7 @@ export function NewTrainingPage() {
     return () => {
       cancelled = true;
     };
-  }, [presetCompanyId, user]);
+  }, [presetCompanyId, user, visitId]);
 
   useEffect(() => {
     if (companyId === null) {
@@ -104,6 +139,12 @@ export function NewTrainingPage() {
       .then((res) => {
         if (cancelled) return;
         setFacilities(res.facilities);
+        // In a visit the prevádzka is the visit's; the facilities are only
+        // loaded for the offline draft.
+        if (visitId !== null) {
+          setVisitCompany(res.company);
+          return;
+        }
         setFacilityId((current) => {
           if (current !== null && res.facilities.some((f) => f.id === current)) {
             return current;
@@ -120,7 +161,7 @@ export function NewTrainingPage() {
     return () => {
       cancelled = true;
     };
-  }, [companyId, presetFacilityId]);
+  }, [companyId, presetFacilityId, visitId]);
 
   // The Pokyn is a document for the client's employees, not a session they
   // attend — the same form, but the wording follows what is being issued.
@@ -129,6 +170,8 @@ export function NewTrainingPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const errs: typeof fieldErrors = {};
+    // Inside a visit the three shared values are the visit's own.
+    if (visitId !== null && !visit) return;
     if (!companyId) errs.company = 'Vyber firmu.';
     if (!date) errs.date = pokyn ? 'Zadaj dátum vydania pokynu.' : 'Zadaj dátum školenia.';
     if (Object.keys(errs).length > 0) {
@@ -145,6 +188,7 @@ export function NewTrainingPage() {
         facility_id: facilityId ?? undefined,
         date,
         trainer_id: trainerId ?? undefined,
+        ...(visitId !== null ? { visit_id: visitId } : {}),
         // The Pokyn starts from the client's template text; the technician
         // edits it on the detail page before generating the PDF.
         fields: pokyn
@@ -155,14 +199,18 @@ export function NewTrainingPage() {
           }
           : undefined,
       };
-      const company = (companies ?? []).find((c) => c.id === companyId);
-      const facility = facilities.find((f) => f.id === facilityId);
+      const company = visit
+        ? visitCompany
+        : (companies ?? []).find((c) => c.id === companyId);
+      const facility = visit
+        ? { id: visit.facility_id, name: visit.facility_name }
+        : facilities.find((f) => f.id === facilityId);
       const trainer = (members ?? []).find((m) => m.id === trainerId);
       const optimistic = trainingCreateOptimistic({
         payload,
         company: {
           id: companyId!,
-          name: company?.name ?? '',
+          name: visit?.company_name ?? company?.name ?? '',
           ico: company?.ico ?? null,
           approver: company?.approver ?? null,
           // Chapter 22 — the offline draft shows the firm's režim fakturácie.
@@ -187,13 +235,49 @@ export function NewTrainingPage() {
 
   // Back to where the technician came from: the firm or prevádzka, the
   // Školenia tab of OPP, or Dnes — never a list of every section's úkony.
-  const backHref = presetFacilityId
+  const backHref = visitId !== null
+    ? `/visits/${visitId}`
+    : presetFacilityId
     ? `/facilities/${presetFacilityId}`
     : presetCompanyId
       ? `/companies/${presetCompanyId}`
       : searchParams.get('section') === TRAINING_SECTION
         ? TRAININGS_PATH
         : '/';
+
+  if (visitId !== null && visitError && !visit) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť
+        </Link>
+        <Card className="px-4 py-3 text-sm text-status-bad">{visitError}</Card>
+      </div>
+    );
+  }
+
+  if (visitId !== null && !visit) {
+    return (
+      <div className="flex flex-col gap-5">
+        <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť
+        </Link>
+        <header>
+          <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">
+            Úkon · nové školenie
+          </p>
+          <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">
+            {TRAINING_TYPE_LABELS[type]}
+          </h1>
+        </header>
+        <Card className="p-5">
+          <VisitSharedFieldsSkeleton />
+        </Card>
+      </div>
+    );
+  }
 
   if (companies === null) {
     return (
@@ -215,7 +299,7 @@ export function NewTrainingPage() {
     );
   }
 
-  if (companies.length === 0) {
+  if (visitId === null && companies.length === 0) {
     return (
       <div className="flex flex-col gap-4">
         <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
@@ -240,14 +324,20 @@ export function NewTrainingPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
-        <ArrowLeft className="size-4" />
-        Späť
-      </Link>
+      {visit ? (
+        <Breadcrumb items={[...visitTrail({ id: visit.id, companyName: visit.company_name, date: visit.visit_date }), { label: 'Školenie PO' }]} />
+      ) : (
+        <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť
+        </Link>
+      )}
 
       <header>
         <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">
-          {pokyn ? 'Nový pokyn' : 'Nové školenie'}
+          {visit
+            ? `Úkon ${visitUkonPosition(visit, 'skolenie_po').n} z ${visitUkonPosition(visit, 'skolenie_po').total} · nové školenie`
+            : pokyn ? 'Nový pokyn' : 'Nové školenie'}
         </p>
         <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">
           {TRAINING_TYPE_LABELS[type]}
@@ -259,96 +349,107 @@ export function NewTrainingPage() {
           <Field label="Typ dokumentu" required>
             {() => (
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Typ dokumentu">
-                {TRAINING_TYPES.map((t) => (
+                {TRAINING_TYPES.filter((t) => visit === null || !isPokyn(t)).map((t) => (
                   <TypeButton key={t} value={t} active={type === t} onClick={() => setType(t)} />
                 ))}
               </div>
             )}
           </Field>
 
-          <Field label="Spoločnosť" required error={fieldErrors.company}>
-            {(p) => (
-              <Select
-                id={p.id}
-                aria-invalid={p['aria-invalid']}
-                value={companyId !== null ? String(companyId) : ''}
-                onChange={(v) => { setCompanyId(v ? Number(v) : null); if (fieldErrors.company) setFieldErrors((prev) => ({ ...prev, company: undefined })); }}
-                placeholder="— vyber firmu —"
-                leftIcon={<Building2 className="size-4" />}
-                searchable
-                options={companies.map((c) => ({
-                  value: String(c.id),
-                  label: c.name,
-                  description: c.ico ? `IČO ${c.ico}` : undefined,
-                }))}
-                headerSlot={({ closeDropdown }) => (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      closeDropdown();
-                      setNewCompanyOpen(true);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
-                  >
-                    <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
-                      <Plus className="size-3.5" />
-                    </span>
-                    Pridať novú firmu
-                  </button>
-                )}
-              />
-            )}
-          </Field>
+          {visit ? (
+            <VisitSharedFields
+              companyName={visit.company_name}
+              facilityName={visit.facility_name}
+              date={visit.visit_date}
+              dateLabel="Dátum školenia"
+            />
+          ) : (
+            <>
+            <Field label="Spoločnosť" required error={fieldErrors.company}>
+              {(p) => (
+                <Select
+                  id={p.id}
+                  aria-invalid={p['aria-invalid']}
+                  value={companyId !== null ? String(companyId) : ''}
+                  onChange={(v) => { setCompanyId(v ? Number(v) : null); if (fieldErrors.company) setFieldErrors((prev) => ({ ...prev, company: undefined })); }}
+                  placeholder="— vyber firmu —"
+                  leftIcon={<Building2 className="size-4" />}
+                  searchable
+                  options={companies.map((c) => ({
+                    value: String(c.id),
+                    label: c.name,
+                    description: c.ico ? `IČO ${c.ico}` : undefined,
+                  }))}
+                  headerSlot={({ closeDropdown }) => (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeDropdown();
+                        setNewCompanyOpen(true);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
+                    >
+                      <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
+                        <Plus className="size-3.5" />
+                      </span>
+                      Pridať novú firmu
+                    </button>
+                  )}
+                />
+              )}
+            </Field>
 
-          <Field
-            label="Prevádzka"
-            hint={pokyn
-              ? 'Voliteľné — pokyn môže platiť pre celú firmu.'
-              : 'Voliteľné — niektoré školenia sú pre celú firmu.'}
-          >
-            {(p) => (
-              <Select
-                id={p.id}
-                value={facilityId !== null ? String(facilityId) : ''}
-                onChange={(v) => setFacilityId(v ? Number(v) : null)}
-                disabled={companyId === null}
-                placeholder="— bez konkrétnej prevádzky —"
-                searchable
-                options={[
-                  { value: '', label: '— bez konkrétnej prevádzky —' },
-                  ...facilities.map((f) => ({ value: String(f.id), label: f.name })),
-                ]}
-                headerSlot={companyId !== null ? ({ closeDropdown }) => (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      closeDropdown();
-                      setNewFacilityOpen(true);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
-                  >
-                    <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
-                      <Plus className="size-3.5" />
-                    </span>
-                    Pridať prevádzku
-                  </button>
-                ) : undefined}
-              />
-            )}
-          </Field>
+            <Field
+              label="Prevádzka"
+              hint={pokyn
+                ? 'Voliteľné — pokyn môže platiť pre celú firmu.'
+                : 'Voliteľné — niektoré školenia sú pre celú firmu.'}
+            >
+              {(p) => (
+                <Select
+                  id={p.id}
+                  value={facilityId !== null ? String(facilityId) : ''}
+                  onChange={(v) => setFacilityId(v ? Number(v) : null)}
+                  disabled={companyId === null}
+                  placeholder="— bez konkrétnej prevádzky —"
+                  searchable
+                  options={[
+                    { value: '', label: '— bez konkrétnej prevádzky —' },
+                    ...facilities.map((f) => ({ value: String(f.id), label: f.name })),
+                  ]}
+                  headerSlot={companyId !== null ? ({ closeDropdown }) => (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeDropdown();
+                        setNewFacilityOpen(true);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
+                    >
+                      <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
+                        <Plus className="size-3.5" />
+                      </span>
+                      Pridať prevádzku
+                    </button>
+                  ) : undefined}
+                />
+              )}
+            </Field>
 
-          <Field
-            label={pokyn ? 'Dátum vydania pokynu' : 'Dátum školenia'}
-            required
-            hint={fieldErrors.date ? undefined : 'Predvyplnený je dnešný dátum, môžeš ho zmeniť aj na minulý.'}
-            error={fieldErrors.date}
-          >
-            {(p) => (
-              <Input {...p} required type="date"
-                leftIcon={<CalendarDays className="size-4" />}
-                value={date} onChange={(e) => { setDate(e.target.value); if (fieldErrors.date) setFieldErrors((prev) => ({ ...prev, date: undefined })); }} />
-            )}
-          </Field>
+            <Field
+              label={pokyn ? 'Dátum vydania pokynu' : 'Dátum školenia'}
+              required
+              hint={fieldErrors.date ? undefined : 'Predvyplnený je dnešný dátum, môžeš ho zmeniť aj na minulý.'}
+              error={fieldErrors.date}
+            >
+              {(p) => (
+                <Input {...p} required type="date"
+                  leftIcon={<CalendarDays className="size-4" />}
+                  value={date} onChange={(e) => { setDate(e.target.value); if (fieldErrors.date) setFieldErrors((prev) => ({ ...prev, date: undefined })); }} />
+              )}
+            </Field>
+            </>
+          )}
 
           <Field
             label={pokyn ? 'Vypracoval' : 'Školiteľ'}

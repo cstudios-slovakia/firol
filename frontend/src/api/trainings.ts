@@ -78,6 +78,8 @@ export type TrainingListItem = InvoicingFields & {
   company_name: string;
   facility_id: number | null;
   facility_name: string | null;
+  /** The visit this training was recorded under, when it came out of one (chapter 9). */
+  visit_id: number | null;
   trainer_id: number | null;
   trainer_name: string | null;
   trainees_count: number;
@@ -136,6 +138,8 @@ export type TrainingPayload = {
   trainer_id?: number | null;
   topics?: string | null;
   duration_min?: number | null;
+  /** Set when the training is recorded as part of a visit (chapter 9). */
+  visit_id?: number;
   /** Pokyn only — seeded from the template at creation, editable afterwards. */
   fields?: PokynZatvaFields | null;
 };

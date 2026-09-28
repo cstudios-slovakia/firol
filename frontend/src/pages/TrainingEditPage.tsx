@@ -20,6 +20,8 @@ import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Select } from '@/components/ui/Select';
 import { Spinner } from '@/components/ui/Spinner';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { visitTrail } from '@/lib/visits';
 
 export function TrainingEditPage() {
   const { id: idStr } = useParams<{ id: string }>();
@@ -122,10 +124,20 @@ export function TrainingEditPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Link to={`/trainings/${id}`} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
-        <ArrowLeft className="size-4" />
-        Späť
-      </Link>
+      {training !== null && training.visit_id !== null ? (
+        <Breadcrumb
+          items={[
+            ...visitTrail({ id: training.visit_id, companyName: training.company_name, date: training.date }),
+            { label: 'Školenie PO', to: `/trainings/${id}` },
+            { label: 'Upraviť' },
+          ]}
+        />
+      ) : (
+        <Link to={`/trainings/${id}`} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť
+        </Link>
+      )}
 
       <header>
         <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">

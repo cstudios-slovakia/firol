@@ -189,6 +189,7 @@ export function trainingCreateOptimistic(args: {
     trainer_name: args.trainer?.name ?? null,
     trainer_certification_number: args.trainer?.certification_number ?? null,
     trainees_count: 0,
+    visit_id: args.payload.visit_id ?? null,
     fields,
     pokyn_year: fields?.year ?? null,
     ...newUkonInvoicing(args.company.billing_mode),
