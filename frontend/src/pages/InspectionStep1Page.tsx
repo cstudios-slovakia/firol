@@ -5,7 +5,7 @@ import {
   Plus, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
-import { Companies, type CompanyListItem, type FacilityListItem } from '@/api/companies';
+import { Companies, type Company, type CompanyListItem, type FacilityListItem } from '@/api/companies';
 import {
   INSPECTION_TYPE_LABELS,
   Inspections,
@@ -17,6 +17,9 @@ import {
   type PeriodicityUnit,
 } from '@/lib/periodicity';
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
+import { VisitSharedFields, VisitSharedFieldsSkeleton } from '@/components/VisitSharedFields';
+import { Visits, type Visit } from '@/api/visits';
+import { visitUkonPosition } from '@/lib/visits';
 import { isPersonListType } from '@/api/personList';
 import { ApiError } from '@/lib/api';
 import { todayIso } from '@/lib/dates';
@@ -47,7 +50,13 @@ function isInspectionType(s: string | undefined): s is InspectionType {
 
 /**
  * Inspection — Step 1. Same screen for every type; per-type fields land
- * in Step 2. Per locked decision, the date is NEVER auto-prefilled.
+ * in Step 2. The date is prefilled with today and stays editable, including
+ * to a past day (the protocol carries the execution date).
+ *
+ * Inside a visit (chapter 9) the screen is still shown — periodicity and the
+ * notes differ per úkon — but the company, prevádzka and date are the visit's
+ * own: read from the loaded visit rather than the query string, shown locked,
+ * and overridden again by the server on create.
  */
 export function InspectionStep1Page() {
   const { user, csrfToken } = useAuth();
@@ -67,12 +76,19 @@ export function InspectionStep1Page() {
   // Inside a visit (chapter 9) the company, prevádzka and date were chosen
   // once at the start — skipping that repetition is the whole point of it.
   const visitId = numericParam(searchParams.get('visit_id'));
-  const presetDate = searchParams.get('executed_on') || todayIso();
+  const presetDate = visitId !== null ? '' : searchParams.get('executed_on') || todayIso();
 
+  // Query parameters can be edited by hand, so in a visit the three shared
+  // values start empty and are filled from the visit once it has loaded.
+  const [visit, setVisit] = useState<Visit | null>(null);
+  const [visitError, setVisitError] = useState<string | null>(null);
   const [companies, setCompanies] = useState<CompanyListItem[] | null>(null);
   const [facilities, setFacilities] = useState<FacilityListItem[]>([]);
-  const [companyId, setCompanyId] = useState<number | null>(presetCompanyId);
-  const [facilityId, setFacilityId] = useState<number | null>(presetFacilityId);
+  // The visit's company in full (IČO, režim fakturácie) — the offline draft
+  // shows them, and the company list is not loaded in a visit.
+  const [visitCompany, setVisitCompany] = useState<Company | null>(null);
+  const [companyId, setCompanyId] = useState<number | null>(visitId !== null ? null : presetCompanyId);
+  const [facilityId, setFacilityId] = useState<number | null>(visitId !== null ? null : presetFacilityId);
   const [executedOn, setExecutedOn] = useState(presetDate);
   const [periodicity, setPeriodicity] = useState<Periodicity>(() => defaultPeriodicity(type));
   const [notes, setNotes] = useState('');
@@ -81,7 +97,7 @@ export function InspectionStep1Page() {
   // overrides a deliberate choice.
   const [periodicityTouched, setPeriodicityTouched] = useState(false);
 
-  const [loadingCompanies, setLoadingCompanies] = useState(true);
+  const [loadingCompanies, setLoadingCompanies] = useState(visitId === null);
   const [loadingFacilities, setLoadingFacilities] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,9 +105,33 @@ export function InspectionStep1Page() {
   const [newCompanyOpen, setNewCompanyOpen] = useState(false);
   const [newFacilityOpen, setNewFacilityOpen] = useState(false);
 
+  // The visit this úkon belongs to; its company, prevádzka and date replace
+  // the editable fields below.
+  useEffect(() => {
+    if (visitId === null) return;
+    let cancelled = false;
+    Visits.show(visitId)
+      .then((res) => {
+        if (cancelled) return;
+        setVisit(res.visit);
+        setCompanyId(res.visit.company_id);
+        setFacilityId(res.visit.facility_id);
+        setExecutedOn(res.visit.visit_date);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setVisitError(err instanceof ApiError ? err.message : 'Návštevu sa nepodarilo načítať.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visitId]);
+
   // Initial company list. Pulls a generous page (200) — enough for the
   // typical technician's client base; pagination/search lands in Phase 5.
+  // Not needed in a visit: the company is fixed there.
   useEffect(() => {
+    if (visitId !== null) return;
     let cancelled = false;
     Companies.list()
       .then((res) => {
@@ -111,7 +151,7 @@ export function InspectionStep1Page() {
     return () => {
       cancelled = true;
     };
-  }, [presetCompanyId]);
+  }, [presetCompanyId, visitId]);
 
   // Whenever the picked company changes, reload its facilities. Reset the
   // facility selection unless the preset already targets this company.
@@ -127,6 +167,12 @@ export function InspectionStep1Page() {
       .then((res) => {
         if (cancelled) return;
         setFacilities(res.facilities);
+        // In a visit the prevádzka is the visit's; the facilities are only
+        // loaded for the periodicity history and the offline draft.
+        if (visitId !== null) {
+          setVisitCompany(res.company);
+          return;
+        }
         setFacilityId((current) => {
           if (current !== null && res.facilities.some((f) => f.id === current)) {
             return current;
@@ -138,7 +184,8 @@ export function InspectionStep1Page() {
         });
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
+        // Best-effort in a visit — the locked rows need nothing from this.
+        if (cancelled || visitId !== null) return;
         setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať prevádzky.');
       })
       .finally(() => {
@@ -147,7 +194,7 @@ export function InspectionStep1Page() {
     return () => {
       cancelled = true;
     };
-  }, [companyId, presetFacilityId]);
+  }, [companyId, presetFacilityId, visitId]);
 
   // Prefill the periodicity from this prevádzka's history: what was chosen
   // here last time is a better guess than the catalogue's recommendation, and
@@ -167,6 +214,9 @@ export function InspectionStep1Page() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const errs: typeof fieldErrors = {};
+    // Inside a visit the three are the visit's own — nothing to validate, but
+    // nothing to submit either until it has loaded.
+    if (visitId !== null && !visit) return;
     if (!companyId) errs.company = 'Vyber firmu.';
     if (!facilityId) errs.facility = 'Vyber prevádzku.';
     if (!executedOn) errs.date = 'Zadaj dátum vykonania kontroly.';
@@ -188,7 +238,9 @@ export function InspectionStep1Page() {
         notes: notes.trim() || undefined,
         ...(visitId !== null ? { visit_id: visitId } : {}),
       };
-      const company = (companies ?? []).find((c) => c.id === companyId);
+      const company = visit
+        ? visitCompany
+        : (companies ?? []).find((c) => c.id === companyId);
       const facility = facilities.find((f) => f.id === facilityId);
       // Optimistic draft so the inspection (and Step 2) work offline; ignored
       // entirely when the create POST reaches the server.
@@ -196,12 +248,12 @@ export function InspectionStep1Page() {
         payload,
         company: {
           id: companyId!,
-          name: company?.name ?? '',
+          name: visit?.company_name ?? company?.name ?? '',
           ico: company?.ico ?? null,
           // Chapter 22 — the offline draft shows the firm's režim fakturácie.
           billing_mode: company?.billing_mode,
         },
-        facility: { id: facilityId!, name: facility?.name ?? '' },
+        facility: { id: facilityId!, name: visit?.facility_name ?? facility?.name ?? '' },
         inspector: { id: user?.id ?? 0, name: user?.fullname ?? '' },
       });
       const res = await Inspections.createDraft(payload, csrfToken, optimistic);
@@ -239,6 +291,40 @@ export function InspectionStep1Page() {
         ? `/companies/${presetCompanyId}`
         : newInspectionPath(isSection(sectionParam) ? sectionParam : null);
 
+  if (visitId !== null && visitError && !visit) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť
+        </Link>
+        <Card className="px-4 py-3 text-sm text-status-bad">{visitError}</Card>
+      </div>
+    );
+  }
+
+  if (visitId !== null && !visit) {
+    return (
+      <div className="flex flex-col gap-5">
+        <Link to={backHref} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť
+        </Link>
+        <header>
+          <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">
+            Úkon · základné údaje
+          </p>
+          <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">
+            {INSPECTION_TYPE_LABELS[type]}
+          </h1>
+        </header>
+        <Card className="p-5">
+          <VisitSharedFieldsSkeleton />
+        </Card>
+      </div>
+    );
+  }
+
   if (loadingCompanies) {
     return (
       <div className="flex justify-center py-10 text-ink-400">
@@ -247,7 +333,7 @@ export function InspectionStep1Page() {
     );
   }
 
-  if (companies !== null && companies.length === 0) {
+  if (visitId === null && companies !== null && companies.length === 0) {
     return (
       <div className="flex flex-col gap-4">
         <Link to="/" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
@@ -281,7 +367,9 @@ export function InspectionStep1Page() {
       <header className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">
-            Krok 1 · základné údaje
+            {visit
+              ? `Úkon ${visitUkonPosition(visit, type).n} z ${visitUkonPosition(visit, type).total} · základné údaje`
+              : 'Krok 1 · základné údaje'}
           </p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">
             {INSPECTION_TYPE_LABELS[type]}
@@ -291,97 +379,108 @@ export function InspectionStep1Page() {
 
       <Card className="p-5">
         <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-          <Field label="Spoločnosť" required error={fieldErrors.company}>
-            {(p) => (
-              <Select
-                id={p.id}
-                aria-invalid={p['aria-invalid']}
-                value={companyId !== null ? String(companyId) : ''}
-                onChange={(v) => { setCompanyId(v ? Number(v) : null); if (fieldErrors.company) setFieldErrors((prev) => ({ ...prev, company: undefined })); }}
-                placeholder="— vyber firmu —"
-                leftIcon={<Building2 className="size-4" />}
-                searchable
-                options={(companies ?? []).map((c) => ({
-                  value: String(c.id),
-                  label: c.name,
-                  description: c.ico ? `IČO ${c.ico}` : undefined,
-                }))}
-                headerSlot={({ closeDropdown }) => (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      closeDropdown();
-                      setNewCompanyOpen(true);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
-                  >
-                    <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
-                      <Plus className="size-3.5" />
-                    </span>
-                    Pridať novú firmu
-                  </button>
-                )}
-              />
-            )}
-          </Field>
+          {visit ? (
+            <VisitSharedFields
+              companyName={visit.company_name}
+              facilityName={visit.facility_name}
+              date={visit.visit_date}
+              dateLabel={dateLabel(type)}
+            />
+          ) : (
+            <>
+            <Field label="Spoločnosť" required error={fieldErrors.company}>
+              {(p) => (
+                <Select
+                  id={p.id}
+                  aria-invalid={p['aria-invalid']}
+                  value={companyId !== null ? String(companyId) : ''}
+                  onChange={(v) => { setCompanyId(v ? Number(v) : null); if (fieldErrors.company) setFieldErrors((prev) => ({ ...prev, company: undefined })); }}
+                  placeholder="— vyber firmu —"
+                  leftIcon={<Building2 className="size-4" />}
+                  searchable
+                  options={(companies ?? []).map((c) => ({
+                    value: String(c.id),
+                    label: c.name,
+                    description: c.ico ? `IČO ${c.ico}` : undefined,
+                  }))}
+                  headerSlot={({ closeDropdown }) => (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeDropdown();
+                        setNewCompanyOpen(true);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
+                    >
+                      <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
+                        <Plus className="size-3.5" />
+                      </span>
+                      Pridať novú firmu
+                    </button>
+                  )}
+                />
+              )}
+            </Field>
 
-          <Field label="Prevádzka" required error={fieldErrors.facility}>
-            {(p) => (
-              <Select
-                id={p.id}
-                aria-invalid={p['aria-invalid']}
-                value={facilityId !== null ? String(facilityId) : ''}
-                onChange={(v) => { setFacilityId(v ? Number(v) : null); if (fieldErrors.facility) setFieldErrors((prev) => ({ ...prev, facility: undefined })); }}
-                disabled={companyId === null || loadingFacilities}
-                placeholder={
-                  companyId === null
-                    ? '— najprv vyber firmu —'
-                    : loadingFacilities
-                      ? 'Načítavam…'
-                      : '— vyber prevádzku —'
-                }
-                leftIcon={<Warehouse className="size-4" />}
-                searchable
-                options={facilities.map((f) => ({
-                  value: String(f.id),
-                  label: f.name,
-                }))}
-                headerSlot={companyId !== null ? ({ closeDropdown }) => (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      closeDropdown();
-                      setNewFacilityOpen(true);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
-                  >
-                    <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
-                      <Plus className="size-3.5" />
-                    </span>
-                    Pridať prevádzku
-                  </button>
-                ) : undefined}
-              />
-            )}
-          </Field>
+            <Field label="Prevádzka" required error={fieldErrors.facility}>
+              {(p) => (
+                <Select
+                  id={p.id}
+                  aria-invalid={p['aria-invalid']}
+                  value={facilityId !== null ? String(facilityId) : ''}
+                  onChange={(v) => { setFacilityId(v ? Number(v) : null); if (fieldErrors.facility) setFieldErrors((prev) => ({ ...prev, facility: undefined })); }}
+                  disabled={companyId === null || loadingFacilities}
+                  placeholder={
+                    companyId === null
+                      ? '— najprv vyber firmu —'
+                      : loadingFacilities
+                        ? 'Načítavam…'
+                        : '— vyber prevádzku —'
+                  }
+                  leftIcon={<Warehouse className="size-4" />}
+                  searchable
+                  options={facilities.map((f) => ({
+                    value: String(f.id),
+                    label: f.name,
+                  }))}
+                  headerSlot={companyId !== null ? ({ closeDropdown }) => (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeDropdown();
+                        setNewFacilityOpen(true);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-firol-700 transition-colors hover:bg-firol-50"
+                    >
+                      <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
+                        <Plus className="size-3.5" />
+                      </span>
+                      Pridať prevádzku
+                    </button>
+                  ) : undefined}
+                />
+              )}
+            </Field>
 
-          <Field
-            label={dateLabel(type)}
-            required
-            hint={fieldErrors.date ? undefined : 'Predvyplnený je dnešný dátum, môžeš ho zmeniť aj na minulý.'}
-            error={fieldErrors.date}
-          >
-            {(p) => (
-              <Input
-                {...p}
-                type="date"
-                required
-                leftIcon={<CalendarDays className="size-4" />}
-                value={executedOn}
-                onChange={(e) => { setExecutedOn(e.target.value); if (fieldErrors.date) setFieldErrors((prev) => ({ ...prev, date: undefined })); }}
-              />
-            )}
-          </Field>
+            <Field
+              label={dateLabel(type)}
+              required
+              hint={fieldErrors.date ? undefined : 'Predvyplnený je dnešný dátum, môžeš ho zmeniť aj na minulý.'}
+              error={fieldErrors.date}
+            >
+              {(p) => (
+                <Input
+                  {...p}
+                  type="date"
+                  required
+                  leftIcon={<CalendarDays className="size-4" />}
+                  value={executedOn}
+                  onChange={(e) => { setExecutedOn(e.target.value); if (fieldErrors.date) setFieldErrors((prev) => ({ ...prev, date: undefined })); }}
+                />
+              )}
+            </Field>
+            </>
+          )}
 
           <Field label="Periodicita">
             {() => (

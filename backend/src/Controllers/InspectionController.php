@@ -531,6 +531,19 @@ final class InspectionController
         if ($type === null || !in_array($type, self::TYPES, true)) {
             Response::error('Invalid inspection type', 422);
         }
+        // Inside a visit (chapter 9) the company, prevádzka and date were chosen
+        // once, when the visit started. They are the visit's, not the request's:
+        // overriding them is friendlier offline than rejecting a draft that
+        // was queued with a stale value.
+        if ($visitId !== null) {
+            $visit = VisitController::findForUkon($visitId, $isAdmin, $accountId);
+            if ($visit === null) {
+                Response::error('Návšteva sa nenašla.', 404);
+            }
+            $companyId = $visit['company_id'];
+            $facilityId = $visit['facility_id'];
+            $executedOn = $visit['visit_date'];
+        }
         // Any value in days/weeks/months, or none at all. The type only
         // decides what the app SUGGESTS (chapter 5) — it never limits what the
         // technician may choose.

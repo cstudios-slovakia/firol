@@ -110,23 +110,28 @@ final class VisitController
             Response::error('Vyber aspoň jeden typ úkonu.', 422);
         }
 
+        // An admin's company list spans every account, so the visit belongs to
+        // the account that owns the chosen facility, not the admin's own.
+        $isAdmin = Admin::isAdmin($userId);
         $check = Db::pdo()->prepare(
-            'SELECT 1
+            'SELECT f.account_id
              FROM   facilities f
              JOIN   companies  c ON c.id = f.company_id
-             WHERE  f.id = ? AND f.company_id = ? AND f.account_id = ?
+             WHERE  f.id = ? AND f.company_id = ? AND (? = 1 OR f.account_id = ?)
                 AND f.archived_at IS NULL AND c.archived_at IS NULL'
         );
-        $check->execute([$facilityId, $companyId, $accountId]);
-        if ($check->fetchColumn() === false) {
+        $check->execute([$facilityId, $companyId, $isAdmin ? 1 : 0, $accountId]);
+        $ownerAccountId = $check->fetchColumn();
+        if ($ownerAccountId === false) {
             Response::error('Firma alebo prevádzka sa nenašla.', 404);
         }
+        $accountId = (int) $ownerAccountId;
 
         $auCheck = Db::pdo()->prepare(
             'SELECT 1 FROM account_users WHERE account_id = ? AND user_id = ?'
         );
         $auCheck->execute([$accountId, $technicianId]);
-        if ($auCheck->fetchColumn() === false && !Admin::isAdmin($userId)) {
+        if ($auCheck->fetchColumn() === false && !$isAdmin) {
             Response::error('Zvolený technik nie je členom tohto účtu.', 422);
         }
 
@@ -290,6 +295,39 @@ final class VisitController
                 'document_number' => $r['document_number'],
             ];
         }, $stmt->fetchAll());
+    }
+
+    /**
+     * The visit an úkon is being recorded under, for the create endpoints of
+     * inspections and trainings. They take company, prevádzka and date from it
+     * rather than from the request, so a úkon can never drift away from the
+     * visit that lists it. Null when the visit does not exist, is archived, or
+     * sits in another account (admins see every account).
+     *
+     * @return array{account_id: int, company_id: int, facility_id: int, visit_date: string}|null
+     */
+    public static function findForUkon(int $visitId, bool $isAdmin, int $accountId): ?array
+    {
+        $sql = 'SELECT account_id, company_id, facility_id, visit_date
+                FROM   visits
+                WHERE  id = ? AND archived_at IS NULL';
+        $args = [$visitId];
+        if (!$isAdmin) {
+            $sql .= ' AND account_id = ?';
+            $args[] = $accountId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($args);
+        $row = $stmt->fetch();
+        if (!$row) {
+            return null;
+        }
+        return [
+            'account_id'  => (int) $row['account_id'],
+            'company_id'  => (int) $row['company_id'],
+            'facility_id' => (int) $row['facility_id'],
+            'visit_date'  => (string) $row['visit_date'],
+        ];
     }
 
     /** @return list<string> */
