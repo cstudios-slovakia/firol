@@ -374,6 +374,7 @@ final class InspectionItemController
                 'activities'        => [],
                 'custom_activities' => [],
                 'result'            => 'bez_nedostatkov',
+                'no_defects_found'  => false,
                 'defects'           => [],
                 'notes'             => $notes,
             ];
@@ -414,6 +415,18 @@ final class InspectionItemController
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::PK_RESULTS, true)) {
             self::failValidation('Field result must be bez_nedostatkov or zistene_nedostatky.');
+        }
+
+        // Optional „no nedostatky found" statement: prints a ZISTENIA section
+        // with a fixed sentence and forces the result to bez_nedostatkov. It
+        // only makes sense while no nedostatok is entered.
+        $noDefectsFound = ($body['no_defects_found'] ?? false) === true;
+        if ($noDefectsFound) {
+            $defectsSent = is_array($body['defects'] ?? null) && $body['defects'] !== [];
+            if ($result === 'zistene_nedostatky' || $defectsSent) {
+                self::failValidation('Vyhlásenie „neboli zistené žiadne nedostatky" nejde použiť spolu s nedostatkom.');
+            }
+            $result = 'bez_nedostatkov';
         }
 
         // Per the PDF protokol (docs/handoff/.../04_Poziarna_kniha.pdf) every
@@ -460,6 +473,7 @@ final class InspectionItemController
             'activities'        => $activities,
             'custom_activities' => $customActivities,
             'result'            => $result,
+            'no_defects_found'  => $noDefectsFound,
             'defects'           => $defects,
             'notes'             => $notes,
         ];

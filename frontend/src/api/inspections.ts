@@ -245,6 +245,8 @@ export type PoziarnaKnihaItemFields = {
   activities: PkActivity[];
   custom_activities: string[];
   result: PkResult;
+  /** Optional „no nedostatky found" statement — prints ZISTENIA and forces result = bez_nedostatkov. Only valid with no defects. */
+  no_defects_found?: boolean;
   /** Per-defect list with its own deadline. Required when result = zistene_nedostatky. */
   defects: PkDefect[];
   /** Legacy single deadline — kept for reading older records; new writes use `defects`. */
