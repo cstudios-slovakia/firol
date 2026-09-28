@@ -167,11 +167,14 @@ export function TrainingEditPage() {
           <Field
             label={pokyn ? 'Dátum vydania pokynu' : 'Dátum školenia'}
             required
-            hint={dateError ? undefined : 'Zadaj manuálne, nemusí byť dnešný dátum.'}
+            hint={dateError ? undefined : training?.visit_id != null
+              ? 'Dátum je spoločný pre celú návštevu — mení sa na návšteve.'
+              : 'Zadaj manuálne, nemusí byť dnešný dátum.'}
             error={dateError}
           >
             {(p) => (
               <Input {...p} required type="date"
+                disabled={training?.visit_id != null}
                 leftIcon={<CalendarDays className="size-4" />}
                 value={date} onChange={(e) => { setDate(e.target.value); if (dateError) setDateError(null); }} />
             )}

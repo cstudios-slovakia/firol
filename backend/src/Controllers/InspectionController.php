@@ -693,6 +693,11 @@ final class InspectionController
         if ($executedOn !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $executedOn)) {
             Response::error('Invalid executed_on (expected YYYY-MM-DD)', 422);
         }
+        // The date of an úkon in a visit is the visit's (chapter 9) — ignored
+        // rather than rejected, so an edit queued offline still saves the rest.
+        if ($row['visit_id'] !== null) {
+            $executedOn = null;
+        }
 
         // Periodicity is edited as a whole: "bez opakovania" has to be
         // expressible, and a COALESCE over two columns cannot tell "leave it

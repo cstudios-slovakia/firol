@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
@@ -42,7 +43,7 @@ final class WorkConfirmationController
                        w.facility_id, f.name AS facility_name,
                        w.visit_id, w.confirmed_on, w.time_from, w.time_to,
                        w.technician_user_id, u.fullname AS technician_name,
-                       w.inspection_ids, w.created_at,
+                       w.inspection_ids, w.training_ids, w.created_at,
                        d.id AS document_id, d.number AS document_number
                 FROM   work_confirmations w
                 JOIN   companies  c ON c.id = w.company_id
@@ -75,6 +76,7 @@ final class WorkConfirmationController
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
         $userId = Tenant::currentUserId();
+        $isAdmin = Admin::isAdmin($userId);
 
         $visitId = $req->jsonInt('visit_id');
         $companyId = $req->jsonInt('company_id');
@@ -89,10 +91,16 @@ final class WorkConfirmationController
         $trainingIds = [];
 
         if ($visitId !== null) {
-            $visit = self::loadVisit($accountId, $visitId);
-            $companyId ??= (int) $visit['company_id'];
-            $facilityId ??= (int) $visit['facility_id'];
-            $confirmedOn ??= (string) $visit['visit_date'];
+            $visit = VisitController::findForUkon($visitId, $isAdmin, $accountId);
+            if ($visit === null) {
+                Response::error('Návšteva sa nenašla.', 404);
+            }
+            // An admin works across accounts: the confirmation (and its
+            // number) belongs to the account that owns the visit.
+            $accountId = $visit['account_id'];
+            $companyId ??= $visit['company_id'];
+            $facilityId ??= $visit['facility_id'];
+            $confirmedOn ??= $visit['visit_date'];
             if ($inspectionIds === []) {
                 $inspectionIds = self::inspectionIdsOfVisit($visitId);
             }
@@ -101,6 +109,17 @@ final class WorkConfirmationController
 
         if ($companyId === null) {
             Response::error('Vyber firmu.', 422);
+        }
+        // Same for a company picked without a visit: the confirmation is filed
+        // under the account that owns the company.
+        if ($isAdmin && $visitId === null) {
+            $owner = Db::pdo()->prepare('SELECT account_id FROM companies WHERE id = ? AND archived_at IS NULL');
+            $owner->execute([$companyId]);
+            $ownerAccountId = $owner->fetchColumn();
+            if ($ownerAccountId === false) {
+                Response::error('Firma sa nenašla.', 404);
+            }
+            $accountId = (int) $ownerAccountId;
         }
         if ($confirmedOn === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $confirmedOn)) {
             Response::error('Zadaj dátum vykonania práce.', 422);
@@ -311,7 +330,7 @@ final class WorkConfirmationController
                     w.facility_id, f.name AS facility_name,
                     w.visit_id, w.confirmed_on, w.time_from, w.time_to,
                     w.technician_user_id, u.fullname AS technician_name,
-                    w.inspection_ids, w.created_at,
+                    w.inspection_ids, w.training_ids, w.created_at,
                     d.id AS document_id, d.number AS document_number
              FROM   work_confirmations w
              JOIN   companies  c ON c.id = w.company_id
@@ -500,21 +519,6 @@ final class WorkConfirmationController
             'quantity'        => (int) $r['qty'] . ' ' . (string) $r['unit'],
             'document_number' => $r['document_number'],
         ], $stmt->fetchAll());
-    }
-
-    /** @return array<string, mixed> */
-    private static function loadVisit(int $accountId, int $visitId): array
-    {
-        $stmt = Db::pdo()->prepare(
-            'SELECT company_id, facility_id, visit_date FROM visits
-             WHERE  id = ? AND account_id = ? AND archived_at IS NULL'
-        );
-        $stmt->execute([$visitId, $accountId]);
-        $row = $stmt->fetch();
-        if (!$row) {
-            Response::error('Návšteva sa nenašla.', 404);
-        }
-        return $row;
     }
 
     /** „3 h 15 min", or null when either end of the interval is missing. */

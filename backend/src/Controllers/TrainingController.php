@@ -275,6 +275,12 @@ final class TrainingController
         if ($date !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
             Response::error('Invalid date (expected YYYY-MM-DD)', 422);
         }
+        // The date of a training in a visit is the visit's (chapter 9) —
+        // ignored rather than rejected, so an edit queued offline still saves
+        // the rest.
+        if ($existing['visit_id'] !== null) {
+            $date = null;
+        }
         // A finalized training is the record of an issued document — its text
         // must keep matching the PDF that carries its number.
         if ($fields !== null && $existing['status'] === 'finalized') {

@@ -539,16 +539,18 @@ export function InspectionDetailPage() {
               Dátum kontroly
             </p>
             <p className="mt-0.5 text-xs text-ink-600">
-              {isDraft
-                ? 'Zmeň dátum, ak opakuješ staršiu kontrolu — nový PDF protokol bude vystavený s týmto dátumom.'
-                : 'Dátum, s ktorým bol vystavený PDF protokol.'}
+              {i.visit_id !== null
+                ? 'Dátum je spoločný pre celú návštevu — mení sa na návšteve.'
+                : isDraft
+                  ? 'Zmeň dátum, ak opakuješ staršiu kontrolu — nový PDF protokol bude vystavený s týmto dátumom.'
+                  : 'Dátum, s ktorým bol vystavený PDF protokol.'}
             </p>
           </div>
         </div>
         <input
           type="date"
           value={localDate}
-          disabled={!isDraft || savingDate}
+          disabled={!isDraft || savingDate || i.visit_id !== null}
           onChange={(e) => setLocalDate(e.target.value)}
           aria-label="Dátum kontroly"
           className={cn(
