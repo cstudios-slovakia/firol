@@ -822,8 +822,9 @@ Migrations `035`–`037`.
   `visit_id`, so an úkon added on the spot joins the visit.
   **Školenie PO on a visit (done):** `trainings.visit_id` (migration `048`,
   which also adds `work_confirmations.training_ids`). `skolenie_po` is a planned
-  type — offered in the OPP group of `<VisitNewPage>`, never pre-ticked because
-  trainings carry no periodicity yet — and the visit lists its trainings, counts
+  type — offered in the OPP group of `<VisitNewPage>`, pre-ticked when a training
+  chain of the firm is due within 30 days or overdue (since item H) — and the
+  visit lists its trainings, counts
   them in „N z M hotové", starts them at `/trainings/new?visit_id=…` (company,
   prevádzka and date locked, type / trainer editable) and continues them.
   „Generovať všetky protokoly" calls `DocumentController::generateForTrainingInternal`
@@ -1192,8 +1193,37 @@ a **reduced scope**, which overrides the original report.
   /api/account/member-rights`, every change written to `audit_log`). Members
   don't see the buttons at all (`useMemberRights`); on a locked inspection the
   note points them to the main user instead of „Upraviť".
-- ⏸ **Client decisions — not implemented:** original point 6 (default
-  periodicity of training types) is not in the reduced scope; points 11, 12, 13
+- ✅ **H — periodicity on trainings (original point 6) (7. 10. 2026).** The
+  earlier „not in the reduced scope, do not implement" is **reversed**: on
+  7. 10. 2026 the owner decided to build point 6 in full — the fix half
+  (trainings carry a periodicity) and the new half (a recommended lehota per
+  subtype, the term in the calendar and in kniha BOZP). Migration `053`:
+  `trainings.periodicity_value` / `periodicity_unit` / `periodicity_is_custom`
+  and a nullable `training_id` on `calendar_plans` and `deadline_notices`
+  (exactly one of it and `inspection_id`, enforced by a CHECK). Recommended
+  lehoty (client's table, `TRAINING_RECOMMENDED_MONTHS` on both sides): 24
+  mesiacov for `vstupne`, `opakovane`, `zdrzujuca_sa`; 12 for `opp_mimo`,
+  `hliadka_oph`, `hliadka_opah`, `pokyn_zatva`. As on inspections the value is
+  only recommended: the technician can set any days / weeks / months or „bez
+  opakovania", and the form defaults to the last value used for the same chain
+  at that firma / prevádzka (`last_training_periodicities` on the company
+  response), else the subtype's recommendation, following the subtype until
+  touched. The period locks with the training (same `MemberRights` guard as the
+  date). `Deadlines` computes a term per training chain per prevádzka — or per
+  whole firma when the training has none (shown as „Celá firma"); the shape is
+  the inspection one with `training_id`, `training_type`, `done_training_id`.
+  Calendar, časová os, Dnes, planned dates (`/api/calendar/plans/training/{id}`),
+  client notices (recorded by `training_id`, naming the subtype) and the visit
+  pre-tick of Školenie PO all read it. The PDFs print „Periodicita: 12
+  mesiacov" (none without recurrence) and kniha BOZP „Termíny a kontroly"
+  prints platnosť do and stav for trainings. Backup and import carry the
+  columns. **Owner decisions:** (1) Vstupné and Opakované are one term chain
+  (`trainingChain()`): the next training of either fulfils the open term, every
+  other subtype is its own chain; (2) **no back-fill** — trainings from before
+  the migration stay „podľa potreby" and create no term. Oboznámenie BOZP
+  (`skolenie_bozp`, an inspection type) already worked and keeps its default
+  of 36 mesiacov.
+- ⏸ **Client decisions — not implemented:** points 11, 12, 13
   (custom BOZP deadlines, personal number of trainee, patrol training fields)
   cancelled by the client for budget reasons.
 - ✅ **Already done before this report:** point 1 (`e81f9af`), point 7, point 9
