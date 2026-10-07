@@ -133,7 +133,7 @@ final class CalendarController
 
         $date = $req->jsonString('planned_date');
         if ($date === null || !self::isDate($date)) {
-            Response::error('Invalid planned_date (expected YYYY-MM-DD)', 422);
+            Response::error('Neplatný plánovaný dátum (očakáva sa formát YYYY-MM-DD).', 422);
         }
 
         // Upsert: one plan per inspection (unique key).
@@ -310,13 +310,13 @@ final class CalendarController
     {
         $title = $req->jsonString('title');
         if ($title === null || trim($title) === '') {
-            Response::error('Title required', 422);
+            Response::error('Zadaj názov udalosti.', 422);
         }
         $title = mb_substr(trim($title), 0, 191);
 
         $date = $req->jsonString('event_date');
         if ($date === null || !self::isDate($date)) {
-            Response::error('Invalid event_date (expected YYYY-MM-DD)', 422);
+            Response::error('Neplatný dátum udalosti (očakáva sa formát YYYY-MM-DD).', 422);
         }
 
         $note = $req->jsonString('note');
@@ -336,14 +336,14 @@ final class CalendarController
             $c = Db::pdo()->prepare('SELECT 1 FROM companies WHERE id = ? AND account_id = ?');
             $c->execute([$companyId, $accountId]);
             if ($c->fetchColumn() === false) {
-                Response::error('Company not found', 422);
+                Response::error('Firma sa nenašla.', 422);
             }
         }
         if ($facilityId !== null) {
             $f = Db::pdo()->prepare('SELECT 1 FROM facilities WHERE id = ? AND account_id = ?');
             $f->execute([$facilityId, $accountId]);
             if ($f->fetchColumn() === false) {
-                Response::error('Facility not found', 422);
+                Response::error('Prevádzka sa nenašla.', 422);
             }
         }
 
@@ -366,7 +366,7 @@ final class CalendarController
         $stmt->execute($args);
         $owner = $stmt->fetchColumn();
         if ($owner === false) {
-            Response::error('Inspection not found', 404);
+            Response::error('Kontrola sa nenašla.', 404);
         }
         return (int) $owner;
     }
@@ -387,7 +387,7 @@ final class CalendarController
         $stmt->execute($args);
         $owner = $stmt->fetchColumn();
         if ($owner === false) {
-            Response::error('Event not found', 404);
+            Response::error('Udalosť sa nenašla.', 404);
         }
         return (int) $owner;
     }

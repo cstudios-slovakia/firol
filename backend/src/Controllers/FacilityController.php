@@ -42,7 +42,7 @@ final class FacilityController
             $check->execute([$companyId]);
             $companyAccountId = $check->fetchColumn();
             if ($companyAccountId === false) {
-                Response::error('Company not found', 404);
+                Response::error('Firma sa nenašla.', 404);
             }
             $accountId = (int) $companyAccountId;
         } else {
@@ -51,7 +51,7 @@ final class FacilityController
             );
             $check->execute([$companyId, $accountId]);
             if ($check->fetchColumn() === false) {
-                Response::error('Company not found', 404);
+                Response::error('Firma sa nenašla.', 404);
             }
         }
 
@@ -119,7 +119,7 @@ final class FacilityController
         $notes         = $req->jsonString('notes');
 
         if ($name === null || $name === '') {
-            Response::error('Field required: name', 422);
+            Response::error('Zadaj názov prevádzky.', 422);
         }
         // The edit form sends the structured parts; offline/import clients may
         // still send a single combined "Adresa" string.
@@ -149,7 +149,7 @@ final class FacilityController
         $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Facility not found', 404);
+            Response::error('Prevádzka sa nenašla.', 404);
         }
         return $row;
     }

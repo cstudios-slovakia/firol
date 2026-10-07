@@ -352,7 +352,7 @@ final class DocumentController
 
         $doc = self::loadDocument($isAdmin ? null : $accountId, $documentId);
         if (!$doc) {
-            Response::error('Document not found', 404);
+            Response::error('Dokument sa nenašiel.', 404);
         }
         if ($isAdmin) {
             $accountId = (int) $doc['account_id'];
@@ -403,13 +403,13 @@ final class DocumentController
 
         $doc = self::loadDocument($isAdmin ? null : $accountId, $documentId);
         if (!$doc) {
-            Response::error('Document not found', 404);
+            Response::error('Dokument sa nenašiel.', 404);
         }
 
         $abs = Storage::documentAbsolute($doc['file_path']);
         if (!is_file($abs)) {
             error_log('[document-download] file missing: ' . $abs);
-            Response::error('Document file is missing on disk.', 410);
+            Response::error('Súbor dokumentu chýba na disku.', 410);
         }
 
         $filename = ($doc['number'] ?? 'protocol') . '.pdf';
@@ -586,7 +586,7 @@ final class DocumentController
             $check->execute([$trainingId]);
             $trainingAccountId = $check->fetchColumn();
             if ($trainingAccountId === false) {
-                Response::error('Training not found', 404);
+                Response::error('Školenie sa nenašlo.', 404);
             }
             $accountId = (int) $trainingAccountId;
         } else {
@@ -595,7 +595,7 @@ final class DocumentController
             );
             $check->execute([$trainingId, $accountId]);
             if ($check->fetchColumn() === false) {
-                Response::error('Training not found', 404);
+                Response::error('Školenie sa nenašlo.', 404);
             }
         }
 
@@ -617,7 +617,7 @@ final class DocumentController
             $check->execute([$inspectionId]);
             $insAccountId = $check->fetchColumn();
             if ($insAccountId === false) {
-                Response::error('Inspection not found', 404);
+                Response::error('Kontrola sa nenašla.', 404);
             }
             $accountId = (int) $insAccountId;
         } else {
@@ -626,7 +626,7 @@ final class DocumentController
             );
             $check->execute([$inspectionId, $accountId]);
             if ($check->fetchColumn() === false) {
-                Response::error('Inspection not found', 404);
+                Response::error('Kontrola sa nenašla.', 404);
             }
         }
 
@@ -668,7 +668,7 @@ final class DocumentController
         $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Inspection not found', 404);
+            Response::error('Kontrola sa nenašla.', 404);
         }
         return $row;
     }
@@ -1427,7 +1427,7 @@ final class DocumentController
         $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Training not found', 404);
+            Response::error('Školenie sa nenašlo.', 404);
         }
         return $row;
     }

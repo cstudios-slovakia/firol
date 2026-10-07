@@ -178,7 +178,7 @@ final class InspectionController
         // placeholder is not portable across PDO emulation settings.
         $field = (string) $req->query('field');
         if (!in_array($field, ['manufacturer', 'type', 'location'], true)) {
-            Response::error('Invalid field', 422);
+            Response::error('Neplatné pole.', 422);
         }
         $val = "JSON_UNQUOTE(JSON_EXTRACT(ji.fields, '\$.$field'))";
         // A JSON column is stored with the binary collation, which would make
@@ -529,7 +529,7 @@ final class InspectionController
         $details = self::readDetails($req, (string) $type);
 
         if ($type === null || !in_array($type, self::TYPES, true)) {
-            Response::error('Invalid inspection type', 422);
+            Response::error('Neplatný typ kontroly.', 422);
         }
         // Inside a visit (chapter 9) the company, prevádzka and date were chosen
         // once, when the visit started. They are the visit's, not the request's:
@@ -549,10 +549,10 @@ final class InspectionController
         // technician may choose.
         [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
         if ($companyId === null || $facilityId === null) {
-            Response::error('Field required: company_id, facility_id', 422);
+            Response::error('Vyber firmu aj prevádzku.', 422);
         }
         if ($executedOn === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $executedOn)) {
-            Response::error('Invalid executed_on (expected YYYY-MM-DD)', 422);
+            Response::error('Neplatný dátum vykonania (očakáva sa formát YYYY-MM-DD).', 422);
         }
 
         // Verify the facility exists, belongs to the company, and (for
@@ -570,7 +570,7 @@ final class InspectionController
             $check->execute([$facilityId, $companyId]);
             $facAccountId = $check->fetchColumn();
             if ($facAccountId === false) {
-                Response::error('Company or facility not found', 404);
+                Response::error('Firma alebo prevádzka sa nenašla.', 404);
             }
             $accountId = (int) $facAccountId;
         } else {
@@ -583,7 +583,7 @@ final class InspectionController
             );
             $check->execute([$facilityId, $companyId, $accountId]);
             if ($check->fetchColumn() === false) {
-                Response::error('Company or facility not found', 404);
+                Response::error('Firma alebo prevádzka sa nenašla.', 404);
             }
         }
 
@@ -596,7 +596,7 @@ final class InspectionController
             );
             $auCheck->execute([$accountId, $inspectorUserId]);
             if ($auCheck->fetchColumn() === false) {
-                Response::error('Inspector is not a member of this account', 422);
+                Response::error('Technik nie je členom tohto účtu.', 422);
             }
         }
 
@@ -691,7 +691,7 @@ final class InspectionController
         $notes = $req->jsonString('notes');
 
         if ($executedOn !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $executedOn)) {
-            Response::error('Invalid executed_on (expected YYYY-MM-DD)', 422);
+            Response::error('Neplatný dátum vykonania (očakáva sa formát YYYY-MM-DD).', 422);
         }
         // The date of an úkon in a visit is the visit's (chapter 9) — ignored
         // rather than rejected, so an edit queued offline still saves the rest.
@@ -1339,7 +1339,7 @@ final class InspectionController
         $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Inspection not found', 404);
+            Response::error('Kontrola sa nenašla.', 404);
         }
         return $row;
     }

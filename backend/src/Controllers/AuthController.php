@@ -30,16 +30,16 @@ final class AuthController
         // true: an unticked box must fail here even if the UI is bypassed.
         $termsAccepted       = $req->jsonBool('terms_accepted') ?? false;
 
-        if ($fullname === null || $fullname === '')           { Response::error('Field required: fullname',             422); }
-        if ($email === null || !self::isValidEmail($email))   { Response::error('Field required or invalid: email',     422); }
+        if ($fullname === null || $fullname === '')           { Response::error('Zadaj meno a priezvisko.',             422); }
+        if ($email === null || !self::isValidEmail($email))   { Response::error('Zadaj platnú e-mailovú adresu.',     422); }
         if ($password === null || !Password::isStrongEnough($password)) {
-            Response::error('Password must be at least ' . Password::MIN_LENGTH . ' characters', 422);
+            Response::error('Heslo musí mať aspoň ' . Password::MIN_LENGTH . ' znakov.', 422);
         }
         if ($invoiceCompanyName === null || $invoiceCompanyName === '') {
-            Response::error('Field required: invoice_company_name', 422);
+            Response::error('Zadaj názov firmy pre fakturáciu.', 422);
         }
         if ($billingPeriod !== 'monthly' && $billingPeriod !== 'yearly' && $billingPeriod !== 'trial') {
-            Response::error('billing_period must be "trial", "monthly" or "yearly"', 422);
+            Response::error('Neplatné fakturačné obdobie (očakáva sa „trial“, „monthly“ alebo „yearly“).', 422);
         }
         if ($termsAccepted !== true) {
             Response::error(
@@ -61,7 +61,7 @@ final class AuthController
         $claimUserId  = null;
         if ($existingUser !== false) {
             if ((int) $existingUser['is_pending'] !== 1) {
-                Response::error('Email already registered', 409);
+                Response::error('Tento e-mail je už zaregistrovaný.', 409);
             }
             $claimUserId = (int) $existingUser['id'];
         }
@@ -182,7 +182,7 @@ final class AuthController
         $remember = $req->jsonBool('remember') ?? false;
 
         if ($email === null || $password === null) {
-            Response::error('Email and password required', 422);
+            Response::error('Zadaj e-mail a heslo.', 422);
         }
 
         // Rate-limit by IP + email separately so a single attacker IP can't
@@ -198,7 +198,7 @@ final class AuthController
         $user = $stmt->fetch();
 
         if (!$user || !Password::verify($password, (string) $user['password_hash'])) {
-            Response::error('Invalid email or password', 401);
+            Response::error('Nesprávny e-mail alebo heslo.', 401);
         }
 
         // Drop both counters now that we know the credentials matched.
@@ -216,7 +216,7 @@ final class AuthController
         $accountId = $accStmt->fetchColumn();
 
         if ($accountId === false) {
-            Response::error('User has no active account', 403);
+            Response::error('Používateľ nemá aktívny účet.', 403);
         }
 
         Session::setUserId($userId);
@@ -243,7 +243,7 @@ final class AuthController
     {
         $email = $req->jsonString('email');
         if ($email === null || !self::isValidEmail($email)) {
-            Response::error('Valid email required', 422);
+            Response::error('Zadaj platnú e-mailovú adresu.', 422);
         }
 
         $pdo  = Db::pdo();
@@ -274,10 +274,10 @@ final class AuthController
         $newPassword = $req->jsonString('password');
 
         if ($token === null || $token === '') {
-            Response::error('Token required', 422);
+            Response::error('Chýba token.', 422);
         }
         if ($newPassword === null || !Password::isStrongEnough($newPassword)) {
-            Response::error('Password must be at least ' . Password::MIN_LENGTH . ' characters', 422);
+            Response::error('Heslo musí mať aspoň ' . Password::MIN_LENGTH . ' znakov.', 422);
         }
 
         $pdo  = Db::pdo();
@@ -288,7 +288,7 @@ final class AuthController
         $row = $stmt->fetch();
 
         if (!$row || $row['used_at'] !== null || strtotime((string) $row['expires_at']) < time()) {
-            Response::error('Token invalid or expired', 400);
+            Response::error('Odkaz je neplatný alebo vypršal.', 400);
         }
 
         $pdo->beginTransaction();

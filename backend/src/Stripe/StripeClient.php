@@ -24,7 +24,7 @@ final class StripeClient
         }
         $secret = (string) ($_ENV['STRIPE_SECRET_KEY'] ?? '');
         if ($secret === '') {
-            Response::error('Stripe is not configured on the server', 500);
+            Response::error('Platobná brána Stripe nie je na serveri nastavená.', 500);
         }
         self::$instance = new SdkClient([
             'api_key'        => $secret,
@@ -39,7 +39,7 @@ final class StripeClient
     {
         $secret = (string) ($_ENV['STRIPE_WEBHOOK_SECRET'] ?? '');
         if ($secret === '') {
-            Response::error('Stripe webhook secret not configured', 500);
+            Response::error('Webhook platobnej brány Stripe nie je na serveri nastavený.', 500);
         }
         return $secret;
     }
@@ -49,7 +49,7 @@ final class StripeClient
         $key = $billingPeriod === 'yearly' ? 'STRIPE_PRICE_YEARLY' : 'STRIPE_PRICE_MONTHLY';
         $price = (string) ($_ENV[$key] ?? '');
         if ($price === '') {
-            Response::error("Stripe $key not configured", 500);
+            Response::error("Platobná brána Stripe nemá na serveri nastavené „$key“.", 500);
         }
         return $price;
     }

@@ -68,7 +68,7 @@ final class AdminController
             $value = $body[$key];
             if ($rule['type'] === 'int') {
                 if (!is_int($value) && !(is_string($value) && ctype_digit($value))) {
-                    Response::error("$key must be an integer", 422);
+                    Response::error("Hodnota „$key“ musí byť celé číslo.", 422);
                 }
                 $intVal = (int) $value;
                 if ($intVal < $rule['min'] || $intVal > $rule['max']) {
@@ -80,7 +80,7 @@ final class AdminController
                 $stmt->execute([$key, (string) $intVal]);
             } elseif ($rule['type'] === 'float') {
                 if (!is_int($value) && !is_float($value) && !(is_string($value) && is_numeric($value))) {
-                    Response::error("$key must be a number", 422);
+                    Response::error("Hodnota „$key“ musí byť číslo.", 422);
                 }
                 $floatVal = round((float) $value, 2);
                 if ($floatVal < $rule['min'] || $floatVal > $rule['max']) {

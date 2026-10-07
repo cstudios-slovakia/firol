@@ -196,12 +196,12 @@ final class AdminPanelController
         Admin::require();
 
         $accountId = (int) ($params['id'] ?? 0);
-        if ($accountId <= 0) Response::error('Invalid account id', 422);
+        if ($accountId <= 0) Response::error('Neplatné ID účtu.', 422);
 
         $pdo = Db::pdo();
         $exists = $pdo->prepare('SELECT 1 FROM accounts WHERE id = ?');
         $exists->execute([$accountId]);
-        if ($exists->fetchColumn() === false) Response::error('Account not found', 404);
+        if ($exists->fetchColumn() === false) Response::error('Účet sa nenašiel.', 404);
 
         // Distinct years that actually have invoices, newest first.
         $yearsStmt = $pdo->prepare(
@@ -260,7 +260,7 @@ final class AdminPanelController
         Csrf::require($req);
 
         $id = (int) ($params['id'] ?? 0);
-        if ($id <= 0) Response::error('Invalid account id', 422);
+        if ($id <= 0) Response::error('Neplatné ID účtu.', 422);
 
         $sets = [];
         $bind = [];
@@ -268,7 +268,7 @@ final class AdminPanelController
         $name = $req->jsonString('invoice_company_name');
         if ($name !== null) {
             $name = trim($name);
-            if ($name === '') Response::error('invoice_company_name cannot be empty', 422);
+            if ($name === '') Response::error('Zadaj názov firmy pre fakturáciu.', 422);
             $sets[] = 'invoice_company_name = ?';
             $bind[] = $name;
         }
@@ -276,7 +276,7 @@ final class AdminPanelController
         $end = $req->jsonString('subscription_end_date');
         if ($end !== null) {
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $end)) {
-                Response::error('subscription_end_date must be YYYY-MM-DD', 422);
+                Response::error('Neplatný dátum konca predplatného (očakáva sa formát YYYY-MM-DD).', 422);
             }
             $sets[] = 'subscription_end_date = ?';
             $bind[] = $end;
@@ -290,7 +290,7 @@ final class AdminPanelController
         $syncSeats   = false;
         if ($includedRaw !== null) {
             if (!is_int($includedRaw) && !(is_string($includedRaw) && ctype_digit($includedRaw))) {
-                Response::error('included_technicians must be an integer', 422);
+                Response::error('Počet zahrnutých technikov musí byť celé číslo.', 422);
             }
             $included = (int) $includedRaw;
             if ($included < 1 || $included > 1000) {
@@ -301,7 +301,7 @@ final class AdminPanelController
             $syncSeats = true;
         }
 
-        if ($sets === []) Response::error('Nothing to update', 422);
+        if ($sets === []) Response::error('Nie je čo aktualizovať.', 422);
 
         // Snapshot the row before mutation so the audit log can show diff.
         $beforeStmt = Db::pdo()->prepare(
@@ -319,7 +319,7 @@ final class AdminPanelController
             // Either id doesn't exist, or values were unchanged. Verify.
             $exists = Db::pdo()->prepare('SELECT 1 FROM accounts WHERE id = ?');
             $exists->execute([$id]);
-            if ($exists->fetchColumn() === false) Response::error('Account not found', 404);
+            if ($exists->fetchColumn() === false) Response::error('Účet sa nenašiel.', 404);
         }
 
         $afterStmt = Db::pdo()->prepare(
@@ -342,7 +342,7 @@ final class AdminPanelController
         Csrf::require($req);
 
         $id = (int) ($params['id'] ?? 0);
-        if ($id <= 0) Response::error('Invalid account id', 422);
+        if ($id <= 0) Response::error('Neplatné ID účtu.', 422);
 
         // Refuse to nuke the admin's own active tenant — otherwise they'd
         // need to re-login mid-session and the activeAccountId in the
@@ -397,7 +397,7 @@ final class AdminPanelController
         Csrf::require($req);
 
         $id = (int) ($params['id'] ?? 0);
-        if ($id <= 0) Response::error('Invalid user id', 422);
+        if ($id <= 0) Response::error('Neplatné ID používateľa.', 422);
 
         $sets = [];
         $bind = [];
@@ -405,7 +405,7 @@ final class AdminPanelController
         $fullname = $req->jsonString('fullname');
         if ($fullname !== null) {
             $fullname = trim($fullname);
-            if ($fullname === '') Response::error('fullname cannot be empty', 422);
+            if ($fullname === '') Response::error('Zadaj meno a priezvisko.', 422);
             $sets[] = 'fullname = ?';
             $bind[] = $fullname;
         }
@@ -414,7 +414,7 @@ final class AdminPanelController
         if ($email !== null) {
             $email = strtolower(trim($email));
             if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-                Response::error('Invalid email', 422);
+                Response::error('Neplatná e-mailová adresa.', 422);
             }
             $sets[] = 'email = ?';
             $bind[] = $email;
@@ -444,7 +444,7 @@ final class AdminPanelController
             $bind[] = $isAdmin ? 1 : 0;
         }
 
-        if ($sets === []) Response::error('Nothing to update', 422);
+        if ($sets === []) Response::error('Nie je čo aktualizovať.', 422);
 
         $beforeStmt = Db::pdo()->prepare('SELECT fullname, email, phone, is_admin FROM users WHERE id = ?');
         $beforeStmt->execute([$id]);
@@ -476,7 +476,7 @@ final class AdminPanelController
         Csrf::require($req);
 
         $id = (int) ($params['id'] ?? 0);
-        if ($id <= 0) Response::error('Invalid user id', 422);
+        if ($id <= 0) Response::error('Neplatné ID používateľa.', 422);
 
         if ($id === Tenant::currentUserId()) {
             Response::error('Nemôžeš zmazať sám seba.', 409);
@@ -535,17 +535,17 @@ final class AdminPanelController
 
         $accountId = (int) ($params['id'] ?? 0);
         $userId    = (int) ($params['user_id'] ?? 0);
-        if ($accountId <= 0 || $userId <= 0) Response::error('Invalid id', 422);
+        if ($accountId <= 0 || $userId <= 0) Response::error('Neplatné ID.', 422);
 
         $isActive = $req->jsonBool('is_active');
-        if ($isActive === null) Response::error('Field required: is_active', 422);
+        if ($isActive === null) Response::error('Chýba údaj o aktivite (is_active).', 422);
 
         // The main user owns the account and must stay active — deactivating
         // them would strip the tenant of its only guaranteed member.
         $mainStmt = Db::pdo()->prepare('SELECT main_user_id FROM accounts WHERE id = ?');
         $mainStmt->execute([$accountId]);
         $mainId = $mainStmt->fetchColumn();
-        if ($mainId === false) Response::error('Account not found', 404);
+        if ($mainId === false) Response::error('Účet sa nenašiel.', 404);
         if (!$isActive && (int) $mainId === $userId) {
             Response::error('Hlavného používateľa účtu nie je možné deaktivovať.', 409);
         }

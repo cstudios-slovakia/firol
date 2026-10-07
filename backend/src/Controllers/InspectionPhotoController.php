@@ -415,7 +415,7 @@ final class InspectionPhotoController
         $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Inspection not found', 404);
+            Response::error('Kontrola sa nenašla.', 404);
         }
         return $row;
     }
@@ -438,7 +438,7 @@ final class InspectionPhotoController
         );
         $stmt->execute([$itemId, $inspectionId]);
         if ($stmt->fetchColumn() === false) {
-            Response::error('Item not found', 404);
+            Response::error('Položka sa nenašla.', 404);
         }
     }
 

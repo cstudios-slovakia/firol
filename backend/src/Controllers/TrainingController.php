@@ -147,7 +147,7 @@ final class TrainingController
         $visitId     = $req->jsonInt('visit_id');
 
         if ($type === null || !in_array($type, self::TYPES, true)) {
-            Response::error('Invalid training type', 422);
+            Response::error('Neplatný typ školenia.', 422);
         }
         // Inside a visit (chapter 9) the company, prevádzka and date were chosen
         // once, when the visit started: they are the visit's, not the request's.
@@ -175,10 +175,10 @@ final class TrainingController
         // required once the PDF is generated.
         $fields = self::fieldsForType($req, $type, required: false);
         if ($companyId === null) {
-            Response::error('Field required: company_id', 422);
+            Response::error('Vyber firmu.', 422);
         }
         if ($date === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-            Response::error('Invalid date (expected YYYY-MM-DD)', 422);
+            Response::error('Neplatný dátum (očakáva sa formát YYYY-MM-DD).', 422);
         }
 
         // Verify company belongs to the account; facility (optional) must
@@ -193,7 +193,7 @@ final class TrainingController
             $check->execute([$companyId]);
             $companyAccountId = $check->fetchColumn();
             if ($companyAccountId === false) {
-                Response::error('Company not found', 404);
+                Response::error('Firma sa nenašla.', 404);
             }
             $accountId = (int) $companyAccountId;
         } else {
@@ -202,7 +202,7 @@ final class TrainingController
             );
             $check->execute([$companyId, $accountId]);
             if ($check->fetchColumn() === false) {
-                Response::error('Company not found', 404);
+                Response::error('Firma sa nenašla.', 404);
             }
         }
 
@@ -216,7 +216,7 @@ final class TrainingController
             );
             $fc->execute([$facilityId, $companyId]);
             if ($fc->fetchColumn() === false) {
-                Response::error('Facility does not belong to the chosen company', 422);
+                Response::error('Prevádzka nepatrí k vybranej firme.', 422);
             }
         }
 
@@ -232,7 +232,7 @@ final class TrainingController
                 $tc->execute([$trainerId, $accountId]);
             }
             if ($tc->fetchColumn() === false) {
-                Response::error('Trainer not found', 422);
+                Response::error('Školiteľ sa nenašiel.', 422);
             }
         }
 
@@ -273,7 +273,7 @@ final class TrainingController
         $fields      = self::fieldsForType($req, (string) $existing['type'], required: false);
 
         if ($date !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-            Response::error('Invalid date (expected YYYY-MM-DD)', 422);
+            Response::error('Neplatný dátum (očakáva sa formát YYYY-MM-DD).', 422);
         }
         // The date of a training in a visit is the visit's (chapter 9) —
         // ignored rather than rejected, so an edit queued offline still saves
@@ -298,7 +298,7 @@ final class TrainingController
                 $tc->execute([$trainerId, $accountId]);
             }
             if ($tc->fetchColumn() === false) {
-                Response::error('Trainer not found', 422);
+                Response::error('Školiteľ sa nenašiel.', 422);
             }
         }
 
@@ -373,7 +373,7 @@ final class TrainingController
         $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Training not found', 404);
+            Response::error('Školenie sa nenašlo.', 404);
         }
         return $row;
     }
@@ -429,7 +429,7 @@ final class TrainingController
             return null;
         }
         if (!is_array($raw)) {
-            Response::error('Field fields must be an object.', 422);
+            Response::error('Pole „fields“ musí byť objekt.', 422);
         }
 
         try {

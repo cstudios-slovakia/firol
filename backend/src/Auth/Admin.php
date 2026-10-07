@@ -77,7 +77,7 @@ final class Admin
     {
         $userId = Tenant::currentUserId();
         if (!self::isAdmin($userId)) {
-            Response::error('Admin access required', 403);
+            Response::error('Vyžaduje sa prístup správcu.', 403);
         }
         return $userId;
     }

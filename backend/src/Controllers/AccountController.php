@@ -40,10 +40,10 @@ final class AccountController
         $themeColor  = $req->jsonString('theme_color');
 
         if ($invoiceName !== null && trim($invoiceName) === '') {
-            Response::error('invoice_company_name cannot be empty', 422);
+            Response::error('Zadaj názov firmy pre fakturáciu.', 422);
         }
         if ($themeColor !== null && $themeColor !== '' && !preg_match('/^#[0-9a-fA-F]{6}$/', $themeColor)) {
-            Response::error('Invalid theme_color (expected #RRGGBB)', 422);
+            Response::error('Neplatná farba motívu (očakáva sa #RRGGBB).', 422);
         }
 
         // Empty string clears the override and falls back to Firol red.
@@ -79,7 +79,7 @@ final class AccountController
             }
             // invoice_country is NOT NULL in schema — refuse to clear it.
             if ($col === 'invoice_country' && $trimmed === '') {
-                Response::error('invoice_country cannot be empty', 422);
+                Response::error('Zadaj krajinu pre fakturáciu.', 422);
             }
             $sets[]   = "$col = ?";
             $params[] = $trimmed === '' ? null : $trimmed;
@@ -100,15 +100,15 @@ final class AccountController
 
         $file = $_FILES['logo'] ?? null;
         if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            Response::error('No logo file uploaded', 422);
+            Response::error('Nenahral sa žiadny súbor s logom.', 422);
         }
         if (($file['size'] ?? 0) > self::MAX_LOGO_BYTES) {
-            Response::error('Logo too large (max 1 MB)', 422);
+            Response::error('Logo je príliš veľké (max 1 MB).', 422);
         }
 
         $tmp = (string) ($file['tmp_name'] ?? '');
         if ($tmp === '' || !is_uploaded_file($tmp)) {
-            Response::error('Upload failed', 422);
+            Response::error('Nahratie súboru zlyhalo.', 422);
         }
 
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
@@ -122,7 +122,7 @@ final class AccountController
             default      => null,
         };
         if ($extByMime === null) {
-            Response::error('Logo must be a PNG or JPEG image', 422);
+            Response::error('Logo musí byť obrázok PNG alebo JPEG.', 422);
         }
 
         // Store under a single canonical filename per extension. If the
@@ -139,7 +139,7 @@ final class AccountController
 
         $dest = Storage::accountLogoPath($accountId, $extByMime);
         if (!move_uploaded_file($tmp, $dest)) {
-            Response::error('Failed to store logo', 500);
+            Response::error('Logo sa nepodarilo uložiť.', 500);
         }
 
         Db::pdo()->prepare('UPDATE accounts SET logo_path = ? WHERE id = ?')
@@ -176,23 +176,23 @@ final class AccountController
 
         $rel = is_array($row) ? ($row['logo_path'] ?? null) : null;
         if (!is_string($rel) || $rel === '') {
-            Response::error('No logo on file', 404);
+            Response::error('Logo nie je nahraté.', 404);
         }
         // Guard against a stored logo_path containing path-traversal segments.
         // Only the canonical layout (accounts/<id>/logo.png|jpg) is acceptable —
         // anything else (../, absolute paths, …) is treated as tampered data.
         if (!preg_match('#^accounts/\d+/logo\.(png|jpg)$#', $rel)) {
             error_log('[downloadLogo] suspicious logo_path on account ' . (int) $accountId . ': ' . $rel);
-            Response::error('No logo on file', 404);
+            Response::error('Logo nie je nahraté.', 404);
         }
         $abs  = Storage::root() . '/' . $rel;
         $root = realpath(Storage::root());
         $real = realpath($abs);
         if ($root === false || $real === false || !str_starts_with($real, $root . DIRECTORY_SEPARATOR)) {
-            Response::error('No logo on file', 404);
+            Response::error('Logo nie je nahraté.', 404);
         }
         if (!is_file($abs)) {
-            Response::error('No logo on file', 404);
+            Response::error('Logo nie je nahraté.', 404);
         }
 
         $mime = str_ends_with($rel, '.jpg') ? 'image/jpeg' : 'image/png';

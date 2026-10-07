@@ -333,5 +333,5 @@ try {
     $router->dispatch($request);
 } catch (\Throwable $e) {
     error_log('[unhandled] ' . $e::class . ': ' . $e->getMessage() . "\n" . $e->getTraceAsString());
-    Response::error('Internal Server Error', 500);
+    Response::error('Nastala chyba servera. Skús to znova.', 500);
 }

@@ -229,7 +229,7 @@ final class CompanyController
         $approver = $req->jsonString('approver');
 
         if ($name === null || $name === '') {
-            Response::error('Field required: name', 422);
+            Response::error('Zadaj názov firmy.', 422);
         }
         if ($ico !== null) {
             $ico = preg_replace('/\s+/', '', $ico);
@@ -245,7 +245,7 @@ final class CompanyController
             if ($contactEmail === '') {
                 $contactEmail = null;
             } elseif (!filter_var($contactEmail, FILTER_VALIDATE_EMAIL)) {
-                Response::error('Invalid contact_email', 422);
+                Response::error('Zadaj platný kontaktný e-mail.', 422);
             }
         }
 
@@ -296,7 +296,7 @@ final class CompanyController
         }
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Company not found', 404);
+            Response::error('Firma sa nenašla.', 404);
         }
         return $row;
     }
