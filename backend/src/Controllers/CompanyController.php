@@ -11,6 +11,7 @@ use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Support\Address;
+use Firol\Support\Periodicity;
 use PDO;
 
 final class CompanyController
@@ -124,16 +125,41 @@ final class CompanyController
                 'unit'  => $r['periodicity_unit'] !== null ? (string) $r['periodicity_unit'] : null,
             ];
         }
+
+        // The same for trainings, per term chain (Vstupné and Opakované share
+        // one — Periodicity::trainingChain). Newest first, so the first row
+        // seen for a (prevádzka, chain) is the latest. Trainings without a
+        // prevádzka are the whole firm's and go under their own key.
+        $trStmt = Db::pdo()->prepare(
+            'SELECT t.facility_id, t.type, t.periodicity_value, t.periodicity_unit
+             FROM   trainings t
+             WHERE  t.company_id = ? AND t.account_id = ? AND t.archived_at IS NULL
+               AND  t.date IS NOT NULL
+             ORDER  BY t.date DESC, t.id DESC'
+        );
+        $trStmt->execute([$id, (int) $row['account_id']]);
+        $trainingDefaults = [];
+        foreach ($trStmt->fetchAll() as $r) {
+            $scope = $r['facility_id'] !== null ? (int) $r['facility_id'] : 'company';
+            $chain = Periodicity::trainingChain((string) $r['type']);
+            $trainingDefaults[$scope][$chain] ??= [
+                'value' => $r['periodicity_value'] !== null ? (int) $r['periodicity_value'] : null,
+                'unit'  => $r['periodicity_unit'] !== null ? (string) $r['periodicity_unit'] : null,
+            ];
+        }
+
         foreach ($facilities as &$fac) {
             $fac['id'] = (int) $fac['id'];
             $fac['address'] = Address::format($fac['street'], $fac['postal_code'], $fac['city']);
             $fac['last_periodicities'] = $defaultsByFacility[$fac['id']] ?? new \stdClass();
+            $fac['last_training_periodicities'] = $trainingDefaults[$fac['id']] ?? new \stdClass();
         }
         unset($fac);
 
         Response::json([
             'company'    => self::shape($row),
             'facilities' => $facilities,
+            'company_last_training_periodicities' => $trainingDefaults['company'] ?? new \stdClass(),
         ]);
     }
 

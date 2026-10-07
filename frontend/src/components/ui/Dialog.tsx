@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useDelayedMount } from '@/lib/useDelayedMount';
+import { lockScroll } from '@/lib/scrollLock';
 
 type DialogProps = {
   open: boolean;
@@ -52,14 +53,13 @@ export function Dialog({
     document.addEventListener('keydown', onKey);
     // Prevent the body from scrolling while the dialog is open. The
     // backdrop catches scrolls on its own.
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const unlock = lockScroll();
     // Move focus into the panel so screen readers announce it and
     // keyboard nav starts from a sensible place.
     panelRef.current?.focus();
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
+      unlock();
     };
   }, [open]);
 

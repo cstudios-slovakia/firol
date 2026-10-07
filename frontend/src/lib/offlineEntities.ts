@@ -22,7 +22,7 @@
  */
 import type { CachePatch, OptimisticSpec } from './api';
 import { mintTempId } from './tempId';
-import { validUntil } from './periodicity';
+import { validUntil, type Periodicity } from './periodicity';
 import type {
   Inspection,
   InspectionDetail,
@@ -126,6 +126,9 @@ export function inspectionCreateOptimistic(args: {
     facility_name: args.facility.name,
     inspector_user_id: args.inspector.id,
     inspector_name: args.inspector.name,
+    // The server records the creator when the create syncs; until then the
+    // draft counts as the assigned technician's (useMemberRights falls back).
+    created_by_user_id: null,
     effective_inspector_user_id: null,
     effective_inspector_name: null,
     effective_cert_number: null,
@@ -174,6 +177,15 @@ export function trainingCreateOptimistic(args: {
     id,
     type: args.payload.type,
     date: args.payload.date ?? null,
+    periodicity_value: args.payload.periodicity_value ?? null,
+    periodicity_unit: args.payload.periodicity_unit ?? null,
+    // As for inspections: the server decides whether the period is custom when
+    // the create syncs, and nothing in the UI reads the flag before then.
+    periodicity_is_custom: false,
+    valid_until: validUntil(args.payload.date ?? null, {
+      value: args.payload.periodicity_value ?? null,
+      unit: args.payload.periodicity_unit ?? null,
+    }),
     duration_min: args.payload.duration_min ?? null,
     topics: args.payload.topics ?? null,
     status: 'draft',
@@ -187,6 +199,9 @@ export function trainingCreateOptimistic(args: {
     facility_name: args.facility?.name ?? null,
     trainer_id: args.trainer?.id ?? null,
     trainer_name: args.trainer?.name ?? null,
+    // The server records the creator when the create syncs; until then the
+    // draft counts as the assigned technician's (useMemberRights falls back).
+    created_by_user_id: null,
     trainer_certification_number: args.trainer?.certification_number ?? null,
     trainees_count: 0,
     visit_id: args.payload.visit_id ?? null,
@@ -437,7 +452,21 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
   const training = TRAINING_RE.exec(pathOnly);
   if (training) {
     const id = Number(training[1]);
-    const keys = ['date', 'duration_min', 'topics', 'trainer_id', 'facility_id', 'type', 'fields'];
+    const keys = [
+      'date', 'periodicity_value', 'periodicity_unit', 'duration_min', 'topics',
+      'trainer_id', 'facility_id', 'type', 'fields',
+    ];
+    // `valid_until` is derived from the date and the period, so it follows them.
+    const merged = <T extends Record<string, unknown>>(row: T): T => {
+      const next = mergeFields(row, f, keys);
+      return {
+        ...next,
+        valid_until: validUntil(next.date as string | null, {
+          value: next.periodicity_value as Periodicity['value'],
+          unit: next.periodicity_unit as Periodicity['unit'],
+        }),
+      };
+    };
     return {
       label: 'Úprava školenia',
       patches: [
@@ -446,12 +475,12 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
           apply: (current) => {
             const d = current as TrainingDetail | undefined;
             if (!d) return undefined;
-            return { ...d, training: mergeFields(d.training, f, keys) };
+            return { ...d, training: merged(d.training) };
           },
         },
         {
           path: '/api/trainings',
-          apply: (current) => updateListRow(current, id, (row) => mergeFields(row, f, keys)),
+          apply: (current) => updateListRow(current, id, merged),
         },
       ],
     };

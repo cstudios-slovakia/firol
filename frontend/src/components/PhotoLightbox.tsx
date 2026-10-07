@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useDelayedMount } from '@/lib/useDelayedMount';
+import { lockScroll } from '@/lib/scrollLock';
 
 export type LightboxPhoto = { src: string; alt?: string };
 
@@ -188,11 +189,10 @@ export function PhotoLightbox({
       if (e.key === 'ArrowLeft') navigate(-1);
     };
     document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const unlock = lockScroll();
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
+      unlock();
     };
   }, [state, onClose, navigate]);
 

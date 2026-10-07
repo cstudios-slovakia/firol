@@ -294,7 +294,7 @@ final class AdminPanelController
             }
             $included = (int) $includedRaw;
             if ($included < 1 || $included > 1000) {
-                Response::error('included_technicians out of range (1–1000)', 422);
+                Response::error('Počet zahrnutých technikov musí byť v rozsahu 1–1000.', 422);
             }
             $sets[] = 'included_technicians = ?';
             $bind[] = $included;

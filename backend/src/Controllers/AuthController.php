@@ -338,6 +338,7 @@ final class AuthController
 
         $accStmt = $pdo->prepare(
             'SELECT a.id, a.invoice_company_name, a.subscription_end_date, a.main_user_id,
+                    a.member_rights,
                     a.stripe_status, a.stripe_subscription_id, a.stripe_cancel_at_period_end,
                     a.billing_period, a.stripe_customer_id,
                     a.invoice_street, a.invoice_postal_code, a.invoice_city, a.invoice_ico

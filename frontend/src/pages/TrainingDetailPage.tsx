@@ -4,12 +4,13 @@ import { Link, useParams } from 'react-router-dom';
 import { InvoicingBlock } from '@/components/InvoicingBlock';
 import { invoicingOf } from '@/api/invoicing';
 import {
-  ArrowLeft, Briefcase, Building2, CalendarDays, CheckCircle2, Clock,
-  Download, Edit2, FileText, GraduationCap, Plus, Trash2, User, Users,
+  ArrowLeft, Briefcase, Building2, CalendarCheck, CalendarDays, CheckCircle2, Clock,
+  Download, Edit2, FileText, GraduationCap, Plus, Repeat, Trash2, User, Users,
   Warehouse, Wheat,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
+import { useMemberRights } from '@/auth/useMemberRights';
 import {
   isPokyn,
   TRAINING_TYPE_LABELS,
@@ -23,6 +24,7 @@ import {
 import { ApiError } from '@/lib/api';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { TRAININGS_PATH } from '@/lib/sections';
+import { periodicityLabel } from '@/lib/periodicity';
 import { useToast } from '@/lib/toast';
 import { useConfirm } from '@/lib/confirm';
 import { Card } from '@/components/ui/Card';
@@ -32,6 +34,7 @@ import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Spinner } from '@/components/ui/Spinner';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { VisitContinueButton } from '@/components/VisitContinueButton';
 import { VisitNextUkon } from '@/components/VisitNextUkon';
 import { visitTrail } from '@/lib/visits';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
@@ -45,6 +48,7 @@ export function TrainingDetailPage() {
   const id = Number(idStr);
   const { csrfToken } = useAuth();
   const isReadOnly = useIsReadOnly();
+  const { canDelete: canEditFinished } = useMemberRights();
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -246,7 +250,7 @@ export function TrainingDetailPage() {
                 </span>
               </div>
             </div>
-            {!isReadOnly && (
+            {!isReadOnly && (isDraft || canEditFinished) && (
               <Link
                 to={`/trainings/${id}/edit`}
                 aria-label="Upraviť"
@@ -278,6 +282,14 @@ export function TrainingDetailPage() {
           >
             {t.date ? new Date(t.date + 'T00:00:00').toLocaleDateString('sk-SK') : '—'}
           </DetailRow>
+          <DetailRow icon={<Repeat className="size-4" />} label="Periodicita">
+            {periodicityLabel({ value: t.periodicity_value, unit: t.periodicity_unit })}
+          </DetailRow>
+          {t.valid_until && (
+            <DetailRow icon={<CalendarCheck className="size-4" />} label="Platí do">
+              {new Date(t.valid_until + 'T00:00:00').toLocaleDateString('sk-SK')}
+            </DetailRow>
+          )}
           {!pokyn && t.duration_min !== null && (
             <DetailRow icon={<Clock className="size-4" />} label="Dĺžka">
               {t.duration_min} min
@@ -384,6 +396,9 @@ export function TrainingDetailPage() {
         isReadOnly={isReadOnly}
         pdfError={pdfError}
         pokyn={pokyn}
+        visitId={t.visit_id}
+        trainingId={t.id}
+        companyId={t.company_id}
       />
 
       {/* Chapter 29.2, step 5 — once the protocol exists, the visit goes on. */}
@@ -434,8 +449,16 @@ function DocumentsBlock({
   isReadOnly,
   pdfError,
   pokyn,
+  visitId = null,
+  trainingId,
+  companyId,
 }: {
   documents: TrainingDocument[];
+  /** Set when the training belongs to a visit: the protocol may wait for its end. */
+  visitId?: number | null;
+  trainingId: number;
+  /** The client, whose recorded e-mail prefills the send form. */
+  companyId: number;
   canGenerate: boolean;
   canGenerateHint: string | null;
   generating: boolean;
@@ -471,8 +494,24 @@ function DocumentsBlock({
           leftIcon={<FileText className="size-4" />}
           className="bg-status-bad hover:brightness-110"
         >
-          {pokyn ? 'Generovať PDF pokyn' : 'Generovať PDF protokol'}
+          {visitId !== null
+            ? (pokyn ? 'Generovať PDF pokyn teraz' : 'Generovať PDF protokol teraz')
+            : (pokyn ? 'Generovať PDF pokyn' : 'Generovať PDF protokol')}
         </Button>
+        {visitId !== null && (
+          <>
+            <VisitContinueButton
+              visitId={visitId}
+              ukon={{ training_id: trainingId }}
+              disabled={!canGenerate}
+            />
+            <p className="max-w-sm text-xs text-ink-500">
+              {pokyn
+                ? 'Pokyn môžeš vygenerovať teraz alebo hromadne na konci návštevy.'
+                : 'Protokol môžeš vygenerovať teraz alebo hromadne na konci návštevy.'}
+            </p>
+          </>
+        )}
         {pdfError && (
           <p className="text-xs text-status-bad">{pdfError}</p>
         )}
@@ -519,7 +558,7 @@ function DocumentsBlock({
               </div>
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
-            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} />
+            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} companyId={companyId} />
           </li>
         ))}
       </ul>

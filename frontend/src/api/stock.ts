@@ -95,6 +95,9 @@ export type MovementPayload = {
   note?: string;
 };
 
+/** Backend `code` of the 409 that refuses to delete an item already on a výdajka. */
+export const STOCK_ITEM_USED = 'stock_item_used';
+
 export const STOCK_UNITS: StockUnit[] = ['ks', 'bal', 'm'];
 
 /** texty_ui.json → sklad */
@@ -134,6 +137,30 @@ export const Stock = {
     api<{ item: StockItem }>('/api/stock/items', {
       method: 'POST',
       body,
+      csrfToken,
+      requireOnline: true,
+    }),
+
+  updateItem: (id: number, body: { name: string; unit: StockUnit }, csrfToken: string | null) =>
+    api<{ item: StockItem }>(`/api/stock/items/${id}`, {
+      method: 'PATCH',
+      body,
+      csrfToken,
+      requireOnline: true,
+    }),
+
+  /** Plain delete; the server answers 409 `stock_item_used` when the item is already on a výdajka. */
+  deleteItem: (id: number, csrfToken: string | null) =>
+    api<{ deleted: true }>(`/api/stock/items/${id}`, {
+      method: 'DELETE',
+      csrfToken,
+      requireOnline: true,
+    }),
+
+  /** Vyradenie zo skladu: the item leaves the sklad but stays in the journal and on výdajky. */
+  retireItem: (id: number, csrfToken: string | null) =>
+    api<{ retired: true }>(`/api/stock/items/${id}/retire`, {
+      method: 'POST',
       csrfToken,
       requireOnline: true,
     }),

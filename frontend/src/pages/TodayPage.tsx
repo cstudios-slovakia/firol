@@ -39,8 +39,9 @@ import { useIsMainUser } from '@/auth/useIsMainUser';
 import { Today, type FieldRow, type OpenDefect, type TodayData, type TodayScope, type UkonRow } from '@/api/today';
 import { useUpcomingTasks, type Task } from '@/api/tasks';
 import { INSPECTION_TYPE_LABELS, type InspectionType } from '@/api/inspections';
+import { visitTypeLabel } from '@/lib/visits';
 import { TRAINING_TYPE_SHORT, type TrainingType } from '@/api/trainings';
-import { ZDROJ_LABELS, type CalendarDeadline, type OwnTerm, type TerminTechnician } from '@/api/calendar';
+import { ZDROJ_LABELS, formatEventTime, type CalendarDeadline, type OwnTerm, type TerminTechnician } from '@/api/calendar';
 import { UNINVOICED_PARAM } from '@/api/invoicing';
 import {
   SECTION_COLORS,
@@ -463,7 +464,7 @@ function buildCards(
 }
 
 function fieldRow(r: FieldRow, who: (t: TerminTechnician | null) => TerminTechnician | null): CardRow {
-  const types = r.types.map((t) => INSPECTION_TYPE_LABELS[t] ?? t).join(', ');
+  const types = r.types.map((t) => visitTypeLabel(t)).join(', ');
   const place = r.city ?? r.facility_name;
   if (r.kind === 'navsteva') {
     return {
@@ -494,6 +495,7 @@ function fieldRow(r: FieldRow, who: (t: TerminTechnician | null) => TerminTechni
     title: r.title ?? '',
     sub: [r.company_name, place].filter(Boolean).join(' · ') || null,
     tag: ZDROJ_LABELS.vlastny,
+    meta: formatEventTime(r.time_from ?? null, r.time_to ?? null),
     technician: who(r.technician),
   };
 }

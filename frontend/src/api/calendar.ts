@@ -72,6 +72,9 @@ export type CalendarEvent = {
   zdroj: 'vlastny';
   title: string;
   event_date: string;
+  /** `HH:MM`; both null = all-day. `time_to` is only set together with `time_from`. */
+  time_from: string | null;
+  time_to: string | null;
   note: string | null;
   company_id: number | null;
   company_name: string | null;
@@ -107,6 +110,8 @@ export type CalendarData = {
 export type CalendarEventInput = {
   title: string;
   event_date: string;
+  time_from?: string | null;
+  time_to?: string | null;
   note?: string | null;
   company_id?: number | null;
   facility_id?: number | null;
@@ -158,3 +163,9 @@ export const Calendar = {
       csrfToken,
     }),
 };
+
+/** „08:30" or „08:30–10:00"; null for an all-day event. */
+export function formatEventTime(from: string | null, to: string | null): string | null {
+  if (!from) return null;
+  return to ? `${from}–${to}` : from;
+}

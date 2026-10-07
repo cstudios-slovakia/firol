@@ -38,11 +38,13 @@ import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { periodicityLabel, type Periodicity } from '@/lib/periodicity';
 import { sectionPathForType } from '@/lib/sections';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { VisitContinueButton } from '@/components/VisitContinueButton';
 import { VisitNextUkon } from '@/components/VisitNextUkon';
 import { visitTrail } from '@/lib/visits';
 import { InvoicingBlock } from '@/components/InvoicingBlock';
 import { invoicingOf } from '@/api/invoicing';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
+import { useMemberRights } from '@/auth/useMemberRights';
 
 /**
  * Step 3 — summary screen. Final review before PDF generation.
@@ -60,6 +62,8 @@ export function InspectionDetailPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const isReadOnly = useIsReadOnly();
+  // „Upraviť" discards the issued protocol, so it follows the práva členov switch.
+  const { canDelete: canUnlock } = useMemberRights();
 
   const [data, setData] = useState<InspectionDetail | null>(null);
   const [documents, setDocuments] = useState<InspectionDocument[]>([]);
@@ -411,18 +415,20 @@ export function InspectionDetailPage() {
         </div>
         {!isDraft ? (
           <div className="flex shrink-0 items-center gap-2">
-            <Button
-              type="button"
-              id="unlock-inspection"
-              variant="warn"
-              onClick={() => setUnlockPrompt((open) => !open)}
-              aria-expanded={unlockPrompt}
-              aria-controls="unlock-prompt"
-              leftIcon={<Pencil className="size-4" />}
-              title="Odomkne kontrolu na úpravy — vystavený protokol sa pritom zruší"
-            >
-              Upraviť
-            </Button>
+            {canUnlock && (
+              <Button
+                type="button"
+                id="unlock-inspection"
+                variant="warn"
+                onClick={() => setUnlockPrompt((open) => !open)}
+                aria-expanded={unlockPrompt}
+                aria-controls="unlock-prompt"
+                leftIcon={<Pencil className="size-4" />}
+                title="Odomkne kontrolu na úpravy — vystavený protokol sa pritom zruší"
+              >
+                Upraviť
+              </Button>
+            )}
             <Button
               type="button"
               onClick={handleRepeat}
@@ -444,7 +450,9 @@ export function InspectionDetailPage() {
           <p className="text-xs text-ink-600">
             <span className="font-semibold text-ink-800">Kontrola je uzamknutá.</span>{' '}
             Má vystavený PDF protokol, preto sa záznamy ani dátum už nedajú meniť.
-            Pre opravu použi „Upraviť", pre nový termín „Opakovať".
+            {canUnlock
+              ? 'Pre opravu použi „Upraviť", pre nový termín „Opakovať".'
+              : 'Odomknúť ju na opravu môže hlavný používateľ, pre nový termín použi „Opakovať".'}
           </p>
         </Card>
       )}
@@ -736,6 +744,9 @@ export function InspectionDetailPage() {
         onIncludePhotosChange={setIncludePhotos}
         onSign={setSigningDocument}
         canSign={!isDraft}
+        visitId={i.visit_id}
+        inspectionId={i.id}
+        companyId={i.company_id}
       />
       )}
 
@@ -983,8 +994,16 @@ function DocumentsBlock({
   onIncludePhotosChange,
   onSign,
   canSign = true,
+  visitId = null,
+  inspectionId,
+  companyId,
 }: {
   documents: InspectionDocument[];
+  /** Set when the úkon belongs to a visit: the protocol may wait for its end. */
+  visitId?: number | null;
+  inspectionId: number;
+  /** The client, whose recorded e-mail prefills the send form. */
+  companyId: number;
   canGenerate: boolean;
   generating: boolean;
   onGenerate: () => void;
@@ -1029,8 +1048,20 @@ function DocumentsBlock({
           leftIcon={<FileText className="size-4" />}
           className="bg-status-bad hover:brightness-110"
         >
-          Generovať PDF protokol
+          {visitId !== null ? 'Generovať PDF protokol teraz' : 'Generovať PDF protokol'}
         </Button>
+        {visitId !== null && (
+          <>
+            <VisitContinueButton
+              visitId={visitId}
+              ukon={{ inspection_id: inspectionId }}
+              disabled={!canGenerate}
+            />
+            <p className="max-w-sm text-xs text-ink-500">
+              Protokol môžeš vygenerovať teraz alebo hromadne na konci návštevy.
+            </p>
+          </>
+        )}
         {pdfError && (
           <p className="text-xs text-status-bad">{pdfError}</p>
         )}
@@ -1080,7 +1111,7 @@ function DocumentsBlock({
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
             <HandoverRow doc={doc} canSign={canSign} onSign={() => onSign(doc)} />
-            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} />
+            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} companyId={companyId} />
           </li>
         ))}
       </ul>

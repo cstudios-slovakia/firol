@@ -60,6 +60,7 @@ import { ImportApi, type ImportKind, type ImportResult } from "@/api/import";
 import { BackupReminderModal } from "@/components/BackupReminderModal";
 import { InstallAppCard } from "@/components/InstallAppCard";
 import { ClientNoticeSettingsCard } from "@/components/ClientNoticeSettingsCard";
+import { MemberRightsCard } from "@/components/MemberRightsCard";
 import { MemberIdentityEditor } from "@/components/team/MemberIdentityEditor";
 import {
     InspectorProfileApi,
@@ -86,6 +87,7 @@ import { Badge } from "@/components/ui/Badge";
 import { SignaturePickerModal } from "@/components/SignaturePickerModal";
 import { FeedbackDialog } from "@/components/FeedbackFloater";
 import { cn } from "@/lib/cn";
+import { formatDateSk } from "@/lib/clientNoticeEmail";
 
 // ─── Tab definitions ─────────────────────────────────────────────────────────
 
@@ -135,7 +137,7 @@ const MENU_ITEMS = [
         to: "/settings/data",
         label: "Správa dát",
         description:
-            "Záloha a obnova účtu, import z Excelu, hromadné vymazanie dát.",
+            "Záloha účtu a import z Excelu.",
         icon: Database,
         color: "text-slate-600",
         bg: "bg-slate-50",
@@ -150,6 +152,11 @@ const MENU_ITEMS = [
         bg: "bg-cyan-50",
     },
 ] as const;
+
+// Restore and bulk delete are for the account's main user (and the platform
+// admin), so the menu blurb only promises them to those who can see them.
+const DATA_MENU_DESCRIPTION_FULL =
+    "Záloha a obnova účtu, import z Excelu, hromadné vymazanie dát.";
 
 const ADMIN_MENU_ITEM = {
     to: "/settings/admin",
@@ -202,7 +209,7 @@ export function SettingsLayout() {
             <div className="relative hidden sm:block">
                 <nav
                     aria-label="Sekcie nastavení"
-                    className="flex items-center gap-0.5 overflow-x-auto border-b border-ink-100 [&::-webkit-scrollbar]:hidden"
+                    className="flex flex-wrap items-center gap-x-0.5 gap-y-1 border-b border-ink-100"
                 >
                     {tabs.map((tab) => (
                         <NavLink
@@ -288,7 +295,12 @@ export function SettingsIndexPage() {
     const base = isMain
         ? [...MENU_ITEMS.slice(0, 2), CERT_MENU_ITEM, ...MENU_ITEMS.slice(2)]
         : [...MENU_ITEMS];
-    const items = isAdmin ? [...base, ADMIN_MENU_ITEM] : base;
+    const withAdmin = isAdmin ? [...base, ADMIN_MENU_ITEM] : base;
+    const items = withAdmin.map((item) =>
+        item.to === "/settings/data" && (isMain || isAdmin)
+            ? { ...item, description: DATA_MENU_DESCRIPTION_FULL }
+            : item,
+    );
 
     return (
         <div className="flex flex-col gap-2 sm:hidden">
@@ -1003,6 +1015,7 @@ export function TeamPage() {
         <>
             <SectionBack label="Technici" />
             <TeamSection />
+            <MemberRightsCard className="mt-4" />
         </>
     );
 }
@@ -1138,7 +1151,7 @@ function TeamSection() {
         try {
             const res = await Team.setActive(m.id, !m.is_active, csrfToken);
             setMembers((prev) =>
-                prev ? prev.map((x) => (x.id === m.id ? res.item : x)) : prev,
+                prev ? prev.map((x) => (x.id === m.id ? { ...x, ...res.item } : x)) : prev,
             );
             reloadSeats();
             toast.success(
@@ -1941,7 +1954,7 @@ function CertSummaryBlock({
                     {(isExpired || isExpiringSoon) && (
                         <AlertTriangle className="size-3 shrink-0" />
                     )}
-                    do {validTo}
+                    do {formatDateSk(validTo)}
                 </p>
             )}
         </div>
@@ -2298,7 +2311,9 @@ function PurgeCard({
 }
 
 function DataSection() {
-    const { csrfToken } = useAuth();
+    const { csrfToken, isAdmin } = useAuth();
+    // Restore and bulk delete: main user only (the backend enforces it too).
+    const canManageData = useIsMainUser() || isAdmin;
     const toast = useToast();
     const [busyCompanies, setBusyCompanies] = useState(false);
     const [busyInspections, setBusyInspections] = useState(false);
@@ -2378,8 +2393,10 @@ function DataSection() {
                         </p>
                         <p className="mt-2 text-xs text-ink-400">
                             Súbor si ulož na bezpečné miesto (napr. Google Drive
-                            alebo externý disk). Obnovu spustíš nižšie cez
-                            „Obnova zo zálohy".
+                            alebo externý disk).{" "}
+                            {canManageData
+                                ? "Obnovu spustíš nižšie cez „Obnova zo zálohy\"."
+                                : "Obnovu zo zálohy môže spustiť hlavný používateľ účtu."}
                         </p>
                     </div>
 
@@ -2432,7 +2449,7 @@ function DataSection() {
             </Card>
 
             {/* Obnova zo zálohy */}
-            <RestoreCard />
+            {canManageData && <RestoreCard />}
 
             {/* Import z Excelu */}
             <Card className="overflow-hidden">
@@ -2465,6 +2482,7 @@ function DataSection() {
             </Card>
 
             {/* Danger zone */}
+            {canManageData && (
             <Card className="overflow-hidden">
                 <div className="flex items-center gap-3 border-b border-red-100 bg-gradient-to-br from-red-50/60 to-transparent px-5 py-4">
                     <div className="grid size-11 place-items-center rounded-2xl bg-red-500 text-white shadow-[var(--shadow-glow)]">
@@ -2522,6 +2540,7 @@ function DataSection() {
                     />
                 </div>
             </Card>
+            )}
         </div>
     );
 }

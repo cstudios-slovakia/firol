@@ -71,7 +71,7 @@ final class CalendarController
         $evStmt = Db::pdo()->prepare(
             self::eventSelect() . '
              WHERE  ' . ($isAdmin ? '1 = 1' : 'e.account_id = :acct') . '
-             ORDER  BY e.event_date ASC, e.id ASC'
+             ORDER  BY e.event_date ASC, e.time_from IS NOT NULL, e.time_from ASC, e.id ASC'
         );
         $evStmt->execute($isAdmin ? [] : ['acct' => $accountId]);
         $events = array_map(static fn (array $r): array => self::shapeEvent($r), $evStmt->fetchAll());
@@ -171,12 +171,12 @@ final class CalendarController
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
 
-        [$title, $date, $note, $companyId, $facilityId] = self::validateEventBody($req, $accountId);
+        [$title, $date, $timeFrom, $timeTo, $note, $companyId, $facilityId] = self::validateEventBody($req, $accountId);
 
         Db::pdo()->prepare(
-            'INSERT INTO calendar_events (account_id, user_id, title, event_date, note, company_id, facility_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
-        )->execute([$accountId, Tenant::currentUserId(), $title, $date, $note, $companyId, $facilityId]);
+            'INSERT INTO calendar_events (account_id, user_id, title, event_date, time_from, time_to, note, company_id, facility_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$accountId, Tenant::currentUserId(), $title, $date, $timeFrom, $timeTo, $note, $companyId, $facilityId]);
 
         $id = (int) Db::pdo()->lastInsertId();
         Response::json(['event' => self::loadEvent($id, $accountId)], 201);
@@ -191,13 +191,13 @@ final class CalendarController
         // Stays in its owner account when an admin edits another tenant's event.
         $scopeAccountId = self::assertEventInAccount($id, $isAdmin ? null : $accountId);
 
-        [$title, $date, $note, $companyId, $facilityId] = self::validateEventBody($req, $scopeAccountId);
+        [$title, $date, $timeFrom, $timeTo, $note, $companyId, $facilityId] = self::validateEventBody($req, $scopeAccountId);
 
         Db::pdo()->prepare(
             'UPDATE calendar_events
-                SET title = ?, event_date = ?, note = ?, company_id = ?, facility_id = ?
+                SET title = ?, event_date = ?, time_from = ?, time_to = ?, note = ?, company_id = ?, facility_id = ?
               WHERE id = ? AND account_id = ?'
-        )->execute([$title, $date, $note, $companyId, $facilityId, $id, $scopeAccountId]);
+        )->execute([$title, $date, $timeFrom, $timeTo, $note, $companyId, $facilityId, $id, $scopeAccountId]);
 
         Response::json(['event' => self::loadEvent($id, $scopeAccountId)]);
     }
@@ -304,7 +304,7 @@ final class CalendarController
      * create, the event's own on update — so an optional company/facility is
      * always validated against the tenant that will own the row.
      *
-     * @return array{0:string,1:string,2:?string,3:?int,4:?int}
+     * @return array{0:string,1:string,2:?string,3:?string,4:?string,5:?int,6:?int}
      */
     private static function validateEventBody(Request $req, int $accountId): array
     {
@@ -317,6 +317,15 @@ final class CalendarController
         $date = $req->jsonString('event_date');
         if ($date === null || !self::isDate($date)) {
             Response::error('Neplatný dátum udalosti (očakáva sa formát YYYY-MM-DD).', 422);
+        }
+
+        $timeFrom = self::readTime($req, 'time_from');
+        $timeTo = self::readTime($req, 'time_to');
+        if ($timeTo !== null && $timeFrom === null) {
+            Response::error('Zadaj čas začiatku, ak je zadaný čas konca.', 422);
+        }
+        if ($timeTo !== null && $timeTo < $timeFrom) {
+            Response::error('Čas konca nesmie byť skôr ako čas začiatku.', 422);
         }
 
         $note = $req->jsonString('note');
@@ -347,7 +356,7 @@ final class CalendarController
             }
         }
 
-        return [$title, $date, $note, $companyId, $facilityId];
+        return [$title, $date, $timeFrom, $timeTo, $note, $companyId, $facilityId];
     }
 
     /**
@@ -394,7 +403,7 @@ final class CalendarController
 
     private static function eventSelect(): string
     {
-        return 'SELECT e.id, e.title, e.event_date, e.note,
+        return 'SELECT e.id, e.title, e.event_date, e.time_from, e.time_to, e.note,
                        e.company_id, c.name AS company_name,
                        e.facility_id, f.name AS facility_name, f.city AS facility_city,
                        e.user_id, u.fullname AS user_name,
@@ -439,6 +448,8 @@ final class CalendarController
             'zdroj'         => 'vlastny',
             'title'         => (string) $r['title'],
             'event_date'    => (string) $r['event_date'],
+            'time_from'     => self::shapeTime($r['time_from'] ?? null),
+            'time_to'       => self::shapeTime($r['time_to'] ?? null),
             'note'          => $r['note'] !== null ? (string) $r['note'] : null,
             'company_id'    => $r['company_id'] !== null ? (int) $r['company_id'] : null,
             'company_name'  => $r['company_name'] !== null ? (string) $r['company_name'] : null,
@@ -448,6 +459,26 @@ final class CalendarController
             // Who created it; null for events recorded before chapter 11.
             'technician'    => $technician,
         ];
+    }
+
+    /** Optional `HH:MM` field; empty / absent = null, anything else 422. */
+    private static function readTime(Request $req, string $key): ?string
+    {
+        $v = $req->jsonString($key);
+        if ($v === null || trim($v) === '') {
+            return null;
+        }
+        $v = trim($v);
+        if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $v)) {
+            Response::error('Zadaj čas vo formáte HH:MM.', 422);
+        }
+        return $v;
+    }
+
+    /** TIME comes back as `HH:MM:SS`; the API speaks `HH:MM`. */
+    private static function shapeTime(mixed $v): ?string
+    {
+        return $v !== null && $v !== '' ? substr((string) $v, 0, 5) : null;
     }
 
     private static function isDate(string $s): bool

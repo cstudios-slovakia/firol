@@ -13,6 +13,7 @@ import { ApiError } from '@/lib/api';
 import { handleOfflineSave } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
+import { formatDateSk } from '@/lib/clientNoticeEmail';
 import { Card } from '@/components/ui/Card';
 import { Field } from '@/components/ui/Field';
 import { Input } from '@/components/ui/Input';
@@ -194,6 +195,12 @@ function TrainingHeader({
   );
 }
 
+/** "2026-08" → "8/2026"; an empty or unrecognised value is returned as is. */
+function formatMonthSk(month: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  return m ? `${Number(m[2])}/${m[1]}` : month;
+}
+
 /** One-line summary of the header for a locked úkon. */
 export function headerSummary(type: PersonListType, value: HeaderValue): { label: string; text: string }[] {
   if (type === 'skolenie_bozp') {
@@ -210,7 +217,7 @@ export function headerSummary(type: PersonListType, value: HeaderValue): { label
   return [
     { label: isAlcohol ? 'Prístroj' : 'Použitý prostriedok', text: (isAlcohol ? d.device_type : d.test_type) ?? '' },
     { label: isAlcohol ? 'Výrobné číslo' : 'Šarža', text: (isAlcohol ? d.device_serial : d.batch) ?? '' },
-    { label: isAlcohol ? 'Platnosť kalibrácie' : 'Exspirácia', text: (isAlcohol ? d.calibration_valid_to : d.expiry) ?? '' },
+    { label: isAlcohol ? 'Platnosť kalibrácie' : 'Exspirácia', text: isAlcohol ? (d.calibration_valid_to ? formatDateSk(d.calibration_valid_to) : '') : formatMonthSk(d.expiry ?? '') },
     { label: 'Opatrenia', text: d.measures ?? '' },
   ].filter((r) => r.text !== '');
 }

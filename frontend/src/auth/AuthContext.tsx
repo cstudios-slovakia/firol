@@ -31,11 +31,15 @@ export type SubscriptionState =
   | 'incomplete'
   | 'has_subscription';
 
+export type MemberRights = 'plne' | 'obmedzene';
+
 export type Account = {
   id: number;
   invoice_company_name: string;
   subscription_end_date: string;
   main_user_id: number;
+  /** Práva členov (chapter 1.6): may members delete finished úkony and protocols? */
+  member_rights: MemberRights;
   stripe_status: string | null;
   stripe_cancel_at_period_end: boolean;
   billing_period: 'monthly' | 'yearly' | null;

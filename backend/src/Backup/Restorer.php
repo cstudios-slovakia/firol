@@ -839,8 +839,8 @@ final class Restorer
         }
 
         $insertItem = $this->pdo->prepare(
-            'INSERT INTO stock_items (account_id, name, unit, warehouse_qty, created_by_user_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO stock_items (account_id, name, unit, warehouse_qty, retired_at, created_by_user_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
         $insertBalance = $this->pdo->prepare(
             'INSERT INTO stock_balances (item_id, user_id, account_id, qty) VALUES (?, ?, ?, ?)
@@ -864,6 +864,7 @@ final class Restorer
                 mb_substr($name, 0, 191),
                 $unit,
                 max(0, (int) ($item['warehouse_qty'] ?? 0)),
+                $this->str($item, 'retired_at'),
                 $this->userId,
                 $this->createdAt($item),
             ]);

@@ -4,7 +4,7 @@ import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, GraduationCap, Plus, Wheat,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
-import { Companies, type Company, type CompanyListItem, type FacilityListItem } from '@/api/companies';
+import { Companies, type Company, type CompanyDetail, type CompanyListItem, type FacilityListItem } from '@/api/companies';
 import { Team, type TeamMember } from '@/api/team';
 import {
   isPokyn,
@@ -18,6 +18,12 @@ import { Visits, type Visit } from '@/api/visits';
 import { ApiError } from '@/lib/api';
 import { TRAINING_SECTION, TRAININGS_PATH } from '@/lib/sections';
 import { todayIso } from '@/lib/dates';
+import {
+  TRAINING_RECOMMENDED_MONTHS,
+  defaultTrainingPeriodicity,
+  trainingChain,
+  type Periodicity,
+} from '@/lib/periodicity';
 import { trainingCreateOptimistic } from '@/lib/offlineEntities';
 import { defaultPokynSections } from '@/lib/pokynZatvaTemplate';
 import { useToast } from '@/lib/toast';
@@ -27,6 +33,7 @@ import { Field } from '@/components/ui/Field';
 import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
+import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { VisitSharedFields, VisitSharedFieldsSkeleton } from '@/components/VisitSharedFields';
 import { visitTrail, visitUkonPosition } from '@/lib/visits';
@@ -49,7 +56,11 @@ export function NewTrainingPage() {
   const presetFacilityId = visitId !== null ? null : numericParam(searchParams.get('facility_id'));
 
   const { user } = useAuth();
-  const [type, setType] = useState<TrainingType>('vstupne');
+  // The type picker („Nová kontrola / nové školenie") preselects the type; a
+  // Pokyn is not offered inside a visit, so it cannot be preselected there.
+  const typeParam = searchParams.get('type');
+  const presetType = TRAINING_TYPES.find((t) => t === typeParam && (visitId === null || !isPokyn(t)));
+  const [type, setType] = useState<TrainingType>(presetType ?? 'vstupne');
   const [visit, setVisit] = useState<Visit | null>(null);
   const [visitError, setVisitError] = useState<string | null>(null);
   // The visit's company in full (IČO, schvaľujúca osoba, režim fakturácie) —
@@ -62,6 +73,13 @@ export function NewTrainingPage() {
   const [facilityId, setFacilityId] = useState<number | null>(presetFacilityId);
   const [trainerId, setTrainerId] = useState<number | null>(null);
   const [date, setDate] = useState(visitId !== null ? '' : todayIso());
+  // Periodicity (chapter 5): starts from the history of this firm / prevádzka,
+  // else the subtype's recommended value, and follows the subtype until the
+  // technician picks one themselves.
+  const [periodicity, setPeriodicity] = useState<Periodicity>(() => defaultTrainingPeriodicity(presetType ?? 'vstupne'));
+  const [periodicityTouched, setPeriodicityTouched] = useState(false);
+  const [companyTrainingHistory, setCompanyTrainingHistory] =
+    useState<NonNullable<CompanyDetail['company_last_training_periodicities']>>({});
 
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ company?: string; date?: string }>({});
@@ -139,6 +157,7 @@ export function NewTrainingPage() {
       .then((res) => {
         if (cancelled) return;
         setFacilities(res.facilities);
+        setCompanyTrainingHistory(res.company_last_training_periodicities ?? {});
         // In a visit the prevádzka is the visit's; the facilities are only
         // loaded for the offline draft.
         if (visitId !== null) {
@@ -162,6 +181,23 @@ export function NewTrainingPage() {
       cancelled = true;
     };
   }, [companyId, presetFacilityId, visitId]);
+
+  // Prefill the periodicity: what was chosen last time for this kind of
+  // training at this firm / prevádzka beats the catalogue's recommendation
+  // (same as inspections' `last_periodicities`), and the subtype's recommended
+  // value is the fallback. Only runs while the technician hasn't picked one.
+  useEffect(() => {
+    if (periodicityTouched) return;
+    const history = facilityId !== null
+      ? facilities.find((f) => f.id === facilityId)?.last_training_periodicities
+      : companyTrainingHistory;
+    const last = history?.[trainingChain(type)];
+    if (last && typeof last.value === 'number' && last.unit) {
+      setPeriodicity({ value: last.value, unit: last.unit });
+    } else {
+      setPeriodicity(defaultTrainingPeriodicity(type));
+    }
+  }, [type, facilityId, facilities, companyTrainingHistory, periodicityTouched]);
 
   // The Pokyn is a document for the client's employees, not a session they
   // attend — the same form, but the wording follows what is being issued.
@@ -187,6 +223,8 @@ export function NewTrainingPage() {
         company_id: companyId!,
         facility_id: facilityId ?? undefined,
         date,
+        periodicity_value: periodicity.value,
+        periodicity_unit: periodicity.unit,
         trainer_id: trainerId ?? undefined,
         ...(visitId !== null ? { visit_id: visitId } : {}),
         // The Pokyn starts from the client's template text; the technician
@@ -450,6 +488,20 @@ export function NewTrainingPage() {
             </Field>
             </>
           )}
+
+          <Field label="Periodicita">
+            {() => (
+              <PeriodicityPicker
+                recommended={TRAINING_RECOMMENDED_MONTHS[type] ?? []}
+                value={periodicity}
+                executedOn={date || null}
+                onChange={(next) => {
+                  setPeriodicity(next);
+                  setPeriodicityTouched(true);
+                }}
+              />
+            )}
+          </Field>
 
           <Field
             label={pokyn ? 'Vypracoval' : 'Školiteľ'}

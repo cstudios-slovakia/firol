@@ -6,11 +6,13 @@ namespace Firol\Controllers;
 
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
+use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Storage\Storage;
+use Firol\Support\Periodicity;
 use Firol\Support\PokynZatva;
 
 final class TrainingController
@@ -46,11 +48,13 @@ final class TrainingController
         // it covers, which is all a row needs to identify itself. The body is
         // fetched with the detail.
         $sql = 'SELECT t.id, t.type, t.date, t.duration_min, t.topics, t.status,
+                       t.periodicity_value, t.periodicity_unit, t.periodicity_is_custom,
                        t.created_at,
                        JSON_UNQUOTE(JSON_EXTRACT(t.fields, \'$.year\')) AS pokyn_year,
                        t.company_id, c.name AS company_name,
                        t.facility_id, f.name AS facility_name, t.visit_id,
                        t.trainer_id, tr.fullname AS trainer_name,
+                       t.created_by_user_id,
                        t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
                        (SELECT COUNT(*) FROM trainees WHERE training_id = t.id) AS trainees_count
                 FROM   trainings t
@@ -174,6 +178,7 @@ final class TrainingController
         // the template) or filled in afterwards on the detail page — it is only
         // required once the PDF is generated.
         $fields = self::fieldsForType($req, $type, required: false);
+        [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
         if ($companyId === null) {
             Response::error('Vyber firmu.', 422);
         }
@@ -239,12 +244,16 @@ final class TrainingController
         Db::pdo()->prepare(
             'INSERT INTO trainings
                 (account_id, company_id, facility_id, visit_id, type, date,
-                 trainer_id, topics, duration_min, fields, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft")'
+                 periodicity_value, periodicity_unit, periodicity_is_custom,
+                 trainer_id, topics, duration_min, fields, status, created_by_user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?)'
         )->execute([
             $accountId, $companyId, $facilityId, $visitId, $type, $date,
+            $periodicityValue, $periodicityUnit,
+            Periodicity::isCustomForTraining($type, $periodicityValue, $periodicityUnit) ? 1 : 0,
             $trainerId, $topics, $durationMin,
             $fields !== null ? json_encode($fields, JSON_UNESCAPED_UNICODE) : null,
+            Tenant::currentUserId(),
         ]);
         $id = (int) Db::pdo()->lastInsertId();
 
@@ -281,6 +290,23 @@ final class TrainingController
         if ($existing['visit_id'] !== null) {
             $date = null;
         }
+        // Changing a finalized training (date, trainer, topics, duration) is the
+        // training's counterpart of „Upraviť" on a locked inspection, so it
+        // follows the same members' switch (chapter 1.6).
+        if ($existing['status'] === 'finalized') {
+            MemberRights::requireDelete($scopeAccountId);
+        }
+        // The periodicity is printed on the protocol, so it sits behind the same
+        // guard as the date above. It is edited as a whole — „bez opakovania"
+        // has to be expressible, and a COALESCE over two columns cannot tell
+        // „leave it alone" from „clear it" — so sending either key means the
+        // technician touched the field (same as on inspections).
+        $body = $req->json();
+        $touchesPeriodicity = array_key_exists('periodicity_value', $body)
+            || array_key_exists('periodicity_unit', $body);
+        if ($touchesPeriodicity) {
+            [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
+        }
         // A finalized training is the record of an issued document — its text
         // must keep matching the PDF that carries its number.
         if ($fields !== null && $existing['status'] === 'finalized') {
@@ -315,6 +341,21 @@ final class TrainingController
             $fields !== null ? json_encode($fields, JSON_UNESCAPED_UNICODE) : null,
             $id, $scopeAccountId,
         ]);
+        if ($touchesPeriodicity) {
+            Db::pdo()->prepare(
+                'UPDATE trainings
+                 SET    periodicity_value     = ?,
+                        periodicity_unit      = ?,
+                        periodicity_is_custom = ?
+                 WHERE  id = ? AND account_id = ?'
+            )->execute([
+                $periodicityValue,
+                $periodicityUnit,
+                Periodicity::isCustomForTraining((string) $existing['type'], $periodicityValue, $periodicityUnit) ? 1 : 0,
+                $id,
+                $scopeAccountId,
+            ]);
+        }
         unset($existing);
 
         Response::json(['training' => self::shape(self::loadOrFail($isAdmin ? null : $accountId, $id))]);
@@ -328,6 +369,10 @@ final class TrainingController
         $id        = (int) $params['id'];
         $existing  = self::loadOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
+        MemberRights::requireDeleteUkon(
+            $existing,
+            $existing['trainer_id'] !== null ? (int) $existing['trainer_id'] : null,
+        );
 
         // Remove trainee signature files from disk before the DB row is gone.
         $dir = Storage::root() . "/trainings/$id";
@@ -349,11 +394,13 @@ final class TrainingController
     private static function loadOrFail(?int $accountId, int $id): array
     {
         $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics,
+                       t.periodicity_value, t.periodicity_unit, t.periodicity_is_custom,
                        t.fields, t.status, t.created_at, t.updated_at,
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.approver AS company_approver,
                        t.facility_id, f.name AS facility_name, t.visit_id,
                        t.trainer_id, tr.fullname AS trainer_name,
+                       t.created_by_user_id,
                        ip.cert_general AS trainer_certification_number,
                        t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
                        (SELECT COUNT(*) FROM trainees WHERE training_id = t.id) AS trainees_count
@@ -389,8 +436,20 @@ final class TrainingController
         $row['facility_id']    = $row['facility_id'] !== null ? (int) $row['facility_id'] : null;
         $row['visit_id']       = isset($row['visit_id']) ? (int) $row['visit_id'] : null;
         $row['trainer_id']     = $row['trainer_id'] !== null ? (int) $row['trainer_id'] : null;
+        $row['created_by_user_id'] = isset($row['created_by_user_id']) ? (int) $row['created_by_user_id'] : null;
         $row['duration_min']   = $row['duration_min'] !== null ? (int) $row['duration_min'] : null;
         $row['trainees_count'] = isset($row['trainees_count']) ? (int) $row['trainees_count'] : 0;
+        $row['periodicity_value'] = isset($row['periodicity_value'])
+            ? (int) $row['periodicity_value']
+            : null;
+        $row['periodicity_unit'] = $row['periodicity_unit'] ?? null;
+        $row['periodicity_is_custom'] = (bool) ($row['periodicity_is_custom'] ?? false);
+        // Derived, never stored — null without recurrence or without a date.
+        $row['valid_until'] = Periodicity::validUntil(
+            $row['date'] ?? null,
+            $row['periodicity_value'],
+            $row['periodicity_unit'],
+        );
         // `fields` reaches the client decoded (detail) — the list only carries
         // the year it extracted, so the Pokyn's text never rides along there.
         if (array_key_exists('fields', $row)) {
@@ -435,6 +494,25 @@ final class TrainingController
         try {
             return PokynZatva::validate($raw);
         } catch (\DomainException $e) {
+            Response::error($e->getMessage(), 422);
+        }
+    }
+
+    /**
+     * Read and validate the periodicity pair off the request body, turning a
+     * bad pair into a 422 with a Slovak message (same as on inspections).
+     *
+     * @return array{0: int|null, 1: string|null}
+     */
+    private static function readPeriodicity(Request $req): array
+    {
+        $body = $req->json();
+        try {
+            return Periodicity::normalize(
+                $body['periodicity_value'] ?? null,
+                $body['periodicity_unit'] ?? null,
+            );
+        } catch (\InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422);
         }
     }

@@ -40,7 +40,7 @@ export const PERIODICITY_UNIT_LABELS: Record<PeriodicityUnit, string> = {
  */
 export const RECOMMENDED_MONTHS: Record<string, number[]> = {
   php: [24, 12],
-  oprava_ts_php: [],
+  oprava_ts_php: [60],
   vyradenie: [],
   hydranty: [12],
   ts_hadic: [12],

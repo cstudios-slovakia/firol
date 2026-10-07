@@ -13,6 +13,7 @@ import {
 } from '@/api/trainings';
 import { ApiError } from '@/lib/api';
 import { handleOfflineSave } from '@/lib/offline';
+import { PERIODICITY_NONE, TRAINING_RECOMMENDED_MONTHS, type Periodicity } from '@/lib/periodicity';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -20,6 +21,7 @@ import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Select } from '@/components/ui/Select';
 import { Spinner } from '@/components/ui/Spinner';
+import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { visitTrail } from '@/lib/visits';
 
@@ -37,6 +39,7 @@ export function TrainingEditPage() {
 
   const [date, setDate] = useState('');
   const [trainerId, setTrainerId] = useState<number | null>(null);
+  const [periodicity, setPeriodicity] = useState<Periodicity>(PERIODICITY_NONE);
   const [submitting, setSubmitting] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
 
@@ -52,6 +55,7 @@ export function TrainingEditPage() {
         setTraining(t);
         setDate(t.date ?? '');
         setTrainerId(t.trainer_id);
+        setPeriodicity({ value: t.periodicity_value, unit: t.periodicity_unit });
         const tm = await Team.list().catch(() => ({ items: [] as TeamMember[] }));
         if (cancelled) return;
         setMembers(tm.items.filter((m) => m.is_active));
@@ -72,9 +76,18 @@ export function TrainingEditPage() {
     setError(null);
     setSubmitting(true);
     try {
+      // The pair is sent only when the technician changed it: a training from
+      // before periodicity existed has none, and saving its date must not turn
+      // that into an explicit „bez opakovania" choice.
+      const periodicityChanged = training !== null
+        && (periodicity.value !== training.periodicity_value
+          || periodicity.unit !== training.periodicity_unit);
       await Trainings.update(id, {
         date,
         trainer_id: trainerId,
+        ...(periodicityChanged
+          ? { periodicity_value: periodicity.value, periodicity_unit: periodicity.unit }
+          : {}),
       }, csrfToken);
       toast.success('Školenie uložené');
       navigate(`/trainings/${id}`, { replace: true });
@@ -177,6 +190,17 @@ export function TrainingEditPage() {
                 disabled={training?.visit_id != null}
                 leftIcon={<CalendarDays className="size-4" />}
                 value={date} onChange={(e) => { setDate(e.target.value); if (dateError) setDateError(null); }} />
+            )}
+          </Field>
+
+          <Field label="Periodicita">
+            {() => (
+              <PeriodicityPicker
+                recommended={training ? TRAINING_RECOMMENDED_MONTHS[training.type] ?? [] : []}
+                value={periodicity}
+                executedOn={date || null}
+                onChange={setPeriodicity}
+              />
             )}
           </Field>
 

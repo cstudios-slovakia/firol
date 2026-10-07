@@ -158,6 +158,16 @@
   .animate-fade-up  { animation: fade-up  0.22s ease-out both; }
   .animate-fade-in  { animation: fade-in  0.18s ease-out both; }
   .animate-scale-in { animation: scale-in 0.18s ease-out both; }
+
+  /* Thin scrollbar that only shows while the pointer is over the element. */
+  .scrollbar-autohide {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 0.3s;
+  }
+  .scrollbar-autohide:hover {
+    scrollbar-color: var(--color-ink-300) transparent;
+  }
 }
 
 @layer base {

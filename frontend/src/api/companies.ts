@@ -62,6 +62,11 @@ export type FacilityListItem = {
    * since block 1 a period can be days or weeks, not only months.
    */
   last_periodicities: Record<string, { value: number | null; unit: PeriodicityUnit | null }>;
+  /**
+   * The same for trainings, keyed by term chain (`trainingChain`: Vstupné and
+   * Opakované share one). Optional — a response cached before it existed lacks it.
+   */
+  last_training_periodicities?: Record<string, { value: number | null; unit: PeriodicityUnit | null }>;
 };
 
 /** One person at the client entitled to sign a protocol (chapter 13.2). */
@@ -86,6 +91,8 @@ export type CompanyPersonPayload = {
 export type CompanyDetail = {
   company: Company;
   facilities: FacilityListItem[];
+  /** Last-used training periodicity per chain for trainings of the whole firm (no prevádzka). */
+  company_last_training_periodicities?: Record<string, { value: number | null; unit: PeriodicityUnit | null }>;
 };
 
 export type CompanyPayload = {

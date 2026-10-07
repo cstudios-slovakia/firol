@@ -69,7 +69,7 @@ export function VisitNextUkon({ visitId }: { visitId: number }) {
           <p className="text-sm font-semibold text-ink-900">Úkon je hotový</p>
           {visit && (
             <p className="mt-0.5 text-xs text-ink-600">
-              Všetky úkony návštevy majú protokol — na návšteve ich pošleš klientovi.
+              Všetky úkony návštevy sú hotové — chýbajúce protokoly sa vygenerujú a klientovi sa pošlú na návšteve.
             </p>
           )}
         </div>

@@ -131,8 +131,9 @@ export function VisitNewPage() {
   }, [facilityId]);
 
   /** Types whose term is due within a month, or already past. */
-  const dueTypes = useMemo(() => {
+  const { dueTypes, overdueTypes } = useMemo(() => {
     const due = new Set<VisitType>();
+    const overdue = new Set<VisitType>();
     const latest = new Map<InspectionType, InspectionListItem>();
     for (const it of history) {
       if (it.status !== 'finalized' || !it.executed_on) continue;
@@ -142,8 +143,9 @@ export function VisitNewPage() {
     for (const [type, it] of latest) {
       const days = daysUntilNext(it.executed_on, periodicityOf(it));
       if (days !== null && days <= DUE_SOON_DAYS) due.add(type);
+      if (days !== null && days < 0) overdue.add(type);
     }
-    return due;
+    return { dueTypes: due, overdueTypes: overdue };
   }, [history]);
 
   // Tick the due ones — until the technician makes their own selection, at
@@ -278,7 +280,7 @@ export function VisitNewPage() {
             label="Úkony na tejto návšteve"
             hint={
               dueTypes.size > 0
-                ? 'Predvybrané sú tie, ktorých termín je splatný do 30 dní. Výber môžeš kedykoľvek zmeniť.'
+                ? 'Predvybrané sú tie, ktorým sa termín blíži (do 30 dní) alebo je po termíne. Výber môžeš kedykoľvek zmeniť.'
                 : 'Odškrtni, čo na prevádzke urobíš. Ponuka je zo všetkých sekcií naraz.'
             }
           >
@@ -310,9 +312,16 @@ export function VisitNewPage() {
                             )}
                           >
                             {visitTypeLabel(type)}
-                            {due && !active && (
-                              <span className="rounded-full bg-[var(--color-status-warn-bg)] px-1.5 py-0.5 text-[10px] text-[var(--color-status-warn)]">
-                                splatné
+                            {due && (
+                              <span
+                                className={cn(
+                                  'rounded-full px-1.5 py-0.5 text-[10px] transition-colors duration-150',
+                                  active
+                                    ? 'bg-white/25 text-white'
+                                    : 'bg-[var(--color-status-warn-bg)] text-[var(--color-status-warn)]',
+                                )}
+                              >
+                                {overdueTypes.has(type) ? 'po termíne' : 'blíži sa'}
                               </span>
                             )}
                           </button>

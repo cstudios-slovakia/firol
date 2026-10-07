@@ -1,7 +1,7 @@
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, Ban, BookOpen, ChevronRight, DoorClosed, Droplets,
-  Flame, Gauge, LibraryBig, Lightbulb, Shield, ShieldCheck, Signpost, TrainTrack, Wrench,
+  Flame, Gauge, GraduationCap, LibraryBig, Lightbulb, Shield, ShieldCheck, Signpost, TrainTrack, Wheat, Wrench,
   TestTube, Users, Wind,
 } from 'lucide-react';
 // Block 2 — single-record BOZP úkony.
@@ -12,11 +12,22 @@ import {
   INSPECTION_TYPE_LABELS,
   type InspectionType,
 } from '@/api/inspections';
+import {
+  isPokyn,
+  TRAINING_TYPES,
+  TRAINING_TYPE_LABELS,
+  TRAINING_TYPE_SHORT,
+  type TrainingType,
+} from '@/api/trainings';
 import { RECOMMENDED_MONTHS } from '@/lib/periodicity';
 import {
+  SECTIONS,
+  SECTION_COLORS,
   SECTION_INSPECTION_TYPES,
   SECTION_LABELS,
   SECTION_PATHS,
+  TRAINING_COLOR,
+  TRAINING_SECTION,
   isSection,
   type Section,
 } from '@/lib/sections';
@@ -245,12 +256,37 @@ export function NewInspectionTypePicker() {
   // same narrowed list rather than to every type.
   if (section) passthrough.set('section', section);
 
-  const offered = section
-    ? TYPES.filter((m) => SECTION_INSPECTION_TYPES[section].includes(m.type))
-    : TYPES;
   const passthroughQs = passthrough.toString();
   const stepOnePathFor = (type: InspectionType) =>
     `/inspections/new/${type}/step-1${passthroughQs ? `?${passthroughQs}` : ''}`;
+
+  // A training has no section flow of its own: it goes to the training form
+  // with the same company / prevádzka / visit context, and the picked type
+  // preselected there.
+  const trainingParams = new URLSearchParams();
+  if (facilityId) trainingParams.set('facility_id', facilityId);
+  if (companyId) trainingParams.set('company_id', companyId);
+  if (visitId) trainingParams.set('visit_id', visitId);
+  const trainingPathFor = (type: TrainingType) => {
+    const qs = new URLSearchParams(trainingParams);
+    qs.set('type', type);
+    return `/trainings/new?${qs.toString()}`;
+  };
+  // The Pokyn is a document for the client's employees, not a session on a
+  // visit — the training form leaves it out inside a visit, so does this list.
+  const trainingTypes = TRAINING_TYPES.filter((t) => !visitId || !isPokyn(t));
+
+  // Narrowed to one odbor (arriving from its list): a flat list of its types.
+  // Otherwise every module gets its own labelled group, and OPP splits into
+  // kontroly and školenia on a second level.
+  const groups = (section ? [section] : SECTIONS).map((s) => ({
+    section: s,
+    types: TYPES.filter((m) => SECTION_INSPECTION_TYPES[s].includes(m.type)),
+    trainings: !section && s === TRAINING_SECTION ? trainingTypes : [],
+  }));
+  const grouped = !section;
+  let cardIndex = 0;
+  const nextDelay = () => ({ animationDelay: `${cardIndex++ * 40}ms` });
 
   return (
     <div className="flex flex-col gap-5">
@@ -264,21 +300,81 @@ export function NewInspectionTypePicker() {
 
       <header>
         <h1 className="text-xl font-semibold tracking-tight text-ink-900">
-          Nová kontrola{section ? ` — ${SECTION_LABELS[section]}` : ''}
+          {section ? `Nová kontrola — ${SECTION_LABELS[section]}` : 'Nová kontrola / nové školenie'}
         </h1>
         <p className="mt-0.5 text-sm text-ink-500">
-          Vyber typ kontroly. Periodicitu si zvolíš v ďalšom kroku.
+          {section
+            ? 'Vyber typ kontroly. Periodicitu si zvolíš v ďalšom kroku.'
+            : 'Vyber typ kontroly alebo školenia. Periodicitu kontroly si zvolíš v ďalšom kroku.'}
         </p>
       </header>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {offered.map((meta, i) => (
-          <div key={meta.type} className="animate-fade-up" style={{ animationDelay: `${i * 40}ms` }}>
-            <TypeCard meta={meta} href={stepOnePathFor(meta.type)} />
+      {groups.map((g) => (
+        <section key={g.section} aria-labelledby={`picker-${g.section}`} className="flex flex-col gap-3">
+          {grouped && (
+            <h2
+              id={`picker-${g.section}`}
+              className="flex items-center gap-2 border-b border-ink-100 pb-1.5 text-sm font-semibold uppercase tracking-wide text-ink-700"
+            >
+              <span
+                aria-hidden="true"
+                className="size-2.5 rounded-full"
+                style={{ backgroundColor: SECTION_COLORS[g.section] }}
+              />
+              {SECTION_LABELS[g.section]}
+            </h2>
+          )}
+
+          {g.trainings.length > 0 && (
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-ink-400">Kontroly</h3>
+          )}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {g.types.map((meta) => (
+              <div key={meta.type} className="animate-fade-up" style={nextDelay()}>
+                <TypeCard meta={meta} href={stepOnePathFor(meta.type)} />
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+
+          {g.trainings.length > 0 && (
+            <>
+              <h3 className="mt-1 text-xs font-semibold uppercase tracking-wider text-ink-400">Školenia</h3>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {g.trainings.map((t) => (
+                  <div key={t} className="animate-fade-up" style={nextDelay()}>
+                    <TrainingCard type={t} href={trainingPathFor(t)} />
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
+      ))}
     </div>
+  );
+}
+
+function TrainingCard({ type, href }: { type: TrainingType; href: string }) {
+  return (
+    <Link
+      to={href}
+      className="group block rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
+      title={TRAINING_TYPE_LABELS[type]}
+    >
+      <Card className="flex items-center gap-3 px-4 py-4 transition-[box-shadow,transform] duration-150 group-hover:-translate-y-px group-hover:shadow-md">
+        <div
+          className="grid size-11 shrink-0 place-items-center rounded-2xl text-white"
+          style={{ backgroundColor: TRAINING_COLOR }}
+        >
+          {isPokyn(type) ? <Wheat className="size-5" /> : <GraduationCap className="size-5" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-sm font-semibold text-ink-900">{TRAINING_TYPE_SHORT[type]}</h3>
+          <p className="mt-0.5 line-clamp-2 text-xs text-ink-500">{TRAINING_TYPE_LABELS[type]}</p>
+        </div>
+        <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-firol-500" />
+      </Card>
+    </Link>
   );
 }
 

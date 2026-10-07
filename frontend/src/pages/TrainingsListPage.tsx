@@ -26,6 +26,7 @@ import {
 } from "@/api/trainings";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { periodicityShort } from "@/lib/periodicity";
 import { useAuth } from "@/auth/AuthContext";
 import { useIsReadOnly } from "@/auth/useIsReadOnly";
 import { useToast } from "@/lib/toast";
@@ -42,6 +43,7 @@ import {
     type InvoicingFields,
 } from "@/api/invoicing";
 import { TRAINING_COLOR, TRAINING_SECTION } from "@/lib/sections";
+import { useMemberRights } from "@/auth/useMemberRights";
 
 const ACTIVE_CHIP_STYLE = { backgroundColor: TRAINING_COLOR };
 
@@ -367,6 +369,7 @@ function TrainingRow({
     /** Set in the „Nevyfakturované" view — offers the one-tap check-off. */
     onInvoiced?: (id: number, next: InvoicingFields) => void;
 }) {
+    const { canDelete, canDeleteUkon } = useMemberRights();
     return (
         <Card className="px-4 py-3">
             <div className="flex items-center gap-3">
@@ -411,6 +414,8 @@ function TrainingRow({
                         {it.date
                             ? new Date(it.date + "T00:00:00").toLocaleDateString("sk-SK")
                             : "—"}
+                        <span className="mx-1.5 text-ink-300">·</span>
+                        {periodicityShort({ value: it.periodicity_value, unit: it.periodicity_unit })}
                         {it.trainer_name && (
                             <>
                                 <span className="mx-1.5 text-ink-300">·</span>
@@ -444,21 +449,25 @@ function TrainingRow({
                                 onDone={(next) => onInvoiced(it.id, next)}
                             />
                         )}
-                        <Link
-                            to={`/trainings/${it.id}/edit`}
-                            title="Upraviť"
-                            className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
-                        >
-                            <Edit2 className="size-4" />
-                        </Link>
-                        <button
-                            type="button"
-                            title="Odstrániť"
-                            onClick={() => onDelete(it.id)}
-                            className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-                        >
-                            <Trash2 className="size-4" />
-                        </button>
+                        {(it.status === "draft" || canDelete) && (
+                            <Link
+                                to={`/trainings/${it.id}/edit`}
+                                title="Upraviť"
+                                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)]"
+                            >
+                                <Edit2 className="size-4" />
+                            </Link>
+                        )}
+                        {canDeleteUkon(it, it.trainer_id) && (
+                            <button
+                                type="button"
+                                title="Odstrániť"
+                                onClick={() => onDelete(it.id)}
+                                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
+                            >
+                                <Trash2 className="size-4" />
+                            </button>
+                        )}
                     </div>
                 )}
             </div>

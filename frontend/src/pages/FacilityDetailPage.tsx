@@ -47,6 +47,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
 import { DetailHeaderSkeleton, SkeletonList } from "@/components/ui/Skeleton";
 import { PendingSyncBanner } from "@/components/PendingSyncBanner";
+import { useMemberRights } from "@/auth/useMemberRights";
 
 export function FacilityDetailPage() {
     const { id: idStr } = useParams<{ id: string }>();
@@ -55,6 +56,7 @@ export function FacilityDetailPage() {
     const navigate = useNavigate();
     const { csrfToken } = useAuth();
     const isReadOnly = useIsReadOnly();
+    const { canDeleteUkon } = useMemberRights();
     const toast = useToast();
     const confirm = useConfirm();
     const [facility, setFacility] = useState<Facility | null>(null);
@@ -319,34 +321,19 @@ export function FacilityDetailPage() {
 
             {/* Action card menu */}
             {!isReadOnly && (
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <Link
-                        to={`/inspections/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
-                        className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-colors hover:bg-ink-50 active:bg-ink-100"
-                    >
-                        <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-50">
-                            <ClipboardList className="size-5 text-firol-600" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-ink-900">Nová kontrola</p>
-                            <p className="mt-0.5 text-xs text-ink-500">Vybrať typ a spustiť protokol</p>
-                        </div>
-                        <ChevronRight className="size-4 shrink-0 text-ink-300" />
-                    </Link>
-                    <Link
-                        to={`/trainings/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
-                        className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-colors hover:bg-ink-50 active:bg-ink-100"
-                    >
-                        <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-emerald-50">
-                            <GraduationCap className="size-5 text-emerald-600" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-ink-900">Nové školenie</p>
-                            <p className="mt-0.5 text-xs text-ink-500">Evidencia školení PO pre prevádzku</p>
-                        </div>
-                        <ChevronRight className="size-4 shrink-0 text-ink-300" />
-                    </Link>
-                </div>
+                <Link
+                    to={`/inspections/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
+                    className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-colors hover:bg-ink-50 active:bg-ink-100"
+                >
+                    <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-50">
+                        <ClipboardList className="size-5 text-firol-600" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-ink-900">Nová kontrola / nové školenie</p>
+                        <p className="mt-0.5 text-xs text-ink-500">Vybrať typ a spustiť protokol</p>
+                    </div>
+                    <ChevronRight className="size-4 shrink-0 text-ink-300" />
+                </Link>
             )}
 
             {/* Tab bar */}
@@ -547,15 +534,17 @@ export function FacilityDetailPage() {
                                                 >
                                                     <Edit2 className="size-4" />
                                                 </Link>
-                                                <button
-                                                    type="button"
-                                                    title="Odstrániť"
-                                                    aria-label="Odstrániť"
-                                                    onClick={() => setPendingDeleteId(ins.id)}
-                                                    className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-                                                >
-                                                    <Trash2 className="size-4" />
-                                                </button>
+                                                {canDeleteUkon(ins, ins.inspector_user_id) && (
+                                                    <button
+                                                        type="button"
+                                                        title="Odstrániť"
+                                                        aria-label="Odstrániť"
+                                                        onClick={() => setPendingDeleteId(ins.id)}
+                                                        className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
+                                                    >
+                                                        <Trash2 className="size-4" />
+                                                    </button>
+                                                )}
                                             </div>
                                         )}
                                     </Card>
@@ -673,6 +662,8 @@ export function FacilityDetailPage() {
                                                 <p className="mt-0.5 text-xs text-ink-500">
                                                     <CalendarDays className="-mt-0.5 mr-1 inline size-3" />
                                                     {tr.date ?? "—"}
+                                                    <span className="mx-1.5 text-ink-300">·</span>
+                                                    {periodicityShort({ value: tr.periodicity_value, unit: tr.periodicity_unit })}
                                                     {tr.trainer_name && (
                                                         <>
                                                             <span className="mx-1.5 text-ink-300">·</span>
@@ -694,7 +685,7 @@ export function FacilityDetailPage() {
                                             >
                                                 <Edit2 className="size-4" />
                                             </Link>
-                                            {!isReadOnly && (
+                                            {!isReadOnly && canDeleteUkon(tr, tr.trainer_id) && (
                                                 <button
                                                     type="button"
                                                     title="Odstrániť"

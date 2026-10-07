@@ -438,7 +438,7 @@ final class Writer
     private static function stock(int $accountId, PDO $pdo): array
     {
         $itemStmt = $pdo->prepare(
-            'SELECT id, name, unit, warehouse_qty, created_at FROM stock_items WHERE account_id = ? ORDER BY id'
+            'SELECT id, name, unit, warehouse_qty, retired_at, created_at FROM stock_items WHERE account_id = ? ORDER BY id'
         );
         $itemStmt->execute([$accountId]);
         $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);

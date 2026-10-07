@@ -13,7 +13,9 @@ use Firol\Http\Response;
 use Firol\Mail\Mailer;
 use Firol\Mail\ReplyTo;
 use Firol\Mail\Templates\BulkDocumentEmail;
+use Firol\Pdf\PdfImageShrinker;
 use Firol\Storage\Storage;
+use Firol\Support\ImageProcessor;
 
 /**
  * Sending several protocols in one e-mail — block 1 / chapter 9.1.
@@ -140,10 +142,18 @@ final class DocumentSendController
             ];
         }
 
+        // Chapter 9.1: over the limit the photos are shrunk. Only the copy that
+        // goes out is lighter — the archived protocol is not touched.
+        $shrunk = [];
+        if ($totalBytes > self::MAX_TOTAL_BYTES) {
+            $totalBytes = self::shrinkToFit($attachments, $totalBytes, $shrunk);
+        }
+
+        // Nothing left to shrink and still over: only then is the send refused.
         if ($totalBytes > self::MAX_TOTAL_BYTES) {
             Response::error(
                 'Prílohy majú spolu ' . self::humanSize($totalBytes)
-                . ' — to je nad limit 20 MB, ktorý väčšina schránok prijme. '
+                . ' aj po zmenšení fotiek — to je nad limit 20 MB, ktorý väčšina schránok prijme. '
                 . 'Odošli protokoly na dvakrát alebo niektorý odznač.',
                 422,
                 ['code' => 'attachments_too_large', 'total_bytes' => $totalBytes],
@@ -196,6 +206,8 @@ final class DocumentSendController
                 'status'     => 'odoslane',
                 'recipients' => $recipients,
                 'documents'  => count($documents),
+                // Numbers of the protocols whose photos went out shrunk.
+                'shrunk'     => $shrunk,
             ], 201);
         }
 
@@ -255,7 +267,21 @@ final class DocumentSendController
         );
         $stmt->execute([$accountId, $companyId, $accountId, $companyId, $accountId, $companyId]);
 
-        $items = array_map(static function (array $r): array {
+        // Documents already part of a send that went out to this company, so the
+        // dialog can preselect only what the client has not received yet.
+        $sentStmt = Db::pdo()->prepare(
+            'SELECT document_ids FROM document_sends
+             WHERE  account_id = ? AND company_id = ? AND status = "odoslane"'
+        );
+        $sentStmt->execute([$accountId, $companyId]);
+        $sent = [];
+        foreach ($sentStmt->fetchAll(\PDO::FETCH_COLUMN) as $json) {
+            foreach (json_decode((string) $json, true) ?: [] as $docId) {
+                $sent[(int) $docId] = true;
+            }
+        }
+
+        $items = array_map(static function (array $r) use ($sent): array {
             $abs = Storage::documentAbsolute((string) $r['file_path']);
             return [
                 'id'            => (int) $r['id'],
@@ -268,6 +294,7 @@ final class DocumentSendController
                 // Shown next to each row so the technician can see which
                 // protocol is pushing the send over the mailbox limit.
                 'byte_size'     => is_file($abs) ? (int) filesize($abs) : 0,
+                'already_sent'  => isset($sent[(int) $r['id']]),
             ];
         }, $stmt->fetchAll());
 
@@ -275,6 +302,43 @@ final class DocumentSendController
             'items' => $items,
             'max_total_bytes' => self::MAX_TOTAL_BYTES,
         ]);
+    }
+
+    /**
+     * Swap attachments for lighter copies, biggest first, until the total fits
+     * — so as few protocols as possible leave with reduced photos.
+     *
+     * The copy is the issued file with its photos re-encoded (PdfImageShrinker),
+     * never a re-render. A protocol without big photos keeps its stored bytes.
+     *
+     * @param list<array{filename: string, bytes: string, number: string}> $attachments
+     * @param list<string> $shrunk filled with the numbers of the protocols shrunk
+     * @return int the new total size in bytes
+     */
+    private static function shrinkToFit(array &$attachments, int $totalBytes, array &$shrunk): int
+    {
+        $order = array_keys($attachments);
+        usort($order, static fn (int $a, int $b): int => strlen($attachments[$b]['bytes']) <=> strlen($attachments[$a]['bytes']));
+
+        foreach ($order as $i) {
+            if ($totalBytes <= self::MAX_TOTAL_BYTES) {
+                break;
+            }
+            $attachment = $attachments[$i];
+            $light = PdfImageShrinker::shrink(
+                $attachment['bytes'],
+                ImageProcessor::MAIL_EDGE,
+                ImageProcessor::MAIL_QUALITY,
+            );
+            if ($light === null) {
+                continue;
+            }
+            $totalBytes -= strlen($attachment['bytes']) - strlen($light);
+            $attachment['bytes'] = $light;
+            $attachments[$i] = $attachment;
+            $shrunk[] = $attachment['number'];
+        }
+        return $totalBytes;
     }
 
     /**

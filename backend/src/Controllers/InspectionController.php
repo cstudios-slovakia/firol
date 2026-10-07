@@ -7,6 +7,7 @@ namespace Firol\Controllers;
 use Firol\Audit\AuditLog;
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
+use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
@@ -116,6 +117,7 @@ final class InspectionController
                        i.company_id, c.name AS company_name,
                        i.facility_id, f.name AS facility_name,
                        i.inspector_user_id, u.fullname AS inspector_name,
+                       i.created_by_user_id,
                        i.effective_inspector_user_id,
                        eu.fullname AS effective_inspector_name,
                        i.effective_cert_number,
@@ -381,8 +383,8 @@ final class InspectionController
                 'INSERT INTO inspections
                     (account_id, company_id, facility_id, source_inspection_id, type,
                      periodicity_value, periodicity_unit, executed_on, inspector_user_id,
-                     status, notes, is_preventive_inspection)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", NULL, ?)'
+                     status, notes, is_preventive_inspection, created_by_user_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", NULL, ?, ?)'
             )->execute([
                 $accountId,
                 $source['company_id'],
@@ -393,6 +395,7 @@ final class InspectionController
                 $fuUnit,
                 $source['inspector_user_id'],
                 in_array($targetType, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
+                Tenant::currentUserId(),
             ]);
             $newId = (int) $pdo->lastInsertId();
 
@@ -629,8 +632,8 @@ final class InspectionController
                     (account_id, company_id, facility_id, visit_id, type,
                      periodicity_value, periodicity_unit, periodicity_is_custom,
                      executed_on, inspector_user_id, status, notes,
-                     is_preventive_inspection)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?)'
+                     is_preventive_inspection, created_by_user_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?)'
             );
             $stmt->execute([
                 $accountId,
@@ -645,6 +648,7 @@ final class InspectionController
                 $inspectorUserId,
                 $notes,
                 in_array($type, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
+                $userId,
             ]);
             $id = (int) $pdo->lastInsertId();
 
@@ -753,6 +757,7 @@ final class InspectionController
 
         $existing = self::loadOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
+        MemberRights::requireDeleteUkon($existing, (int) $existing['inspector_user_id']);
 
         Db::pdo()->prepare(
             'UPDATE inspections SET archived_at = NOW() WHERE id = ? AND account_id = ?'
@@ -793,6 +798,9 @@ final class InspectionController
         if ($row['status'] !== 'finalized') {
             Response::error('Kontrola nie je uzamknutá.', 422);
         }
+        // Unlocking discards the issued protocol, so it is a delete under the
+        // account's práva členov (chapter 1.6).
+        MemberRights::requireDelete($accountId);
 
         $pdo = Db::pdo();
         $docsStmt = $pdo->prepare(
@@ -823,6 +831,7 @@ final class InspectionController
             $pdo->prepare(
                 'UPDATE inspections
                  SET    status = "draft",
+                        protocol_deferred_at        = NULL,
                         effective_inspector_user_id = NULL,
                         effective_cert_number       = NULL,
                         effective_cert_valid_from   = NULL,
@@ -935,8 +944,8 @@ final class InspectionController
                     (account_id, company_id, facility_id, type,
                      periodicity_value, periodicity_unit, periodicity_is_custom,
                      is_preventive_inspection, executed_on, inspector_user_id,
-                     status, notes, carried_over_from_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", ?, ?)'
+                     status, notes, carried_over_from_id, created_by_user_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", ?, ?, ?)'
             )->execute([
                 $accountId,
                 $source['company_id'],
@@ -949,6 +958,7 @@ final class InspectionController
                 $source['inspector_user_id'],
                 $source['notes'],
                 $sourceId,
+                Tenant::currentUserId(),
             ]);
             $newId = (int) $pdo->lastInsertId();
 
@@ -1319,6 +1329,7 @@ final class InspectionController
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
                        i.facility_id, f.name AS facility_name,
                        i.inspector_user_id, u.fullname AS inspector_name,
+                       i.created_by_user_id,
                        i.effective_inspector_user_id,
                        eu.fullname AS effective_inspector_name,
                        i.effective_cert_number,
@@ -1354,6 +1365,7 @@ final class InspectionController
         $row['company_id'] = (int) $row['company_id'];
         $row['facility_id'] = (int) $row['facility_id'];
         $row['inspector_user_id'] = (int) $row['inspector_user_id'];
+        $row['created_by_user_id'] = isset($row['created_by_user_id']) ? (int) $row['created_by_user_id'] : null;
         $row['periodicity_value'] = isset($row['periodicity_value'])
             ? (int) $row['periodicity_value']
             : null;

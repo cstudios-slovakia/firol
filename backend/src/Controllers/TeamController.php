@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Audit\AuditLog;
 use Firol\Auth\Csrf;
+use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Billing\SeatSync;
 use Firol\Db;
@@ -129,6 +131,40 @@ final class TeamController
         )->execute([$userId, $accountId]);
 
         Response::json(['ok' => true, 'kind' => $kind, 'user_id' => $userId]);
+    }
+
+    /**
+     * Práva členov (chapter 1.6) — whether members may delete finished úkony
+     * and protocols. One switch per account, main user only; every change
+     * goes to the audit log (chapter 1.6.2).
+     */
+    public static function setMemberRights(Request $req): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::requireMainUser('Práva členov môže meniť len hlavný používateľ účtu.');
+
+        $value = $req->jsonString('member_rights');
+        if ($value !== MemberRights::FULL && $value !== MemberRights::RESTRICTED) {
+            Response::error('Neplatné práva člena (očakáva sa „plne“ alebo „obmedzene“).', 422);
+        }
+
+        $stmt = Db::pdo()->prepare('SELECT member_rights FROM accounts WHERE id = ?');
+        $stmt->execute([$accountId]);
+        $before = (string) $stmt->fetchColumn();
+
+        if ($before !== $value) {
+            Db::pdo()->prepare('UPDATE accounts SET member_rights = ? WHERE id = ?')
+                ->execute([$value, $accountId]);
+            AuditLog::record(
+                'account.member_rights',
+                'accounts',
+                $accountId,
+                ['member_rights' => $before],
+                ['member_rights' => $value],
+            );
+        }
+
+        Response::json(['member_rights' => $value]);
     }
 
     /**

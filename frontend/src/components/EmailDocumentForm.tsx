@@ -1,8 +1,10 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Mail, Send } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
+import { Companies } from '@/api/companies';
 import { Documents } from '@/api/documents';
 import { ApiError } from '@/lib/api';
+import { companyRecipientEmail } from '@/lib/companyEmail';
 import { useToast } from '@/lib/toast';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -15,9 +17,12 @@ import { Button } from '@/components/ui/Button';
 export function EmailDocumentForm({
   documentId,
   documentNumber,
+  companyId,
 }: {
   documentId: number;
   documentNumber: string;
+  /** When given, the client's recorded e-mail is prefilled (and stays editable). */
+  companyId?: number;
 }) {
   const { csrfToken } = useAuth();
   const toast = useToast();
@@ -25,6 +30,23 @@ export function EmailDocumentForm({
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (companyId === undefined) return;
+    let cancelled = false;
+    Companies.show(companyId)
+      .then((res) => {
+        const known = companyRecipientEmail(res.company);
+        // Never overwrite something the technician already started typing.
+        if (!cancelled && known) setEmail((current) => current || known);
+      })
+      .catch(() => {
+        // Prefill is a convenience; the field simply stays empty.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();

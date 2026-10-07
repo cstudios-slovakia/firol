@@ -29,6 +29,9 @@ export type FieldRow = {
   types: InspectionType[];
   /** Event title; null otherwise. */
   title: string | null;
+  /** `HH:MM` of an event with a time; null = all-day or not an event. */
+  time_from?: string | null;
+  time_to?: string | null;
   /** Visit: prebieha | dokoncena; plan: planovany | po_termine; event: null. */
   status: string | null;
   technician: TerminTechnician | null;

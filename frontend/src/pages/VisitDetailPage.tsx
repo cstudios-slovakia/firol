@@ -19,6 +19,7 @@ import { BulkSendDialog } from '@/components/BulkSendDialog';
 import { WorkConfirmationDialog } from '@/components/WorkConfirmationDialog';
 import { SECTION_COLORS, TRAINING_SECTION, sectionForInspectionType } from '@/lib/sections';
 import { cn } from '@/lib/cn';
+import { companyRecipientEmail } from '@/lib/companyEmail';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import {
   visitTrail, visitTypeLabel, visitUkonPath, visitUkonState, visitUkonTypes,
@@ -65,7 +66,7 @@ export function VisitDetailPage() {
         // The client's recorded address, prefilled as the recipient of the
         // bulk send so the common case needs no typing.
         const company = await Companies.show(v.company_id).catch(() => null);
-        if (!cancelled) setCompanyEmail(company?.company.contact_email ?? null);
+        if (!cancelled) setCompanyEmail(company ? companyRecipientEmail(company.company) : null);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -251,7 +252,8 @@ export function VisitDetailPage() {
           Ukončenie návštevy
         </h2>
         <p className="text-xs text-ink-500">
-          Každý úkon dostane vlastný protokol s vlastným číslom. Klientovi ich
+          Každý úkon dostane vlastný protokol s vlastným číslom. Protokoly úkonov
+          označených ako hotové bez protokolu sa vygenerujú tlačidlom nižšie. Klientovi ich
           pošleš v jednom e-maile; potvrdenie o vykonaní práce je pre tvojho
           zamestnávateľa a neobsahuje žiadne zistenia.
         </p>

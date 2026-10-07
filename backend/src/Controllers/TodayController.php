@@ -191,7 +191,7 @@ final class TodayController
 
         // Vlastné udalosti dated today. One without a firm stays; one whose
         // firm or prevádzka is archived goes (chapter 25).
-        $sql = 'SELECT e.id, e.title, e.company_id, c.name AS company_name,
+        $sql = 'SELECT e.id, e.title, e.time_from, e.time_to, e.company_id, c.name AS company_name,
                        f.name AS facility_name, f.city AS facility_city,
                        e.user_id AS tech_id, u.fullname AS tech_name,
                        au.initials AS tech_initials, au.avatar_color AS tech_color
@@ -207,7 +207,7 @@ final class TodayController
             $sql .= ' AND e.user_id = ?';
             $args[] = $userId;
         }
-        $sql .= ' ORDER BY e.created_at ASC, e.id ASC';
+        $sql .= ' ORDER BY e.time_from IS NOT NULL, e.time_from ASC, e.created_at ASC, e.id ASC';
         $stmt = Db::pdo()->prepare($sql);
         $stmt->execute($args);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
@@ -221,6 +221,8 @@ final class TodayController
                 'city'          => self::city($r['facility_city']),
                 'types'         => [],
                 'title'         => (string) $r['title'],
+                'time_from'     => $r['time_from'] !== null ? substr((string) $r['time_from'], 0, 5) : null,
+                'time_to'       => $r['time_to'] !== null ? substr((string) $r['time_to'], 0, 5) : null,
                 'status'        => null,
                 'technician'    => self::technician($r),
             ];

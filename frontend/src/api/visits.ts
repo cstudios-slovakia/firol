@@ -32,6 +32,8 @@ export type VisitInspection = {
   valid_until: string | null;
   document_id: number | null;
   document_number: string | null;
+  /** Protocol held until the end of the visit (a draft the technician finished). */
+  deferred: boolean;
 };
 
 /** The školenie PO recorded under a visit, as the visit screen needs it. */
@@ -43,6 +45,7 @@ export type VisitTraining = {
   trainees_count: number;
   document_id: number | null;
   document_number: string | null;
+  deferred: boolean;
 };
 
 export type Visit = {
@@ -102,6 +105,19 @@ export const Visits = {
   ) => api<{ visit: Visit }>(`/api/visits/${id}`, { method: 'PATCH', body, csrfToken }),
   archive: (id: number, csrfToken: string | null) =>
     api<void>(`/api/visits/${id}`, { method: 'DELETE', csrfToken }),
+
+  /** Hold (or release) the protocol of one draft úkon until the end of the visit. */
+  deferProtocol: (
+    id: number,
+    body: { inspection_id: number; deferred: boolean } | { training_id: number; deferred: boolean },
+    csrfToken: string | null,
+  ) =>
+    api<{ visit: Visit }>(`/api/visits/${id}/defer-protocol`, {
+      method: 'POST',
+      body,
+      csrfToken,
+      requireOnline: true,
+    }),
 
   /**
    * Issue the protocol of every finished úkon that has none yet. One úkon that

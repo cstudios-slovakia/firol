@@ -1,5 +1,5 @@
 import { api } from '@/lib/api';
-import type { TeamIdentity } from '@/auth/AuthContext';
+import type { MemberRights, TeamIdentity } from '@/auth/AuthContext';
 
 export type TeamMember = {
   id: number;
@@ -91,6 +91,14 @@ export const Team = {
       '/api/account/team-defaults',
       { method: 'POST', body: { kind, user_id: userId }, csrfToken },
     ),
+
+  /** Main user only — the account-wide práva členov switch (chapter 1.6). */
+  setMemberRights: (value: MemberRights, csrfToken: string | null) =>
+    api<{ member_rights: MemberRights }>('/api/account/member-rights', {
+      method: 'PATCH',
+      body: { member_rights: value },
+      csrfToken,
+    }),
 };
 
 export type InvitePreview = {

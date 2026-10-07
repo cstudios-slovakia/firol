@@ -108,7 +108,7 @@ final class Schema
     public const INSPECTION_RECOMMENDED_MONTHS = [
         'php' => 24,
         'hydranty' => 12,
-        'oprava_ts_php' => null,
+        'oprava_ts_php' => 60,
         'poziarna_kniha' => 12,
         'pu_akcieschopnost' => 3,
         'pu_udrzba' => 12,

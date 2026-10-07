@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Firol\Controllers;
 
 use Firol\Auth\Csrf;
+use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Documents\NumberAllocator;
@@ -81,6 +82,132 @@ final class StockController
         Response::json(['item' => self::items($accountId, $id)[0] ?? null], 201);
     }
 
+    /**
+     * Rename a položka and/or change its unit. Balances and journal rows hang
+     * on the item id, so nothing else moves.
+     *
+     * @param array<string, string> $params
+     */
+    public static function updateItem(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $id = (int) ($params['id'] ?? 0);
+
+        $name = $req->jsonString('name');
+        if ($name === null || $name === '') {
+            Response::error('Zadaj názov položky.', 422);
+        }
+        if (mb_strlen($name) > 191) {
+            Response::error('Názov položky je príliš dlhý.', 422);
+        }
+        $unit = $req->jsonString('unit') ?? 'ks';
+        if (!in_array($unit, Stock::UNITS, true)) {
+            Response::error('Jednotka musí byť ks, bal alebo m.', 422);
+        }
+
+        $pdo = Db::pdo();
+        $exists = $pdo->prepare('SELECT 1 FROM stock_items WHERE id = ? AND account_id = ? AND retired_at IS NULL');
+        $exists->execute([$id, $accountId]);
+        if ($exists->fetchColumn() === false) {
+            Response::error('Položka sa nenašla.', 404);
+        }
+
+        $dup = $pdo->prepare('SELECT 1 FROM stock_items WHERE account_id = ? AND name = ? AND id <> ?');
+        $dup->execute([$accountId, $name, $id]);
+        if ($dup->fetchColumn() !== false) {
+            Response::error('Položka s týmto názvom už v sklade je.', 409);
+        }
+
+        $pdo->prepare('UPDATE stock_items SET name = ?, unit = ? WHERE id = ? AND account_id = ?')
+            ->execute([$name, $unit, $id, $accountId]);
+
+        Response::json(['item' => self::items($accountId, $id)[0] ?? null]);
+    }
+
+    /**
+     * Plain delete of a položka. Refused (409) once any of its movements sits
+     * on a výdajka — the issued document lists that material and must keep
+     * saying so. Otherwise the item goes together with its balances and its
+     * journal rows (the schema cascades both); the journal of an item that
+     * never reached a client has nothing else pointing at it.
+     *
+     * Deleting follows the members' switch (chapter 1.6) like every other
+     * delete. The refusal carries `code: stock_item_used` so the app can offer
+     * {@see retireItem} instead.
+     *
+     * @param array<string, string> $params
+     */
+    public static function deleteItem(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        MemberRights::requireDelete($accountId);
+        $id = (int) ($params['id'] ?? 0);
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            // Row lock: a použitie being issued right now can't slip in
+            // between the check below and the delete.
+            $item = $pdo->prepare('SELECT id FROM stock_items WHERE id = ? AND account_id = ? FOR UPDATE');
+            $item->execute([$id, $accountId]);
+            if ($item->fetchColumn() === false) {
+                $pdo->rollBack();
+                Response::error('Položka sa nenašla.', 404);
+            }
+
+            $used = $pdo->prepare(
+                'SELECT 1 FROM stock_movements WHERE item_id = ? AND account_id = ? AND issue_id IS NOT NULL LIMIT 1'
+            );
+            $used->execute([$id, $accountId]);
+            if ($used->fetchColumn() !== false) {
+                $pdo->rollBack();
+                Response::error(
+                    'Položku nemožno vymazať — je už uvedená na výdajke, ktorá by inak zostala bez materiálu.',
+                    409,
+                    ['code' => 'stock_item_used'],
+                );
+            }
+
+            $pdo->prepare('DELETE FROM stock_items WHERE id = ? AND account_id = ?')->execute([$id, $accountId]);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        Response::json(['deleted' => true]);
+    }
+
+    /**
+     * Vyradenie zo skladu — what is offered when a položka can't be deleted
+     * because a výdajka lists it. The item leaves the sklad (no longer in the
+     * Položky list, no new nákup / presun / použitie) but its movements and
+     * the issued documents keep naming it. Same right as deleting.
+     *
+     * @param array<string, string> $params
+     */
+    public static function retireItem(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        MemberRights::requireDelete($accountId);
+        $id = (int) ($params['id'] ?? 0);
+
+        $stmt = Db::pdo()->prepare(
+            'UPDATE stock_items SET retired_at = ? WHERE id = ? AND account_id = ? AND retired_at IS NULL'
+        );
+        $stmt->execute([date('Y-m-d H:i:s'), $id, $accountId]);
+        if ($stmt->rowCount() === 0) {
+            Response::error('Položka sa nenašla.', 404);
+        }
+
+        Response::json(['retired' => true]);
+    }
+
     // ── Pohyby ───────────────────────────────────────────────────────────────
 
     /**
@@ -128,6 +255,12 @@ final class StockController
         }
         if ($qty === null) {
             Response::error('Zadaj počet väčší ako 0.', 422);
+        }
+
+        $retired = Db::pdo()->prepare('SELECT 1 FROM stock_items WHERE id = ? AND account_id = ? AND retired_at IS NOT NULL');
+        $retired->execute([$itemId, $accountId]);
+        if ($retired->fetchColumn() !== false) {
+            Response::error('Položka je vyradená zo skladu.', 409);
         }
 
         try {
@@ -495,7 +628,7 @@ final class StockController
      */
     private static function items(int $accountId, ?int $onlyId = null): array
     {
-        $sql = 'SELECT id, name, unit, warehouse_qty FROM stock_items WHERE account_id = ?';
+        $sql = 'SELECT id, name, unit, warehouse_qty FROM stock_items WHERE account_id = ? AND retired_at IS NULL';
         $args = [$accountId];
         if ($onlyId !== null) {
             $sql .= ' AND id = ?';

@@ -521,7 +521,7 @@ function SideNav({ topOffset }: { topOffset: number }) {
             className="hidden sm:block w-56 shrink-0"
         >
             <nav
-                className="sticky flex flex-col pt-5 sm:pt-8"
+                className="sticky flex flex-col scrollbar-autohide overflow-y-auto overscroll-contain pt-5 sm:pt-8"
                 style={{ top: topOffset, height: `calc(100vh - ${topOffset}px)` }}
             >
                 {groups.map((group, i) => (

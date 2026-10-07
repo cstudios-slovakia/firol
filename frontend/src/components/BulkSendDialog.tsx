@@ -60,8 +60,10 @@ export function BulkSendDialog({
   useEffect(() => {
     if (!open) return;
     setError(null);
-    setRecipients(defaultRecipient ? [defaultRecipient] : []);
-    setRecipientDraft('');
+    // The client's address goes into the input rather than straight into a chip:
+    // a chip can only be removed, the input can be corrected.
+    setRecipients([]);
+    setRecipientDraft(defaultRecipient ?? '');
     setSubject(`Protokoly z kontroly — ${companyName}, ${new Date().toLocaleDateString('sk-SK')}`);
     setNote('');
 
@@ -75,7 +77,7 @@ export function BulkSendDialog({
           new Set(
             preselectDocumentIds && preselectDocumentIds.length > 0
               ? preselectDocumentIds
-              : res.items.map((d) => d.id),
+              : res.items.filter((d) => !d.already_sent).map((d) => d.id),
           ),
         );
       })
@@ -115,7 +117,7 @@ export function BulkSendDialog({
   function addRecipient() {
     const value = recipientDraft.trim();
     if (!value) return;
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+    if (!EMAIL_RE.test(value)) {
       setError(`Neplatná e-mailová adresa: ${value}`);
       return;
     }
@@ -132,6 +134,10 @@ export function BulkSendDialog({
     }
     // A recipient typed but not yet added with Enter would otherwise be lost.
     const pending = recipientDraft.trim();
+    if (pending && !EMAIL_RE.test(pending)) {
+      setError(`Neplatná e-mailová adresa: ${pending}`);
+      return;
+    }
     const allRecipients = pending && !recipients.includes(pending)
       ? [...recipients, pending]
       : recipients;
@@ -143,7 +149,7 @@ export function BulkSendDialog({
     setSending(true);
     setError(null);
     try {
-      await Documents.send(
+      const result = await Documents.send(
         companyId,
         {
           document_ids: ids,
@@ -155,7 +161,8 @@ export function BulkSendDialog({
         csrfToken,
       );
       toast.success(
-        `Odoslané: ${ids.length} ${ids.length === 1 ? 'protokol' : ids.length < 5 ? 'protokoly' : 'protokolov'} na ${allRecipients.length} ${allRecipients.length === 1 ? 'adresu' : 'adries'}.`,
+        `Odoslané: ${ids.length} ${ids.length === 1 ? 'protokol' : ids.length < 5 ? 'protokoly' : 'protokolov'} na ${allRecipients.length} ${allRecipients.length === 1 ? 'adresu' : 'adries'}.` +
+          (result.shrunk?.length ? ' Fotky v prílohách boli zmenšené, aby e-mail prešiel.' : ''),
       );
       onSent?.();
       onClose();
@@ -232,25 +239,31 @@ export function BulkSendDialog({
                 {formatSize(totalBytes)}
               </span>
             </span>
-            <button
-              type="button"
-              onClick={() =>
-                setSelected(
-                  selected.size === documents.length
-                    ? new Set()
-                    : new Set(documents.map((d) => d.id)),
-                )
-              }
-              className="text-firol-600 hover:underline"
-            >
-              {selected.size === documents.length ? 'Zrušiť výber' : 'Označiť všetky'}
-            </button>
+            <span className="flex shrink-0 items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setSelected(new Set(documents.map((d) => d.id)))}
+                disabled={sending || selected.size === documents.length}
+                className="text-firol-600 hover:underline disabled:cursor-default disabled:text-ink-300 disabled:no-underline"
+              >
+                Označiť všetky
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                disabled={sending || selected.size === 0}
+                className="text-firol-600 hover:underline disabled:cursor-default disabled:text-ink-300 disabled:no-underline"
+              >
+                Odznačiť všetky
+              </button>
+            </span>
           </div>
 
           {overLimit && (
             <p className="rounded-xl bg-[var(--color-status-warn-bg)] px-3 py-2 text-xs text-[var(--color-status-warn)]">
-              Prílohy presahujú {formatSize(maxTotalBytes)} — väčšina schránok taký
-              e-mail odmietne. Odošli protokoly na dvakrát alebo niektorý odznač.
+              Prílohy presahujú {formatSize(maxTotalBytes)}, čo väčšina schránok odmietne.
+              Pri odoslaní sa fotky v protokoloch zmenšia, aby e-mail prešiel; uložené
+              protokoly zostanú nezmenené.
             </p>
           )}
 
@@ -357,6 +370,8 @@ export function BulkSendDialog({
     </Dialog>
   );
 }
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

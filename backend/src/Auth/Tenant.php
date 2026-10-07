@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Firol\Auth;
 
+use Firol\Db;
+use Firol\Http\Response;
+
 /**
  * Multi-tenancy guard. Every controller that touches domain data MUST
  * resolve the active account through this — there is no other supported
@@ -45,5 +48,25 @@ final class Tenant
             );
         }
         return $id;
+    }
+
+    /**
+     * Sends 403 unless the signed-in user is the main user of the active
+     * account. A platform admin passes too — they deliberately operate across
+     * client accounts. Returns the account id so callers can chain it.
+     */
+    public static function requireMainUser(string $message): int
+    {
+        $accountId = self::currentAccountId();
+        $userId    = self::currentUserId();
+        if (Admin::isAdmin($userId)) {
+            return $accountId;
+        }
+        $stmt = Db::pdo()->prepare('SELECT main_user_id FROM accounts WHERE id = ?');
+        $stmt->execute([$accountId]);
+        if ((int) $stmt->fetchColumn() !== $userId) {
+            Response::error($message, 403);
+        }
+        return $accountId;
     }
 }

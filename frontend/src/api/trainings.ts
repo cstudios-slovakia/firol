@@ -1,5 +1,6 @@
 import { api, buildUrl, type OptimisticSpec } from '@/lib/api';
 import type { InvoicingFields } from '@/api/invoicing';
+import type { PeriodicityUnit } from '@/lib/periodicity';
 
 export type TrainingType =
   | 'vstupne'
@@ -70,6 +71,13 @@ export type TrainingListItem = InvoicingFields & {
   id: number;
   type: TrainingType;
   date: string | null;
+  /** Chapter 5 — both null means „bez opakovania". Stored with the training, not the subtype. */
+  periodicity_value: number | null;
+  periodicity_unit: PeriodicityUnit | null;
+  /** The technician chose a value other than the recommended one for the subtype. */
+  periodicity_is_custom: boolean;
+  /** `date` + periodicity (platnosť do); null without recurrence or without a date. */
+  valid_until: string | null;
   duration_min: number | null;
   topics: string | null;
   status: TrainingStatus;
@@ -82,6 +90,8 @@ export type TrainingListItem = InvoicingFields & {
   visit_id: number | null;
   trainer_id: number | null;
   trainer_name: string | null;
+  /** Who created the úkon — null on rows older than the práva členov switch. */
+  created_by_user_id: number | null;
   trainees_count: number;
   // Pokyn only — the harvest year, so a list row can name itself without
   // dragging the whole instruction text along.
@@ -135,6 +145,8 @@ export type TrainingPayload = {
   company_id: number;
   facility_id?: number | null;
   date: string;
+  periodicity_value?: number | null;
+  periodicity_unit?: PeriodicityUnit | null;
   trainer_id?: number | null;
   topics?: string | null;
   duration_min?: number | null;
@@ -146,6 +158,9 @@ export type TrainingPayload = {
 
 export type TrainingUpdatePayload = {
   date?: string | null;
+  /** Sent as a pair; both null clears the recurrence („bez opakovania"). */
+  periodicity_value?: number | null;
+  periodicity_unit?: PeriodicityUnit | null;
   trainer_id?: number | null;
   topics?: string | null;
   duration_min?: number | null;

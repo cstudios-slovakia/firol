@@ -6,6 +6,7 @@ namespace Firol\Controllers;
 
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
+use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
@@ -228,6 +229,7 @@ final class VisitController
         $id = (int) $params['id'];
 
         $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        MemberRights::requireDelete((int) $row['account_id']);
         // The úkony survive the visit: they are protocols in their own right,
         // and dropping the thread between them must not drop them.
         Db::pdo()->prepare('UPDATE visits SET archived_at = NOW() WHERE id = ? AND account_id = ?')
@@ -310,6 +312,48 @@ final class VisitController
     }
 
     /**
+     * Hold (or release) the protocol of one draft úkon until the end of the
+     * visit. Body: inspection_id or training_id, plus deferred (bool).
+     */
+    public static function deferProtocol(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $id = (int) $params['id'];
+
+        $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        $scopeAccountId = (int) $row['account_id'];
+
+        $body = $req->json();
+        $inspectionId = isset($body['inspection_id']) ? (int) $body['inspection_id'] : 0;
+        $trainingId = isset($body['training_id']) ? (int) $body['training_id'] : 0;
+        if (($inspectionId > 0) === ($trainingId > 0) || !is_bool($body['deferred'] ?? null)) {
+            Response::error('Neplatná požiadavka.', 422);
+        }
+        $table = $inspectionId > 0 ? 'inspections' : 'trainings';
+        $ukonId = $inspectionId > 0 ? $inspectionId : $trainingId;
+
+        $stmt = Db::pdo()->prepare(
+            "SELECT status FROM {$table}
+             WHERE  id = ? AND visit_id = ? AND account_id = ? AND archived_at IS NULL"
+        );
+        $stmt->execute([$ukonId, $id, $scopeAccountId]);
+        $ukon = $stmt->fetch();
+        if (!$ukon || $ukon['status'] !== 'draft') {
+            Response::error('Úkon nepatrí do tejto návštevy alebo už má vygenerovaný protokol.', 422);
+        }
+
+        Db::pdo()->prepare(
+            "UPDATE {$table}
+             SET    protocol_deferred_at = " . ($body['deferred'] ? 'NOW()' : 'NULL') . '
+             WHERE  id = ? AND account_id = ?'
+        )->execute([$ukonId, $scopeAccountId]);
+
+        Response::json(['visit' => self::shape(self::loadOrFail($scopeAccountId, $id))]);
+    }
+
+    /**
      * Úkony recorded under this visit, with their protocol when one exists.
      *
      * @return list<array<string, mixed>>
@@ -318,7 +362,7 @@ final class VisitController
     {
         $stmt = Db::pdo()->prepare(
             'SELECT i.id, i.type, i.status, i.executed_on,
-                    i.periodicity_value, i.periodicity_unit,
+                    i.periodicity_value, i.periodicity_unit, i.protocol_deferred_at,
                     (SELECT COUNT(*) FROM inspection_items it WHERE it.inspection_id = i.id) AS item_count,
                     d.id AS document_id, d.number AS document_number
              FROM   inspections i
@@ -343,6 +387,7 @@ final class VisitController
                 ),
                 'document_id'     => $r['document_id'] !== null ? (int) $r['document_id'] : null,
                 'document_number' => $r['document_number'],
+                'deferred'        => $r['protocol_deferred_at'] !== null,
             ];
         }, $stmt->fetchAll());
     }
@@ -389,7 +434,7 @@ final class VisitController
     private static function loadTrainings(int $visitId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT t.id, t.type, t.status, t.date,
+            'SELECT t.id, t.type, t.status, t.date, t.protocol_deferred_at,
                     (SELECT COUNT(*) FROM trainees tr WHERE tr.training_id = t.id) AS trainees_count,
                     d.id AS document_id, d.number AS document_number
              FROM   trainings t
@@ -409,6 +454,7 @@ final class VisitController
                 'trainees_count'  => (int) $r['trainees_count'],
                 'document_id'     => $r['document_id'] !== null ? (int) $r['document_id'] : null,
                 'document_number' => $r['document_number'],
+                'deferred'        => $r['protocol_deferred_at'] !== null,
             ];
         }, $stmt->fetchAll());
     }

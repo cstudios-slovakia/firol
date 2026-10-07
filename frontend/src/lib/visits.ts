@@ -54,6 +54,9 @@ export function visitTrainingOf(visit: Visit): VisitTraining | undefined {
   return visit.trainings.find((t) => t.status !== 'finalized') ?? visit.trainings[0];
 }
 
+/** Text of an úkon whose protocol is held until the end of the visit. */
+export const HELD_TEXT = 'Hotové · protokol sa vygeneruje na konci návštevy';
+
 /** How far an úkon of the visit is, as the visit screen and „Ďalší úkon" read it. */
 export function visitUkonState(
   visit: Visit,
@@ -63,20 +66,24 @@ export function visitUkonState(
     const training = visitTrainingOf(visit);
     if (!training) return { started: false, done: false, text: 'Zatiaľ nezačaté', documentId: null };
     const trainees = plural(training.trainees_count, 'účastník', 'účastníci', 'účastníkov');
-    const done = visit.trainings.every((t) => t.status === 'finalized');
+    const issued = visit.trainings.every((t) => t.status === 'finalized');
+    if (!issued && visit.trainings.every((t) => t.status === 'finalized' || t.deferred)) {
+      return { started: true, done: true, text: HELD_TEXT, documentId: null };
+    }
     return {
       started: true,
-      done,
-      text: done
+      done: issued,
+      text: issued
         ? `Protokol ${training.document_number ?? '—'} · ${trainees}`
         : `Rozpracované · ${trainees}`,
-      documentId: done ? training.document_id : null,
+      documentId: issued ? training.document_id : null,
     };
   }
   const inspection = visitInspectionOfType(visit, type);
   if (!inspection) return { started: false, done: false, text: 'Zatiaľ nezačaté', documentId: null };
   const items = plural(inspection.item_count, 'položka', 'položky', 'položiek');
   const done = inspection.status === 'finalized';
+  if (!done && inspection.deferred) return { started: true, done: true, text: HELD_TEXT, documentId: null };
   return {
     started: true,
     done,
@@ -111,6 +118,12 @@ export function visitUkonPath(visit: Visit, type: VisitType): string {
 /** The first úkon of the visit that has no protocol yet, or null when all are done. */
 export function nextUnfinishedType(visit: Visit): VisitType | null {
   return visitUkonTypes(visit).find((type) => !visitUkonState(visit, type).done) ?? null;
+}
+
+/** Where to go after finishing an úkon: the next unfinished úkon, else null. */
+export function nextUkonPath(visit: Visit): string | null {
+  const next = nextUnfinishedType(visit);
+  return next ? visitUkonPath(visit, next) : null;
 }
 
 /**
