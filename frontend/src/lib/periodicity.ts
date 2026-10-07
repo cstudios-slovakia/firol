@@ -66,9 +66,42 @@ export const RECOMMENDED_MONTHS: Record<string, number[]> = {
   skolenie_bozp: [36, 24, 12],
 };
 
+/**
+ * Recommended period per TRAINING subtype — the client's table (change request
+ * 6). A map of its own, apart from `RECOMMENDED_MONTHS`: training slugs and
+ * inspection slugs are different namespaces. Mirrors
+ * `Periodicity::TRAINING_RECOMMENDED_MONTHS` on the server; the first value is
+ * preselected and, as everywhere, nothing here is statutory.
+ */
+export const TRAINING_RECOMMENDED_MONTHS: Record<string, number[]> = {
+  vstupne: [24],
+  opakovane: [24],
+  zdrzujuca_sa: [24],
+  opp_mimo: [12],
+  hliadka_oph: [12],
+  hliadka_opah: [12],
+  pokyn_zatva: [12],
+};
+
+/**
+ * Key of the term chain a training belongs to. Vstupné and Opakované are one
+ * chain — the next training of either kind at the same firma / prevádzka
+ * fulfils the open term — every other subtype is its own chain. Mirrors
+ * `Periodicity::trainingChain`.
+ */
+export function trainingChain(type: string): string {
+  return type === 'vstupne' || type === 'opakovane' ? 'zamestnanci' : type;
+}
+
 /** The period the app offers first for a type, before any history is known. */
 export function defaultPeriodicity(type: string): Periodicity {
   const months = RECOMMENDED_MONTHS[type] ?? [];
+  return months.length > 0 ? { value: months[0], unit: 'mesiac' } : PERIODICITY_NONE;
+}
+
+/** The period the app offers first for a training subtype, before any history is known. */
+export function defaultTrainingPeriodicity(type: string): Periodicity {
+  const months = TRAINING_RECOMMENDED_MONTHS[type] ?? [];
   return months.length > 0 ? { value: months[0], unit: 'mesiac' } : PERIODICITY_NONE;
 }
 
@@ -104,6 +137,13 @@ export function periodicityShort(p: Periodicity): string {
 /** True when the pair is not one of the values the app offered for this type. */
 export function isCustomPeriodicity(type: string, p: Periodicity): boolean {
   const recommended = RECOMMENDED_MONTHS[type] ?? [];
+  if (p.value === null) return recommended.length > 0;
+  return p.unit !== 'mesiac' || !recommended.includes(p.value);
+}
+
+/** The same check for a training subtype, against `TRAINING_RECOMMENDED_MONTHS`. */
+export function isCustomTrainingPeriodicity(type: string, p: Periodicity): boolean {
+  const recommended = TRAINING_RECOMMENDED_MONTHS[type] ?? [];
   if (p.value === null) return recommended.length > 0;
   return p.unit !== 'mesiac' || !recommended.includes(p.value);
 }
