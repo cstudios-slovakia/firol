@@ -40,6 +40,7 @@ import { Today, type FieldRow, type OpenDefect, type TodayData, type TodayScope,
 import { useUpcomingTasks, type Task } from '@/api/tasks';
 import { INSPECTION_TYPE_LABELS, type InspectionType } from '@/api/inspections';
 import { visitTypeLabel } from '@/lib/visits';
+import { deadlineFacilityName, deadlineHref, deadlineLabel } from '@/lib/deadlines';
 import { TRAINING_TYPE_SHORT, type TrainingType } from '@/api/trainings';
 import { ZDROJ_LABELS, formatEventTime, type CalendarDeadline, type OwnTerm, type TerminTechnician } from '@/api/calendar';
 import { UNINVOICED_PARAM } from '@/api/invoicing';
@@ -479,12 +480,13 @@ function fieldRow(r: FieldRow, who: (t: TerminTechnician | null) => TerminTechni
   if (r.kind === 'plan') {
     return {
       key: r.key,
-      href: `/inspections/${r.id}`,
+      // A training term opens the training; `id` is its id then.
+      href: r.training_id ? `/trainings/${r.id}` : `/inspections/${r.id}`,
       title: r.company_name ?? '',
       sub: [place, types].filter(Boolean).join(' · ') || null,
       tag: ZDROJ_LABELS.kontrola,
       tagTone: r.status === 'po_termine' ? 'bad' : 'muted',
-      section: r.types[0] ? sectionForInspectionType(r.types[0]) : null,
+      section: r.training_id ? TRAINING_SECTION : r.types[0] ? sectionForInspectionType(r.types[0] as InspectionType) : null,
       technician: who(r.technician),
     };
   }
@@ -504,9 +506,9 @@ function overdueRow(d: CalendarDeadline, who: (t: TerminTechnician | null) => Te
   const late = -daysUntil(d.due_date);
   return {
     key: d.key,
-    href: `/inspections/${d.inspection_id}`,
+    href: deadlineHref(d),
     title: d.company_name,
-    sub: [INSPECTION_TYPE_LABELS[d.type] ?? d.type, d.facility_city ?? d.facility_name].join(' · '),
+    sub: [deadlineLabel(d), d.facility_city ?? deadlineFacilityName(d)].join(' · '),
     meta: `−${late} ${dayWord(late)}`,
     metaTone: 'bad',
     section: d.section,

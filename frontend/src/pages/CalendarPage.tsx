@@ -35,7 +35,12 @@ import {
     type CompanyListItem,
     type FacilityListItem,
 } from "@/api/companies";
-import { INSPECTION_TYPE_LABELS } from "@/api/inspections";
+import {
+    clearDeadlinePlan,
+    deadlineHref,
+    deadlineLabel,
+    setDeadlinePlan,
+} from "@/lib/deadlines";
 import { ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { useConfirm } from "@/lib/confirm";
@@ -786,7 +791,7 @@ function TerminRow({
     const overdue = t.state === "po_termine";
     const done = t.state === "splneny";
 
-    const title = d ? INSPECTION_TYPE_LABELS[d.type] : (e?.title ?? "");
+    const title = d ? deadlineLabel(d) : (e?.title ?? "");
     const where =
         groupBy === "firma"
             ? [t.facility_name, t.city].filter(Boolean).join(" · ")
@@ -809,7 +814,7 @@ function TerminRow({
                 <div className="min-w-0 flex-1">
                     {d ? (
                         <Link
-                            to={`/inspections/${d.inspection_id}`}
+                            to={deadlineHref(d)}
                             className={cn(
                                 "text-sm font-medium transition-colors hover:text-firol-600",
                                 done ? "text-ink-500" : "text-ink-900",
@@ -945,7 +950,7 @@ export function PlanEditor({
         if (!planned) return;
         setSaving(true);
         try {
-            await Calendar.setPlan(deadline.inspection_id, planned, csrfToken);
+            await setDeadlinePlan(deadline, planned, csrfToken);
             await onDone();
             toast.success("Plánovaný dátum uložený");
         } catch (err) {
@@ -959,7 +964,7 @@ export function PlanEditor({
     async function clearPlan() {
         setSaving(true);
         try {
-            await Calendar.clearPlan(deadline.inspection_id, csrfToken);
+            await clearDeadlinePlan(deadline, csrfToken);
             await onDone();
             toast.success("Plánovaný dátum zrušený");
         } catch (err) {

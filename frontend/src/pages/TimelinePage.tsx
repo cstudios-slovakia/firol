@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
 import { Calendar, type CalendarData, type CalendarDeadline } from "@/api/calendar";
-import { INSPECTION_TYPE_LABELS } from "@/api/inspections";
+import { deadlineFacilityName, deadlineLabel } from "@/lib/deadlines";
 import { daysUntil } from "@/lib/calendarGrouping";
 import { formatDateSk } from "@/lib/clientNoticeEmail";
 import { cn } from "@/lib/cn";
@@ -258,7 +258,7 @@ function TimelineRow({
     const overdue = d.state === "po_termine";
     const days = daysUntil(d.due_date);
     const soon = !overdue && days <= 30;
-    const where = [d.facility_city, d.facility_name].filter(Boolean).join(" · ");
+    const where = [d.facility_city, deadlineFacilityName(d)].filter(Boolean).join(" · ");
 
     return (
         <div
@@ -286,7 +286,7 @@ function TimelineRow({
                         {d.company_name}
                     </p>
                     <p className="text-sm text-ink-700">
-                        {INSPECTION_TYPE_LABELS[d.type]}
+                        {deadlineLabel(d)}
                     </p>
                     {where && (
                         <p className="truncate text-xs text-ink-500">{where}</p>

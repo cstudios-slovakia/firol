@@ -190,6 +190,8 @@ $router->get('/api/inspections/{id}/documents',      [DocumentController::class,
 $router->get('/api/calendar',                        [CalendarController::class, 'index']);
 $router->patch('/api/calendar/plans/{inspection_id}', [CalendarController::class, 'setPlan']);
 $router->delete('/api/calendar/plans/{inspection_id}', [CalendarController::class, 'deletePlan']);
+$router->patch('/api/calendar/plans/training/{training_id}',  [CalendarController::class, 'setTrainingPlan']);
+$router->delete('/api/calendar/plans/training/{training_id}', [CalendarController::class, 'deleteTrainingPlan']);
 $router->post('/api/calendar/events',                [CalendarController::class, 'createEvent']);
 $router->patch('/api/calendar/events/{id}',          [CalendarController::class, 'updateEvent']);
 $router->delete('/api/calendar/events/{id}',         [CalendarController::class, 'deleteEvent']);

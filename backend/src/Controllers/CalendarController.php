@@ -165,6 +165,53 @@ final class CalendarController
         Response::noContent();
     }
 
+    /** The same for the term of a training (change request 6). */
+    public static function setTrainingPlan(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $trainingId = (int) ($params['training_id'] ?? 0);
+
+        // As for an inspection: the plan belongs to the training's account.
+        $scopeAccountId = self::assertTrainingInAccount(
+            $trainingId,
+            $isAdmin ? null : $accountId,
+        );
+
+        $date = $req->jsonString('planned_date');
+        if ($date === null || !self::isDate($date)) {
+            Response::error('Neplatný plánovaný dátum (očakáva sa formát YYYY-MM-DD).', 422);
+        }
+
+        // Upsert: one plan per training (unique key).
+        Db::pdo()->prepare(
+            'INSERT INTO calendar_plans (account_id, training_id, planned_date)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE planned_date = VALUES(planned_date)'
+        )->execute([$scopeAccountId, $trainingId, $date]);
+
+        Response::json(['ok' => true]);
+    }
+
+    public static function deleteTrainingPlan(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $trainingId = (int) ($params['training_id'] ?? 0);
+
+        $sql = 'DELETE FROM calendar_plans WHERE training_id = ?';
+        $args = [$trainingId];
+        if (!$isAdmin) {
+            $sql .= ' AND account_id = ?';
+            $args[] = $accountId;
+        }
+        Db::pdo()->prepare($sql)->execute($args);
+
+        Response::noContent();
+    }
+
     /** Create a free-standing vlastná udalosť, owned by whoever creates it. */
     public static function createEvent(Request $req): void
     {
@@ -376,6 +423,27 @@ final class CalendarController
         $owner = $stmt->fetchColumn();
         if ($owner === false) {
             Response::error('Kontrola sa nenašla.', 404);
+        }
+        return (int) $owner;
+    }
+
+    /**
+     * @param int|null $accountId Tenant to scope to; null = any account (admin).
+     * @return int The training's own account id, to scope the write with.
+     */
+    private static function assertTrainingInAccount(int $trainingId, ?int $accountId): int
+    {
+        $sql = 'SELECT account_id FROM trainings WHERE id = ? AND archived_at IS NULL';
+        $args = [$trainingId];
+        if ($accountId !== null) {
+            $sql .= ' AND account_id = ?';
+            $args[] = $accountId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($args);
+        $owner = $stmt->fetchColumn();
+        if ($owner === false) {
+            Response::error('Školenie sa nenašlo.', 404);
         }
         return (int) $owner;
     }

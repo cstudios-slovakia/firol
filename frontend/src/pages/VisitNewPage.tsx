@@ -9,9 +9,10 @@ import {
   type InspectionListItem,
   type InspectionType,
 } from '@/api/inspections';
+import { isPokyn, Trainings, type TrainingListItem } from '@/api/trainings';
 import { SKOLENIE_PO, Visits, type VisitType } from '@/api/visits';
 import { ApiError } from '@/lib/api';
-import { daysUntilNext } from '@/lib/periodicity';
+import { daysUntilNext, trainingChain } from '@/lib/periodicity';
 import {
   SECTIONS, SECTION_COLORS, SECTION_INSPECTION_TYPES, SECTION_LABELS, TRAINING_SECTION,
   type Section,
@@ -59,6 +60,7 @@ export function VisitNewPage() {
   const [visitDate, setVisitDate] = useState(todayIso());
   const [types, setTypes] = useState<Set<VisitType>>(new Set());
   const [history, setHistory] = useState<InspectionListItem[]>([]);
+  const [trainingHistory, setTrainingHistory] = useState<TrainingListItem[]>([]);
   const [touchedTypes, setTouchedTypes] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
@@ -130,6 +132,26 @@ export function VisitNewPage() {
     };
   }, [facilityId]);
 
+  // The firm's trainings — a training term belongs to this prevádzka or to the
+  // whole firma, so the history is the company's, not the prevádzka's.
+  useEffect(() => {
+    if (companyId === null) {
+      setTrainingHistory([]);
+      return;
+    }
+    let cancelled = false;
+    Trainings.list({ company_id: companyId })
+      .then((res) => {
+        if (!cancelled) setTrainingHistory(res.items);
+      })
+      .catch(() => {
+        if (!cancelled) setTrainingHistory([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
   /** Types whose term is due within a month, or already past. */
   const { dueTypes, overdueTypes } = useMemo(() => {
     const due = new Set<VisitType>();
@@ -145,8 +167,27 @@ export function VisitNewPage() {
       if (days !== null && days <= DUE_SOON_DAYS) due.add(type);
       if (days !== null && days < 0) overdue.add(type);
     }
+
+    // Školenie PO is due when any training chain of this prevádzka (or of the
+    // whole firma) is: the latest finalized training per chain, as in the
+    // calendar. The Pokyn is left out — it is not recorded under a visit.
+    const latestTraining = new Map<string, TrainingListItem>();
+    for (const t of trainingHistory) {
+      if (t.status !== 'finalized' || !t.date || isPokyn(t.type)) continue;
+      if (t.facility_id !== null && t.facility_id !== facilityId) continue;
+      const key = `${t.facility_id ?? 'firma'}|${trainingChain(t.type)}`;
+      const current = latestTraining.get(key);
+      if (!current || (current.date ?? '') < t.date || ((current.date ?? '') === t.date && current.id < t.id)) {
+        latestTraining.set(key, t);
+      }
+    }
+    for (const t of latestTraining.values()) {
+      const days = daysUntilNext(t.date, { value: t.periodicity_value, unit: t.periodicity_unit });
+      if (days !== null && days <= DUE_SOON_DAYS) due.add(SKOLENIE_PO);
+      if (days !== null && days < 0) overdue.add(SKOLENIE_PO);
+    }
     return { dueTypes: due, overdueTypes: overdue };
-  }, [history]);
+  }, [history, trainingHistory, facilityId]);
 
   // Tick the due ones — until the technician makes their own selection, at
   // which point the app stops second-guessing them.
@@ -353,9 +394,7 @@ export function VisitNewPage() {
 
 /**
  * Types a section offers on a visit: its inspection types, and — in OPP — the
- * školenie PO, which is a training rather than an inspection type. It is never
- * pre-ticked: whether a training is due is not tracked (trainings carry no
- * periodicity yet), so the technician ticks it themselves.
+ * školenie PO, which is a training rather than an inspection type.
  */
 function typesOfSection(section: Section): VisitType[] {
   const types: VisitType[] = [...SECTION_INSPECTION_TYPES[section]];

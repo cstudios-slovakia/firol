@@ -95,7 +95,7 @@ final class TodayController
             static fn (array $d): bool => $d['state'] === 'po_termine',
         ));
         usort($overdue, static fn (array $a, array $b): int =>
-            strcmp($a['due_date'], $b['due_date']) ?: $a['inspection_id'] <=> $b['inspection_id']);
+            strcmp($a['due_date'], $b['due_date']) ?: strcmp($a['key'], $b['key']));
 
         $horizon = (new \DateTimeImmutable($today))->modify('+' . self::OWN_TERM_DAYS . ' days')->format('Y-m-d');
         $ownTerms = array_values(array_filter(
@@ -171,15 +171,19 @@ final class TodayController
         ));
         usort($planned, static fn (array $a, array $b): int =>
             strcmp($a['company_name'], $b['company_name'])
-            ?: strcmp($a['facility_name'], $b['facility_name'])
-            ?: $a['inspection_id'] <=> $b['inspection_id']);
+            ?: strcmp((string) $a['facility_name'], (string) $b['facility_name'])
+            ?: strcmp($a['key'], $b['key']));
         foreach ($planned as $d) {
+            // A training term (no inspection_id) is told apart by `training_id`;
+            // `id` is the úkon the row opens, whichever kind it is.
             $out[] = [
                 'kind'          => 'plan',
-                'key'           => 'plan-' . $d['inspection_id'],
-                'id'            => $d['inspection_id'],
+                'key'           => 'plan-' . $d['key'],
+                'id'            => $d['inspection_id'] ?? $d['training_id'],
+                'training_id'   => $d['training_id'],
                 'company_id'    => $d['company_id'],
                 'company_name'  => $d['company_name'],
+                // Null for a training of the whole firma.
                 'facility_name' => $d['facility_name'],
                 'city'          => $d['facility_city'],
                 'types'         => [$d['type']],

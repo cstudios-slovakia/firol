@@ -19,14 +19,16 @@ export type FieldRow = {
   /** navsteva = visit dated today, plan = deadline planned for today, udalost = vlastná udalosť. */
   kind: 'navsteva' | 'plan' | 'udalost';
   key: string;
-  /** Visit id, the deadline's inspection id, or the event id. */
+  /** Visit id, the deadline's úkon id (inspection or training — see `training_id`), or the event id. */
   id: number;
+  /** A plan row only: set when the term belongs to a training, whose id is then `id`. */
+  training_id?: number | null;
   company_id: number | null;
   company_name: string | null;
   facility_name: string | null;
   city: string | null;
   /** Úkony planned on the visit; the deadline's type for a plan; empty for an event. */
-  types: InspectionType[];
+  types: (InspectionType | 'skolenie_po')[];
   /** Event title; null otherwise. */
   title: string | null;
   /** `HH:MM` of an event with a time; null = all-day or not an event. */
