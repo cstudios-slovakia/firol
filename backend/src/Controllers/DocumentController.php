@@ -1402,6 +1402,7 @@ final class DocumentController
     private static function loadTrainingForGenerate(?int $accountId, int $trainingId): array
     {
         $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics, t.status,
+                       t.periodicity_value, t.periodicity_unit,
                        t.fields,
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
@@ -1498,6 +1499,14 @@ final class DocumentController
                 'type'                => $type,
                 'training_type_label' => self::TRAINING_TYPE_LABELS[$type] ?? $type,
                 'date'                => $training['date'],
+                // Chapter 5: only the bare value, „Periodicita: 12 mesiacov";
+                // null (bez opakovania) prints no row at all.
+                'periodicity_label'   => $training['periodicity_value'] !== null
+                    ? Periodicity::label(
+                        (int) $training['periodicity_value'],
+                        (string) $training['periodicity_unit'],
+                    )
+                    : null,
                 'duration_min'        => $training['duration_min'],
                 'topics'              => $training['topics'],
                 'status'              => $training['status'],

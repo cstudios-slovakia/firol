@@ -32,6 +32,8 @@ $formatDate = static function (?string $iso): string {
 $year     = (int) ($pokyn['year'] ?? 0);
 $sections = is_array($pokyn['sections'] ?? null) ? $pokyn['sections'] : [];
 $issuedOn = $training['date'] ?? null;
+// Chapter 5: a bare „Periodicita: 12 mesiacov"; bez opakovania prints no row.
+$periodicity = $training['periodicity_label'] ?? null;
 
 // Per-document override wins over the company's recorded schvaľujúca osoba.
 $approver = trim((string) ($pokyn['approver'] ?? '')) ?: trim((string) ($company['approver'] ?? ''));
@@ -337,6 +339,12 @@ $renderBody = static function (string $text) use ($h): string {
     <td class="bl">Schválil</td>
     <td colspan="3"><?= $approver !== '' ? $h($approver) : '—' ?></td>
   </tr>
+  <?php if ($periodicity !== null): ?>
+    <tr>
+      <td class="bl">Periodicita</td>
+      <td colspan="3"><?= $h($periodicity) ?></td>
+    </tr>
+  <?php endif ?>
   <?= \Firol\Support\Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
 </table>
 
