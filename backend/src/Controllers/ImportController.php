@@ -529,8 +529,9 @@ final class ImportController
             $insertTraining = $pdo->prepare(
                 'INSERT INTO trainings
                     (account_id, company_id, facility_id, type, date,
+                     periodicity_value, periodicity_unit, periodicity_is_custom,
                      trainer_id, topics, duration_min, status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, "draft")'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft")'
             );
 
             foreach ($rowsBySheet['Skolenia'] as $idx => $row) {
@@ -558,6 +559,19 @@ final class ImportController
                 }
                 if ($date === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
                     $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Neplatný dátum (formát DD-MM-RRRR).'];
+                    continue;
+                }
+                // Same rule as the inspections sheet: any value in any unit, an
+                // empty cell is „bez opakovania", a blank unit beside a count
+                // means months.
+                $unitCell = self::str($row, 'periodicity_unit');
+                try {
+                    [$periodicityValue, $periodicityUnit] = Periodicity::normalize(
+                        self::intOrNull($row, 'periodicity_value'),
+                        $unitCell ?? (self::intOrNull($row, 'periodicity_value') !== null ? 'mesiac' : null),
+                    );
+                } catch (\InvalidArgumentException $e) {
+                    $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => $e->getMessage()];
                     continue;
                 }
                 // Match by IČO; create the company when it does not exist yet.
@@ -589,6 +603,8 @@ final class ImportController
 
                 $insertTraining->execute([
                     $accountId, $companyId, $facilityId, $type, $date,
+                    $periodicityValue, $periodicityUnit,
+                    Periodicity::isCustomForTraining($type, $periodicityValue, $periodicityUnit) ? 1 : 0,
                     $trainerId,
                     self::str($row, 'topics'),
                     self::intOrNull($row, 'duration_min'),

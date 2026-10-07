@@ -78,6 +78,25 @@ final class Schema
                     ],
                     ['header' => 'Dátum (DD-MM-RRRR) *', 'key' => 'date', 'hint' => '15-01-2026', 'date' => true],
                     ['header' => 'E-mail lektora', 'key' => 'trainer_email', 'hint' => 'lektor@firma.sk'],
+                    // Appended last: the importer reads columns by position, so a sheet
+                    // downloaded before periodicity existed still lines up (and reads
+                    // as „bez opakovania").
+                    [
+                        'header' => 'Periodicita — počet',
+                        'key' => 'periodicity_value',
+                        'hint' => '24',
+                        'options' => self::PERIODICITY_SUGGESTIONS,
+                        'prompt_title' => 'Periodicita',
+                        'prompt' => 'Koľko dní / týždňov / mesiacov platí školenie. Nechaj prázdne, ak sa školenie neopakuje.',
+                    ],
+                    [
+                        'header' => 'Periodicita — jednotka',
+                        'key' => 'periodicity_unit',
+                        'hint' => 'mesiac',
+                        'options' => self::PERIODICITY_UNITS,
+                        'prompt_title' => 'Jednotka periodicity',
+                        'prompt' => 'den, tyzden alebo mesiac. Prázdne pole znamená mesiac.',
+                    ],
                 ],
             ],
             'Ucastnici' => [
