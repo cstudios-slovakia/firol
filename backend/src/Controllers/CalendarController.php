@@ -165,7 +165,11 @@ final class CalendarController
         Response::noContent();
     }
 
-    /** The same for the term of a training (change request 6). */
+    /**
+     * The same for the term of a training (change request 6).
+     *
+     * @param array<string, string> $params
+     */
     public static function setTrainingPlan(Request $req, array $params): void
     {
         Csrf::require($req);
@@ -194,6 +198,7 @@ final class CalendarController
         Response::json(['ok' => true]);
     }
 
+    /** @param array<string, string> $params */
     public static function deleteTrainingPlan(Request $req, array $params): void
     {
         Csrf::require($req);
