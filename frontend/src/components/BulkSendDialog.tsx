@@ -217,7 +217,9 @@ export function BulkSendDialog({
                           ? 'Výdajka materiálu'
                           : doc.type === 'skolenie'
                             ? 'Školenie PO'
-                            : (INSPECTION_TYPE_LABELS[doc.type] ?? doc.type)}
+                            : doc.type === 'pokyn_zatva'
+                              ? 'Pokyn — žatevné práce'
+                              : (INSPECTION_TYPE_LABELS[doc.type] ?? doc.type)}
                         {doc.facility_name && ` · ${doc.facility_name}`}
                         {doc.executed_on &&
                           ` · ${new Date(`${doc.executed_on}T00:00:00`).toLocaleDateString('sk-SK')}`}

@@ -237,7 +237,12 @@ final class DocumentSendController
 
         // Výdajky (block 4 / chapter 21) are this client's documents too, so
         // they can go out in the same e-mail as the protocols — and so is the
-        // protocol of a školenie PO (chapter 9: it is an úkon of the visit).
+        // protocol of a školenie PO (chapter 9: it is an úkon of the visit) and
+        // the Pokyn — žatevné práce (owner decision 7. 10. 2026).
+        // The potvrdenie o vykonaní práce is never offered (owner decision
+        // 7. 10. 2026): it is a document for the technician's employer, not for
+        // the client, and it hangs off a work_confirmation, which none of the
+        // joins below reach. loadDocuments() refuses it again for a crafted id.
         $stmt = Db::pdo()->prepare(
             'SELECT * FROM (
                 SELECT d.id, d.type, d.number, d.generated_at, d.file_path,
@@ -259,7 +264,7 @@ final class DocumentSendController
                 FROM   documents d
                 JOIN   trainings t ON t.id = d.parent_id AND d.parent_type = "training"
                 LEFT   JOIN facilities f ON f.id = t.facility_id
-                WHERE  d.account_id = ? AND t.company_id = ? AND d.type = "skolenie"
+                WHERE  d.account_id = ? AND t.company_id = ? AND d.type IN ("skolenie", "pokyn_zatva")
                    AND t.archived_at IS NULL
              ) x
              ORDER  BY COALESCE(executed_on, generated_at) DESC, id DESC
@@ -400,6 +405,7 @@ final class DocumentSendController
              LEFT   JOIN stock_issues si ON si.id = d.parent_id AND d.parent_type = 'stock_issue'
              LEFT   JOIN trainings    tr ON tr.id = d.parent_id AND d.parent_type = 'training'
              WHERE  d.account_id = ? AND COALESCE(i.company_id, si.company_id, tr.company_id) = ?
+               AND  d.type <> 'potvrdenie_prace'
                AND  d.id IN ($placeholders)
              ORDER  BY d.id ASC"
         );

@@ -132,6 +132,7 @@ final class WorkConfirmationController
         // this company on that day, which is what "spätne z histórie" means.
         if ($inspectionIds === [] && $trainingIds === []) {
             $inspectionIds = self::inspectionIdsOfDay($accountId, $companyId, $facilityId, $confirmedOn);
+            $trainingIds = self::trainingIdsOfDay($accountId, $companyId, $facilityId, $confirmedOn);
         }
         if ($inspectionIds === [] && $trainingIds === []) {
             Response::error('V ten deň nie je pri tejto firme zaznamenaný žiadny dokončený úkon.', 422);
@@ -441,6 +442,27 @@ final class WorkConfirmationController
              ORDER  BY id ASC'
         );
         $stmt->execute([$visitId]);
+        return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
+    /** @return list<int> */
+    private static function trainingIdsOfDay(
+        int $accountId,
+        int $companyId,
+        ?int $facilityId,
+        string $date,
+    ): array {
+        $sql = 'SELECT id FROM trainings
+                WHERE  account_id = ? AND company_id = ? AND date = ?
+                   AND archived_at IS NULL AND status = "finalized"';
+        $args = [$accountId, $companyId, $date];
+        if ($facilityId !== null) {
+            $sql .= ' AND facility_id = ?';
+            $args[] = $facilityId;
+        }
+        $sql .= ' ORDER BY id ASC';
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($args);
         return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
     }
 

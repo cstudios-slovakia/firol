@@ -18,8 +18,8 @@ export type HandoverPayload = {
 /** A protocol available for a bulk send (chapter 9.1). */
 export type SendableDocument = {
   id: number;
-  /** An úkon's protocol, a výdajka materiálu (block 4 / chapter 21), or the protocol of a školenie PO. */
-  type: InspectionType | 'vydajka' | 'skolenie';
+  /** An úkon's protocol, a výdajka materiálu (block 4 / chapter 21), the protocol of a školenie PO, or a Pokyn — žatevné práce. */
+  type: InspectionType | 'vydajka' | 'skolenie' | 'pokyn_zatva';
   number: string;
   executed_on: string | null;
   /** Null for a výdajka not tied to one prevádzka. */
