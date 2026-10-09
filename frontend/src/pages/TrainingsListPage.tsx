@@ -369,7 +369,7 @@ function TrainingRow({
     /** Set in the „Nevyfakturované" view — offers the one-tap check-off. */
     onInvoiced?: (id: number, next: InvoicingFields) => void;
 }) {
-    const { canDelete, canDeleteUkon } = useMemberRights();
+    const { canDeleteUkon } = useMemberRights();
     return (
         <Card className="px-4 py-3">
             <div className="flex items-center gap-3">
@@ -449,7 +449,7 @@ function TrainingRow({
                                 onDone={(next) => onInvoiced(it.id, next)}
                             />
                         )}
-                        {(it.status === "draft" || canDelete) && (
+                        {it.status === "draft" && (
                             <Link
                                 to={`/trainings/${it.id}/edit`}
                                 title="Upraviť"

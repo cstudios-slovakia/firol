@@ -223,6 +223,17 @@ export const Trainings = {
       csrfToken,
       requireOnline: true,
     }),
+  /**
+   * Reopen a locked (finalized) training for editing. The server discards the
+   * issued PDF protocol — a fresh one gets a new number. Online only: there is
+   * nothing sensible to replay from an outbox once the document is gone.
+   */
+  unlock: (trainingId: number, csrfToken: string | null) =>
+    api<{ training: Training }>(`/api/trainings/${trainingId}/unlock`, {
+      method: 'POST',
+      csrfToken,
+      requireOnline: true,
+    }),
   documents: (trainingId: number) =>
     api<{ items: TrainingDocument[] }>(`/api/trainings/${trainingId}/documents`),
 };

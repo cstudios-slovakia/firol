@@ -5,8 +5,8 @@ import { InvoicingBlock } from '@/components/InvoicingBlock';
 import { invoicingOf } from '@/api/invoicing';
 import {
   ArrowLeft, Briefcase, Building2, CalendarCheck, CalendarDays, CheckCircle2, Clock,
-  Download, Edit2, FileText, GraduationCap, Plus, Repeat, Trash2, User, Users,
-  Warehouse, Wheat,
+  Download, Edit2, FileText, GraduationCap, Lock, LockOpen, Pencil, Plus, Repeat, Trash2, User,
+  Users, Warehouse, Wheat,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
@@ -48,7 +48,8 @@ export function TrainingDetailPage() {
   const id = Number(idStr);
   const { csrfToken } = useAuth();
   const isReadOnly = useIsReadOnly();
-  const { canDelete: canEditFinished } = useMemberRights();
+  // „Upraviť" discards the issued protocol, so it follows the práva členov switch.
+  const { canDelete: canUnlock } = useMemberRights();
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -60,6 +61,10 @@ export function TrainingDetailPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // „Upraviť" on a locked training asks first — unlocking throws the issued
+  // protocol away, so it never happens on a single tap.
+  const [unlockPrompt, setUnlockPrompt] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,6 +96,26 @@ export function TrainingDetailPage() {
       () => ({ items: [] as TrainingDocument[] }),
     );
     setDocuments(docs.items);
+  }
+
+  /**
+   * Reopen a locked training for editing. The server deletes the issued
+   * protocol, so the documents list is refetched alongside the training.
+   */
+  async function handleUnlock() {
+    setPdfError(null);
+    setUnlocking(true);
+    try {
+      await Trainings.unlock(id, csrfToken);
+      await refreshDetail();
+      setUnlockPrompt(false);
+      toast.success('Školenie odomknuté — pôvodný protokol bol zrušený.');
+    } catch (err) {
+      setPdfError(offlineMessage(err, 'Školenie sa nepodarilo odomknúť.'));
+      setUnlockPrompt(false);
+    } finally {
+      setUnlocking(false);
+    }
   }
 
   async function handleGeneratePdf() {
@@ -250,7 +275,7 @@ export function TrainingDetailPage() {
                 </span>
               </div>
             </div>
-            {!isReadOnly && (isDraft || canEditFinished) && (
+            {!isReadOnly && isDraft && (
               <Link
                 to={`/trainings/${id}/edit`}
                 aria-label="Upraviť"
@@ -258,6 +283,20 @@ export function TrainingDetailPage() {
               >
                 <Edit2 className="size-4" />
               </Link>
+            )}
+            {!isReadOnly && !isDraft && canUnlock && (
+              <Button
+                type="button"
+                id="unlock-training"
+                variant="warn"
+                onClick={() => setUnlockPrompt((open) => !open)}
+                aria-expanded={unlockPrompt}
+                aria-controls="unlock-prompt"
+                leftIcon={<Pencil className="size-4" />}
+                title="Odomkne školenie na úpravy — vystavený protokol sa pritom zruší"
+              >
+                Upraviť
+              </Button>
             )}
           </div>
         </div>
@@ -303,6 +342,68 @@ export function TrainingDetailPage() {
           </DetailRow>
         </dl>
       </Card>
+
+      {!isDraft && !unlockPrompt && (
+        <Card className="flex items-start gap-3 bg-ink-50 px-4 py-3">
+          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white text-ink-500">
+            <Lock className="size-3.5" />
+          </span>
+          <p className="text-xs text-ink-600">
+            <span className="font-semibold text-ink-800">
+              {pokyn ? 'Pokyn je uzamknutý.' : 'Školenie je uzamknuté.'}
+            </span>{' '}
+            {pokyn ? 'Má vystavený PDF dokument' : 'Má vystavený PDF protokol'}, preto sa už nedá meniť.{' '}
+            {canUnlock
+              ? 'Pre opravu použi „Upraviť".'
+              : 'Odomknúť ho na opravu môže hlavný používateľ.'}
+          </p>
+        </Card>
+      )}
+
+      {!isDraft && unlockPrompt && (
+        <Card
+          id="unlock-prompt"
+          role="alertdialog"
+          aria-labelledby="unlock-prompt-title"
+          className="flex animate-fade-up flex-col gap-3 border-status-warn/40 bg-[var(--color-status-warn-bg)]/60 p-4"
+        >
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white text-status-warn">
+              <LockOpen className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <p id="unlock-prompt-title" className="text-sm font-semibold text-ink-900">
+                {pokyn ? 'Odomknúť pokyn?' : 'Odomknúť školenie?'}
+              </p>
+              <p className="mt-1 text-xs text-ink-600">
+                {pokyn ? 'Pokyn je dokončený a má vystavený PDF dokument' : 'Školenie je dokončené a má vystavený PDF protokol'}
+                {documents[0] ? ` ${documents[0].number}` : ''}. Odomknutím sa
+                {pokyn ? ' dokument zruší' : ' protokol zruší'} a natrvalo odstráni — po úprave bude treba
+                vygenerovať nový, ktorý dostane nové číslo.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={unlocking}
+              onClick={() => setUnlockPrompt(false)}
+            >
+              Zrušiť
+            </Button>
+            <Button
+              type="button"
+              variant="warn"
+              loading={unlocking}
+              onClick={handleUnlock}
+              leftIcon={<LockOpen className="size-4" />}
+            >
+              Odomknúť a upraviť
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {pokyn ? (
         <section>

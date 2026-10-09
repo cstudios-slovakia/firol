@@ -272,9 +272,7 @@ export function NewInspectionTypePicker() {
     qs.set('type', type);
     return `/trainings/new?${qs.toString()}`;
   };
-  // The Pokyn is a document for the client's employees, not a session on a
-  // visit — the training form leaves it out inside a visit, so does this list.
-  const trainingTypes = TRAINING_TYPES.filter((t) => !visitId || !isPokyn(t));
+  const trainingTypes = TRAINING_TYPES;
 
   // Narrowed to one odbor (arriving from its list): a flat list of its types.
   // Otherwise every module gets its own labelled group, and OPP splits into

@@ -52,6 +52,11 @@ export function TrainingEditPage() {
       .then(async (detail) => {
         if (cancelled) return;
         const t = detail.training;
+        // A finished training is locked; „Upraviť" on its detail reopens it.
+        if (t.status === 'finalized') {
+          navigate(`/trainings/${id}`, { replace: true });
+          return;
+        }
         setTraining(t);
         setDate(t.date ?? '');
         setTrainerId(t.trainer_id);
@@ -67,7 +72,7 @@ export function TrainingEditPage() {
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [id]);
+  }, [id, navigate]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();

@@ -56,10 +56,9 @@ export function NewTrainingPage() {
   const presetFacilityId = visitId !== null ? null : numericParam(searchParams.get('facility_id'));
 
   const { user } = useAuth();
-  // The type picker („Nová kontrola / nové školenie") preselects the type; a
-  // Pokyn is not offered inside a visit, so it cannot be preselected there.
+  // The type picker („Nová kontrola / nové školenie") preselects the type.
   const typeParam = searchParams.get('type');
-  const presetType = TRAINING_TYPES.find((t) => t === typeParam && (visitId === null || !isPokyn(t)));
+  const presetType = TRAINING_TYPES.find((t) => t === typeParam);
   const [type, setType] = useState<TrainingType>(presetType ?? 'vstupne');
   const [visit, setVisit] = useState<Visit | null>(null);
   const [visitError, setVisitError] = useState<string | null>(null);
@@ -387,7 +386,7 @@ export function NewTrainingPage() {
           <Field label="Typ dokumentu" required>
             {() => (
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Typ dokumentu">
-                {TRAINING_TYPES.filter((t) => visit === null || !isPokyn(t)).map((t) => (
+                {TRAINING_TYPES.map((t) => (
                   <TypeButton key={t} value={t} active={type === t} onClick={() => setType(t)} />
                 ))}
               </div>

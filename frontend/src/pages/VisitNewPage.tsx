@@ -9,7 +9,7 @@ import {
   type InspectionListItem,
   type InspectionType,
 } from '@/api/inspections';
-import { isPokyn, Trainings, type TrainingListItem } from '@/api/trainings';
+import { Trainings, type TrainingListItem } from '@/api/trainings';
 import { SKOLENIE_PO, Visits, type VisitType } from '@/api/visits';
 import { ApiError } from '@/lib/api';
 import { daysUntilNext, trainingChain } from '@/lib/periodicity';
@@ -170,10 +170,10 @@ export function VisitNewPage() {
 
     // Školenie PO is due when any training chain of this prevádzka (or of the
     // whole firma) is: the latest finalized training per chain, as in the
-    // calendar. The Pokyn is left out — it is not recorded under a visit.
+    // calendar.
     const latestTraining = new Map<string, TrainingListItem>();
     for (const t of trainingHistory) {
-      if (t.status !== 'finalized' || !t.date || isPokyn(t.type)) continue;
+      if (t.status !== 'finalized' || !t.date) continue;
       if (t.facility_id !== null && t.facility_id !== facilityId) continue;
       const key = `${t.facility_id ?? 'firma'}|${trainingChain(t.type)}`;
       const current = latestTraining.get(key);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Audit\AuditLog;
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\MemberRights;
@@ -155,13 +156,10 @@ final class TrainingController
         }
         // Inside a visit (chapter 9) the company, prevádzka and date were chosen
         // once, when the visit started: they are the visit's, not the request's.
-        // Overriding is friendlier offline than rejecting a queued draft. The
-        // Pokyn is a document for the client's employees, not a školenie PO, so
-        // it is never recorded under a visit.
+        // Overriding is friendlier offline than rejecting a queued draft. Every
+        // training type may be recorded under a visit, the Pokyn included (owner
+        // decision 7. 10. 2026) — it counts as a školenie PO of the visit.
         if ($visitId !== null) {
-            if ($type === self::TYPE_POKYN) {
-                Response::error('Pokyn sa nezapisuje v návšteve — nie je to školenie PO.', 422);
-            }
             $visit = VisitController::findForUkon(
                 $visitId,
                 Admin::isAdmin(Tenant::currentUserId()),
@@ -290,14 +288,14 @@ final class TrainingController
         if ($existing['visit_id'] !== null) {
             $date = null;
         }
-        // Changing a finalized training (date, trainer, topics, duration) is the
-        // training's counterpart of „Upraviť" on a locked inspection, so it
-        // follows the same members' switch (chapter 1.6).
+        // A finalized training is locked for everyone, exactly like a finalized
+        // inspection: its record and the issued protocol must keep saying the
+        // same thing. The way back is „Upraviť" ({@see self::unlock}), which
+        // discards the protocol first.
         if ($existing['status'] === 'finalized') {
-            MemberRights::requireDelete($scopeAccountId);
+            Response::error('Školenie je uzamknuté — najprv ho odomkni tlačidlom „Upraviť".', 409);
         }
-        // The periodicity is printed on the protocol, so it sits behind the same
-        // guard as the date above. It is edited as a whole — „bez opakovania"
+        // The periodicity is edited as a whole — „bez opakovania"
         // has to be expressible, and a COALESCE over two columns cannot tell
         // „leave it alone" from „clear it" — so sending either key means the
         // technician touched the field (same as on inspections).
@@ -306,11 +304,6 @@ final class TrainingController
             || array_key_exists('periodicity_unit', $body);
         if ($touchesPeriodicity) {
             [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
-        }
-        // A finalized training is the record of an issued document — its text
-        // must keep matching the PDF that carries its number.
-        if ($fields !== null && $existing['status'] === 'finalized') {
-            Response::error('Pokyn už je vystavený — jeho text sa nedá meniť.', 409);
         }
         if ($trainerId !== null) {
             if ($isAdmin) {
@@ -359,6 +352,93 @@ final class TrainingController
         unset($existing);
 
         Response::json(['training' => self::shape(self::loadOrFail($isAdmin ? null : $accountId, $id))]);
+    }
+
+    /**
+     * "Upraviť" — reopen a finalized training for editing, the same way
+     * {@see InspectionController::unlock} reopens an inspection.
+     *
+     * Unlocking *discards* the issued protocol: its documents rows (and every
+     * re-rendered version) and the PDF files are deleted and the training drops
+     * back to `draft`. The discarded number is never handed out again — the
+     * next PDF takes the next one from the sequence and leaves a gap, because a
+     * copy of the old protocol may already sit in the client's inbox.
+     */
+    public static function unlock(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
+        $id        = (int) $params['id'];
+
+        $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        // The training's own account, so an admin acting on a foreign-account
+        // record deletes that account's documents, not their session account's.
+        $accountId = (int) $row['account_id'];
+
+        if ($row['status'] !== 'finalized') {
+            Response::error('Školenie nie je uzamknuté.', 422);
+        }
+        // Unlocking discards the issued protocol, so it is a delete under the
+        // account's práva členov (chapter 1.6).
+        MemberRights::requireDelete($accountId);
+
+        $pdo = Db::pdo();
+        $docsStmt = $pdo->prepare(
+            'SELECT number, file_path FROM documents
+             WHERE  account_id = ? AND parent_type = "training" AND parent_id = ?'
+        );
+        $docsStmt->execute([$accountId, $id]);
+        $docs = $docsStmt->fetchAll();
+
+        $versionsStmt = $pdo->prepare(
+            'SELECT v.file_path FROM document_versions v
+             JOIN   documents d ON d.id = v.document_id
+             WHERE  d.account_id = ? AND d.parent_type = "training" AND d.parent_id = ?'
+        );
+        $versionsStmt->execute([$accountId, $id]);
+        $versionFiles = $versionsStmt->fetchAll(\PDO::FETCH_COLUMN);
+
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare(
+                'DELETE FROM documents
+                 WHERE  account_id = ? AND parent_type = "training" AND parent_id = ?'
+            )->execute([$accountId, $id]);
+
+            $pdo->prepare(
+                'UPDATE trainings SET status = "draft" WHERE id = ? AND account_id = ?'
+            )->execute([$id, $accountId]);
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        // Files are unlinked only after the commit: an orphaned PDF nobody
+        // links to is harmless, a missing file behind a live row is not.
+        $paths = array_unique(array_merge(
+            array_map(static fn (array $d): string => (string) $d['file_path'], $docs),
+            array_map(static fn ($p): string => (string) $p, $versionFiles),
+        ));
+        foreach ($paths as $rel) {
+            $abs = Storage::documentAbsolute($rel);
+            if (is_file($abs) && !@unlink($abs)) {
+                error_log('[unlock-training] failed to delete PDF: ' . $abs);
+            }
+        }
+
+        // Destroying an issued protocol is worth a trail.
+        AuditLog::record(
+            'training.unlock',
+            'trainings',
+            $id,
+            ['status' => 'finalized', 'documents' => array_column($docs, 'number')],
+            ['status' => 'draft'],
+        );
+
+        Response::json(['training' => self::shape(self::loadOrFail($accountId, $id))]);
     }
 
     public static function archive(Request $req, array $params): void
