@@ -12,6 +12,9 @@ use Firol\Http\Response;
  * whether members other than the main user may delete finished úkony and
  * protocols. The main user and a platform admin are never restricted.
  *
+ * Archiving (and restoring) a firma or prevádzka and deleting or retiring a
+ * sklad item sit behind it too (owner decision 7. 10. 2026, spec 25).
+ *
  * Bulk delete and restore are a separate, stricter rule
  * (Tenant::requireMainUser) that this switch does not loosen.
  */
@@ -21,6 +24,7 @@ final class MemberRights
     public const RESTRICTED = 'obmedzene';
 
     private const DENIED = 'Mazanie hotových úkonov a protokolov povoľuje hlavný používateľ účtu.';
+    public const ARCHIVE_DENIED = 'Archivovanie a obnovenie firmy alebo prevádzky povoľuje hlavný používateľ účtu.';
 
     /** May the signed-in user delete finished records of this account? */
     public static function canDelete(int $accountId): bool
@@ -38,11 +42,11 @@ final class MemberRights
         return (int) $row['main_user_id'] === $userId || $row['member_rights'] !== self::RESTRICTED;
     }
 
-    /** Sends 403 unless canDelete(). */
-    public static function requireDelete(int $accountId): void
+    /** Sends 403 unless canDelete(); `$message` replaces the default for non-protocol deletes. */
+    public static function requireDelete(int $accountId, ?string $message = null): void
     {
         if (!self::canDelete($accountId)) {
-            Response::error(self::DENIED, 403);
+            Response::error($message ?? self::DENIED, 403);
         }
     }
 

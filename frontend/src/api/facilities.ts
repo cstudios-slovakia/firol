@@ -12,6 +12,11 @@ export type Facility = {
   notes: string | null;
   company_id: number;
   company_name?: string;
+  /** Spec 25 — set while the prevádzka is archived; it then opens read-only. */
+  archived_at?: string | null;
+  archived_reason?: string | null;
+  /** Set while the whole firm is archived. */
+  company_archived_at?: string | null;
 };
 
 export type FacilityPayload = {
@@ -39,6 +44,14 @@ export const Facilities = {
     }),
   update: (id: number, body: FacilityPayload, csrfToken: string | null) =>
     api<{ facility: Facility }>(`/api/facilities/${id}`, { method: 'PATCH', body, csrfToken }),
-  archive: (id: number, csrfToken: string | null) =>
-    api<void>(`/api/facilities/${id}`, { method: 'DELETE', csrfToken }),
+  /** Spec 25 — archived, never deleted; closes the prevádzka's open úlohy. */
+  archive: (id: number, reason: string | null, csrfToken: string | null) =>
+    api<void>(`/api/facilities/${id}/archive`, {
+      method: 'POST',
+      body: { reason },
+      csrfToken,
+      requireOnline: true,
+    }),
+  restore: (id: number, csrfToken: string | null) =>
+    api<void>(`/api/facilities/${id}/restore`, { method: 'POST', csrfToken, requireOnline: true }),
 };

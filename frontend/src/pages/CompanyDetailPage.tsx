@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Mail, MapPin, Phone, Plus, Route, Send, Trash2, UserCheck, Warehouse } from 'lucide-react';
-import { useAuth } from '@/auth/AuthContext';
+import { useMemberRights } from '@/auth/useMemberRights';
+import { Archive, ArchiveRestore, ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Mail, MapPin, Phone, Plus, Route, Send, UserCheck, Warehouse } from 'lucide-react';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyDetail } from '@/api/companies';
-import { Facilities } from '@/api/facilities';
 import { ApiError } from '@/lib/api';
-import { useConfirm } from '@/lib/confirm';
-import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
+import { ArchiveDialog, ArchivedNotice, formatDay, useRestoreArchived } from '@/components/ClientArchive';
 import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { BulkSendDialog } from '@/components/BulkSendDialog';
@@ -36,10 +34,9 @@ export function CompanyDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
   const id = Number(idStr);
   const navigate = useNavigate();
-  const { csrfToken } = useAuth();
   const isReadOnly = useIsReadOnly();
-  const confirm = useConfirm();
-  const toast = useToast();
+  const { canDelete } = useMemberRights();
+  const restoreArchived = useRestoreArchived();
   const [params, setParams] = useSearchParams();
   const tab = parseTab(params.get('tab'));
 
@@ -63,37 +60,20 @@ export function CompanyDetailPage() {
     loadSends();
   }, [loadSends]);
 
-  async function onDeleteFacility(facilityId: number, name: string) {
-    const ok = await confirm({
-      title: 'Odstrániť prevádzku?',
-      description: `Prevádzka „${name}“ bude odstránená spolu so svojimi kontrolami a školeniami. Táto akcia je nevratná.`,
-      confirmLabel: 'Odstrániť',
-    });
-    if (!ok) return;
-    try {
-      await Facilities.archive(facilityId, csrfToken);
-      setData((prev) =>
-        prev ? { ...prev, facilities: prev.facilities.filter((f) => f.id !== facilityId) } : prev,
-      );
-      toast.success('Prevádzka odstránená');
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Prevádzku sa nepodarilo odstrániť.');
-    }
+  // Spec 25 — a firm or prevádzka is archived, never deleted: its protocols stay.
+  const [archiving, setArchiving] = useState<{ kind: 'company' | 'facility'; id: number; name: string } | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const reload = () => setReloadKey((k) => k + 1);
+
+  function onArchived() {
+    const target = archiving;
+    setArchiving(null);
+    if (target?.kind === 'company') navigate('/companies', { replace: true });
+    else reload();
   }
 
-  async function onDelete() {
-    const ok = await confirm({
-      title: 'Odstrániť firmu?',
-      description: 'Táto akcia je nevratná. Firma bude odstránená spolu so všetkými prevádzkami.',
-      confirmLabel: 'Odstrániť',
-    });
-    if (!ok) return;
-    try {
-      await Companies.archive(id, csrfToken);
-      navigate('/companies', { replace: true });
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Firmu sa nepodarilo odstrániť.');
-    }
+  async function onRestore(kind: 'company' | 'facility', targetId: number, name: string) {
+    if (await restoreArchived(kind, targetId, name)) reload();
   }
 
   useEffect(() => {
@@ -109,7 +89,7 @@ export function CompanyDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, reloadKey]);
 
   if (error) {
     return (
@@ -137,7 +117,13 @@ export function CompanyDetailPage() {
   }
 
   const { company, facilities } = data;
-  const canStart = facilities.length > 0 && !isReadOnly;
+  const archivedFacilities = data.archived_facilities ?? [];
+  // An archived firm opens read-only: protocols can be opened and sent, but no
+  // new úkon, edit or potvrdenie starts here until it is restored.
+  const archived = Boolean(company.archived_at);
+  const canEdit = !isReadOnly && !archived;
+  const canStart = facilities.length > 0 && canEdit;
+  const canSend = facilities.length > 0 && !isReadOnly;
 
   function selectTab(next: CompanyTab) {
     // The default tab keeps the URL clean; replace so tab hops don't pile up in history.
@@ -153,12 +139,31 @@ export function CompanyDetailPage() {
 
       <PendingSyncBanner resource="companies" id={id} />
 
+      {company.archived_at && (
+        <ArchivedNotice
+          label="Firma je archivovaná od"
+          archivedAt={company.archived_at}
+          reason={company.archived_reason}
+          onRestore={canDelete && !isReadOnly ? () => onRestore('company', company.id, company.name) : undefined}
+        />
+      )}
+
       {/* One block: header, actions, tabs and the active tab's content. */}
       <Card className="overflow-hidden">
-        <div className="bg-gradient-to-br from-firol-50/60 to-transparent px-5 pb-4 pt-5">
+        <div
+          className={cn(
+            'bg-gradient-to-br to-transparent px-5 pb-4 pt-5',
+            archived ? 'from-ink-100/70' : 'from-firol-50/60',
+          )}
+        >
           <div className="flex items-start gap-3">
-            <div className="grid size-12 shrink-0 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
-              <Building2 className="size-5" />
+            <div
+              className={cn(
+                'grid size-12 shrink-0 place-items-center rounded-2xl',
+                archived ? 'bg-ink-200 text-ink-500' : 'bg-firol-500 text-white shadow-[var(--shadow-glow)]',
+              )}
+            >
+              {archived ? <Archive className="size-5" /> : <Building2 className="size-5" />}
             </div>
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-lg font-semibold tracking-tight text-ink-900">
@@ -168,7 +173,7 @@ export function CompanyDetailPage() {
                 {facilities.length} {plural(facilities.length, 'prevádzka', 'prevádzky', 'prevádzok')}
               </p>
             </div>
-            {!isReadOnly && (
+            {canEdit && (
               <div className="flex items-center gap-3">
                 <Link
                   to={`/companies/${company.id}/edit`}
@@ -177,14 +182,17 @@ export function CompanyDetailPage() {
                 >
                   <Edit2 className="size-4" />
                 </Link>
-                <button
-                  type="button"
-                  aria-label="Odstrániť"
-                  onClick={onDelete}
-                  className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-                >
-                  <Trash2 className="size-4" />
-                </button>
+                {canDelete && (
+                  <button
+                    type="button"
+                    title="Archivovať"
+                    aria-label="Archivovať"
+                    onClick={() => setArchiving({ kind: 'company', id: company.id, name: company.name })}
+                    className="grid size-8 place-items-center rounded-xl text-ink-500 transition-all duration-200 hover:bg-ink-100 hover:text-ink-700 active:scale-95"
+                  >
+                    <Archive className="size-4" />
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -279,13 +287,14 @@ export function CompanyDetailPage() {
                   <div className="py-2 text-ink-400">Žiadne ďalšie údaje. Doplň ich úpravou firmy.</div>
                 )}
               </dl>
-              <CompanyPersons companyId={company.id} facilities={facilities} />
+              {/* The persons are edited only while the firm is active. */}
+              {!archived && <CompanyPersons companyId={company.id} facilities={facilities} />}
             </div>
           )}
 
           {tab === 'facilities' && (
             <div role="tabpanel" id="company-panel-facilities" aria-labelledby="company-tab-facilities" className="animate-fade-up">
-              {!isReadOnly && (
+              {canEdit && (
                 <div className="mb-3 flex justify-end">
                   <Link
                     to={`/companies/${company.id}/facilities/new`}
@@ -297,7 +306,7 @@ export function CompanyDetailPage() {
                 </div>
               )}
 
-              {facilities.length === 0 ? (
+              {facilities.length === 0 && archivedFacilities.length > 0 ? null : facilities.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
                   <div className="grid size-12 place-items-center rounded-2xl bg-firol-50 text-firol-500">
                     <Warehouse className="size-5" />
@@ -325,7 +334,7 @@ export function CompanyDetailPage() {
                           )}
                         </div>
                       </Link>
-                      {!isReadOnly ? (
+                      {canEdit ? (
                         <div className="flex shrink-0 items-center gap-2">
                           <Link
                             to={`/facilities/${f.id}/edit`}
@@ -335,15 +344,17 @@ export function CompanyDetailPage() {
                           >
                             <Edit2 className="size-4" />
                           </Link>
-                          <button
-                            type="button"
-                            title="Odstrániť"
-                            aria-label="Odstrániť"
-                            onClick={() => onDeleteFacility(f.id, f.name)}
-                            className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-                          >
-                            <Trash2 className="size-4" />
-                          </button>
+                          {canDelete && (
+                            <button
+                              type="button"
+                              title="Archivovať"
+                              aria-label="Archivovať"
+                              onClick={() => setArchiving({ kind: 'facility', id: f.id, name: f.name })}
+                              className="grid size-8 place-items-center rounded-xl text-ink-500 transition-all duration-200 hover:bg-ink-100 hover:text-ink-700 active:scale-95"
+                            >
+                              <Archive className="size-4" />
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <ChevronRight className="size-4 shrink-0 text-ink-300" />
@@ -352,15 +363,56 @@ export function CompanyDetailPage() {
                   ))}
                 </ul>
               )}
+
+              {/* Spec 25 — prevádzky archived on their own, kept for their protocols. */}
+              {archivedFacilities.length > 0 && (
+                <section className={cn(facilities.length > 0 && 'mt-5 border-t border-ink-100 pt-4')}>
+                  <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-400">
+                    Archivované prevádzky
+                  </h3>
+                  <ul className="flex flex-col divide-y divide-ink-100">
+                    {archivedFacilities.map((f) => (
+                      <li key={f.id} className="flex items-center gap-3 py-3">
+                        <Link to={`/facilities/${f.id}`} className="group flex min-w-0 flex-1 items-center gap-3">
+                          <div className="grid size-9 shrink-0 place-items-center rounded-2xl bg-ink-100 text-ink-400">
+                            <Archive className="size-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h4 className="truncate text-sm font-semibold text-ink-500 group-hover:text-firol-700">{f.name}</h4>
+                            <p className="truncate text-xs text-ink-400">
+                              archivovaná {formatDay(f.archived_at)}
+                              {f.archived_reason && ` · ${f.archived_reason}`}
+                            </p>
+                          </div>
+                        </Link>
+                        {canEdit && canDelete ? (
+                          <button
+                            type="button"
+                            title="Obnoviť"
+                            aria-label="Obnoviť"
+                            onClick={() => onRestore('facility', f.id, f.name)}
+                            className="grid size-8 shrink-0 place-items-center rounded-xl text-firol-600 transition-all duration-200 hover:bg-firol-50 active:scale-95"
+                          >
+                            <ArchiveRestore className="size-4" />
+                          </button>
+                        ) : (
+                          <ChevronRight className="size-4 shrink-0 text-ink-300" />
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
             </div>
           )}
 
           {tab === 'protocols' && (
             <div role="tabpanel" id="company-panel-protocols" aria-labelledby="company-tab-protocols" className="flex animate-fade-up flex-col gap-6">
-              <SendHistory sends={sends} onSend={canStart ? () => setSendOpen(true) : undefined} />
+              {/* Spec 25 — an archived firm's protocols can still be sent. */}
+              <SendHistory sends={sends} onSend={canSend ? () => setSendOpen(true) : undefined} />
 
               {/* Chapter 21 — výdajky of this client; hidden while there are none. */}
-              <CompanyStockIssues companyId={company.id} readOnly={isReadOnly} />
+              <CompanyStockIssues companyId={company.id} readOnly={!canEdit} />
             </div>
           )}
         </div>
@@ -381,6 +433,15 @@ export function CompanyDetailPage() {
         companyId={company.id}
         companyName={company.name}
         date={todayIso()}
+      />
+
+      <ArchiveDialog
+        open={archiving !== null}
+        kind={archiving?.kind ?? 'company'}
+        id={archiving?.id ?? 0}
+        name={archiving?.name ?? ''}
+        onClose={() => setArchiving(null)}
+        onArchived={onArchived}
       />
     </div>
   );

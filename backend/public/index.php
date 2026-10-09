@@ -135,7 +135,9 @@ $router->get('/api/companies',                      [CompanyController::class, '
 $router->post('/api/companies',                     [CompanyController::class, 'store']);
 $router->get('/api/companies/{id}',                 [CompanyController::class, 'show']);
 $router->patch('/api/companies/{id}',               [CompanyController::class, 'update']);
-$router->delete('/api/companies/{id}',              [CompanyController::class, 'archive']);
+// Spec 25 — a firma / prevádzka is archived and restored, never deleted.
+$router->post('/api/companies/{id}/archive',        [CompanyController::class, 'archive']);
+$router->post('/api/companies/{id}/restore',        [CompanyController::class, 'restore']);
 $router->post('/api/companies/{id}/facilities',     [FacilityController::class, 'storeUnderCompany']);
 
 // Chapter 13.2 — people at the client entitled to sign a protocol.
@@ -151,7 +153,8 @@ $router->post('/api/companies/{id}/sends',             [DocumentSendController::
 
 $router->get('/api/facilities/{id}',                [FacilityController::class, 'show']);
 $router->patch('/api/facilities/{id}',              [FacilityController::class, 'update']);
-$router->delete('/api/facilities/{id}',             [FacilityController::class, 'archive']);
+$router->post('/api/facilities/{id}/archive',       [FacilityController::class, 'archive']);
+$router->post('/api/facilities/{id}/restore',       [FacilityController::class, 'restore']);
 
 $router->get('/api/inspections',                    [InspectionController::class, 'index']);
 $router->post('/api/inspections',                   [InspectionController::class, 'store']);
@@ -249,6 +252,7 @@ $router->get('/api/trainings',                      [TrainingController::class, 
 $router->post('/api/trainings',                     [TrainingController::class, 'store']);
 $router->get('/api/trainings/{id}',                 [TrainingController::class, 'show']);
 $router->patch('/api/trainings/{id}',               [TrainingController::class, 'update']);
+$router->post('/api/trainings/{id}/unlock',         [TrainingController::class, 'unlock']);
 $router->delete('/api/trainings/{id}',              [TrainingController::class, 'archive']);
 $router->post('/api/trainings/{id}/trainees',       [TraineeController::class, 'store']);
 $router->delete('/api/trainings/{id}/trainees/{trainee_id}', [TraineeController::class, 'destroy']);

@@ -6,11 +6,13 @@ namespace Firol\Controllers;
 
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
+use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Support\Address;
+use Firol\Support\ClientArchive;
 
 final class FacilityController
 {
@@ -20,7 +22,9 @@ final class FacilityController
         $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id        = (int) $params['id'];
 
-        $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        // Spec 25 — an archived prevádzka (or one of an archived firm) still
+        // opens, so its protocols stay reachable and it can be restored.
+        $row = self::loadOrFail($isAdmin ? null : $accountId, $id, true);
 
         Response::json(['facility' => self::shapePublic($row)]);
     }
@@ -88,6 +92,12 @@ final class FacilityController
         Response::json(['facility' => self::shapePublic(self::loadOrFail($scopeAccountId, $id))]);
     }
 
+    /**
+     * POST /api/facilities/{id}/archive  { reason?: string }
+     *
+     * Spec 25 — a prevádzka the client closed is archived on its own while the
+     * firma stays active. See ClientArchive.
+     */
     public static function archive(Request $req, array $params): void
     {
         Csrf::require($req);
@@ -95,12 +105,42 @@ final class FacilityController
         $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id        = (int) $params['id'];
 
-        $existing = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        $existing = self::loadOrFail($isAdmin ? null : $accountId, $id, true);
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
+        // Archiving sits under the members' switch (chapter 1.6, spec 25).
+        MemberRights::requireDelete($scopeAccountId, MemberRights::ARCHIVE_DENIED);
+        if ($existing['archived_at'] !== null) {
+            Response::error('Prevádzka je už archivovaná.', 409);
+        }
+        if ($existing['company_archived_at'] !== null) {
+            Response::error('Firma tejto prevádzky je archivovaná.', 409);
+        }
 
-        Db::pdo()->prepare(
-            'UPDATE facilities SET archived_at = NOW() WHERE id = ? AND account_id = ?'
-        )->execute([$id, $scopeAccountId]);
+        ClientArchive::archiveFacility($scopeAccountId, $id, ClientArchive::readReason($req));
+
+        Response::noContent();
+    }
+
+    /** POST /api/facilities/{id}/restore — spec 25, undoes the archiving. */
+    public static function restore(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
+        $id        = (int) $params['id'];
+
+        $existing = self::loadOrFail($isAdmin ? null : $accountId, $id, true);
+        $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
+        MemberRights::requireDelete($scopeAccountId, MemberRights::ARCHIVE_DENIED);
+        if ($existing['archived_at'] === null) {
+            Response::error('Prevádzka nie je archivovaná.', 409);
+        }
+        // A prevádzka of an archived firm would stay hidden anyway.
+        if ($existing['company_archived_at'] !== null) {
+            Response::error('Najprv obnov firmu tejto prevádzky.', 409);
+        }
+
+        ClientArchive::restoreFacility($scopeAccountId, $id);
 
         Response::noContent();
     }
@@ -132,18 +172,27 @@ final class FacilityController
         return [$name, $addr, $contactPerson, $notes];
     }
 
-    /** @return array<string, mixed> */
-    private static function loadOrFail(?int $accountId, int $id): array
+    /**
+     * A prevádzka that is archived, or whose firma is, counts as not found
+     * unless `$includeArchived` — it can be opened and restored, not edited.
+     *
+     * @return array<string, mixed>
+     */
+    private static function loadOrFail(?int $accountId, int $id, bool $includeArchived = false): array
     {
         $sql = 'SELECT f.id, f.account_id, f.name, f.street, f.postal_code, f.city, f.contact_person, f.notes,
-                       f.company_id, c.name AS company_name
+                       f.archived_at, f.archived_reason,
+                       f.company_id, c.name AS company_name, c.archived_at AS company_archived_at
                 FROM   facilities f
                 JOIN   companies  c ON c.id = f.company_id
-                WHERE  f.id = ? AND f.archived_at IS NULL';
+                WHERE  f.id = ?';
         $params = [$id];
         if ($accountId !== null) {
             $sql .= ' AND f.account_id = ?';
             $params[] = $accountId;
+        }
+        if (!$includeArchived) {
+            $sql .= ' AND f.archived_at IS NULL AND c.archived_at IS NULL';
         }
         $stmt = Db::pdo()->prepare($sql);
         $stmt->execute($params);

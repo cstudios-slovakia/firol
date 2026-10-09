@@ -18,6 +18,7 @@ import {
   Trash2,
   User as UserIcon,
   Warehouse,
+  X,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
@@ -45,6 +46,11 @@ const T = {
   splnene: 'Splnené',
   vseobecna: '— všeobecná —',
   zNedostatku: (cislo: string) => `vzniklo z kontroly ${cislo}`,
+  // Spec 25 — closed by archiving, not ticked.
+  zrusena: {
+    company_archived: 'zrušená — firma archivovaná',
+    facility_archived: 'zrušená — prevádzka archivovaná',
+  },
 };
 
 /** „2026-08-26" → „26. 8. 2026" */
@@ -310,6 +316,9 @@ function TaskRow({
   const place = task.company_name
     ? task.facility_name ? `${task.company_name} · ${task.facility_name}` : task.company_name
     : null;
+  const cancelled = task.done && task.cancel_reason ? T.zrusena[task.cancel_reason] : null;
+  // Spec 25 — a task of an archived firma / prevádzka stays closed.
+  const locked = readOnly || (task.done && task.place_archived === true);
 
   return (
     <li>
@@ -319,19 +328,21 @@ function TaskRow({
           role="checkbox"
           aria-checked={task.done}
           aria-label={task.done ? 'Označiť ako nesplnenú' : 'Označiť ako splnenú'}
-          disabled={readOnly}
+          disabled={locked}
           onClick={onToggle}
           className="grid size-11 shrink-0 place-items-center rounded-xl transition-transform duration-150 active:scale-90 disabled:opacity-50"
         >
           <span
             className={cn(
               'grid size-6 place-items-center rounded-lg border-2 transition-all duration-200',
-              task.done
-                ? 'border-[var(--color-status-ok)] bg-[var(--color-status-ok)] text-white'
-                : 'border-ink-300 bg-white hover:border-firol-400',
+              cancelled
+                ? 'border-ink-300 bg-ink-200 text-ink-500'
+                : task.done
+                  ? 'border-[var(--color-status-ok)] bg-[var(--color-status-ok)] text-white'
+                  : 'border-ink-300 bg-white hover:border-firol-400',
             )}
           >
-            {task.done && <Check className="size-4" />}
+            {cancelled ? <X className="size-4" /> : task.done && <Check className="size-4" />}
           </span>
         </button>
 
@@ -339,7 +350,7 @@ function TaskRow({
         <button
           type="button"
           onClick={onOpen}
-          disabled={readOnly}
+          disabled={locked}
           className="block w-full text-left disabled:cursor-default"
         >
           <p className={cn('break-words text-sm font-semibold', task.done ? 'text-ink-500 line-through decoration-ink-300' : 'text-ink-900')}>
@@ -357,7 +368,7 @@ function TaskRow({
               </span>
             )}
             {task.done && task.done_at && (
-              <span>splnená {formatDay(task.done_at)}</span>
+              <span>{cancelled ?? 'splnená'} {formatDay(task.done_at)}</span>
             )}
           </p>
         </button>
