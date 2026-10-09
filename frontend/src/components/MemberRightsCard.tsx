@@ -11,8 +11,9 @@ import { Card } from '@/components/ui/Card';
 /**
  * Práva členov — chapter 1.6. One switch for the whole account: on, every
  * technician may delete finished úkony and protocols (and unlock a protocol
- * with „Upraviť"); off, only the main user may and the others don't see those
- * buttons. A technician can always delete their own draft. Bulk delete and
+ * with „Upraviť"), delete or retire sklad items and archive a firma or
+ * prevádzka; off, only the main user may and the others don't see those
+ * buttons. New accounts start off (migration 054). A technician can always delete their own draft. Bulk delete and
  * restore from a backup are the main user's alone either way.
  *
  * Only the main user sees this card.
@@ -50,8 +51,15 @@ export function MemberRightsCard({ className }: { className?: string }) {
         <div className="min-w-0 flex-1">
           <h2 className="text-base font-semibold text-ink-900">Technici môžu mazať</h2>
           <p className="mt-0.5 text-xs text-ink-500">
-            Mazanie hotových úkonov a protokolov a ich odomknutie na úpravu. Keď je vypnuté, technici
-            tieto tlačidlá nevidia. Vlastné rozpracované úkony si technik môže zmazať vždy.
+            Mazanie hotových úkonov a protokolov, ich odomknutie na úpravu, mazanie položiek skladu
+            a archivovanie firiem a prevádzok. Keď je vypnuté, technici tieto tlačidlá nevidia.
+            Vlastné rozpracované úkony si technik môže zmazať vždy.
+          </p>
+          <p className="mt-2 text-xs font-medium text-ink-700">
+            {enabled
+              ? 'Teraz: technici môžu mazať. Platí pre všetkých technikov účtu okrem hlavného používateľa.'
+              : 'Teraz: technici nemôžu mazať. Platí pre všetkých technikov účtu okrem hlavného používateľa.'}
+            {' '}Nové účty začínajú s vypnutým nastavením.
           </p>
         </div>
         <button
