@@ -408,6 +408,7 @@ final class ImportController
             // company IČO. The map is seeded from existing companies in
             // the tenant and extended as we insert new ones.
             $companyIdByIco = self::loadCompanyMap($accountId);
+            $facilityIdByKey = self::loadFacilityMap($accountId);
 
             $insertCompany = $pdo->prepare(
                 'INSERT INTO companies (account_id, name, ico, street, postal_code, city, contact)
@@ -464,6 +465,12 @@ final class ImportController
                     $errors[] = ['sheet' => 'Prevadzky', 'row' => $rowNum, 'message' => "Firma s IČO $ico neexistuje."];
                     continue;
                 }
+                $facKey = $companyId . '|' . mb_strtolower($name);
+                if (isset($facilityIdByKey[$facKey])) {
+                    // Same as for the company: re-uploading the sheet must not
+                    // double a prevádzka that is already there.
+                    continue;
+                }
                 $facAddr = Address::parse(self::str($row, 'address'));
                 $insertFacility->execute([
                     $accountId,
@@ -475,6 +482,7 @@ final class ImportController
                     self::str($row, 'contact_person'),
                     self::str($row, 'notes'),
                 ]);
+                $facilityIdByKey[$facKey] = (int) $pdo->lastInsertId();
                 $createdFacilities++;
             }
 
@@ -1285,7 +1293,7 @@ final class ImportController
                 $actions = array_values(array_filter(array_map('trim', explode(',', $actionsRaw)), fn($a) => $a !== ''));
                 foreach ($actions as $a) {
                     if (!in_array($a, ['tlakova_skuska','oprava','plnenie'], true)) {
-                        $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => "Neznáma akcia „$a”."];
+                        $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => "Neznáma akcia „{$a}”."];
                         return null;
                     }
                 }

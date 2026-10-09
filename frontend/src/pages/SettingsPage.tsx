@@ -2000,7 +2000,7 @@ const IMPORT_DEFS: ImportSectionDef[] = [
     {
         kind: "trainings",
         title: "Školenia",
-        description: "Školenia a ich účastníkov. Podpisy účastníkov sa zachytia neskôr v aplikácii — Excel ich neimportuje.",
+        description: "Školenia a ich účastníkov. Účastníci sa podpisujú ručne na vytlačenom protokole.",
         hint: 'Sheet „Skolenia" — # riadok je tvoje vlastné poradie. Sheet „Ucastnici" odkazuje na toto # cez „# riadok školenia". Firma sa hľadá podľa IČO — ak ešte neexistuje, vytvorí sa automaticky pod zadaným názvom (IČO má prednosť pred názvom). Prevádzka sa rovnako vytvorí, ak chýba. E-mail lektora, ktorý ešte nemá konto, sa predvytvorí a pridá do tvojho tímu; školenia sa mu priradia, keď sa zaregistruje.',
         Icon: GraduationCap,
         color: "text-violet-600",
@@ -2385,8 +2385,7 @@ function DataSection() {
                             vrátane všetkých položiek a účastníkov, a k tomu
                             skutočné súbory —{" "}
                             <strong className="text-ink-800">
-                                fotodokumentáciu, PDF protokoly a podpisy
-                                účastníkov
+                                fotodokumentáciu a PDF protokoly
                             </strong>
                             . Zo zálohy sa dá účet obnoviť aj vtedy, keď sa
                             stratí celá databáza.
@@ -2528,7 +2527,7 @@ function DataSection() {
                     <PurgeCard
                         title="Vymazať všetky školenia"
                         description="Vymaže všetky školenia a zoznamy účastníkov. Firmy a kontroly zostanú."
-                        detail="Zmažú sa všetky školenia bez ohľadu na stav vrátane podpisov účastníkov."
+                        detail="Zmažú sa všetky školenia bez ohľadu na stav."
                         busy={busyTrainings}
                         onConfirm={() =>
                             purge(
