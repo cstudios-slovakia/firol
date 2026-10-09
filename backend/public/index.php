@@ -89,6 +89,7 @@ $router->post('/api/account/users',       [TeamController::class, 'invite']);
 $router->patch('/api/account/users/{id}', [TeamController::class, 'update']);
 $router->delete('/api/account/users/{id}',[TeamController::class, 'destroy']);
 $router->post('/api/account/team-defaults', [TeamController::class, 'setDefault']);
+$router->patch('/api/account/member-rights', [TeamController::class, 'setMemberRights']);
 // Chapter 11.5 — technician initials + avatar colour.
 $router->get('/api/account/avatar-palette',          [\Firol\Controllers\TeamIdentityController::class, 'palette']);
 $router->patch('/api/account/users/{id}/identity',   [\Firol\Controllers\TeamIdentityController::class, 'update']);
@@ -134,7 +135,9 @@ $router->get('/api/companies',                      [CompanyController::class, '
 $router->post('/api/companies',                     [CompanyController::class, 'store']);
 $router->get('/api/companies/{id}',                 [CompanyController::class, 'show']);
 $router->patch('/api/companies/{id}',               [CompanyController::class, 'update']);
-$router->delete('/api/companies/{id}',              [CompanyController::class, 'archive']);
+// Spec 25 — a firma / prevádzka is archived and restored, never deleted.
+$router->post('/api/companies/{id}/archive',        [CompanyController::class, 'archive']);
+$router->post('/api/companies/{id}/restore',        [CompanyController::class, 'restore']);
 $router->post('/api/companies/{id}/facilities',     [FacilityController::class, 'storeUnderCompany']);
 
 // Chapter 13.2 — people at the client entitled to sign a protocol.
@@ -150,7 +153,8 @@ $router->post('/api/companies/{id}/sends',             [DocumentSendController::
 
 $router->get('/api/facilities/{id}',                [FacilityController::class, 'show']);
 $router->patch('/api/facilities/{id}',              [FacilityController::class, 'update']);
-$router->delete('/api/facilities/{id}',             [FacilityController::class, 'archive']);
+$router->post('/api/facilities/{id}/archive',       [FacilityController::class, 'archive']);
+$router->post('/api/facilities/{id}/restore',       [FacilityController::class, 'restore']);
 
 $router->get('/api/inspections',                    [InspectionController::class, 'index']);
 $router->post('/api/inspections',                   [InspectionController::class, 'store']);
@@ -189,6 +193,8 @@ $router->get('/api/inspections/{id}/documents',      [DocumentController::class,
 $router->get('/api/calendar',                        [CalendarController::class, 'index']);
 $router->patch('/api/calendar/plans/{inspection_id}', [CalendarController::class, 'setPlan']);
 $router->delete('/api/calendar/plans/{inspection_id}', [CalendarController::class, 'deletePlan']);
+$router->patch('/api/calendar/plans/training/{training_id}',  [CalendarController::class, 'setTrainingPlan']);
+$router->delete('/api/calendar/plans/training/{training_id}', [CalendarController::class, 'deleteTrainingPlan']);
 $router->post('/api/calendar/events',                [CalendarController::class, 'createEvent']);
 $router->patch('/api/calendar/events/{id}',          [CalendarController::class, 'updateEvent']);
 $router->delete('/api/calendar/events/{id}',         [CalendarController::class, 'deleteEvent']);
@@ -208,6 +214,7 @@ $router->get('/api/visits/{id}',                    [VisitController::class, 'sh
 $router->patch('/api/visits/{id}',                  [VisitController::class, 'update']);
 $router->delete('/api/visits/{id}',                 [VisitController::class, 'archive']);
 $router->post('/api/visits/{id}/generate-documents', [VisitController::class, 'generateDocuments']);
+$router->post('/api/visits/{id}/defer-protocol',     [VisitController::class, 'deferProtocol']);
 
 // Chapter 10 — potvrdenie o vykonaní práce.
 $router->get('/api/work-confirmations',             [WorkConfirmationController::class, 'index']);
@@ -218,6 +225,9 @@ $router->post('/api/work-confirmations',            [WorkConfirmationController:
 // invoice flags („Pridať na faktúru" / vyfakturované).
 $router->get('/api/stock',                              [\Firol\Controllers\StockController::class, 'index']);
 $router->post('/api/stock/items',                       [\Firol\Controllers\StockController::class, 'storeItem']);
+$router->patch('/api/stock/items/{id}',                 [\Firol\Controllers\StockController::class, 'updateItem']);
+$router->delete('/api/stock/items/{id}',               [\Firol\Controllers\StockController::class, 'deleteItem']);
+$router->post('/api/stock/items/{id}/retire',          [\Firol\Controllers\StockController::class, 'retireItem']);
 $router->get('/api/stock/movements',                    [\Firol\Controllers\StockController::class, 'movements']);
 $router->post('/api/stock/movements',                   [\Firol\Controllers\StockController::class, 'storeMovement']);
 $router->patch('/api/stock/movements/{id}/billing',     [\Firol\Controllers\StockController::class, 'billing']);
@@ -242,6 +252,7 @@ $router->get('/api/trainings',                      [TrainingController::class, 
 $router->post('/api/trainings',                     [TrainingController::class, 'store']);
 $router->get('/api/trainings/{id}',                 [TrainingController::class, 'show']);
 $router->patch('/api/trainings/{id}',               [TrainingController::class, 'update']);
+$router->post('/api/trainings/{id}/unlock',         [TrainingController::class, 'unlock']);
 $router->delete('/api/trainings/{id}',              [TrainingController::class, 'archive']);
 $router->post('/api/trainings/{id}/trainees',       [TraineeController::class, 'store']);
 $router->delete('/api/trainings/{id}/trainees/{trainee_id}', [TraineeController::class, 'destroy']);
@@ -333,5 +344,5 @@ try {
     $router->dispatch($request);
 } catch (\Throwable $e) {
     error_log('[unhandled] ' . $e::class . ': ' . $e->getMessage() . "\n" . $e->getTraceAsString());
-    Response::error('Internal Server Error', 500);
+    Response::error('Nastala chyba servera. Skús to znova.', 500);
 }

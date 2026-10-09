@@ -408,6 +408,7 @@ final class ImportController
             // company IČO. The map is seeded from existing companies in
             // the tenant and extended as we insert new ones.
             $companyIdByIco = self::loadCompanyMap($accountId);
+            $facilityIdByKey = self::loadFacilityMap($accountId);
 
             $insertCompany = $pdo->prepare(
                 'INSERT INTO companies (account_id, name, ico, street, postal_code, city, contact)
@@ -464,6 +465,12 @@ final class ImportController
                     $errors[] = ['sheet' => 'Prevadzky', 'row' => $rowNum, 'message' => "Firma s IČO $ico neexistuje."];
                     continue;
                 }
+                $facKey = $companyId . '|' . mb_strtolower($name);
+                if (isset($facilityIdByKey[$facKey])) {
+                    // Same as for the company: re-uploading the sheet must not
+                    // double a prevádzka that is already there.
+                    continue;
+                }
                 $facAddr = Address::parse(self::str($row, 'address'));
                 $insertFacility->execute([
                     $accountId,
@@ -475,6 +482,7 @@ final class ImportController
                     self::str($row, 'contact_person'),
                     self::str($row, 'notes'),
                 ]);
+                $facilityIdByKey[$facKey] = (int) $pdo->lastInsertId();
                 $createdFacilities++;
             }
 
@@ -529,8 +537,9 @@ final class ImportController
             $insertTraining = $pdo->prepare(
                 'INSERT INTO trainings
                     (account_id, company_id, facility_id, type, date,
+                     periodicity_value, periodicity_unit, periodicity_is_custom,
                      trainer_id, topics, duration_min, status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, "draft")'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft")'
             );
 
             foreach ($rowsBySheet['Skolenia'] as $idx => $row) {
@@ -558,6 +567,19 @@ final class ImportController
                 }
                 if ($date === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
                     $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Neplatný dátum (formát DD-MM-RRRR).'];
+                    continue;
+                }
+                // Same rule as the inspections sheet: any value in any unit, an
+                // empty cell is „bez opakovania", a blank unit beside a count
+                // means months.
+                $unitCell = self::str($row, 'periodicity_unit');
+                try {
+                    [$periodicityValue, $periodicityUnit] = Periodicity::normalize(
+                        self::intOrNull($row, 'periodicity_value'),
+                        $unitCell ?? (self::intOrNull($row, 'periodicity_value') !== null ? 'mesiac' : null),
+                    );
+                } catch (\InvalidArgumentException $e) {
+                    $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => $e->getMessage()];
                     continue;
                 }
                 // Match by IČO; create the company when it does not exist yet.
@@ -589,6 +611,8 @@ final class ImportController
 
                 $insertTraining->execute([
                     $accountId, $companyId, $facilityId, $type, $date,
+                    $periodicityValue, $periodicityUnit,
+                    Periodicity::isCustomForTraining($type, $periodicityValue, $periodicityUnit) ? 1 : 0,
                     $trainerId,
                     self::str($row, 'topics'),
                     self::intOrNull($row, 'duration_min'),
@@ -1269,7 +1293,7 @@ final class ImportController
                 $actions = array_values(array_filter(array_map('trim', explode(',', $actionsRaw)), fn($a) => $a !== ''));
                 foreach ($actions as $a) {
                     if (!in_array($a, ['tlakova_skuska','oprava','plnenie'], true)) {
-                        $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => "Neznáma akcia „$a”."];
+                        $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => "Neznáma akcia „{$a}”."];
                         return null;
                     }
                 }

@@ -49,6 +49,6 @@ final class Router
             }
         }
 
-        Response::error('Not Found', 404, ['path' => $path]);
+        Response::error('Požadovaná cesta sa nenašla.', 404, ['path' => $path]);
     }
 }

@@ -6,11 +6,14 @@ namespace Firol\Controllers;
 
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
+use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Support\Address;
+use Firol\Support\ClientArchive;
+use Firol\Support\Periodicity;
 use PDO;
 
 final class CompanyController
@@ -21,6 +24,7 @@ final class CompanyController
         $accountId = Tenant::currentAccountId();
         $isAdmin   = Admin::isAdmin($userId);
         $search    = $req->query('search');
+        $withArchived = $req->query('archived') === '1';
 
         // Pull facilities count + a quick "last finalized inspection"
         // summary so the dashboard can render status without an extra
@@ -29,6 +33,7 @@ final class CompanyController
         // Admins get all companies across all accounts (no tenant filter).
         if ($isAdmin) {
             $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver, c.billing_mode,
+                           c.archived_at, c.archived_reason,
                            c.account_id,
                            a.invoice_company_name AS account_name,
                            (SELECT COUNT(*) FROM facilities f
@@ -41,10 +46,11 @@ final class CompanyController
                                AND i.status = "finalized" AND i.archived_at IS NULL) AS inspections_count
                     FROM   companies c
                     JOIN   accounts a ON a.id = c.account_id
-                    WHERE  c.archived_at IS NULL';
+                    WHERE  1 = 1';
             $params = [];
         } else {
             $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver, c.billing_mode,
+                           c.archived_at, c.archived_reason,
                            (SELECT COUNT(*) FROM facilities f
                              WHERE f.company_id = c.id AND f.archived_at IS NULL) AS facilities_count,
                            (SELECT MAX(i.executed_on) FROM inspections i
@@ -54,8 +60,13 @@ final class CompanyController
                              WHERE i.company_id = c.id
                                AND i.status = "finalized" AND i.archived_at IS NULL) AS inspections_count
                     FROM   companies c
-                    WHERE  c.account_id = :account_id AND c.archived_at IS NULL';
+                    WHERE  c.account_id = :account_id';
             $params = ['account_id' => $accountId];
+        }
+        // Spec 25 — archived firms only behind the „aj archivované" filter,
+        // listed after the active ones.
+        if (!$withArchived) {
+            $sql .= ' AND c.archived_at IS NULL';
         }
 
         if ($search !== null) {
@@ -65,7 +76,7 @@ final class CompanyController
             $params['search_name'] = '%' . $search . '%';
             $params['search_ico']  = '%' . $search . '%';
         }
-        $sql .= ' ORDER BY c.name ASC LIMIT 500';
+        $sql .= ' ORDER BY c.archived_at IS NOT NULL, c.name ASC LIMIT 500';
 
         $stmt = Db::pdo()->prepare($sql);
         $stmt->execute($params);
@@ -81,16 +92,35 @@ final class CompanyController
         $isAdmin   = Admin::isAdmin($userId);
         $id        = (int) $params['id'];
 
-        $row = self::findOrFail($isAdmin ? null : $accountId, $id);
+        // Spec 25 — an archived firm still opens: its protocols stay readable
+        // and sendable, and this is where it is restored from.
+        $row = self::findOrFail($isAdmin ? null : $accountId, $id, true);
 
         $facStmt = Db::pdo()->prepare(
-            'SELECT id, name, street, postal_code, city, contact_person, notes
+            'SELECT id, name, street, postal_code, city, contact_person, notes, archived_at, archived_reason
              FROM   facilities
-             WHERE  company_id = ? AND archived_at IS NULL
+             WHERE  company_id = ?
              ORDER  BY name ASC'
         );
         $facStmt->execute([$id]);
-        $facilities = $facStmt->fetchAll();
+        // Archived prevádzky go in their own list, so every caller that offers
+        // `facilities` for a new úkon keeps getting only the active ones.
+        $facilities = [];
+        $archivedFacilities = [];
+        foreach ($facStmt->fetchAll() as $f) {
+            if ($f['archived_at'] !== null) {
+                $archivedFacilities[] = [
+                    'id'              => (int) $f['id'],
+                    'name'            => $f['name'],
+                    'address'         => Address::format($f['street'], $f['postal_code'], $f['city']),
+                    'archived_at'     => $f['archived_at'],
+                    'archived_reason' => $f['archived_reason'],
+                ];
+                continue;
+            }
+            unset($f['archived_at'], $f['archived_reason']);
+            $facilities[] = $f;
+        }
 
         // Last-used periodicity per (facility, inspection type) — Step 1
         // prefills it, because what this prevádzka was on last time is a far
@@ -124,16 +154,42 @@ final class CompanyController
                 'unit'  => $r['periodicity_unit'] !== null ? (string) $r['periodicity_unit'] : null,
             ];
         }
+
+        // The same for trainings, per term chain (Vstupné and Opakované share
+        // one — Periodicity::trainingChain). Newest first, so the first row
+        // seen for a (prevádzka, chain) is the latest. Trainings without a
+        // prevádzka are the whole firm's and go under their own key.
+        $trStmt = Db::pdo()->prepare(
+            'SELECT t.facility_id, t.type, t.periodicity_value, t.periodicity_unit
+             FROM   trainings t
+             WHERE  t.company_id = ? AND t.account_id = ? AND t.archived_at IS NULL
+               AND  t.date IS NOT NULL
+             ORDER  BY t.date DESC, t.id DESC'
+        );
+        $trStmt->execute([$id, (int) $row['account_id']]);
+        $trainingDefaults = [];
+        foreach ($trStmt->fetchAll() as $r) {
+            $scope = $r['facility_id'] !== null ? (int) $r['facility_id'] : 'company';
+            $chain = Periodicity::trainingChain((string) $r['type']);
+            $trainingDefaults[$scope][$chain] ??= [
+                'value' => $r['periodicity_value'] !== null ? (int) $r['periodicity_value'] : null,
+                'unit'  => $r['periodicity_unit'] !== null ? (string) $r['periodicity_unit'] : null,
+            ];
+        }
+
         foreach ($facilities as &$fac) {
             $fac['id'] = (int) $fac['id'];
             $fac['address'] = Address::format($fac['street'], $fac['postal_code'], $fac['city']);
             $fac['last_periodicities'] = $defaultsByFacility[$fac['id']] ?? new \stdClass();
+            $fac['last_training_periodicities'] = $trainingDefaults[$fac['id']] ?? new \stdClass();
         }
         unset($fac);
 
         Response::json([
             'company'    => self::shape($row),
             'facilities' => $facilities,
+            'archived_facilities' => $archivedFacilities,
+            'company_last_training_periodicities' => $trainingDefaults['company'] ?? new \stdClass(),
         ]);
     }
 
@@ -193,6 +249,12 @@ final class CompanyController
         Response::json(['company' => self::shape(self::findOrFail($isAdmin ? null : $accountId, $id))]);
     }
 
+    /**
+     * POST /api/companies/{id}/archive  { reason?: string }
+     *
+     * Spec 25 — a firma is archived, never deleted: its protocols must be
+     * kept. See ClientArchive for what archiving does.
+     */
     public static function archive(Request $req, array $params): void
     {
         Csrf::require($req);
@@ -200,11 +262,38 @@ final class CompanyController
         $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id        = (int) $params['id'];
 
-        $existing = self::findOrFail($isAdmin ? null : $accountId, $id);
+        $existing = self::findOrFail($isAdmin ? null : $accountId, $id, true);
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
+        // Archiving sits under the members' switch (chapter 1.6, spec 25).
+        MemberRights::requireDelete($scopeAccountId, MemberRights::ARCHIVE_DENIED);
+        if ($existing['archived_at'] !== null) {
+            Response::error('Firma je už archivovaná.', 409);
+        }
 
-        Db::pdo()->prepare('UPDATE companies SET archived_at = NOW() WHERE id = ? AND account_id = ?')
-            ->execute([$id, $scopeAccountId]);
+        ClientArchive::archiveCompany($scopeAccountId, $id, ClientArchive::readReason($req));
+
+        Response::noContent();
+    }
+
+    /**
+     * POST /api/companies/{id}/restore — spec 25: archiving can be undone at
+     * any time. The firm's termíny are computed afresh from the last control.
+     */
+    public static function restore(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
+        $id        = (int) $params['id'];
+
+        $existing = self::findOrFail($isAdmin ? null : $accountId, $id, true);
+        $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
+        MemberRights::requireDelete($scopeAccountId, MemberRights::ARCHIVE_DENIED);
+        if ($existing['archived_at'] === null) {
+            Response::error('Firma nie je archivovaná.', 409);
+        }
+
+        ClientArchive::restoreCompany($scopeAccountId, $id);
 
         Response::noContent();
     }
@@ -229,14 +318,14 @@ final class CompanyController
         $approver = $req->jsonString('approver');
 
         if ($name === null || $name === '') {
-            Response::error('Field required: name', 422);
+            Response::error('Zadaj názov firmy.', 422);
         }
         if ($ico !== null) {
             $ico = preg_replace('/\s+/', '', $ico);
             if ($ico === '') {
                 $ico = null;
             } elseif (!preg_match('/^\d{1,12}$/', $ico)) {
-                Response::error('IČO must be numeric', 422);
+                Response::error('IČO môže obsahovať len číslice.', 422);
             }
         }
 
@@ -245,7 +334,7 @@ final class CompanyController
             if ($contactEmail === '') {
                 $contactEmail = null;
             } elseif (!filter_var($contactEmail, FILTER_VALIDATE_EMAIL)) {
-                Response::error('Invalid contact_email', 422);
+                Response::error('Zadaj platný kontaktný e-mail.', 422);
             }
         }
 
@@ -276,27 +365,31 @@ final class CompanyController
         return $mode;
     }
 
-    /** @return array<string, mixed> */
-    private static function findOrFail(?int $accountId, int $id): array
+    /**
+     * An archived firm counts as not found unless `$includeArchived` — it can
+     * be opened and restored, but not edited.
+     *
+     * @return array<string, mixed>
+     */
+    private static function findOrFail(?int $accountId, int $id, bool $includeArchived = false): array
     {
-        if ($accountId === null) {
-            $stmt = Db::pdo()->prepare(
-                'SELECT id, account_id, name, ico, street, postal_code, city, contact, contact_email, approver, billing_mode, created_at
-                 FROM   companies
-                 WHERE  id = ? AND archived_at IS NULL'
-            );
-            $stmt->execute([$id]);
-        } else {
-            $stmt = Db::pdo()->prepare(
-                'SELECT id, account_id, name, ico, street, postal_code, city, contact, contact_email, approver, billing_mode, created_at
-                 FROM   companies
-                 WHERE  id = ? AND account_id = ? AND archived_at IS NULL'
-            );
-            $stmt->execute([$id, $accountId]);
+        $sql = 'SELECT id, account_id, name, ico, street, postal_code, city, contact, contact_email, approver, billing_mode,
+                       archived_at, archived_reason, created_at
+                FROM   companies
+                WHERE  id = ?';
+        $params = [$id];
+        if ($accountId !== null) {
+            $sql .= ' AND account_id = ?';
+            $params[] = $accountId;
         }
+        if (!$includeArchived) {
+            $sql .= ' AND archived_at IS NULL';
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Company not found', 404);
+            Response::error('Firma sa nenašla.', 404);
         }
         return $row;
     }

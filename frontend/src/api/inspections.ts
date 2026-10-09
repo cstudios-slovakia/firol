@@ -91,6 +91,8 @@ export type InspectionListItem = InvoicingFields & {
   facility_name: string;
   inspector_user_id: number;
   inspector_name: string;
+  /** Who created the úkon — null on rows older than the práva členov switch. */
+  created_by_user_id: number | null;
   // When the executor borrowed a cert (PHP / Oprava) — frozen at PDF time.
   // Display sites should prefer effective_inspector_name when present.
   effective_inspector_user_id: number | null;

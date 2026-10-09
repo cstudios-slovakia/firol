@@ -40,6 +40,7 @@ import { Pagination } from "@/components/ui/Pagination";
 import { SkeletonList } from "@/components/ui/Skeleton";
 import { Spinner } from "@/components/ui/Spinner";
 import { InvoiceTickButton } from "@/components/InvoicingBlock";
+import { useMemberRights } from "@/auth/useMemberRights";
 import {
     UNINVOICED_LABEL,
     UNINVOICED_PARAM,
@@ -629,6 +630,7 @@ function InspectionRow({
     onInvoiced?: (id: number, next: InvoicingFields) => void;
 }) {
     const isRepeating = repeatingId === it.id;
+    const { canDeleteUkon } = useMemberRights();
 
     const actions = isReadOnly ? null : (
         <>
@@ -657,14 +659,16 @@ function InspectionRow({
             >
                 <Edit2 className="size-4" />
             </Link>
-            <button
-                type="button"
-                title="Odstrániť"
-                onClick={() => onDelete(it.id)}
-                className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-            >
-                <Trash2 className="size-4" />
-            </button>
+            {canDeleteUkon(it, it.inspector_user_id) && (
+                <button
+                    type="button"
+                    title="Odstrániť"
+                    onClick={() => onDelete(it.id)}
+                    className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
+                >
+                    <Trash2 className="size-4" />
+                </button>
+            )}
         </>
     );
 

@@ -95,7 +95,7 @@ final class TodayController
             static fn (array $d): bool => $d['state'] === 'po_termine',
         ));
         usort($overdue, static fn (array $a, array $b): int =>
-            strcmp($a['due_date'], $b['due_date']) ?: $a['inspection_id'] <=> $b['inspection_id']);
+            strcmp($a['due_date'], $b['due_date']) ?: strcmp($a['key'], $b['key']));
 
         $horizon = (new \DateTimeImmutable($today))->modify('+' . self::OWN_TERM_DAYS . ' days')->format('Y-m-d');
         $ownTerms = array_values(array_filter(
@@ -171,15 +171,19 @@ final class TodayController
         ));
         usort($planned, static fn (array $a, array $b): int =>
             strcmp($a['company_name'], $b['company_name'])
-            ?: strcmp($a['facility_name'], $b['facility_name'])
-            ?: $a['inspection_id'] <=> $b['inspection_id']);
+            ?: strcmp((string) $a['facility_name'], (string) $b['facility_name'])
+            ?: strcmp($a['key'], $b['key']));
         foreach ($planned as $d) {
+            // A training term (no inspection_id) is told apart by `training_id`;
+            // `id` is the úkon the row opens, whichever kind it is.
             $out[] = [
                 'kind'          => 'plan',
-                'key'           => 'plan-' . $d['inspection_id'],
-                'id'            => $d['inspection_id'],
+                'key'           => 'plan-' . $d['key'],
+                'id'            => $d['inspection_id'] ?? $d['training_id'],
+                'training_id'   => $d['training_id'],
                 'company_id'    => $d['company_id'],
                 'company_name'  => $d['company_name'],
+                // Null for a training of the whole firma.
                 'facility_name' => $d['facility_name'],
                 'city'          => $d['facility_city'],
                 'types'         => [$d['type']],
@@ -191,7 +195,7 @@ final class TodayController
 
         // Vlastné udalosti dated today. One without a firm stays; one whose
         // firm or prevádzka is archived goes (chapter 25).
-        $sql = 'SELECT e.id, e.title, e.company_id, c.name AS company_name,
+        $sql = 'SELECT e.id, e.title, e.time_from, e.time_to, e.company_id, c.name AS company_name,
                        f.name AS facility_name, f.city AS facility_city,
                        e.user_id AS tech_id, u.fullname AS tech_name,
                        au.initials AS tech_initials, au.avatar_color AS tech_color
@@ -207,7 +211,7 @@ final class TodayController
             $sql .= ' AND e.user_id = ?';
             $args[] = $userId;
         }
-        $sql .= ' ORDER BY e.created_at ASC, e.id ASC';
+        $sql .= ' ORDER BY e.time_from IS NOT NULL, e.time_from ASC, e.created_at ASC, e.id ASC';
         $stmt = Db::pdo()->prepare($sql);
         $stmt->execute($args);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
@@ -221,6 +225,8 @@ final class TodayController
                 'city'          => self::city($r['facility_city']),
                 'types'         => [],
                 'title'         => (string) $r['title'],
+                'time_from'     => $r['time_from'] !== null ? substr((string) $r['time_from'], 0, 5) : null,
+                'time_to'       => $r['time_to'] !== null ? substr((string) $r['time_to'], 0, 5) : null,
                 'status'        => null,
                 'technician'    => self::technician($r),
             ];

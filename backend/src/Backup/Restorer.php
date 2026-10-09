@@ -487,18 +487,26 @@ final class Restorer
     private function restoreDeadlineNotices(array $notices): void
     {
         $insert = $this->pdo->prepare(
-            'INSERT IGNORE INTO deadline_notices (account_id, inspection_id, notice_date, recipient, sent_at)
-             VALUES (?, ?, ?, ?, ?)'
+            'INSERT IGNORE INTO deadline_notices (account_id, inspection_id, training_id, notice_date, recipient, sent_at)
+             VALUES (?, ?, ?, ?, ?, ?)'
         );
         foreach ($notices as $notice) {
-            $inspectionId = $this->inspectionMap[(int) ($notice['inspection_id'] ?? 0)] ?? null;
+            // Exactly one of the two: a notice of a training (change request 6)
+            // carries `training_id`; archives written before it have none.
+            $inspectionId = ($notice['inspection_id'] ?? null) !== null
+                ? ($this->inspectionMap[(int) $notice['inspection_id']] ?? null)
+                : null;
+            $trainingId = ($notice['training_id'] ?? null) !== null
+                ? ($this->trainingMap[(int) $notice['training_id']] ?? null)
+                : null;
             $noticeDate   = $this->date($notice, 'notice_date');
-            if ($inspectionId === null || $noticeDate === null) {
+            if (($inspectionId === null) === ($trainingId === null) || $noticeDate === null) {
                 continue;
             }
             $insert->execute([
                 $this->accountId,
                 $inspectionId,
+                $trainingId,
                 $noticeDate,
                 mb_substr((string) ($this->str($notice, 'recipient') ?? ''), 0, 191),
                 $this->dateTime($notice, 'sent_at') ?? date('Y-m-d H:i:s'),
@@ -515,9 +523,10 @@ final class Restorer
 
         $insert = $this->pdo->prepare(
             'INSERT INTO trainings
-                (account_id, company_id, facility_id, type, date, trainer_id,
+                (account_id, company_id, facility_id, type, date,
+                 periodicity_value, periodicity_unit, periodicity_is_custom, trainer_id,
                  topics, duration_min, fields, status, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insertTrainee = $this->pdo->prepare(
             'INSERT INTO trainees
@@ -555,6 +564,10 @@ final class Restorer
                 $facilityId,
                 $type,
                 $date,
+                // An archive written before periodicity on trainings has no
+                // such keys: they come back as „bez opakovania", like the
+                // trainings themselves did before the migration.
+                ...$this->periodicity($training),
                 $this->user($training, 'trainer_email'),
                 $this->str($training, 'topics'),
                 isset($training['duration_min']) ? (int) $training['duration_min'] : null,
@@ -839,8 +852,8 @@ final class Restorer
         }
 
         $insertItem = $this->pdo->prepare(
-            'INSERT INTO stock_items (account_id, name, unit, warehouse_qty, created_by_user_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO stock_items (account_id, name, unit, warehouse_qty, retired_at, created_by_user_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
         $insertBalance = $this->pdo->prepare(
             'INSERT INTO stock_balances (item_id, user_id, account_id, qty) VALUES (?, ?, ?, ?)
@@ -864,6 +877,7 @@ final class Restorer
                 mb_substr($name, 0, 191),
                 $unit,
                 max(0, (int) ($item['warehouse_qty'] ?? 0)),
+                $this->str($item, 'retired_at'),
                 $this->userId,
                 $this->createdAt($item),
             ]);

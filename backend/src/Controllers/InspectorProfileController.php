@@ -70,7 +70,7 @@ final class InspectorProfileController
             'valid_to_bt'        => $validToBt,
         ] as $field => $val) {
             if ($val !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $val)) {
-                Response::error("Invalid {$field} (expected YYYY-MM-DD)", 422);
+                Response::error('Zadaj dátum platnosti vo formáte YYYY-MM-DD.', 422);
             }
         }
         foreach ([
@@ -80,7 +80,7 @@ final class InspectorProfileController
             ['valid_from_bt',      $validFromBt,      'valid_to_bt',      $validToBt],
         ] as [$fk, $fv, $tk, $tv]) {
             if ($fv !== null && $tv !== null && $tv < $fv) {
-                Response::error("{$tk} must be on or after {$fk}", 422);
+                Response::error('Platnosť do nemôže byť skôr ako platnosť od.', 422);
             }
         }
 
@@ -134,15 +134,15 @@ final class InspectorProfileController
 
         $file = $_FILES['signature'] ?? null;
         if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            Response::error('No signature file uploaded', 422);
+            Response::error('Nenahral sa žiadny súbor s podpisom.', 422);
         }
         if (($file['size'] ?? 0) > self::MAX_SIGNATURE_BYTES) {
-            Response::error('Signature too large (max 512 KB)', 422);
+            Response::error('Podpis je príliš veľký (max 512 KB).', 422);
         }
 
         $tmp = (string) ($file['tmp_name'] ?? '');
         if ($tmp === '' || !is_uploaded_file($tmp)) {
-            Response::error('Upload failed', 422);
+            Response::error('Nahratie súboru zlyhalo.', 422);
         }
 
         // Real MIME sniff — never trust the browser-supplied type. We only
@@ -154,13 +154,13 @@ final class InspectorProfileController
             finfo_close($finfo);
         }
         if ($mime !== 'image/png') {
-            Response::error('Signature must be a PNG image', 422);
+            Response::error('Podpis musí byť PNG obrázok.', 422);
         }
 
         $dest = Storage::signaturePath($accountId, $userId);
         Storage::ensureDir(dirname($dest));
         if (!move_uploaded_file($tmp, $dest)) {
-            Response::error('Failed to store signature', 500);
+            Response::error('Podpis sa nepodarilo uložiť.', 500);
         }
 
         Db::pdo()->prepare(
@@ -182,7 +182,7 @@ final class InspectorProfileController
         $path = Storage::signaturePath($accountId, $userId);
 
         if (empty($row['signature_path']) || !is_file($path)) {
-            Response::error('No signature on file', 404);
+            Response::error('Podpis nie je nahratý.', 404);
         }
 
         // Stream the bytes directly; no Response helper because this isn't

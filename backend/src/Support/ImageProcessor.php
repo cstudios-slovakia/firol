@@ -28,6 +28,14 @@ final class ImageProcessor
     public const THUMB_QUALITY = 70;
 
     /**
+     * Long edge and quality of the photos in the lighter e-mail copy of a
+     * protocol (chapter 9.1). Still sharp on a phone or a printed A4, at
+     * roughly a third of the bytes of the stored 1600 px photo.
+     */
+    public const MAIL_EDGE    = 1000;
+    public const MAIL_QUALITY = 60;
+
+    /**
      * GD is compiled with JPEG support. Not a given on shared hosting: a GD
      * built without libjpeg still loads and still serves mPDF, but has no
      * imagejpeg(). Callers degrade to storing the browser's already-resized

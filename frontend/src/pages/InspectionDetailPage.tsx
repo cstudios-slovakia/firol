@@ -37,9 +37,14 @@ import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStat
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { periodicityLabel, type Periodicity } from '@/lib/periodicity';
 import { sectionPathForType } from '@/lib/sections';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { VisitContinueButton } from '@/components/VisitContinueButton';
+import { VisitNextUkon } from '@/components/VisitNextUkon';
+import { visitTrail } from '@/lib/visits';
 import { InvoicingBlock } from '@/components/InvoicingBlock';
 import { invoicingOf } from '@/api/invoicing';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
+import { useMemberRights } from '@/auth/useMemberRights';
 
 /**
  * Step 3 — summary screen. Final review before PDF generation.
@@ -57,6 +62,8 @@ export function InspectionDetailPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const isReadOnly = useIsReadOnly();
+  // „Upraviť" discards the issued protocol, so it follows the práva členov switch.
+  const { canDelete: canUnlock } = useMemberRights();
 
   const [data, setData] = useState<InspectionDetail | null>(null);
   const [documents, setDocuments] = useState<InspectionDocument[]>([]);
@@ -353,13 +360,24 @@ export function InspectionDetailPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link
-        to={sectionPathForType(i.type)}
-        className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start"
-      >
-        <ArrowLeft className="size-4" />
-        Späť na zoznam kontrol
-      </Link>
+      {/* Inside a visit „Späť" climbs one level — to the visit — instead of
+          leaving it for the section's list. */}
+      {i.visit_id !== null ? (
+        <Breadcrumb
+          items={[
+            ...visitTrail({ id: i.visit_id, companyName: i.company_name, date: i.executed_on }),
+            { label: INSPECTION_TYPE_LABELS[i.type] },
+          ]}
+        />
+      ) : (
+        <Link
+          to={sectionPathForType(i.type)}
+          className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start"
+        >
+          <ArrowLeft className="size-4" />
+          Späť na zoznam kontrol
+        </Link>
+      )}
 
       <PendingSyncBanner resource="inspections" id={id} />
 
@@ -397,18 +415,20 @@ export function InspectionDetailPage() {
         </div>
         {!isDraft ? (
           <div className="flex shrink-0 items-center gap-2">
-            <Button
-              type="button"
-              id="unlock-inspection"
-              variant="warn"
-              onClick={() => setUnlockPrompt((open) => !open)}
-              aria-expanded={unlockPrompt}
-              aria-controls="unlock-prompt"
-              leftIcon={<Pencil className="size-4" />}
-              title="Odomkne kontrolu na úpravy — vystavený protokol sa pritom zruší"
-            >
-              Upraviť
-            </Button>
+            {canUnlock && (
+              <Button
+                type="button"
+                id="unlock-inspection"
+                variant="warn"
+                onClick={() => setUnlockPrompt((open) => !open)}
+                aria-expanded={unlockPrompt}
+                aria-controls="unlock-prompt"
+                leftIcon={<Pencil className="size-4" />}
+                title="Odomkne kontrolu na úpravy — vystavený protokol sa pritom zruší"
+              >
+                Upraviť
+              </Button>
+            )}
             <Button
               type="button"
               onClick={handleRepeat}
@@ -429,8 +449,10 @@ export function InspectionDetailPage() {
           </span>
           <p className="text-xs text-ink-600">
             <span className="font-semibold text-ink-800">Kontrola je uzamknutá.</span>{' '}
-            Má vystavený PDF protokol, preto sa záznamy ani dátum už nedajú meniť.
-            Pre opravu použi „Upraviť", pre nový termín „Opakovať".
+            Má vystavený PDF protokol, preto sa záznamy ani dátum už nedajú meniť.{' '}
+            {canUnlock
+              ? 'Pre opravu použi „Upraviť", pre nový termín „Opakovať".'
+              : 'Odomknúť ju na opravu môže hlavný používateľ, pre nový termín použi „Opakovať".'}
           </p>
         </Card>
       )}
@@ -525,16 +547,18 @@ export function InspectionDetailPage() {
               Dátum kontroly
             </p>
             <p className="mt-0.5 text-xs text-ink-600">
-              {isDraft
-                ? 'Zmeň dátum, ak opakuješ staršiu kontrolu — nový PDF protokol bude vystavený s týmto dátumom.'
-                : 'Dátum, s ktorým bol vystavený PDF protokol.'}
+              {i.visit_id !== null
+                ? 'Dátum je spoločný pre celú návštevu — mení sa na návšteve.'
+                : isDraft
+                  ? 'Zmeň dátum, ak opakuješ staršiu kontrolu — nový PDF protokol bude vystavený s týmto dátumom.'
+                  : 'Dátum, s ktorým bol vystavený PDF protokol.'}
             </p>
           </div>
         </div>
         <input
           type="date"
           value={localDate}
-          disabled={!isDraft || savingDate}
+          disabled={!isDraft || savingDate || i.visit_id !== null}
           onChange={(e) => setLocalDate(e.target.value)}
           aria-label="Dátum kontroly"
           className={cn(
@@ -720,8 +744,14 @@ export function InspectionDetailPage() {
         onIncludePhotosChange={setIncludePhotos}
         onSign={setSigningDocument}
         canSign={!isDraft}
+        visitId={i.visit_id}
+        inspectionId={i.id}
+        companyId={i.company_id}
       />
       )}
+
+      {/* Chapter 29.2, step 5 — once the protocol exists, the visit goes on. */}
+      {i.visit_id !== null && !isDraft && <VisitNextUkon visitId={i.visit_id} />}
 
       {/* Chapter 22 — fakturácia úkonu. Editable on a locked úkon as well:
           invoicing follows the issued protocol and never changes it. */}
@@ -964,8 +994,16 @@ function DocumentsBlock({
   onIncludePhotosChange,
   onSign,
   canSign = true,
+  visitId = null,
+  inspectionId,
+  companyId,
 }: {
   documents: InspectionDocument[];
+  /** Set when the úkon belongs to a visit: the protocol may wait for its end. */
+  visitId?: number | null;
+  inspectionId: number;
+  /** The client, whose recorded e-mail prefills the send form. */
+  companyId: number;
   canGenerate: boolean;
   generating: boolean;
   onGenerate: () => void;
@@ -1010,8 +1048,20 @@ function DocumentsBlock({
           leftIcon={<FileText className="size-4" />}
           className="bg-status-bad hover:brightness-110"
         >
-          Generovať PDF protokol
+          {visitId !== null ? 'Generovať PDF protokol teraz' : 'Generovať PDF protokol'}
         </Button>
+        {visitId !== null && (
+          <>
+            <VisitContinueButton
+              visitId={visitId}
+              ukon={{ inspection_id: inspectionId }}
+              disabled={!canGenerate}
+            />
+            <p className="max-w-sm text-xs text-ink-500">
+              Protokol môžeš vygenerovať teraz alebo hromadne na konci návštevy.
+            </p>
+          </>
+        )}
         {pdfError && (
           <p className="text-xs text-status-bad">{pdfError}</p>
         )}
@@ -1061,7 +1111,7 @@ function DocumentsBlock({
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
             <HandoverRow doc={doc} canSign={canSign} onSign={() => onSign(doc)} />
-            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} />
+            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} companyId={companyId} />
           </li>
         ))}
       </ul>

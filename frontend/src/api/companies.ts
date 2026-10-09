@@ -20,6 +20,9 @@ export type CompanyListItem = {
   billing_mode: CompanyBillingMode;
   facilities_count: number;
   inspections_count: number;
+  /** Spec 25 — set while the firm is archived (listed only with `archived: true`); absent on an offline-created row. */
+  archived_at?: string | null;
+  archived_reason?: string | null;
   last_inspection_at: string | null;
   /** Present only for system admins — identifies which account owns the company. */
   account_id?: number;
@@ -42,7 +45,19 @@ export type Company = {
   approver: string | null;
   /** Chapter 22 — the režim a new úkon for this firm starts with. */
   billing_mode: CompanyBillingMode;
+  /** Spec 25 — set while the firm is archived; it then opens read-only. */
+  archived_at?: string | null;
+  archived_reason?: string | null;
   created_at?: string;
+};
+
+/** Spec 25 — a prevádzka archived on its own while its firm stays active. */
+export type ArchivedFacilityItem = {
+  id: number;
+  name: string;
+  address: string | null;
+  archived_at: string;
+  archived_reason?: string | null;
 };
 
 export type FacilityListItem = {
@@ -62,6 +77,11 @@ export type FacilityListItem = {
    * since block 1 a period can be days or weeks, not only months.
    */
   last_periodicities: Record<string, { value: number | null; unit: PeriodicityUnit | null }>;
+  /**
+   * The same for trainings, keyed by term chain (`trainingChain`: Vstupné and
+   * Opakované share one). Optional — a response cached before it existed lacks it.
+   */
+  last_training_periodicities?: Record<string, { value: number | null; unit: PeriodicityUnit | null }>;
 };
 
 /** One person at the client entitled to sign a protocol (chapter 13.2). */
@@ -85,7 +105,12 @@ export type CompanyPersonPayload = {
 
 export type CompanyDetail = {
   company: Company;
+  /** Active prevádzky only — the ones a new úkon may be started at. */
   facilities: FacilityListItem[];
+  /** Optional — a response cached before spec 25 lacks it. */
+  archived_facilities?: ArchivedFacilityItem[];
+  /** Last-used training periodicity per chain for trainings of the whole firm (no prevádzka). */
+  company_last_training_periodicities?: Record<string, { value: number | null; unit: PeriodicityUnit | null }>;
 };
 
 export type CompanyPayload = {
@@ -102,17 +127,32 @@ export type CompanyPayload = {
 };
 
 export const Companies = {
-  list: (search?: string) => {
-    const qs = search ? `?search=${encodeURIComponent(search)}` : '';
-    return api<{ items: CompanyListItem[] }>(`/api/companies${qs}`);
+  /** `archived` adds the archived firms (the „aj archivované" filter, spec 25). */
+  list: (search?: string, opts?: { archived?: boolean }) => {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (opts?.archived) params.set('archived', '1');
+    const qs = params.toString();
+    return api<{ items: CompanyListItem[] }>(`/api/companies${qs ? `?${qs}` : ''}`);
   },
   show: (id: number) => api<CompanyDetail>(`/api/companies/${id}`),
   create: (body: CompanyPayload, csrfToken: string | null, optimistic?: OptimisticSpec) =>
     api<{ company: Company }>('/api/companies', { method: 'POST', body, csrfToken, optimistic }),
   update: (id: number, body: CompanyPayload, csrfToken: string | null) =>
     api<{ company: Company }>(`/api/companies/${id}`, { method: 'PATCH', body, csrfToken }),
-  archive: (id: number, csrfToken: string | null) =>
-    api<void>(`/api/companies/${id}`, { method: 'DELETE', csrfToken }),
+  /**
+   * Spec 25 — a firm is archived, never deleted (its protocols must be kept).
+   * Needs the server: it closes the firm's open úlohy as well.
+   */
+  archive: (id: number, reason: string | null, csrfToken: string | null) =>
+    api<void>(`/api/companies/${id}/archive`, {
+      method: 'POST',
+      body: { reason },
+      csrfToken,
+      requireOnline: true,
+    }),
+  restore: (id: number, csrfToken: string | null) =>
+    api<void>(`/api/companies/${id}/restore`, { method: 'POST', csrfToken, requireOnline: true }),
 
   /**
    * People entitled to sign this company's protocols (chapter 13.2). Pass

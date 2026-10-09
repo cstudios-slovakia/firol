@@ -55,7 +55,7 @@ final class BillingController
 
         $billingPeriod = $req->jsonString('billing_period') ?? 'monthly';
         if (!in_array($billingPeriod, self::PERIODS, true)) {
-            Response::error('billing_period must be monthly or yearly', 422);
+            Response::error('Neplatné fakturačné obdobie (očakáva sa „monthly“ alebo „yearly“).', 422);
         }
 
         $account = self::loadAccountFull($accountId);
@@ -412,10 +412,10 @@ final class BillingController
             $event = Webhook::constructEvent($payload, $sigHeader, $secret);
         } catch (SignatureVerificationException $e) {
             error_log('[billing.webhook] bad signature: ' . $e->getMessage());
-            Response::error('Invalid signature', 400);
+            Response::error('Neplatný podpis.', 400);
         } catch (\Throwable $e) {
             error_log('[billing.webhook] parse error: ' . $e->getMessage());
-            Response::error('Bad request', 400);
+            Response::error('Neplatná požiadavka.', 400);
         }
 
         $type    = (string) $event->type;
@@ -605,7 +605,7 @@ final class BillingController
         $stmt->execute([$accountId]);
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Account not found', 404);
+            Response::error('Účet sa nenašiel.', 404);
         }
         return $row;
     }

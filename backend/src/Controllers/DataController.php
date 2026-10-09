@@ -25,25 +25,30 @@ use Throwable;
  */
 final class DataController
 {
+    private const PURGE_DENIED = 'Hromadne mazať dáta môže len hlavný používateľ účtu.';
+
     /** Wipes all companies (+ facilities, inspections, trainings, documents). */
     public static function purgeCompanies(Request $req): void
     {
         Csrf::require($req);
-        Response::json(['deleted' => AccountPurge::everything(Tenant::currentAccountId())]);
+        $accountId = Tenant::requireMainUser(self::PURGE_DENIED);
+        Response::json(['deleted' => AccountPurge::everything($accountId)]);
     }
 
     /** Wipes all inspections (+ items + photos + inspection protocols). */
     public static function purgeInspections(Request $req): void
     {
         Csrf::require($req);
-        Response::json(['deleted' => AccountPurge::inspections(Tenant::currentAccountId())]);
+        $accountId = Tenant::requireMainUser(self::PURGE_DENIED);
+        Response::json(['deleted' => AccountPurge::inspections($accountId)]);
     }
 
     /** Wipes all trainings (+ trainees + training protocols). */
     public static function purgeTrainings(Request $req): void
     {
         Csrf::require($req);
-        Response::json(['deleted' => AccountPurge::trainings(Tenant::currentAccountId())]);
+        $accountId = Tenant::requireMainUser(self::PURGE_DENIED);
+        Response::json(['deleted' => AccountPurge::trainings($accountId)]);
     }
 
     /**
@@ -110,7 +115,7 @@ final class DataController
     public static function restoreData(Request $req): void
     {
         Csrf::require($req);
-        $accountId = Tenant::currentAccountId();
+        $accountId = Tenant::requireMainUser('Zálohu môže obnoviť len hlavný používateľ účtu.');
         $userId    = Tenant::currentUserId();
 
         $mode = ($_POST['mode'] ?? Restorer::MODE_MERGE) === Restorer::MODE_REPLACE

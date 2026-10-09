@@ -71,7 +71,7 @@ final class CalendarController
         $evStmt = Db::pdo()->prepare(
             self::eventSelect() . '
              WHERE  ' . ($isAdmin ? '1 = 1' : 'e.account_id = :acct') . '
-             ORDER  BY e.event_date ASC, e.id ASC'
+             ORDER  BY e.event_date ASC, e.time_from IS NOT NULL, e.time_from ASC, e.id ASC'
         );
         $evStmt->execute($isAdmin ? [] : ['acct' => $accountId]);
         $events = array_map(static fn (array $r): array => self::shapeEvent($r), $evStmt->fetchAll());
@@ -133,7 +133,7 @@ final class CalendarController
 
         $date = $req->jsonString('planned_date');
         if ($date === null || !self::isDate($date)) {
-            Response::error('Invalid planned_date (expected YYYY-MM-DD)', 422);
+            Response::error('Neplatný plánovaný dátum (očakáva sa formát YYYY-MM-DD).', 422);
         }
 
         // Upsert: one plan per inspection (unique key).
@@ -165,18 +165,70 @@ final class CalendarController
         Response::noContent();
     }
 
+    /**
+     * The same for the term of a training (change request 6).
+     *
+     * @param array<string, string> $params
+     */
+    public static function setTrainingPlan(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $trainingId = (int) ($params['training_id'] ?? 0);
+
+        // As for an inspection: the plan belongs to the training's account.
+        $scopeAccountId = self::assertTrainingInAccount(
+            $trainingId,
+            $isAdmin ? null : $accountId,
+        );
+
+        $date = $req->jsonString('planned_date');
+        if ($date === null || !self::isDate($date)) {
+            Response::error('Neplatný plánovaný dátum (očakáva sa formát YYYY-MM-DD).', 422);
+        }
+
+        // Upsert: one plan per training (unique key).
+        Db::pdo()->prepare(
+            'INSERT INTO calendar_plans (account_id, training_id, planned_date)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE planned_date = VALUES(planned_date)'
+        )->execute([$scopeAccountId, $trainingId, $date]);
+
+        Response::json(['ok' => true]);
+    }
+
+    /** @param array<string, string> $params */
+    public static function deleteTrainingPlan(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
+        $trainingId = (int) ($params['training_id'] ?? 0);
+
+        $sql = 'DELETE FROM calendar_plans WHERE training_id = ?';
+        $args = [$trainingId];
+        if (!$isAdmin) {
+            $sql .= ' AND account_id = ?';
+            $args[] = $accountId;
+        }
+        Db::pdo()->prepare($sql)->execute($args);
+
+        Response::noContent();
+    }
+
     /** Create a free-standing vlastná udalosť, owned by whoever creates it. */
     public static function createEvent(Request $req): void
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
 
-        [$title, $date, $note, $companyId, $facilityId] = self::validateEventBody($req, $accountId);
+        [$title, $date, $timeFrom, $timeTo, $note, $companyId, $facilityId] = self::validateEventBody($req, $accountId);
 
         Db::pdo()->prepare(
-            'INSERT INTO calendar_events (account_id, user_id, title, event_date, note, company_id, facility_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
-        )->execute([$accountId, Tenant::currentUserId(), $title, $date, $note, $companyId, $facilityId]);
+            'INSERT INTO calendar_events (account_id, user_id, title, event_date, time_from, time_to, note, company_id, facility_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$accountId, Tenant::currentUserId(), $title, $date, $timeFrom, $timeTo, $note, $companyId, $facilityId]);
 
         $id = (int) Db::pdo()->lastInsertId();
         Response::json(['event' => self::loadEvent($id, $accountId)], 201);
@@ -191,13 +243,13 @@ final class CalendarController
         // Stays in its owner account when an admin edits another tenant's event.
         $scopeAccountId = self::assertEventInAccount($id, $isAdmin ? null : $accountId);
 
-        [$title, $date, $note, $companyId, $facilityId] = self::validateEventBody($req, $scopeAccountId);
+        [$title, $date, $timeFrom, $timeTo, $note, $companyId, $facilityId] = self::validateEventBody($req, $scopeAccountId);
 
         Db::pdo()->prepare(
             'UPDATE calendar_events
-                SET title = ?, event_date = ?, note = ?, company_id = ?, facility_id = ?
+                SET title = ?, event_date = ?, time_from = ?, time_to = ?, note = ?, company_id = ?, facility_id = ?
               WHERE id = ? AND account_id = ?'
-        )->execute([$title, $date, $note, $companyId, $facilityId, $id, $scopeAccountId]);
+        )->execute([$title, $date, $timeFrom, $timeTo, $note, $companyId, $facilityId, $id, $scopeAccountId]);
 
         Response::json(['event' => self::loadEvent($id, $scopeAccountId)]);
     }
@@ -304,19 +356,28 @@ final class CalendarController
      * create, the event's own on update — so an optional company/facility is
      * always validated against the tenant that will own the row.
      *
-     * @return array{0:string,1:string,2:?string,3:?int,4:?int}
+     * @return array{0:string,1:string,2:?string,3:?string,4:?string,5:?int,6:?int}
      */
     private static function validateEventBody(Request $req, int $accountId): array
     {
         $title = $req->jsonString('title');
         if ($title === null || trim($title) === '') {
-            Response::error('Title required', 422);
+            Response::error('Zadaj názov udalosti.', 422);
         }
         $title = mb_substr(trim($title), 0, 191);
 
         $date = $req->jsonString('event_date');
         if ($date === null || !self::isDate($date)) {
-            Response::error('Invalid event_date (expected YYYY-MM-DD)', 422);
+            Response::error('Neplatný dátum udalosti (očakáva sa formát YYYY-MM-DD).', 422);
+        }
+
+        $timeFrom = self::readTime($req, 'time_from');
+        $timeTo = self::readTime($req, 'time_to');
+        if ($timeTo !== null && $timeFrom === null) {
+            Response::error('Zadaj čas začiatku, ak je zadaný čas konca.', 422);
+        }
+        if ($timeTo !== null && $timeTo < $timeFrom) {
+            Response::error('Čas konca nesmie byť skôr ako čas začiatku.', 422);
         }
 
         $note = $req->jsonString('note');
@@ -336,18 +397,18 @@ final class CalendarController
             $c = Db::pdo()->prepare('SELECT 1 FROM companies WHERE id = ? AND account_id = ?');
             $c->execute([$companyId, $accountId]);
             if ($c->fetchColumn() === false) {
-                Response::error('Company not found', 422);
+                Response::error('Firma sa nenašla.', 422);
             }
         }
         if ($facilityId !== null) {
             $f = Db::pdo()->prepare('SELECT 1 FROM facilities WHERE id = ? AND account_id = ?');
             $f->execute([$facilityId, $accountId]);
             if ($f->fetchColumn() === false) {
-                Response::error('Facility not found', 422);
+                Response::error('Prevádzka sa nenašla.', 422);
             }
         }
 
-        return [$title, $date, $note, $companyId, $facilityId];
+        return [$title, $date, $timeFrom, $timeTo, $note, $companyId, $facilityId];
     }
 
     /**
@@ -366,7 +427,28 @@ final class CalendarController
         $stmt->execute($args);
         $owner = $stmt->fetchColumn();
         if ($owner === false) {
-            Response::error('Inspection not found', 404);
+            Response::error('Kontrola sa nenašla.', 404);
+        }
+        return (int) $owner;
+    }
+
+    /**
+     * @param int|null $accountId Tenant to scope to; null = any account (admin).
+     * @return int The training's own account id, to scope the write with.
+     */
+    private static function assertTrainingInAccount(int $trainingId, ?int $accountId): int
+    {
+        $sql = 'SELECT account_id FROM trainings WHERE id = ? AND archived_at IS NULL';
+        $args = [$trainingId];
+        if ($accountId !== null) {
+            $sql .= ' AND account_id = ?';
+            $args[] = $accountId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($args);
+        $owner = $stmt->fetchColumn();
+        if ($owner === false) {
+            Response::error('Školenie sa nenašlo.', 404);
         }
         return (int) $owner;
     }
@@ -387,14 +469,14 @@ final class CalendarController
         $stmt->execute($args);
         $owner = $stmt->fetchColumn();
         if ($owner === false) {
-            Response::error('Event not found', 404);
+            Response::error('Udalosť sa nenašla.', 404);
         }
         return (int) $owner;
     }
 
     private static function eventSelect(): string
     {
-        return 'SELECT e.id, e.title, e.event_date, e.note,
+        return 'SELECT e.id, e.title, e.event_date, e.time_from, e.time_to, e.note,
                        e.company_id, c.name AS company_name,
                        e.facility_id, f.name AS facility_name, f.city AS facility_city,
                        e.user_id, u.fullname AS user_name,
@@ -439,6 +521,8 @@ final class CalendarController
             'zdroj'         => 'vlastny',
             'title'         => (string) $r['title'],
             'event_date'    => (string) $r['event_date'],
+            'time_from'     => self::shapeTime($r['time_from'] ?? null),
+            'time_to'       => self::shapeTime($r['time_to'] ?? null),
             'note'          => $r['note'] !== null ? (string) $r['note'] : null,
             'company_id'    => $r['company_id'] !== null ? (int) $r['company_id'] : null,
             'company_name'  => $r['company_name'] !== null ? (string) $r['company_name'] : null,
@@ -448,6 +532,26 @@ final class CalendarController
             // Who created it; null for events recorded before chapter 11.
             'technician'    => $technician,
         ];
+    }
+
+    /** Optional `HH:MM` field; empty / absent = null, anything else 422. */
+    private static function readTime(Request $req, string $key): ?string
+    {
+        $v = $req->jsonString($key);
+        if ($v === null || trim($v) === '') {
+            return null;
+        }
+        $v = trim($v);
+        if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $v)) {
+            Response::error('Zadaj čas vo formáte HH:MM.', 422);
+        }
+        return $v;
+    }
+
+    /** TIME comes back as `HH:MM:SS`; the API speaks `HH:MM`. */
+    private static function shapeTime(mixed $v): ?string
+    {
+        return $v !== null && $v !== '' ? substr((string) $v, 0, 5) : null;
     }
 
     private static function isDate(string $s): bool

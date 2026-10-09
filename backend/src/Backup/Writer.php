@@ -259,8 +259,9 @@ final class Writer
     private static function trainings(int $accountId, PDO $pdo, array &$files): array
     {
         $stmt = $pdo->prepare(
-            'SELECT t.id, t.company_id, t.facility_id, t.type, t.date, t.topics,
-                    t.duration_min, t.fields, t.status, t.created_at,
+            'SELECT t.id, t.company_id, t.facility_id, t.type, t.date,
+                    t.periodicity_value, t.periodicity_unit, t.periodicity_is_custom,
+                    t.topics, t.duration_min, t.fields, t.status, t.created_at,
                     t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
                     u.email AS trainer_email
              FROM   trainings t
@@ -307,6 +308,11 @@ final class Writer
             $training['company_id']  = (int) $training['company_id'];
             $training['facility_id'] = $training['facility_id'] !== null ? (int) $training['facility_id'] : null;
             $training['duration_min'] = $training['duration_min'] !== null ? (int) $training['duration_min'] : null;
+            // Chapter 5 — both null is „bez opakovania".
+            $training['periodicity_value']     = $training['periodicity_value'] !== null
+                ? (int) $training['periodicity_value']
+                : null;
+            $training['periodicity_is_custom'] = (int) $training['periodicity_is_custom'];
             // Pokyn — žatevné práce carries its instruction text here; the six
             // attendance-based types have no payload. Decoded so the manifest
             // stays readable JSON rather than a string of escaped JSON.
@@ -404,22 +410,26 @@ final class Writer
 
     /**
      * Automatic client notices already sent (chapter 11.3), keyed by the
-     * úkon whose deadline they announced.
+     * úkon whose deadline they announced — an inspection or, since
+     * change request 6, a training (exactly one of the two ids is set).
      *
      * @return list<array<string, mixed>>
      */
     private static function deadlineNotices(int $accountId, PDO $pdo): array
     {
         $stmt = $pdo->prepare(
-            'SELECT n.inspection_id, n.notice_date, n.recipient, n.sent_at
+            'SELECT n.inspection_id, n.training_id, n.notice_date, n.recipient, n.sent_at
              FROM   deadline_notices n
-             JOIN   inspections i ON i.id = n.inspection_id AND i.archived_at IS NULL
+             LEFT   JOIN inspections i ON i.id = n.inspection_id AND i.archived_at IS NULL
+             LEFT   JOIN trainings   t ON t.id = n.training_id   AND t.archived_at IS NULL
              WHERE  n.account_id = ?
+               AND  (i.id IS NOT NULL OR t.id IS NOT NULL)
              ORDER  BY n.id'
         );
         $stmt->execute([$accountId]);
         return array_map(static fn (array $r): array => [
-            'inspection_id' => (int) $r['inspection_id'],
+            'inspection_id' => $r['inspection_id'] !== null ? (int) $r['inspection_id'] : null,
+            'training_id'   => $r['training_id'] !== null ? (int) $r['training_id'] : null,
             'notice_date'   => (string) $r['notice_date'],
             'recipient'     => (string) $r['recipient'],
             'sent_at'       => (string) $r['sent_at'],
@@ -438,7 +448,7 @@ final class Writer
     private static function stock(int $accountId, PDO $pdo): array
     {
         $itemStmt = $pdo->prepare(
-            'SELECT id, name, unit, warehouse_qty, created_at FROM stock_items WHERE account_id = ? ORDER BY id'
+            'SELECT id, name, unit, warehouse_qty, retired_at, created_at FROM stock_items WHERE account_id = ? ORDER BY id'
         );
         $itemStmt->execute([$accountId]);
         $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);

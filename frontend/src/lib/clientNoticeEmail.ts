@@ -1,4 +1,5 @@
 import type { InspectionType } from '@/api/inspections';
+import type { TrainingType } from '@/api/trainings';
 import type { FacilityDayGroup } from '@/lib/calendarGrouping';
 
 /**
@@ -41,6 +42,21 @@ export const INSPECTION_TYPE_ACCUSATIVE: Record<InspectionType, string> = {
   skolenie_bozp: 'oboznámenie zamestnancov v oblasti BOZP',
 };
 
+/**
+ * The same for the training subtypes (change request 6): a training term is
+ * announced by its own name. Twin of the training entries in
+ * `ClientNotice::TYPE_ACCUSATIVE` on the server — keep both in step.
+ */
+export const TRAINING_TYPE_ACCUSATIVE: Record<TrainingType, string> = {
+  vstupne: 'vstupné školenie vedúcich a ostatných zamestnancov',
+  opakovane: 'opakované školenie vedúcich a ostatných zamestnancov',
+  zdrzujuca_sa: 'školenie osôb zdržujúcich sa na pracovisku',
+  opp_mimo: 'školenie osôb zabezpečujúcich OPP v mimopracovnom čase',
+  hliadka_oph: 'odbornú prípravu protipožiarnej hliadky pracoviska',
+  hliadka_opah: 'odbornú prípravu protipožiarnej asistenčnej hliadky',
+  pokyn_zatva: 'vydanie pokynu na zabezpečenie ochrany pred požiarmi pri žatevných prácach',
+};
+
 /** "2026-08-15" → "15. 8. 2026" (no leading zeros, as the spec's sample). */
 export function formatDateSk(isoDate: string): string {
   const [y, m, d] = isoDate.split('-');
@@ -75,7 +91,11 @@ export function buildClientNotice(group: FacilityDayGroup, sender: NoticeSender)
   // Deadlines are unique per facility+type, but dedupe anyway so a repeated
   // label could never read as "kontrolu … a kontrolu …".
   const controls = joinSk([
-    ...new Set(group.deadlines.map((d) => INSPECTION_TYPE_ACCUSATIVE[d.type])),
+    ...new Set(
+      group.deadlines.map((d) =>
+        d.training_type ? TRAINING_TYPE_ACCUSATIVE[d.training_type] : INSPECTION_TYPE_ACCUSATIVE[d.type as InspectionType],
+      ),
+    ),
   ]);
   const signature = [sender.fullname, sender.phone].filter(Boolean).join(', ');
 

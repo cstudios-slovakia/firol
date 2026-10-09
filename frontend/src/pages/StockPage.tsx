@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   ArrowRightLeft,
   Boxes,
@@ -7,13 +7,18 @@ import {
   History,
   PackageMinus,
   PackagePlus,
+  Pencil,
   Plus,
   Receipt,
+  Trash2,
   WifiOff,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
+import { useMemberRights } from '@/auth/useMemberRights';
+import { ApiError } from '@/lib/api';
 import {
   ACTION_LABELS,
+  STOCK_ITEM_USED,
   STOCK_TEXTS,
   STOCK_UNITS,
   Stock,
@@ -70,6 +75,7 @@ const ACTION_TONES: Record<StockAction, 'ok' | 'warn' | 'bad'> = {
 
 export function StockPage() {
   const online = useOnlineStatus();
+  const { canDelete } = useMemberRights();
   const [tab, setTab] = useState<Tab>('polozky');
   const [holders, setHolders] = useState<StockHolder[]>([]);
   const [items, setItems] = useState<StockItem[] | null>(null);
@@ -78,6 +84,8 @@ export function StockPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [newItemOpen, setNewItemOpen] = useState(false);
+  const [editItem, setEditItem] = useState<StockItem | null>(null);
+  const [deleteItem, setDeleteItem] = useState<StockItem | null>(null);
   // The item panel; `item` null = opened from „Nákup" in the header, where
   // the item is picked inside the panel.
   const [panel, setPanel] = useState<{ item: StockItem | null; action: StockAction } | null>(null);
@@ -191,7 +199,15 @@ export function StockPage() {
             </Button>
           </Card>
         ) : (
-          <ItemsTable items={items} holders={holders} onOpen={(item) => setPanel({ item, action: 'pouzite' })} />
+          <ItemsTable
+            items={items}
+            holders={holders}
+            online={online}
+            canDelete={canDelete}
+            onOpen={(item) => setPanel({ item, action: 'pouzite' })}
+            onEdit={setEditItem}
+            onDelete={setDeleteItem}
+          />
         ))}
 
       {tab === 'pohyby' &&
@@ -218,6 +234,27 @@ export function StockPage() {
         }}
       />
 
+      <NewItemDialog
+        open={editItem !== null}
+        item={editItem}
+        onClose={() => setEditItem(null)}
+        onCreated={(item) => {
+          setItems((prev) =>
+            (prev ?? []).map((i) => (i.id === item.id ? item : i)).sort((a, b) => a.name.localeCompare(b.name, 'sk')),
+          );
+          loadMovements();
+        }}
+      />
+
+      <DeleteItemDialog
+        item={deleteItem}
+        onClose={() => setDeleteItem(null)}
+        onDeleted={() => {
+          setDeleteItem(null);
+          refresh();
+        }}
+      />
+
       {panel && items && (
         <ItemPanel
           key={`${panel.item?.id ?? 'nakup'}-${panel.action}`}
@@ -226,6 +263,7 @@ export function StockPage() {
           initialItem={panel.item}
           initialAction={panel.action}
           online={online}
+          canDelete={canDelete}
           onClose={() => setPanel(null)}
           onRecorded={(item) => {
             setItems((prev) => prev?.map((i) => (i.id === item.id ? item : i)) ?? prev);
@@ -233,6 +271,10 @@ export function StockPage() {
           }}
           onBillingChanged={loadMovements}
           onIssue={(id) => setIssueFor(id)}
+          onDeleted={() => {
+            setPanel(null);
+            refresh();
+          }}
         />
       )}
 
@@ -248,14 +290,61 @@ export function StockPage() {
 
 // ── Položky ────────────────────────────────────────────────────────────────
 
+function ItemActions({
+  item,
+  online,
+  canDelete,
+  onEdit,
+  onDelete,
+}: {
+  item: StockItem;
+  online: boolean;
+  canDelete: boolean;
+  onEdit: (item: StockItem) => void;
+  onDelete: (item: StockItem) => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        aria-label={`Upraviť ${item.name}`}
+        disabled={!online}
+        onClick={() => onEdit(item)}
+        className="grid size-8 place-items-center rounded-xl text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn-bg)] disabled:opacity-40"
+      >
+        <Pencil className="size-4" />
+      </button>
+      {canDelete && (
+        <button
+          type="button"
+          aria-label={`Odstrániť ${item.name}`}
+          disabled={!online}
+          onClick={() => onDelete(item)}
+          className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)] disabled:opacity-40"
+        >
+          <Trash2 className="size-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ItemsTable({
   items,
   holders,
+  online,
+  canDelete,
   onOpen,
+  onEdit,
+  onDelete,
 }: {
   items: StockItem[];
   holders: StockHolder[];
+  online: boolean;
+  canDelete: boolean;
   onOpen: (item: StockItem) => void;
+  onEdit: (item: StockItem) => void;
+  onDelete: (item: StockItem) => void;
 }) {
   return (
     <>
@@ -274,6 +363,9 @@ function ItemsTable({
                 </th>
               ))}
               <th className="px-4 py-2.5 text-right">{STOCK_TEXTS.spolu}</th>
+              <th className="w-px px-3 py-2.5">
+                <span className="sr-only">Akcie</span>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-ink-100">
@@ -296,6 +388,9 @@ function ItemsTable({
                   </td>
                 ))}
                 <td className="px-4 py-3 text-right font-semibold tabular-nums text-ink-900">{item.total}</td>
+                <td className="px-3 py-3">
+                  <ItemActions item={item} online={online} canDelete={canDelete} onEdit={onEdit} onDelete={onDelete} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -305,25 +400,31 @@ function ItemsTable({
       {/* Mobile: a card per item, holders as chips. */}
       <ul className="flex flex-col gap-2 sm:hidden">
         {items.map((item) => (
-          <li key={item.id}>
-            <button
-              type="button"
-              onClick={() => onOpen(item)}
-              className="w-full rounded-3xl border border-ink-100 bg-white px-4 py-3 text-left shadow-[var(--shadow-soft)] transition-all duration-200 active:scale-[0.99]"
-            >
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="min-w-0 truncate font-medium text-ink-900">{item.name}</span>
-                <span className="shrink-0 text-sm font-semibold tabular-nums text-ink-900">
-                  {item.total} {item.unit}
-                </span>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <HolderChip name={STOCK_TEXTS.sklad} qty={item.warehouse} />
-                {holders.map((h) => (
-                  <HolderChip key={h.user_id} name={h.name} qty={item.balances[String(h.user_id)] ?? 0} />
-                ))}
-              </div>
-            </button>
+          <li
+            key={item.id}
+            className="rounded-3xl border border-ink-100 bg-white px-4 py-3 shadow-[var(--shadow-soft)]"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => onOpen(item)}
+                className="min-w-0 flex-1 text-left transition-all duration-200 active:scale-[0.99]"
+              >
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0 truncate font-medium text-ink-900">{item.name}</span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-ink-900">
+                    {item.total} {item.unit}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <HolderChip name={STOCK_TEXTS.sklad} qty={item.warehouse} />
+                  {holders.map((h) => (
+                    <HolderChip key={h.user_id} name={h.name} qty={item.balances[String(h.user_id)] ?? 0} />
+                  ))}
+                </div>
+              </button>
+              <ItemActions item={item} online={online} canDelete={canDelete} onEdit={onEdit} onDelete={onDelete} />
+            </div>
           </li>
         ))}
       </ul>
@@ -361,20 +462,24 @@ function ItemPanel({
   initialItem,
   initialAction,
   online,
+  canDelete,
   onClose,
   onRecorded,
   onBillingChanged,
   onIssue,
+  onDeleted,
 }: {
   items: StockItem[];
   holders: StockHolder[];
   initialItem: StockItem | null;
   initialAction: StockAction;
   online: boolean;
+  canDelete: boolean;
   onClose: () => void;
   onRecorded: (item: StockItem) => void;
   onBillingChanged: () => void;
   onIssue: (movementId: number) => void;
+  onDeleted: () => void;
 }) {
   const { csrfToken, user } = useAuth();
   const toast = useToast();
@@ -399,6 +504,8 @@ function ItemPanel({
   // After a použitie at a firm: the offer of chapter 21.
   const [recorded, setRecorded] = useState<StockMovement | null>(null);
   const [invoiceSaving, setInvoiceSaving] = useState(false);
+
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const [companies, setCompanies] = useState<CompanyListItem[] | null>(null);
   const [inspections, setInspections] = useState<InspectionListItem[]>([]);
@@ -534,12 +641,12 @@ function ItemPanel({
     <Dialog
       open
       onClose={() => {
-        if (!saving) onClose();
+        if (!saving && !confirmDelete) onClose();
       }}
       title={title}
       description={item ? `${STOCK_TEXTS.spolu}: ${item.total} ${item.unit}` : undefined}
       maxWidthClassName="max-w-lg"
-      dismissible={!saving}
+      dismissible={!saving && !confirmDelete}
     >
       {recorded ? (
         <div className="flex flex-col gap-4">
@@ -746,8 +853,29 @@ function ItemPanel({
               </ul>
             </section>
           )}
+
+          {item && canDelete && (
+            <div className="border-t border-ink-100 pt-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                leftIcon={<Trash2 className="size-4" />}
+                onClick={() => setConfirmDelete(true)}
+                disabled={!online || saving}
+                className="text-status-bad hover:bg-red-50"
+              >
+                Vymazať položku
+              </Button>
+            </div>
+          )}
         </div>
       )}
+
+      <DeleteItemDialog
+        item={confirmDelete ? item : null}
+        onClose={() => setConfirmDelete(false)}
+        onDeleted={onDeleted}
+      />
     </Dialog>
   );
 }
@@ -934,12 +1062,15 @@ function InvoiceList({
 
 // ── Nová položka ───────────────────────────────────────────────────────────
 
+/** Creates a položka, or — when `item` is given — edits its name and unit. */
 function NewItemDialog({
   open,
+  item = null,
   onClose,
   onCreated,
 }: {
   open: boolean;
+  item?: StockItem | null;
   onClose: () => void;
   onCreated: (item: StockItem) => void;
 }) {
@@ -952,12 +1083,16 @@ function NewItemDialog({
 
   useEffect(() => {
     if (!open) return;
-    setName('');
-    setUnit('ks');
+    setName(item?.name ?? '');
+    setUnit((item?.unit as StockUnit | undefined) ?? 'ks');
     setError(null);
-  }, [open]);
+  }, [open, item]);
 
-  async function save() {
+  // A <form>, so Enter in the name field saves — but only once there is a
+  // name; an empty field just shows the hint and nothing is sent.
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (saving) return;
     if (!name.trim()) {
       setError('Zadaj názov položky.');
       return;
@@ -965,12 +1100,15 @@ function NewItemDialog({
     setSaving(true);
     setError(null);
     try {
-      const res = await Stock.createItem({ name: name.trim(), unit }, csrfToken);
+      const body = { name: name.trim(), unit };
+      const res = item
+        ? await Stock.updateItem(item.id, body, csrfToken)
+        : await Stock.createItem(body, csrfToken);
       onCreated(res.item);
-      toast.success('Položka pridaná.');
+      toast.success(item ? 'Položka upravená.' : 'Položka pridaná.');
       onClose();
     } catch (err) {
-      setError(offlineMessage(err, 'Položku sa nepodarilo pridať.'));
+      setError(offlineMessage(err, item ? 'Položku sa nepodarilo upraviť.' : 'Položku sa nepodarilo pridať.'));
     } finally {
       setSaving(false);
     }
@@ -982,10 +1120,10 @@ function NewItemDialog({
       onClose={() => {
         if (!saving) onClose();
       }}
-      title={STOCK_TEXTS.nova_polozka}
+      title={item ? 'Upraviť položku' : STOCK_TEXTS.nova_polozka}
       dismissible={!saving}
     >
-      <div className="flex flex-col gap-4">
+      <form onSubmit={save} className="flex flex-col gap-4" noValidate>
         <Field label="Názov" required>
           {(p) => (
             <Input
@@ -1009,14 +1147,120 @@ function NewItemDialog({
         </Field>
         {error && <p className="text-sm text-status-bad">{error}</p>}
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
             Zrušiť
           </Button>
-          <Button onClick={save} loading={saving}>
-            Pridať
+          <Button type="submit" loading={saving}>
+            {item ? 'Uložiť' : 'Pridať'}
           </Button>
         </div>
-      </div>
+      </form>
+    </Dialog>
+  );
+}
+
+// ── Vymazať / vyradiť položku ──────────────────────────────────────────────
+
+/**
+ * Confirm + delete of a položka; shown while `item` is set. When the server
+ * refuses because a výdajka lists the item, the same dialog offers
+ * „Vyradiť zo skladu" instead: the item leaves the sklad but stays in the
+ * journal and on the issued documents.
+ */
+function DeleteItemDialog({
+  item,
+  onClose,
+  onDeleted,
+}: {
+  item: StockItem | null;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const { csrfToken } = useAuth();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  // Set once the delete came back „už na výdajke".
+  const [used, setUsed] = useState(false);
+
+  useEffect(() => {
+    setUsed(false);
+  }, [item?.id]);
+
+  async function confirmDelete() {
+    if (!item) return;
+    setBusy(true);
+    try {
+      await Stock.deleteItem(item.id, csrfToken);
+      toast.success('Položka vymazaná.');
+      onDeleted();
+    } catch (err) {
+      if (err instanceof ApiError && err.code === STOCK_ITEM_USED) {
+        setUsed(true);
+      } else {
+        toast.error(offlineMessage(err, 'Položku sa nepodarilo vymazať.'));
+        onClose();
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmRetire() {
+    if (!item) return;
+    setBusy(true);
+    try {
+      await Stock.retireItem(item.id, csrfToken);
+      toast.success('Položka vyradená zo skladu.');
+      onDeleted();
+    } catch (err) {
+      toast.error(offlineMessage(err, 'Položku sa nepodarilo vyradiť.'));
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={item !== null}
+      onClose={() => {
+        if (!busy) onClose();
+      }}
+      title={used ? 'Položku nemožno vymazať' : 'Vymazať položku?'}
+      description={item?.name}
+      dismissible={!busy}
+    >
+      {used ? (
+        <>
+          <p className="text-sm text-ink-700">
+            Položka je už uvedená na výdajke, takže sa nedá vymazať. Môžeš ju vyradiť zo skladu — zmizne zo zoznamu
+            položiek a nedá sa s ňou ďalej pracovať, ale zostane dohľadateľná vo vydaných dokladoch a v pohyboch.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose} disabled={busy}>
+              Zrušiť
+            </Button>
+            <Button variant="danger" onClick={confirmRetire} loading={busy}>
+              Vyradiť zo skladu
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-ink-700">
+            Položka sa vymaže zo skladu aj s jej históriou pohybov. Ak je už uvedená na výdajke, ponúkne sa
+            vyradenie zo skladu.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose} disabled={busy}>
+              Zrušiť
+            </Button>
+            <Button variant="danger" onClick={confirmDelete} loading={busy}>
+              Vymazať
+            </Button>
+          </div>
+        </>
+      )}
     </Dialog>
   );
 }

@@ -36,7 +36,7 @@ final class Periodicity
      */
     public const RECOMMENDED_MONTHS = [
         'php'                => [24, 12],
-        'oprava_ts_php'      => [],
+        'oprava_ts_php'      => [60],
         'vyradenie'          => [],
         'hydranty'           => [12],
         'ts_hadic'           => [12],
@@ -63,6 +63,37 @@ final class Periodicity
         'omamne_latky'         => [],
         'skolenie_bozp'        => [36, 24, 12],
     ];
+
+    /**
+     * Recommended period per TRAINING subtype — the client's table (change
+     * request 6). A separate map from RECOMMENDED_MONTHS: training slugs and
+     * inspection slugs are different namespaces. Like the inspection map the
+     * first value is preselected and nothing here is statutory; the technician
+     * can override it or choose „bez opakovania".
+     *
+     * @var array<string, list<int>>
+     */
+    public const TRAINING_RECOMMENDED_MONTHS = [
+        'vstupne'      => [24],
+        'opakovane'    => [24],
+        'zdrzujuca_sa' => [24],
+        'opp_mimo'     => [12],
+        'hliadka_oph'  => [12],
+        'hliadka_opah' => [12],
+        'pokyn_zatva'  => [12],
+    ];
+
+    /**
+     * Key of the term chain a training belongs to. Vstupné and Opakované are
+     * one chain — the next training of either kind at the same firma /
+     * prevádzka fulfils the open term — every other subtype is its own chain
+     * (owner decision, 7. 10. 2026). Everything asking for „the latest
+     * training of this kind" goes through here.
+     */
+    public static function trainingChain(string $type): string
+    {
+        return $type === 'vstupne' || $type === 'opakovane' ? 'zamestnanci' : $type;
+    }
 
     /**
      * Normalise a (value, unit) pair coming off the wire.
@@ -113,6 +144,16 @@ final class Periodicity
     public static function isCustom(string $type, ?int $value, ?string $unit): bool
     {
         $recommended = self::RECOMMENDED_MONTHS[$type] ?? [];
+        if ($value === null) {
+            return $recommended !== [];
+        }
+        return $unit !== 'mesiac' || !in_array($value, $recommended, true);
+    }
+
+    /** The same check for a training subtype, against TRAINING_RECOMMENDED_MONTHS. */
+    public static function isCustomForTraining(string $type, ?int $value, ?string $unit): bool
+    {
+        $recommended = self::TRAINING_RECOMMENDED_MONTHS[$type] ?? [];
         if ($value === null) {
             return $recommended !== [];
         }

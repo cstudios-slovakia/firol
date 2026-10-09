@@ -25,8 +25,12 @@ use Firol\Db;
  *     place of a date (chapter 5), since they are part of the client's record
  *     even though no deadline follows from them.
  *
- * Trainings come from the training tree (latest per type for the prevádzka or
- * for the whole company); they carry no periodicity of their own.
+ * Trainings come from the training tree: the latest per term chain for the
+ * prevádzka or for the whole company, valid until their own date plus the
+ * periodicity stored with them (change request 6). Vstupné and Opakované are
+ * one chain ({@see Periodicity::trainingChain()}), so they print as one row,
+ * named after the latest of the two. A training recorded without recurrence
+ * reads „podľa potreby", like an inspection.
  */
 final class ClientTerms
 {
@@ -69,6 +73,8 @@ final class ClientTerms
         'zdrzujuca_sa' => 'Školenie osôb zdržujúcich sa na pracovisku',
         'hliadka_oph'  => 'Odborná príprava protipožiarnej hliadky pracoviska',
         'hliadka_opah' => 'Odborná príprava protipožiarnej asistenčnej hliadky',
+        'pokyn_zatva'  => 'Pokyn na zabezpečenie ochrany pred požiarmi pri žatevných prácach, '
+            . 'pri zbere a skladovaní objemových krmovín',
     ];
 
     private const MONTHS = [
@@ -124,32 +130,37 @@ final class ClientTerms
             );
         }
 
-        // Latest finalized training per type — for this prevádzka or for the
-        // whole company (facility left empty).
+        // Latest finalized training per term chain — for this prevádzka or for
+        // the whole company (facility left empty). Walked oldest first, so the
+        // last one seen for a chain is its latest; Vstupné and Opakované share
+        // a chain and print one row, named after the later one.
         $tStmt = Db::pdo()->prepare(
-            'SELECT t.type, t.date
+            'SELECT t.type, t.date, t.periodicity_value, t.periodicity_unit
              FROM   trainings t
              WHERE  t.account_id = :acct AND t.company_id = :comp
                AND  (t.facility_id = :fac OR t.facility_id IS NULL)
                AND  t.status = "finalized" AND t.archived_at IS NULL
                AND  t.date IS NOT NULL AND t.date <= :asof
-               AND  NOT EXISTS (
-                      SELECT 1 FROM trainings s
-                      WHERE  s.account_id = t.account_id AND s.company_id = t.company_id
-                        AND  (s.facility_id = :fac2 OR s.facility_id IS NULL)
-                        AND  s.type = t.type AND s.status = "finalized" AND s.archived_at IS NULL
-                        AND  s.date IS NOT NULL AND s.date <= :asof2
-                        AND  (s.date, s.id) > (t.date, t.id)
-                    )
              ORDER  BY t.date ASC, t.id ASC'
         );
-        $tStmt->execute([
-            'acct' => $accountId, 'comp' => $companyId, 'fac' => $facilityId, 'fac2' => $facilityId,
-            'asof' => $asOf, 'asof2' => $asOf,
-        ]);
+        $tStmt->execute(['acct' => $accountId, 'comp' => $companyId, 'fac' => $facilityId, 'asof' => $asOf]);
+        $latest = [];
         foreach ($tStmt->fetchAll() as $r) {
+            unset($latest[Periodicity::trainingChain((string) $r['type'])]);
+            $latest[Periodicity::trainingChain((string) $r['type'])] = $r;
+        }
+        // Re-inserting on every hit keeps the array in date order, as the
+        // inspection rows above are.
+        foreach ($latest as $r) {
             $type = (string) $r['type'];
-            $rows[] = self::row(self::TRAINING_LABELS[$type] ?? $type, (string) $r['date'], null, $asOf);
+            $value = $r['periodicity_value'] !== null ? (int) $r['periodicity_value'] : null;
+            $unit = $r['periodicity_unit'] !== null ? (string) $r['periodicity_unit'] : null;
+            $rows[] = self::row(
+                self::TRAINING_LABELS[$type] ?? $type,
+                (string) $r['date'],
+                Periodicity::validUntil((string) $r['date'], $value, $unit),
+                $asOf,
+            );
         }
 
         return $rows;

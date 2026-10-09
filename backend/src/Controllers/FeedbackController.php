@@ -36,13 +36,13 @@ final class FeedbackController
         $sourceUrl = $req->jsonString('source_url');
 
         if ($kind === null || !in_array($kind, self::KINDS, true)) {
-            Response::error('Invalid kind', 422);
+            Response::error('Neplatný druh správy.', 422);
         }
         if ($message === null || $message === '') {
-            Response::error('Message required', 422);
+            Response::error('Zadaj text správy.', 422);
         }
         if (mb_strlen($message) > self::MAX_MESSAGE) {
-            Response::error('Message too long', 422);
+            Response::error('Správa je príliš dlhá.', 422);
         }
         if ($sourceUrl !== null && mb_strlen($sourceUrl) > 1024) {
             $sourceUrl = mb_substr($sourceUrl, 0, 1024);
@@ -123,7 +123,7 @@ final class FeedbackController
         Admin::require();
         $id = (int) ($params['id'] ?? 0);
         if ($id <= 0) {
-            Response::error('Invalid id', 422);
+            Response::error('Neplatné ID.', 422);
         }
         Db::pdo()->prepare('DELETE FROM feedback_submissions WHERE id = ?')->execute([$id]);
         Response::noContent();

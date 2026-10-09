@@ -35,6 +35,7 @@ $scope = static function (string $type, int $n): string {
     'poziarna_kniha' => ['záznam', 'záznamy', 'záznamov'],
     'kniha_bozp', 'pracovisko', 'osamele_pracovisko', 'fajcenie' => ['záznam', 'záznamy', 'záznamov'],
     'dychova_skuska', 'omamne_latky', 'skolenie_bozp' => ['osoba', 'osoby', 'osôb'],
+    'skolenie_po'    => ['účastník', 'účastníci', 'účastníkov'],
     'hydranty'       => ['hydrant', 'hydranty', 'hydrantov'],
     'ts_hadic'       => ['hadica', 'hadice', 'hadíc'],
     'pu_akcieschopnost', 'pu_udrzba' => ['uzáver', 'uzávery', 'uzáverov'],

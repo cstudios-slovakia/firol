@@ -58,6 +58,7 @@ services:
 
 volumes:
   dbdata:
+    name: 22firol_dbdata # keeps the existing database volume after the project rename
 
 networks:
   firol:

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+    Archive,
     ArrowLeft,
     Building2,
     CalendarDays,
@@ -39,7 +40,7 @@ import {
 } from "@/api/trainings";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { useConfirm } from "@/lib/confirm";
+import { ArchiveDialog, ArchivedNotice, useRestoreArchived } from "@/components/ClientArchive";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -47,6 +48,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
 import { DetailHeaderSkeleton, SkeletonList } from "@/components/ui/Skeleton";
 import { PendingSyncBanner } from "@/components/PendingSyncBanner";
+import { useMemberRights } from "@/auth/useMemberRights";
 
 export function FacilityDetailPage() {
     const { id: idStr } = useParams<{ id: string }>();
@@ -55,8 +57,9 @@ export function FacilityDetailPage() {
     const navigate = useNavigate();
     const { csrfToken } = useAuth();
     const isReadOnly = useIsReadOnly();
+    const { canDelete, canDeleteUkon } = useMemberRights();
     const toast = useToast();
-    const confirm = useConfirm();
+    const restoreArchived = useRestoreArchived();
     const [facility, setFacility] = useState<Facility | null>(null);
     const [inspections, setInspections] = useState<InspectionListItem[] | null>(null);
     const [trainings, setTrainings] = useState<TrainingListItem[] | null>(null);
@@ -101,19 +104,13 @@ export function FacilityDetailPage() {
         });
     }, [trainings, trainingQuery, trainingTypeFilter]);
 
-    async function onDelete() {
-        const ok = await confirm({
-            title: "Odstrániť prevádzku?",
-            description: "Táto akcia je nevratná. Prevádzka bude odstránená spolu so svojimi kontrolami a školeniami.",
-            confirmLabel: "Odstrániť",
-        });
-        if (!ok) return;
-        try {
-            await Facilities.archive(id, csrfToken);
-            navigate(facility ? `/companies/${facility.company_id}` : "/", { replace: true });
-        } catch (err) {
-            setError(err instanceof ApiError ? err.message : "Prevádzku sa nepodarilo odstrániť.");
-        }
+    // Spec 25 — a prevádzka is archived, never deleted: its protocols stay.
+    const [archiveOpen, setArchiveOpen] = useState(false);
+
+    async function onRestore() {
+        if (!facility) return;
+        if (!(await restoreArchived("facility", facility.id, facility.name))) return;
+        setFacility({ ...facility, archived_at: null, archived_reason: null });
     }
 
     async function handleDelete() {
@@ -230,6 +227,11 @@ export function FacilityDetailPage() {
         );
     }
 
+    // Spec 25 — archived on its own or with its firm: the history and the
+    // protocols stay reachable, but nothing new starts here.
+    const archived = Boolean(facility.archived_at || facility.company_archived_at);
+    const canEdit = !isReadOnly && !archived;
+
     return (
         <div className="flex flex-col gap-5">
             <Link
@@ -242,11 +244,38 @@ export function FacilityDetailPage() {
 
             <PendingSyncBanner resource="facilities" id={id} />
 
+            {facility.company_archived_at ? (
+                <ArchivedNotice
+                    label="Firma tejto prevádzky je archivovaná od"
+                    archivedAt={facility.company_archived_at}
+                    hint="Protokoly a história zostávajú. Prevádzka sa vráti spolu s obnovením firmy."
+                />
+            ) : facility.archived_at ? (
+                <ArchivedNotice
+                    label="Prevádzka je archivovaná od"
+                    archivedAt={facility.archived_at}
+                    reason={facility.archived_reason}
+                    onRestore={canDelete && !isReadOnly ? onRestore : undefined}
+                />
+            ) : null}
+
             <Card className="overflow-hidden">
-                <div className="bg-gradient-to-br from-firol-50/60 to-transparent px-5 pt-5">
+                <div
+                    className={cn(
+                        "bg-gradient-to-br to-transparent px-5 pt-5",
+                        archived ? "from-ink-100/70" : "from-firol-50/60",
+                    )}
+                >
                     <div className="flex items-start gap-3">
-                        <div className="grid size-12 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
-                            <Warehouse className="size-5" />
+                        <div
+                            className={cn(
+                                "grid size-12 place-items-center rounded-2xl",
+                                archived
+                                    ? "bg-ink-200 text-ink-500"
+                                    : "bg-firol-500 text-white shadow-[var(--shadow-glow)]",
+                            )}
+                        >
+                            {archived ? <Archive className="size-5" /> : <Warehouse className="size-5" />}
                         </div>
                         <div className="min-w-0 flex-1">
                             <h1 className="truncate text-lg font-semibold tracking-tight text-ink-900">
@@ -262,7 +291,7 @@ export function FacilityDetailPage() {
                                 </Link>
                             )}
                         </div>
-                        {!isReadOnly && (
+                        {canEdit && (
                             <div className="flex items-center gap-3">
                                 <Link
                                     to={`/facilities/${facility.id}/edit`}
@@ -271,14 +300,17 @@ export function FacilityDetailPage() {
                                 >
                                     <Edit2 className="size-4" />
                                 </Link>
-                                <button
-                                    type="button"
-                                    aria-label="Odstrániť"
-                                    onClick={onDelete}
-                                    className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-                                >
-                                    <Trash2 className="size-4" />
-                                </button>
+                                {canDelete && (
+                                  <button
+                                      type="button"
+                                      title="Archivovať"
+                                      aria-label="Archivovať"
+                                      onClick={() => setArchiveOpen(true)}
+                                      className="grid size-8 place-items-center rounded-xl text-ink-500 transition-all duration-200 hover:bg-ink-100 hover:text-ink-700 active:scale-95"
+                                  >
+                                      <Archive className="size-4" />
+                                  </button>
+                                )}
                             </div>
                         )}
                     </div>
@@ -318,35 +350,20 @@ export function FacilityDetailPage() {
             </Card>
 
             {/* Action card menu */}
-            {!isReadOnly && (
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <Link
-                        to={`/inspections/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
-                        className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-colors hover:bg-ink-50 active:bg-ink-100"
-                    >
-                        <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-50">
-                            <ClipboardList className="size-5 text-firol-600" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-ink-900">Nová kontrola</p>
-                            <p className="mt-0.5 text-xs text-ink-500">Vybrať typ a spustiť protokol</p>
-                        </div>
-                        <ChevronRight className="size-4 shrink-0 text-ink-300" />
-                    </Link>
-                    <Link
-                        to={`/trainings/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
-                        className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-colors hover:bg-ink-50 active:bg-ink-100"
-                    >
-                        <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-emerald-50">
-                            <GraduationCap className="size-5 text-emerald-600" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-ink-900">Nové školenie</p>
-                            <p className="mt-0.5 text-xs text-ink-500">Evidencia školení PO pre prevádzku</p>
-                        </div>
-                        <ChevronRight className="size-4 shrink-0 text-ink-300" />
-                    </Link>
-                </div>
+            {canEdit && (
+                <Link
+                    to={`/inspections/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
+                    className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-colors hover:bg-ink-50 active:bg-ink-100"
+                >
+                    <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-50">
+                        <ClipboardList className="size-5 text-firol-600" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-ink-900">Nová kontrola / nové školenie</p>
+                        <p className="mt-0.5 text-xs text-ink-500">Vybrať typ a spustiť protokol</p>
+                    </div>
+                    <ChevronRight className="size-4 shrink-0 text-ink-300" />
+                </Link>
             )}
 
             {/* Tab bar */}
@@ -409,7 +426,7 @@ export function FacilityDetailPage() {
             {activeTab === "inspections" && <section key="inspections" className="animate-fade-up">
                 <header className="mb-3 flex items-center justify-between">
                     <h2 className="sr-only">História kontrol</h2>
-                    {!isReadOnly && (
+                    {canEdit && (
                         <Link
                             to={`/inspections/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
                             className="ml-auto inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
@@ -491,7 +508,8 @@ export function FacilityDetailPage() {
                     <ul className="flex flex-col gap-2">
                         {(filtered ?? []).map((ins) => {
                             const finalized = ins.status === "finalized";
-                            const canRepeat = finalized;
+                            // Repeating starts a new úkon — not at an archived prevádzka.
+                            const canRepeat = finalized && !archived;
                             return (
                                 <li key={ins.id}>
                                     <Card className="flex items-center gap-3 px-4 py-3 transition-shadow hover:shadow-[var(--shadow-lift)]">
@@ -547,15 +565,17 @@ export function FacilityDetailPage() {
                                                 >
                                                     <Edit2 className="size-4" />
                                                 </Link>
-                                                <button
-                                                    type="button"
-                                                    title="Odstrániť"
-                                                    aria-label="Odstrániť"
-                                                    onClick={() => setPendingDeleteId(ins.id)}
-                                                    className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
-                                                >
-                                                    <Trash2 className="size-4" />
-                                                </button>
+                                                {canDeleteUkon(ins, ins.inspector_user_id) && (
+                                                    <button
+                                                        type="button"
+                                                        title="Odstrániť"
+                                                        aria-label="Odstrániť"
+                                                        onClick={() => setPendingDeleteId(ins.id)}
+                                                        className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
+                                                    >
+                                                        <Trash2 className="size-4" />
+                                                    </button>
+                                                )}
                                             </div>
                                         )}
                                     </Card>
@@ -570,7 +590,7 @@ export function FacilityDetailPage() {
             {activeTab === "trainings" && <section key="trainings" className="animate-fade-up">
                 <header className="mb-3 flex items-center justify-between">
                     <h2 className="sr-only">História školení</h2>
-                    {!isReadOnly && (
+                    {canEdit && (
                         <Link
                             to={`/trainings/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
                             className="ml-auto inline-flex h-8 items-center gap-1 rounded-2xl bg-emerald-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-emerald-600"
@@ -673,6 +693,8 @@ export function FacilityDetailPage() {
                                                 <p className="mt-0.5 text-xs text-ink-500">
                                                     <CalendarDays className="-mt-0.5 mr-1 inline size-3" />
                                                     {tr.date ?? "—"}
+                                                    <span className="mx-1.5 text-ink-300">·</span>
+                                                    {periodicityShort({ value: tr.periodicity_value, unit: tr.periodicity_unit })}
                                                     {tr.trainer_name && (
                                                         <>
                                                             <span className="mx-1.5 text-ink-300">·</span>
@@ -694,7 +716,7 @@ export function FacilityDetailPage() {
                                             >
                                                 <Edit2 className="size-4" />
                                             </Link>
-                                            {!isReadOnly && (
+                                            {!isReadOnly && canDeleteUkon(tr, tr.trainer_id) && (
                                                 <button
                                                     type="button"
                                                     title="Odstrániť"
@@ -767,6 +789,18 @@ export function FacilityDetailPage() {
                     </Button>
                 </div>
             </Dialog>
+
+            <ArchiveDialog
+                open={archiveOpen}
+                kind="facility"
+                id={facility.id}
+                name={facility.name}
+                onClose={() => setArchiveOpen(false)}
+                onArchived={() => {
+                    setArchiveOpen(false);
+                    navigate(`/companies/${facility.company_id}?tab=facilities`, { replace: true });
+                }}
+            />
         </div>
     );
 }

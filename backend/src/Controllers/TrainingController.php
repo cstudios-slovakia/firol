@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Audit\AuditLog;
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
+use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Storage\Storage;
+use Firol\Support\Periodicity;
 use Firol\Support\PokynZatva;
 
 final class TrainingController
@@ -46,11 +49,13 @@ final class TrainingController
         // it covers, which is all a row needs to identify itself. The body is
         // fetched with the detail.
         $sql = 'SELECT t.id, t.type, t.date, t.duration_min, t.topics, t.status,
+                       t.periodicity_value, t.periodicity_unit, t.periodicity_is_custom,
                        t.created_at,
                        JSON_UNQUOTE(JSON_EXTRACT(t.fields, \'$.year\')) AS pokyn_year,
                        t.company_id, c.name AS company_name,
-                       t.facility_id, f.name AS facility_name,
+                       t.facility_id, f.name AS facility_name, t.visit_id,
                        t.trainer_id, tr.fullname AS trainer_name,
+                       t.created_by_user_id,
                        t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
                        (SELECT COUNT(*) FROM trainees WHERE training_id = t.id) AS trainees_count
                 FROM   trainings t
@@ -144,19 +149,39 @@ final class TrainingController
         $trainerId   = $req->jsonInt('trainer_id');
         $topics      = $req->jsonString('topics');
         $durationMin = $req->jsonInt('duration_min');
+        $visitId     = $req->jsonInt('visit_id');
 
         if ($type === null || !in_array($type, self::TYPES, true)) {
-            Response::error('Invalid training type', 422);
+            Response::error('Neplatný typ školenia.', 422);
+        }
+        // Inside a visit (chapter 9) the company, prevádzka and date were chosen
+        // once, when the visit started: they are the visit's, not the request's.
+        // Overriding is friendlier offline than rejecting a queued draft. Every
+        // training type may be recorded under a visit, the Pokyn included (owner
+        // decision 7. 10. 2026) — it counts as a školenie PO of the visit.
+        if ($visitId !== null) {
+            $visit = VisitController::findForUkon(
+                $visitId,
+                Admin::isAdmin(Tenant::currentUserId()),
+                $accountId,
+            );
+            if ($visit === null) {
+                Response::error('Návšteva sa nenašla.', 404);
+            }
+            $companyId  = $visit['company_id'];
+            $facilityId = $visit['facility_id'];
+            $date       = $visit['visit_date'];
         }
         // The Pokyn's text may be supplied at creation (the UI seeds it from
         // the template) or filled in afterwards on the detail page — it is only
         // required once the PDF is generated.
         $fields = self::fieldsForType($req, $type, required: false);
+        [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
         if ($companyId === null) {
-            Response::error('Field required: company_id', 422);
+            Response::error('Vyber firmu.', 422);
         }
         if ($date === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-            Response::error('Invalid date (expected YYYY-MM-DD)', 422);
+            Response::error('Neplatný dátum (očakáva sa formát YYYY-MM-DD).', 422);
         }
 
         // Verify company belongs to the account; facility (optional) must
@@ -171,7 +196,7 @@ final class TrainingController
             $check->execute([$companyId]);
             $companyAccountId = $check->fetchColumn();
             if ($companyAccountId === false) {
-                Response::error('Company not found', 404);
+                Response::error('Firma sa nenašla.', 404);
             }
             $accountId = (int) $companyAccountId;
         } else {
@@ -180,7 +205,7 @@ final class TrainingController
             );
             $check->execute([$companyId, $accountId]);
             if ($check->fetchColumn() === false) {
-                Response::error('Company not found', 404);
+                Response::error('Firma sa nenašla.', 404);
             }
         }
 
@@ -194,7 +219,7 @@ final class TrainingController
             );
             $fc->execute([$facilityId, $companyId]);
             if ($fc->fetchColumn() === false) {
-                Response::error('Facility does not belong to the chosen company', 422);
+                Response::error('Prevádzka nepatrí k vybranej firme.', 422);
             }
         }
 
@@ -210,19 +235,23 @@ final class TrainingController
                 $tc->execute([$trainerId, $accountId]);
             }
             if ($tc->fetchColumn() === false) {
-                Response::error('Trainer not found', 422);
+                Response::error('Školiteľ sa nenašiel.', 422);
             }
         }
 
         Db::pdo()->prepare(
             'INSERT INTO trainings
-                (account_id, company_id, facility_id, type, date,
-                 trainer_id, topics, duration_min, fields, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "draft")'
+                (account_id, company_id, facility_id, visit_id, type, date,
+                 periodicity_value, periodicity_unit, periodicity_is_custom,
+                 trainer_id, topics, duration_min, fields, status, created_by_user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?)'
         )->execute([
-            $accountId, $companyId, $facilityId, $type, $date,
+            $accountId, $companyId, $facilityId, $visitId, $type, $date,
+            $periodicityValue, $periodicityUnit,
+            Periodicity::isCustomForTraining($type, $periodicityValue, $periodicityUnit) ? 1 : 0,
             $trainerId, $topics, $durationMin,
             $fields !== null ? json_encode($fields, JSON_UNESCAPED_UNICODE) : null,
+            Tenant::currentUserId(),
         ]);
         $id = (int) Db::pdo()->lastInsertId();
 
@@ -251,12 +280,30 @@ final class TrainingController
         $fields      = self::fieldsForType($req, (string) $existing['type'], required: false);
 
         if ($date !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-            Response::error('Invalid date (expected YYYY-MM-DD)', 422);
+            Response::error('Neplatný dátum (očakáva sa formát YYYY-MM-DD).', 422);
         }
-        // A finalized training is the record of an issued document — its text
-        // must keep matching the PDF that carries its number.
-        if ($fields !== null && $existing['status'] === 'finalized') {
-            Response::error('Pokyn už je vystavený — jeho text sa nedá meniť.', 409);
+        // The date of a training in a visit is the visit's (chapter 9) —
+        // ignored rather than rejected, so an edit queued offline still saves
+        // the rest.
+        if ($existing['visit_id'] !== null) {
+            $date = null;
+        }
+        // A finalized training is locked for everyone, exactly like a finalized
+        // inspection: its record and the issued protocol must keep saying the
+        // same thing. The way back is „Upraviť" ({@see self::unlock}), which
+        // discards the protocol first.
+        if ($existing['status'] === 'finalized') {
+            Response::error('Školenie je uzamknuté — najprv ho odomkni tlačidlom „Upraviť".', 409);
+        }
+        // The periodicity is edited as a whole — „bez opakovania"
+        // has to be expressible, and a COALESCE over two columns cannot tell
+        // „leave it alone" from „clear it" — so sending either key means the
+        // technician touched the field (same as on inspections).
+        $body = $req->json();
+        $touchesPeriodicity = array_key_exists('periodicity_value', $body)
+            || array_key_exists('periodicity_unit', $body);
+        if ($touchesPeriodicity) {
+            [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
         }
         if ($trainerId !== null) {
             if ($isAdmin) {
@@ -270,7 +317,7 @@ final class TrainingController
                 $tc->execute([$trainerId, $accountId]);
             }
             if ($tc->fetchColumn() === false) {
-                Response::error('Trainer not found', 422);
+                Response::error('Školiteľ sa nenašiel.', 422);
             }
         }
 
@@ -287,9 +334,111 @@ final class TrainingController
             $fields !== null ? json_encode($fields, JSON_UNESCAPED_UNICODE) : null,
             $id, $scopeAccountId,
         ]);
+        if ($touchesPeriodicity) {
+            Db::pdo()->prepare(
+                'UPDATE trainings
+                 SET    periodicity_value     = ?,
+                        periodicity_unit      = ?,
+                        periodicity_is_custom = ?
+                 WHERE  id = ? AND account_id = ?'
+            )->execute([
+                $periodicityValue,
+                $periodicityUnit,
+                Periodicity::isCustomForTraining((string) $existing['type'], $periodicityValue, $periodicityUnit) ? 1 : 0,
+                $id,
+                $scopeAccountId,
+            ]);
+        }
         unset($existing);
 
         Response::json(['training' => self::shape(self::loadOrFail($isAdmin ? null : $accountId, $id))]);
+    }
+
+    /**
+     * "Upraviť" — reopen a finalized training for editing, the same way
+     * {@see InspectionController::unlock} reopens an inspection.
+     *
+     * Unlocking *discards* the issued protocol: its documents rows (and every
+     * re-rendered version) and the PDF files are deleted and the training drops
+     * back to `draft`. The discarded number is never handed out again — the
+     * next PDF takes the next one from the sequence and leaves a gap, because a
+     * copy of the old protocol may already sit in the client's inbox.
+     */
+    public static function unlock(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
+        $id        = (int) $params['id'];
+
+        $row = self::loadOrFail($isAdmin ? null : $accountId, $id);
+        // The training's own account, so an admin acting on a foreign-account
+        // record deletes that account's documents, not their session account's.
+        $accountId = (int) $row['account_id'];
+
+        if ($row['status'] !== 'finalized') {
+            Response::error('Školenie nie je uzamknuté.', 422);
+        }
+        // Unlocking discards the issued protocol, so it is a delete under the
+        // account's práva členov (chapter 1.6).
+        MemberRights::requireDelete($accountId);
+
+        $pdo = Db::pdo();
+        $docsStmt = $pdo->prepare(
+            'SELECT number, file_path FROM documents
+             WHERE  account_id = ? AND parent_type = "training" AND parent_id = ?'
+        );
+        $docsStmt->execute([$accountId, $id]);
+        $docs = $docsStmt->fetchAll();
+
+        $versionsStmt = $pdo->prepare(
+            'SELECT v.file_path FROM document_versions v
+             JOIN   documents d ON d.id = v.document_id
+             WHERE  d.account_id = ? AND d.parent_type = "training" AND d.parent_id = ?'
+        );
+        $versionsStmt->execute([$accountId, $id]);
+        $versionFiles = $versionsStmt->fetchAll(\PDO::FETCH_COLUMN);
+
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare(
+                'DELETE FROM documents
+                 WHERE  account_id = ? AND parent_type = "training" AND parent_id = ?'
+            )->execute([$accountId, $id]);
+
+            $pdo->prepare(
+                'UPDATE trainings SET status = "draft" WHERE id = ? AND account_id = ?'
+            )->execute([$id, $accountId]);
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        // Files are unlinked only after the commit: an orphaned PDF nobody
+        // links to is harmless, a missing file behind a live row is not.
+        $paths = array_unique(array_merge(
+            array_map(static fn (array $d): string => (string) $d['file_path'], $docs),
+            array_map(static fn ($p): string => (string) $p, $versionFiles),
+        ));
+        foreach ($paths as $rel) {
+            $abs = Storage::documentAbsolute($rel);
+            if (is_file($abs) && !@unlink($abs)) {
+                error_log('[unlock-training] failed to delete PDF: ' . $abs);
+            }
+        }
+
+        // Destroying an issued protocol is worth a trail.
+        AuditLog::record(
+            'training.unlock',
+            'trainings',
+            $id,
+            ['status' => 'finalized', 'documents' => array_column($docs, 'number')],
+            ['status' => 'draft'],
+        );
+
+        Response::json(['training' => self::shape(self::loadOrFail($accountId, $id))]);
     }
 
     public static function archive(Request $req, array $params): void
@@ -300,6 +449,10 @@ final class TrainingController
         $id        = (int) $params['id'];
         $existing  = self::loadOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
+        MemberRights::requireDeleteUkon(
+            $existing,
+            $existing['trainer_id'] !== null ? (int) $existing['trainer_id'] : null,
+        );
 
         // Remove trainee signature files from disk before the DB row is gone.
         $dir = Storage::root() . "/trainings/$id";
@@ -321,11 +474,13 @@ final class TrainingController
     private static function loadOrFail(?int $accountId, int $id): array
     {
         $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics,
+                       t.periodicity_value, t.periodicity_unit, t.periodicity_is_custom,
                        t.fields, t.status, t.created_at, t.updated_at,
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.approver AS company_approver,
-                       t.facility_id, f.name AS facility_name,
+                       t.facility_id, f.name AS facility_name, t.visit_id,
                        t.trainer_id, tr.fullname AS trainer_name,
+                       t.created_by_user_id,
                        ip.cert_general AS trainer_certification_number,
                        t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
                        (SELECT COUNT(*) FROM trainees WHERE training_id = t.id) AS trainees_count
@@ -345,7 +500,7 @@ final class TrainingController
         $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Training not found', 404);
+            Response::error('Školenie sa nenašlo.', 404);
         }
         return $row;
     }
@@ -359,9 +514,22 @@ final class TrainingController
         $row['id']             = (int) $row['id'];
         $row['company_id']     = (int) $row['company_id'];
         $row['facility_id']    = $row['facility_id'] !== null ? (int) $row['facility_id'] : null;
+        $row['visit_id']       = isset($row['visit_id']) ? (int) $row['visit_id'] : null;
         $row['trainer_id']     = $row['trainer_id'] !== null ? (int) $row['trainer_id'] : null;
+        $row['created_by_user_id'] = isset($row['created_by_user_id']) ? (int) $row['created_by_user_id'] : null;
         $row['duration_min']   = $row['duration_min'] !== null ? (int) $row['duration_min'] : null;
         $row['trainees_count'] = isset($row['trainees_count']) ? (int) $row['trainees_count'] : 0;
+        $row['periodicity_value'] = isset($row['periodicity_value'])
+            ? (int) $row['periodicity_value']
+            : null;
+        $row['periodicity_unit'] = $row['periodicity_unit'] ?? null;
+        $row['periodicity_is_custom'] = (bool) ($row['periodicity_is_custom'] ?? false);
+        // Derived, never stored — null without recurrence or without a date.
+        $row['valid_until'] = Periodicity::validUntil(
+            $row['date'] ?? null,
+            $row['periodicity_value'],
+            $row['periodicity_unit'],
+        );
         // `fields` reaches the client decoded (detail) — the list only carries
         // the year it extracted, so the Pokyn's text never rides along there.
         if (array_key_exists('fields', $row)) {
@@ -400,12 +568,31 @@ final class TrainingController
             return null;
         }
         if (!is_array($raw)) {
-            Response::error('Field fields must be an object.', 422);
+            Response::error('Pole „fields“ musí byť objekt.', 422);
         }
 
         try {
             return PokynZatva::validate($raw);
         } catch (\DomainException $e) {
+            Response::error($e->getMessage(), 422);
+        }
+    }
+
+    /**
+     * Read and validate the periodicity pair off the request body, turning a
+     * bad pair into a 422 with a Slovak message (same as on inspections).
+     *
+     * @return array{0: int|null, 1: string|null}
+     */
+    private static function readPeriodicity(Request $req): array
+    {
+        $body = $req->json();
+        try {
+            return Periodicity::normalize(
+                $body['periodicity_value'] ?? null,
+                $body['periodicity_unit'] ?? null,
+            );
+        } catch (\InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422);
         }
     }

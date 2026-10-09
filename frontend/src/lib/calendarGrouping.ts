@@ -8,6 +8,7 @@ import type {
   TerminZdroj,
 } from '@/api/calendar';
 import type { Section } from '@/lib/sections';
+import { deadlineFacilityName } from '@/lib/deadlines';
 
 /**
  * Shared calendar math (change request 2.5, chapter 11). The due date decides
@@ -46,7 +47,8 @@ export function openDeadlines(deadlines: CalendarDeadline[]): CalendarDeadline[]
 export type FacilityDayGroup = {
   /** Stable React key — facility and day together identify the group. */
   key: string;
-  facility_id: number;
+  /** Null for the trainings of the whole firma (`facility_name` then reads „Celá firma"). */
+  facility_id: number | null;
   facility_name: string;
   company_id: number;
   company_name: string;
@@ -68,13 +70,14 @@ export function groupByFacilityDay(deadlines: CalendarDeadline[]): FacilityDayGr
   const map = new Map<string, FacilityDayGroup>();
   for (const d of deadlines) {
     const date = effectiveDate(d);
-    const key = `${d.facility_id}@${date}`;
+    // A training of the whole firma has no prevádzka — the firm itself is the place.
+    const key = `${d.facility_id ?? `firma-${d.company_id}`}@${date}`;
     let g = map.get(key);
     if (!g) {
       g = {
         key,
         facility_id: d.facility_id,
-        facility_name: d.facility_name,
+        facility_name: deadlineFacilityName(d),
         company_id: d.company_id,
         company_name: d.company_name,
         company_email: d.company_email,
@@ -137,7 +140,7 @@ export function toTerminy(
       technician: d.technician,
       company_id: d.company_id,
       company_name: d.company_name,
-      facility_name: d.facility_name,
+      facility_name: deadlineFacilityName(d),
       city: d.facility_city,
       deadline: d,
     });

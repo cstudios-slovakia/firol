@@ -38,6 +38,13 @@ export type Task = {
   due_date: string | null;
   done: boolean;
   done_at: string | null;
+  /**
+   * Spec 25 — set when the task was closed as „zrušená" by archiving its
+   * firma / prevádzka, not ticked by a person. Absent on an offline-created row.
+   */
+  cancel_reason?: 'company_archived' | 'facility_archived' | null;
+  /** Its firma or prevádzka is archived — the task can't be reopened or edited. */
+  place_archived?: boolean;
   /** The úkon whose nedostatok the task came from — only while that úkon exists. */
   source: {
     inspection_id: number;

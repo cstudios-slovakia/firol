@@ -42,6 +42,15 @@ final class ClientNotice
         'dychova_skuska'       => 'dychovú skúšku na alkohol',
         'omamne_latky'         => 'kontrolu na zistenie požitia omamných a psychotropných látok',
         'skolenie_bozp'        => 'oboznámenie zamestnancov v oblasti BOZP',
+        // Training subtypes (change request 6) — a training term is announced
+        // by its own name, so the key is the training slug, not `skolenie_po`.
+        'vstupne'              => 'vstupné školenie vedúcich a ostatných zamestnancov',
+        'opakovane'            => 'opakované školenie vedúcich a ostatných zamestnancov',
+        'zdrzujuca_sa'         => 'školenie osôb zdržujúcich sa na pracovisku',
+        'opp_mimo'             => 'školenie osôb zabezpečujúcich OPP v mimopracovnom čase',
+        'hliadka_oph'          => 'odbornú prípravu protipožiarnej hliadky pracoviska',
+        'hliadka_opah'         => 'odbornú prípravu protipožiarnej asistenčnej hliadky',
+        'pokyn_zatva'          => 'vydanie pokynu na zabezpečenie ochrany pred požiarmi pri žatevných prácach',
     ];
 
     /** "2026-08-15" → "15. 8. 2026". */
@@ -52,7 +61,7 @@ final class ClientNotice
     }
 
     /**
-     * @param list<string> $types Inspection types due at the prevádzka that day.
+     * @param list<string> $types Inspection types (or training subtypes) due at the prevádzka that day.
      * @return array{subject: string, body: string}
      */
     public static function build(string $isoDate, array $types, string $senderName, ?string $senderPhone): array

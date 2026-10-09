@@ -1,5 +1,6 @@
 import { api } from '@/lib/api';
 import type { InspectionType } from '@/api/inspections';
+import type { TrainingType } from '@/api/trainings';
 import type { Section } from '@/lib/sections';
 
 /**
@@ -34,20 +35,29 @@ export type TerminTechnician = {
  * ones (`splneny`) are reported for a year back.
  */
 export type CalendarDeadline = {
-  /** Stable key across all termíny, e.g. `kontrola-123`. */
+  /** Stable key across all termíny, e.g. `kontrola-123` or `skolenie-45`. */
   key: string;
   zdroj: 'kontrola';
-  /** The úkon defining the deadline (opens the detail; plans attach to it). */
-  inspection_id: number;
-  type: InspectionType;
+  /**
+   * The úkon defining the deadline (opens the detail; plans attach to it).
+   * Exactly one of `inspection_id` / `training_id` is set: a term computed
+   * from a training (change request 6) has `training_id` and no inspection.
+   */
+  inspection_id: number | null;
+  training_id: number | null;
+  /** `skolenie_po` for every training term, so section and colour resolve to OPP. */
+  type: InspectionType | 'skolenie_po';
+  /** The training's subtype, for the label; null for an inspection term. */
+  training_type: TrainingType | null;
   /** Odbor — decides the colour (revizie #C75B45, opp #E8433A, bozp #3D7FC1). */
   section: Section | null;
   company_id: number;
   company_name: string;
   /** Company contact e-mail — recipient of the client notice (11.3). */
   company_email: string | null;
-  facility_id: number;
-  facility_name: string;
+  /** Null for a training of the whole firma — shown as „Celá firma". */
+  facility_id: number | null;
+  facility_name: string | null;
   /** Obec from the prevádzka's address; null when not filled in. */
   facility_city: string | null;
   /** Date the defining úkon was performed („posledná kontrola"). */
@@ -60,6 +70,7 @@ export type CalendarDeadline = {
   /** For `splneny`: when and by which úkon it was fulfilled. */
   done_on: string | null;
   done_inspection_id: number | null;
+  done_training_id: number | null;
   /** Who performed the defining úkon; null only for legacy data. */
   technician: TerminTechnician | null;
   /** When the automatic client notice went out (termin.oznamenie_odoslane). */
@@ -72,6 +83,9 @@ export type CalendarEvent = {
   zdroj: 'vlastny';
   title: string;
   event_date: string;
+  /** `HH:MM`; both null = all-day. `time_to` is only set together with `time_from`. */
+  time_from: string | null;
+  time_to: string | null;
   note: string | null;
   company_id: number | null;
   company_name: string | null;
@@ -107,6 +121,8 @@ export type CalendarData = {
 export type CalendarEventInput = {
   title: string;
   event_date: string;
+  time_from?: string | null;
+  time_to?: string | null;
   note?: string | null;
   company_id?: number | null;
   facility_id?: number | null;
@@ -140,6 +156,17 @@ export const Calendar = {
   clearPlan: (inspectionId: number, csrfToken: string | null) =>
     api<void>(`/api/calendar/plans/${inspectionId}`, { method: 'DELETE', csrfToken }),
 
+  /** The same for the term of a training (change request 6). */
+  setTrainingPlan: (trainingId: number, plannedDate: string, csrfToken: string | null) =>
+    api<{ ok: true }>(`/api/calendar/plans/training/${trainingId}`, {
+      method: 'PATCH',
+      body: { planned_date: plannedDate },
+      csrfToken,
+    }),
+
+  clearTrainingPlan: (trainingId: number, csrfToken: string | null) =>
+    api<void>(`/api/calendar/plans/training/${trainingId}`, { method: 'DELETE', csrfToken }),
+
   createEvent: (body: CalendarEventInput, csrfToken: string | null) =>
     api<{ event: CalendarEvent }>('/api/calendar/events', { method: 'POST', body, csrfToken }),
 
@@ -158,3 +185,9 @@ export const Calendar = {
       csrfToken,
     }),
 };
+
+/** „08:30" or „08:30–10:00"; null for an all-day event. */
+export function formatEventTime(from: string | null, to: string | null): string | null {
+  if (!from) return null;
+  return to ? `${from}–${to}` : from;
+}

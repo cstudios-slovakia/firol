@@ -5,12 +5,8 @@ import {
   FileText, Plus, Route, Send, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
-import {
-  INSPECTION_TYPE_LABELS,
-  documentDownloadUrl,
-  type InspectionType,
-} from '@/api/inspections';
-import { Visits, type Visit, type VisitInspection } from '@/api/visits';
+import { documentDownloadUrl } from '@/api/inspections';
+import { Visits, type Visit, type VisitType } from '@/api/visits';
 import { Companies } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { offlineMessage } from '@/lib/offline';
@@ -21,8 +17,13 @@ import { Badge } from '@/components/ui/Badge';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 import { BulkSendDialog } from '@/components/BulkSendDialog';
 import { WorkConfirmationDialog } from '@/components/WorkConfirmationDialog';
-import { SECTION_COLORS, sectionForInspectionType } from '@/lib/sections';
+import { SECTION_COLORS, TRAINING_SECTION, sectionForInspectionType } from '@/lib/sections';
 import { cn } from '@/lib/cn';
+import { companyRecipientEmail } from '@/lib/companyEmail';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import {
+  visitTrail, visitTypeLabel, visitUkonPath, visitUkonState, visitUkonTypes,
+} from '@/lib/visits';
 
 /**
  * A návšteva in progress — block 1 / chapter 9.
@@ -47,7 +48,7 @@ export function VisitDetailPage() {
   const [companyEmail, setCompanyEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
-  const [startingType, setStartingType] = useState<InspectionType | null>(null);
+  const [startingType, setStartingType] = useState<VisitType | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
 
@@ -65,7 +66,7 @@ export function VisitDetailPage() {
         // The client's recorded address, prefilled as the recipient of the
         // bulk send so the common case needs no typing.
         const company = await Companies.show(v.company_id).catch(() => null);
-        if (!cancelled) setCompanyEmail(company?.company.contact_email ?? null);
+        if (!cancelled) setCompanyEmail(company ? companyRecipientEmail(company.company) : null);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -79,23 +80,14 @@ export function VisitDetailPage() {
 
   /**
    * Open the úkon for a planned type: continue the one already started, or
-   * begin a new one with the visit's company, prevádzka and date already
-   * filled in — Step 1 is what the visit exists to skip.
+   * begin a new one. Step 1 (or the new training) still opens, with the
+   * visit's company, prevádzka and date locked — only what differs per úkon
+   * is asked again.
    */
-  function openType(type: InspectionType, existing: VisitInspection | undefined) {
-    if (existing) {
-      navigate(`/inspections/${existing.id}`);
-      return;
-    }
+  function openType(type: VisitType) {
     if (!visit) return;
-    setStartingType(type);
-    const params = new URLSearchParams({
-      company_id: String(visit.company_id),
-      facility_id: String(visit.facility_id),
-      visit_id: String(visit.id),
-      executed_on: visit.visit_date,
-    });
-    navigate(`/inspections/new/${type}/step-1?${params.toString()}`);
+    if (!visitUkonState(visit, type).started) setStartingType(type);
+    navigate(visitUkonPath(visit, type));
   }
 
   async function handleGenerateAll() {
@@ -114,7 +106,7 @@ export function VisitDetailPage() {
         // the technician can fix that one úkon and press the button again.
         setError(
           `Nevygenerované: ${res.skipped
-            .map((s) => `${INSPECTION_TYPE_LABELS[s.type] ?? s.type} — ${s.reason}`)
+            .map((s) => `${visitTypeLabel(s.type)} — ${s.reason}`)
             .join(' · ')}`,
         );
       }
@@ -156,20 +148,21 @@ export function VisitDetailPage() {
 
   // A planned type is "done" once its úkon has a protocol; the planned list and
   // anything added on the spot both count.
-  const byType = new Map(visit.inspections.map((ins) => [ins.type, ins]));
-  const plannedTypes = [
-    ...visit.planned_types,
-    ...visit.inspections.map((ins) => ins.type).filter((t) => !visit.planned_types.includes(t)),
-  ];
-  const doneCount = plannedTypes.filter((t) => byType.get(t)?.status === 'finalized').length;
-  const documentIds = visit.inspections
-    .map((ins) => ins.document_id)
+  const plannedTypes = visitUkonTypes(visit);
+  const doneCount = plannedTypes.filter((t) => visitUkonState(visit, t).done).length;
+  // The školenie PO's protocol goes out in the same e-mail as the rest.
+  const documentIds = [...visit.inspections, ...visit.trainings]
+    .map((ukon) => ukon.document_id)
     .filter((docId): docId is number => docId !== null);
-  const pendingCount = visit.inspections.filter((ins) => ins.status === 'draft').length;
+  const pendingCount =
+    visit.inspections.filter((ins) => ins.status === 'draft').length
+    + visit.trainings.filter((t) => t.status === 'draft').length;
 
   return (
     <div className="flex flex-col gap-5">
-      <BackLink />
+      <Breadcrumb
+        items={visitTrail({ id: visit.id, companyName: visit.company_name, date: visit.visit_date })}
+      />
 
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-2.5">
@@ -231,15 +224,20 @@ export function VisitDetailPage() {
             <li key={type}>
               <VisitTypeRow
                 type={type}
-                inspection={byType.get(type)}
+                state={visitUkonState(visit, type)}
                 busy={startingType === type}
-                onOpen={() => openType(type, byType.get(type))}
+                onOpen={() => openType(type)}
               />
             </li>
           ))}
         </ul>
         <Link
-          to={`/inspections/new?company_id=${visit.company_id}&facility_id=${visit.facility_id}`}
+          to={`/inspections/new?${new URLSearchParams({
+            company_id: String(visit.company_id),
+            facility_id: String(visit.facility_id),
+            visit_id: String(visit.id),
+            executed_on: visit.visit_date,
+          }).toString()}`}
           className="flex items-center justify-center gap-1.5 border-t border-ink-100 px-4 py-3 text-sm font-medium text-firol-600 transition-colors hover:bg-firol-50"
         >
           <Plus className="size-4" />
@@ -254,7 +252,8 @@ export function VisitDetailPage() {
           Ukončenie návštevy
         </h2>
         <p className="text-xs text-ink-500">
-          Každý úkon dostane vlastný protokol s vlastným číslom. Klientovi ich
+          Každý úkon dostane vlastný protokol s vlastným číslom. Protokoly úkonov
+          označených ako hotové bez protokolu sa vygenerujú tlačidlom nižšie. Klientovi ich
           pošleš v jednom e-maile; potvrdenie o vykonaní práce je pre tvojho
           zamestnávateľa a neobsahuje žiadne zistenia.
         </p>
@@ -311,7 +310,10 @@ export function VisitDetailPage() {
         companyName={visit.company_name}
         facilityName={visit.facility_name}
         date={visit.visit_date}
-        actCount={visit.inspections.filter((ins) => ins.status === 'finalized').length}
+        actCount={
+          visit.inspections.filter((ins) => ins.status === 'finalized').length
+          + visit.trainings.filter((t) => t.status === 'finalized').length
+        }
       />
     </div>
   );
@@ -328,17 +330,18 @@ function BackLink() {
 
 function VisitTypeRow({
   type,
-  inspection,
+  state,
   busy,
   onOpen,
 }: {
-  type: InspectionType;
-  inspection: VisitInspection | undefined;
+  type: VisitType;
+  state: ReturnType<typeof visitUkonState>;
   busy: boolean;
   onOpen: () => void;
 }) {
-  const section = sectionForInspectionType(type);
-  const done = inspection?.status === 'finalized';
+  // The školenie PO has no section of its own — it sits in OPP, like its
+  // colour on the visit list.
+  const section = type === 'skolenie_po' ? TRAINING_SECTION : sectionForInspectionType(type);
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
@@ -348,20 +351,14 @@ function VisitTypeRow({
         style={{ backgroundColor: section ? SECTION_COLORS[section] : 'var(--color-ink-200)' }}
       />
       <div className="min-w-0 flex-1">
-        <p className={cn('truncate text-sm font-medium', done ? 'text-ink-500' : 'text-ink-900')}>
-          {INSPECTION_TYPE_LABELS[type] ?? type}
+        <p className={cn('truncate text-sm font-medium', state.done ? 'text-ink-500' : 'text-ink-900')}>
+          {visitTypeLabel(type)}
         </p>
-        <p className="text-xs text-ink-500">
-          {!inspection
-            ? 'Zatiaľ nezačaté'
-            : done
-              ? `Protokol ${inspection.document_number ?? '—'} · ${inspection.item_count} ${inspection.item_count === 1 ? 'položka' : inspection.item_count < 5 ? 'položky' : 'položiek'}`
-              : `Rozpracované · ${inspection.item_count} ${inspection.item_count === 1 ? 'položka' : inspection.item_count < 5 ? 'položky' : 'položiek'}`}
-        </p>
+        <p className="text-xs text-ink-500">{state.text}</p>
       </div>
-      {done && inspection?.document_id ? (
+      {state.done && state.documentId ? (
         <a
-          href={documentDownloadUrl(inspection.document_id)}
+          href={documentDownloadUrl(state.documentId)}
           target="_blank"
           rel="noopener"
           className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-3 text-xs font-medium text-ink-600 transition-colors hover:bg-ink-100"
@@ -371,7 +368,7 @@ function VisitTypeRow({
         </a>
       ) : (
         <Button type="button" size="sm" variant="secondary" loading={busy} onClick={onOpen} rightIcon={<ArrowRight className="size-3.5" />}>
-          {inspection ? 'Pokračovať' : 'Začať'}
+          {state.started ? 'Pokračovať' : 'Začať'}
         </Button>
       )}
     </div>

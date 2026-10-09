@@ -352,7 +352,7 @@ final class DocumentController
 
         $doc = self::loadDocument($isAdmin ? null : $accountId, $documentId);
         if (!$doc) {
-            Response::error('Document not found', 404);
+            Response::error('Dokument sa nenašiel.', 404);
         }
         if ($isAdmin) {
             $accountId = (int) $doc['account_id'];
@@ -403,13 +403,13 @@ final class DocumentController
 
         $doc = self::loadDocument($isAdmin ? null : $accountId, $documentId);
         if (!$doc) {
-            Response::error('Document not found', 404);
+            Response::error('Dokument sa nenašiel.', 404);
         }
 
         $abs = Storage::documentAbsolute($doc['file_path']);
         if (!is_file($abs)) {
             error_log('[document-download] file missing: ' . $abs);
-            Response::error('Document file is missing on disk.', 410);
+            Response::error('Súbor dokumentu chýba na disku.', 410);
         }
 
         $filename = ($doc['number'] ?? 'protocol') . '.pdf';
@@ -439,33 +439,56 @@ final class DocumentController
         $isAdmin    = Admin::isAdmin(Tenant::currentUserId());
         $trainingId = (int) $params['id'];
 
+        // Resolve the training first so the PDF is filed under ITS account,
+        // not under the (possibly impersonating) admin's session account.
         $training = self::loadTrainingForGenerate($isAdmin ? null : $accountId, $trainingId);
-        $accountId = (int) $training['account_id'];
+
+        $result = self::generateForTrainingInternal((int) $training['account_id'], $trainingId);
+        if (isset($result['error'])) {
+            Response::error((string) $result['error'], (int) $result['status']);
+        }
+
+        Response::json(['document' => $result['document']], 201);
+    }
+
+    /**
+     * Issue the PDF protocol of one training.
+     *
+     * Returns the document descriptor, or an `error` + `status` pair rather
+     * than ending the request — a visit generates all its protocols in a row
+     * (chapter 9) and one training that is not ready yet (no trainer, no
+     * trainees) must not abort the rest.
+     *
+     * @return array{document?: array<string,mixed>, error?: string, status?: int}
+     */
+    public static function generateForTrainingInternal(int $accountId, int $trainingId): array
+    {
+        $training = self::loadTrainingForGenerate($accountId, $trainingId);
         $isPokyn   = $training['type'] === TrainingController::TYPE_POKYN;
 
         if ($training['status'] === 'finalized') {
-            Response::error(
-                $isPokyn
+            return [
+                'error' => $isPokyn
                     ? 'Pokyn už je uzamknutý a má vystavený PDF dokument.'
                     : 'Školenie už je uzamknuté a má vystavený PDF protokol.',
-                409,
-            );
+                'status' => 409,
+            ];
         }
         if ($training['date'] === null) {
-            Response::error(
-                $isPokyn
+            return [
+                'error' => $isPokyn
                     ? 'Doplň dátum vydania pokynu pred generovaním PDF.'
                     : 'Doplň dátum školenia pred generovaním PDF.',
-                422,
-            );
+                'status' => 422,
+            ];
         }
         if ($training['trainer_id'] === null) {
-            Response::error(
-                $isPokyn
+            return [
+                'error' => $isPokyn
                     ? 'Vyber technika, ktorý pokyn vypracoval, pred generovaním PDF.'
                     : 'Vyber školiteľa pred generovaním PDF.',
-                422,
-            );
+                'status' => 422,
+            ];
         }
 
         // A Pokyn is an instruction addressed to the client's employees, not a
@@ -475,15 +498,12 @@ final class DocumentController
         if ($isPokyn) {
             $pokyn = PokynZatva::decode($training['fields']);
             if ($pokyn === null) {
-                Response::error('Doplň text pokynu pred generovaním PDF.', 422);
+                return ['error' => 'Doplň text pokynu pred generovaním PDF.', 'status' => 422];
             }
         } else {
             $trainees = self::loadTrainees($trainingId);
             if (count($trainees) === 0) {
-                Response::error(
-                    'Pridaj aspoň jedného účastníka pred generovaním PDF.',
-                    422,
-                );
+                return ['error' => 'Pridaj aspoň jedného účastníka pred generovaním PDF.', 'status' => 422];
             }
         }
 
@@ -547,12 +567,10 @@ final class DocumentController
                 }
             }
             error_log('[generate-pdf-training] ' . $e::class . ': ' . $e->getMessage());
-            Response::error('PDF sa nepodarilo vygenerovať.', 500);
+            return ['error' => 'PDF sa nepodarilo vygenerovať.', 'status' => 500];
         }
 
-        Response::json([
-            'document' => self::loadDocument($accountId, $documentId),
-        ], 201);
+        return ['document' => self::loadDocument($accountId, $documentId)];
     }
 
     public static function indexForTraining(Request $req, array $params): void
@@ -568,7 +586,7 @@ final class DocumentController
             $check->execute([$trainingId]);
             $trainingAccountId = $check->fetchColumn();
             if ($trainingAccountId === false) {
-                Response::error('Training not found', 404);
+                Response::error('Školenie sa nenašlo.', 404);
             }
             $accountId = (int) $trainingAccountId;
         } else {
@@ -577,7 +595,7 @@ final class DocumentController
             );
             $check->execute([$trainingId, $accountId]);
             if ($check->fetchColumn() === false) {
-                Response::error('Training not found', 404);
+                Response::error('Školenie sa nenašlo.', 404);
             }
         }
 
@@ -599,7 +617,7 @@ final class DocumentController
             $check->execute([$inspectionId]);
             $insAccountId = $check->fetchColumn();
             if ($insAccountId === false) {
-                Response::error('Inspection not found', 404);
+                Response::error('Kontrola sa nenašla.', 404);
             }
             $accountId = (int) $insAccountId;
         } else {
@@ -608,7 +626,7 @@ final class DocumentController
             );
             $check->execute([$inspectionId, $accountId]);
             if ($check->fetchColumn() === false) {
-                Response::error('Inspection not found', 404);
+                Response::error('Kontrola sa nenašla.', 404);
             }
         }
 
@@ -650,7 +668,7 @@ final class DocumentController
         $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Inspection not found', 404);
+            Response::error('Kontrola sa nenašla.', 404);
         }
         return $row;
     }
@@ -1384,6 +1402,7 @@ final class DocumentController
     private static function loadTrainingForGenerate(?int $accountId, int $trainingId): array
     {
         $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics, t.status,
+                       t.periodicity_value, t.periodicity_unit,
                        t.fields,
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
@@ -1409,7 +1428,7 @@ final class DocumentController
         $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Training not found', 404);
+            Response::error('Školenie sa nenašlo.', 404);
         }
         return $row;
     }
@@ -1480,6 +1499,14 @@ final class DocumentController
                 'type'                => $type,
                 'training_type_label' => self::TRAINING_TYPE_LABELS[$type] ?? $type,
                 'date'                => $training['date'],
+                // Chapter 5: only the bare value, „Periodicita: 12 mesiacov";
+                // null (bez opakovania) prints no row at all.
+                'periodicity_label'   => $training['periodicity_value'] !== null
+                    ? Periodicity::label(
+                        (int) $training['periodicity_value'],
+                        (string) $training['periodicity_unit'],
+                    )
+                    : null,
                 'duration_min'        => $training['duration_min'],
                 'topics'              => $training['topics'],
                 'status'              => $training['status'],

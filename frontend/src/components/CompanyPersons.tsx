@@ -11,7 +11,6 @@ import { ApiError } from '@/lib/api';
 import { useConfirm } from '@/lib/confirm';
 import { useToast } from '@/lib/toast';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
 import { Field } from '@/components/ui/Field';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -103,7 +102,7 @@ export function CompanyPersons({
         )}
       </header>
 
-      {error && <Card className="mb-2 px-4 py-3 text-sm text-status-bad">{error}</Card>}
+      {error && <p className="mb-2 text-sm text-status-bad">{error}</p>}
 
       {editing !== null && (
         <PersonForm
@@ -125,7 +124,7 @@ export function CompanyPersons({
         <SkeletonList count={2} />
       ) : persons.length === 0 ? (
         editing === null && (
-          <Card className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+          <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
             <div className="grid size-12 place-items-center rounded-2xl bg-firol-50 text-firol-500">
               <UserCheck className="size-5" />
             </div>
@@ -134,13 +133,13 @@ export function CompanyPersons({
               Pri podpisovaní protokolu sa dá meno a funkcia zadať aj priamo na
               mieste — tu ich uložíš, ak sa opakujú.
             </p>
-          </Card>
+          </div>
         )
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col divide-y divide-ink-100">
           {persons.map((person) => (
             <li key={person.id}>
-              <Card className="flex items-center gap-3 px-4 py-3">
+              <div className="flex items-center gap-3 py-3">
                 <span className="grid size-9 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-600">
                   <UserCheck className="size-4" />
                 </span>
@@ -186,7 +185,7 @@ export function CompanyPersons({
                     </button>
                   </div>
                 )}
-              </Card>
+              </div>
             </li>
           ))}
         </ul>
@@ -249,7 +248,7 @@ function PersonForm({
   }
 
   return (
-    <Card className="mb-2 flex animate-fade-up flex-col gap-3 p-4">
+    <div className="mb-2 flex animate-fade-up flex-col gap-3 rounded-2xl bg-ink-50 p-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-ink-900">
           {person ? 'Upraviť osobu' : 'Nová osoba'}
@@ -324,6 +323,6 @@ function PersonForm({
           Uložiť
         </Button>
       </div>
-    </Card>
+    </div>
   );
 }

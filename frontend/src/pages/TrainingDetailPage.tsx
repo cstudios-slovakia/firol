@@ -4,12 +4,13 @@ import { Link, useParams } from 'react-router-dom';
 import { InvoicingBlock } from '@/components/InvoicingBlock';
 import { invoicingOf } from '@/api/invoicing';
 import {
-  ArrowLeft, Briefcase, Building2, CalendarDays, CheckCircle2, Clock,
-  Download, Edit2, FileText, GraduationCap, Plus, Trash2, User, Users,
-  Warehouse, Wheat,
+  ArrowLeft, Briefcase, Building2, CalendarCheck, CalendarDays, CheckCircle2, Clock,
+  Download, Edit2, FileText, GraduationCap, Lock, LockOpen, Pencil, Plus, Repeat, Trash2, User,
+  Users, Warehouse, Wheat,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
+import { useMemberRights } from '@/auth/useMemberRights';
 import {
   isPokyn,
   TRAINING_TYPE_LABELS,
@@ -23,6 +24,7 @@ import {
 import { ApiError } from '@/lib/api';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { TRAININGS_PATH } from '@/lib/sections';
+import { periodicityLabel } from '@/lib/periodicity';
 import { useToast } from '@/lib/toast';
 import { useConfirm } from '@/lib/confirm';
 import { Card } from '@/components/ui/Card';
@@ -31,6 +33,10 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Spinner } from '@/components/ui/Spinner';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { VisitContinueButton } from '@/components/VisitContinueButton';
+import { VisitNextUkon } from '@/components/VisitNextUkon';
+import { visitTrail } from '@/lib/visits';
 import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleton';
 // SIGNATURE DISABLED — import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
@@ -42,6 +48,8 @@ export function TrainingDetailPage() {
   const id = Number(idStr);
   const { csrfToken } = useAuth();
   const isReadOnly = useIsReadOnly();
+  // „Upraviť" discards the issued protocol, so it follows the práva členov switch.
+  const { canDelete: canUnlock } = useMemberRights();
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -53,6 +61,10 @@ export function TrainingDetailPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // „Upraviť" on a locked training asks first — unlocking throws the issued
+  // protocol away, so it never happens on a single tap.
+  const [unlockPrompt, setUnlockPrompt] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +96,26 @@ export function TrainingDetailPage() {
       () => ({ items: [] as TrainingDocument[] }),
     );
     setDocuments(docs.items);
+  }
+
+  /**
+   * Reopen a locked training for editing. The server deletes the issued
+   * protocol, so the documents list is refetched alongside the training.
+   */
+  async function handleUnlock() {
+    setPdfError(null);
+    setUnlocking(true);
+    try {
+      await Trainings.unlock(id, csrfToken);
+      await refreshDetail();
+      setUnlockPrompt(false);
+      toast.success('Školenie odomknuté — pôvodný protokol bol zrušený.');
+    } catch (err) {
+      setPdfError(offlineMessage(err, 'Školenie sa nepodarilo odomknúť.'));
+      setUnlockPrompt(false);
+    } finally {
+      setUnlocking(false);
+    }
   }
 
   async function handleGeneratePdf() {
@@ -201,10 +233,21 @@ export function TrainingDetailPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link to={TRAININGS_PATH} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
-        <ArrowLeft className="size-4" />
-        Späť na zoznam
-      </Link>
+      {/* Inside a visit „Späť" climbs one level — to the visit — instead of
+          leaving it for the training list. */}
+      {t.visit_id !== null ? (
+        <Breadcrumb
+          items={[
+            ...visitTrail({ id: t.visit_id, companyName: t.company_name, date: t.date }),
+            { label: 'Školenie PO' },
+          ]}
+        />
+      ) : (
+        <Link to={TRAININGS_PATH} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start">
+          <ArrowLeft className="size-4" />
+          Späť na zoznam
+        </Link>
+      )}
 
       <PendingSyncBanner resource="trainings" id={id} />
 
@@ -232,7 +275,7 @@ export function TrainingDetailPage() {
                 </span>
               </div>
             </div>
-            {!isReadOnly && (
+            {!isReadOnly && isDraft && (
               <Link
                 to={`/trainings/${id}/edit`}
                 aria-label="Upraviť"
@@ -240,6 +283,20 @@ export function TrainingDetailPage() {
               >
                 <Edit2 className="size-4" />
               </Link>
+            )}
+            {!isReadOnly && !isDraft && canUnlock && (
+              <Button
+                type="button"
+                id="unlock-training"
+                variant="warn"
+                onClick={() => setUnlockPrompt((open) => !open)}
+                aria-expanded={unlockPrompt}
+                aria-controls="unlock-prompt"
+                leftIcon={<Pencil className="size-4" />}
+                title="Odomkne školenie na úpravy — vystavený protokol sa pritom zruší"
+              >
+                Upraviť
+              </Button>
             )}
           </div>
         </div>
@@ -264,6 +321,14 @@ export function TrainingDetailPage() {
           >
             {t.date ? new Date(t.date + 'T00:00:00').toLocaleDateString('sk-SK') : '—'}
           </DetailRow>
+          <DetailRow icon={<Repeat className="size-4" />} label="Periodicita">
+            {periodicityLabel({ value: t.periodicity_value, unit: t.periodicity_unit })}
+          </DetailRow>
+          {t.valid_until && (
+            <DetailRow icon={<CalendarCheck className="size-4" />} label="Platí do">
+              {new Date(t.valid_until + 'T00:00:00').toLocaleDateString('sk-SK')}
+            </DetailRow>
+          )}
           {!pokyn && t.duration_min !== null && (
             <DetailRow icon={<Clock className="size-4" />} label="Dĺžka">
               {t.duration_min} min
@@ -277,6 +342,68 @@ export function TrainingDetailPage() {
           </DetailRow>
         </dl>
       </Card>
+
+      {!isDraft && !unlockPrompt && (
+        <Card className="flex items-start gap-3 bg-ink-50 px-4 py-3">
+          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white text-ink-500">
+            <Lock className="size-3.5" />
+          </span>
+          <p className="text-xs text-ink-600">
+            <span className="font-semibold text-ink-800">
+              {pokyn ? 'Pokyn je uzamknutý.' : 'Školenie je uzamknuté.'}
+            </span>{' '}
+            {pokyn ? 'Má vystavený PDF dokument' : 'Má vystavený PDF protokol'}, preto sa už nedá meniť.{' '}
+            {canUnlock
+              ? 'Pre opravu použi „Upraviť".'
+              : 'Odomknúť ho na opravu môže hlavný používateľ.'}
+          </p>
+        </Card>
+      )}
+
+      {!isDraft && unlockPrompt && (
+        <Card
+          id="unlock-prompt"
+          role="alertdialog"
+          aria-labelledby="unlock-prompt-title"
+          className="flex animate-fade-up flex-col gap-3 border-status-warn/40 bg-[var(--color-status-warn-bg)]/60 p-4"
+        >
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white text-status-warn">
+              <LockOpen className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <p id="unlock-prompt-title" className="text-sm font-semibold text-ink-900">
+                {pokyn ? 'Odomknúť pokyn?' : 'Odomknúť školenie?'}
+              </p>
+              <p className="mt-1 text-xs text-ink-600">
+                {pokyn ? 'Pokyn je dokončený a má vystavený PDF dokument' : 'Školenie je dokončené a má vystavený PDF protokol'}
+                {documents[0] ? ` ${documents[0].number}` : ''}. Odomknutím sa
+                {pokyn ? ' dokument zruší' : ' protokol zruší'} a natrvalo odstráni — po úprave bude treba
+                vygenerovať nový, ktorý dostane nové číslo.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={unlocking}
+              onClick={() => setUnlockPrompt(false)}
+            >
+              Zrušiť
+            </Button>
+            <Button
+              type="button"
+              variant="warn"
+              loading={unlocking}
+              onClick={handleUnlock}
+              leftIcon={<LockOpen className="size-4" />}
+            >
+              Odomknúť a upraviť
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {pokyn ? (
         <section>
@@ -370,7 +497,13 @@ export function TrainingDetailPage() {
         isReadOnly={isReadOnly}
         pdfError={pdfError}
         pokyn={pokyn}
+        visitId={t.visit_id}
+        trainingId={t.id}
+        companyId={t.company_id}
       />
+
+      {/* Chapter 29.2, step 5 — once the protocol exists, the visit goes on. */}
+      {t.visit_id !== null && !isDraft && <VisitNextUkon visitId={t.visit_id} />}
 
       {/* Chapter 22 — a training is an úkon, so it is invoiced like one.
           Editable after the PDF is issued; the protocol never shows it. */}
@@ -417,8 +550,16 @@ function DocumentsBlock({
   isReadOnly,
   pdfError,
   pokyn,
+  visitId = null,
+  trainingId,
+  companyId,
 }: {
   documents: TrainingDocument[];
+  /** Set when the training belongs to a visit: the protocol may wait for its end. */
+  visitId?: number | null;
+  trainingId: number;
+  /** The client, whose recorded e-mail prefills the send form. */
+  companyId: number;
   canGenerate: boolean;
   canGenerateHint: string | null;
   generating: boolean;
@@ -454,8 +595,24 @@ function DocumentsBlock({
           leftIcon={<FileText className="size-4" />}
           className="bg-status-bad hover:brightness-110"
         >
-          {pokyn ? 'Generovať PDF pokyn' : 'Generovať PDF protokol'}
+          {visitId !== null
+            ? (pokyn ? 'Generovať PDF pokyn teraz' : 'Generovať PDF protokol teraz')
+            : (pokyn ? 'Generovať PDF pokyn' : 'Generovať PDF protokol')}
         </Button>
+        {visitId !== null && (
+          <>
+            <VisitContinueButton
+              visitId={visitId}
+              ukon={{ training_id: trainingId }}
+              disabled={!canGenerate}
+            />
+            <p className="max-w-sm text-xs text-ink-500">
+              {pokyn
+                ? 'Pokyn môžeš vygenerovať teraz alebo hromadne na konci návštevy.'
+                : 'Protokol môžeš vygenerovať teraz alebo hromadne na konci návštevy.'}
+            </p>
+          </>
+        )}
         {pdfError && (
           <p className="text-xs text-status-bad">{pdfError}</p>
         )}
@@ -502,7 +659,7 @@ function DocumentsBlock({
               </div>
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
-            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} />
+            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} companyId={companyId} />
           </li>
         ))}
       </ul>

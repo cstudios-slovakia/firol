@@ -55,10 +55,14 @@ $accounts = $pdo->query(
 )->fetchAll(PDO::FETCH_ASSOC);
 
 $claim = $pdo->prepare(
-    'INSERT IGNORE INTO deadline_notices (account_id, inspection_id, notice_date, recipient)
-     VALUES (?, ?, ?, ?)'
+    'INSERT IGNORE INTO deadline_notices (account_id, inspection_id, training_id, notice_date, recipient)
+     VALUES (?, ?, ?, ?, ?)'
 );
-$release = $pdo->prepare('DELETE FROM deadline_notices WHERE inspection_id = ? AND account_id = ?');
+$release = $pdo->prepare(
+    'DELETE FROM deadline_notices WHERE inspection_id <=> ? AND training_id <=> ? AND account_id = ?'
+);
+// What the e-mail calls a termín: a training by its subtype, an inspection by its type.
+$noticeType = static fn (array $d): string => (string) ($d['training_type'] ?? $d['type']);
 $senderStmt = $pdo->prepare('SELECT fullname, phone FROM users WHERE id = ?');
 
 $sent = 0;
@@ -87,7 +91,8 @@ foreach ($accounts as $account) {
         if ($day < $today || $day > $until) {
             continue;
         }
-        $groups[$d['facility_id'] . '@' . $day][] = $d;
+        // A training of the whole firma has no prevádzka: a group of its own.
+        $groups[($d['facility_id'] ?? 'firma-' . $d['company_id']) . '@' . $day][] = $d;
     }
 
     foreach ($groups as $group) {
@@ -100,10 +105,10 @@ foreach ($accounts as $account) {
                 "[dry-run] account %d: %s — %s, %s → %s (%s)\n",
                 $accountId,
                 $first['company_name'],
-                $first['facility_name'],
+                $first['facility_name'] ?? 'Celá firma',
                 $day,
                 $to,
-                implode(', ', array_map(static fn (array $d): string => $d['type'], $group)),
+                implode(', ', array_map($noticeType, $group)),
             );
             continue;
         }
@@ -111,7 +116,7 @@ foreach ($accounts as $account) {
         // Claim first; send only what this run actually claimed.
         $claimed = [];
         foreach ($group as $d) {
-            $claim->execute([$accountId, $d['inspection_id'], $day, $to]);
+            $claim->execute([$accountId, $d['inspection_id'], $d['training_id'], $day, $to]);
             if ($claim->rowCount() === 1) {
                 $claimed[] = $d;
             }
@@ -130,7 +135,7 @@ foreach ($accounts as $account) {
         $ok = Mailer::send(DeadlineNoticeEmail::build(
             $to,
             $day,
-            array_map(static fn (array $d): string => $d['type'], $claimed),
+            array_map($noticeType, $claimed),
             (string) $sender['fullname'],
             $sender['phone'] !== null ? (string) $sender['phone'] : null,
             ReplyTo::forSender($accountId, (int) $technicianId),
@@ -142,14 +147,14 @@ foreach ($accounts as $account) {
                 "account %d: notice for %s — %s on %s sent to %s\n",
                 $accountId,
                 $first['company_name'],
-                $first['facility_name'],
+                $first['facility_name'] ?? 'Celá firma',
                 $day,
                 $to,
             );
         } else {
             $failed++;
             foreach ($claimed as $d) {
-                $release->execute([$d['inspection_id'], $accountId]);
+                $release->execute([$d['inspection_id'], $d['training_id'], $accountId]);
             }
             fwrite(STDERR, sprintf(
                 "[deadline-notices] account %d: sending to %s failed, will retry\n",

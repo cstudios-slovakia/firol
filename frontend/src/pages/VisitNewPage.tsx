@@ -4,16 +4,20 @@ import { ArrowLeft, ArrowRight, Building2, CalendarDays, Route, Warehouse } from
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type CompanyListItem, type FacilityListItem } from '@/api/companies';
 import {
-  INSPECTION_TYPE_LABELS,
   Inspections,
   periodicityOf,
   type InspectionListItem,
   type InspectionType,
 } from '@/api/inspections';
-import { Visits } from '@/api/visits';
+import { Trainings, type TrainingListItem } from '@/api/trainings';
+import { SKOLENIE_PO, Visits, type VisitType } from '@/api/visits';
 import { ApiError } from '@/lib/api';
-import { daysUntilNext } from '@/lib/periodicity';
-import { SECTIONS, SECTION_COLORS, SECTION_INSPECTION_TYPES, SECTION_LABELS } from '@/lib/sections';
+import { daysUntilNext, trainingChain } from '@/lib/periodicity';
+import {
+  SECTIONS, SECTION_COLORS, SECTION_INSPECTION_TYPES, SECTION_LABELS, TRAINING_SECTION,
+  type Section,
+} from '@/lib/sections';
+import { visitTypeLabel } from '@/lib/visits';
 import { useToast } from '@/lib/toast';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -54,8 +58,9 @@ export function VisitNewPage() {
   const [companyId, setCompanyId] = useState<number | null>(presetCompanyId);
   const [facilityId, setFacilityId] = useState<number | null>(presetFacilityId);
   const [visitDate, setVisitDate] = useState(todayIso());
-  const [types, setTypes] = useState<Set<InspectionType>>(new Set());
+  const [types, setTypes] = useState<Set<VisitType>>(new Set());
   const [history, setHistory] = useState<InspectionListItem[]>([]);
+  const [trainingHistory, setTrainingHistory] = useState<TrainingListItem[]>([]);
   const [touchedTypes, setTouchedTypes] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
@@ -127,9 +132,30 @@ export function VisitNewPage() {
     };
   }, [facilityId]);
 
+  // The firm's trainings — a training term belongs to this prevádzka or to the
+  // whole firma, so the history is the company's, not the prevádzka's.
+  useEffect(() => {
+    if (companyId === null) {
+      setTrainingHistory([]);
+      return;
+    }
+    let cancelled = false;
+    Trainings.list({ company_id: companyId })
+      .then((res) => {
+        if (!cancelled) setTrainingHistory(res.items);
+      })
+      .catch(() => {
+        if (!cancelled) setTrainingHistory([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
   /** Types whose term is due within a month, or already past. */
-  const dueTypes = useMemo(() => {
-    const due = new Set<InspectionType>();
+  const { dueTypes, overdueTypes } = useMemo(() => {
+    const due = new Set<VisitType>();
+    const overdue = new Set<VisitType>();
     const latest = new Map<InspectionType, InspectionListItem>();
     for (const it of history) {
       if (it.status !== 'finalized' || !it.executed_on) continue;
@@ -139,9 +165,29 @@ export function VisitNewPage() {
     for (const [type, it] of latest) {
       const days = daysUntilNext(it.executed_on, periodicityOf(it));
       if (days !== null && days <= DUE_SOON_DAYS) due.add(type);
+      if (days !== null && days < 0) overdue.add(type);
     }
-    return due;
-  }, [history]);
+
+    // Školenie PO is due when any training chain of this prevádzka (or of the
+    // whole firma) is: the latest finalized training per chain, as in the
+    // calendar.
+    const latestTraining = new Map<string, TrainingListItem>();
+    for (const t of trainingHistory) {
+      if (t.status !== 'finalized' || !t.date) continue;
+      if (t.facility_id !== null && t.facility_id !== facilityId) continue;
+      const key = `${t.facility_id ?? 'firma'}|${trainingChain(t.type)}`;
+      const current = latestTraining.get(key);
+      if (!current || (current.date ?? '') < t.date || ((current.date ?? '') === t.date && current.id < t.id)) {
+        latestTraining.set(key, t);
+      }
+    }
+    for (const t of latestTraining.values()) {
+      const days = daysUntilNext(t.date, { value: t.periodicity_value, unit: t.periodicity_unit });
+      if (days !== null && days <= DUE_SOON_DAYS) due.add(SKOLENIE_PO);
+      if (days !== null && days < 0) overdue.add(SKOLENIE_PO);
+    }
+    return { dueTypes: due, overdueTypes: overdue };
+  }, [history, trainingHistory, facilityId]);
 
   // Tick the due ones — until the technician makes their own selection, at
   // which point the app stops second-guessing them.
@@ -150,7 +196,7 @@ export function VisitNewPage() {
     setTypes(new Set(dueTypes));
   }, [dueTypes, touchedTypes]);
 
-  function toggleType(type: InspectionType) {
+  function toggleType(type: VisitType) {
     setTouchedTypes(true);
     setTypes((prev) => {
       const next = new Set(prev);
@@ -275,13 +321,13 @@ export function VisitNewPage() {
             label="Úkony na tejto návšteve"
             hint={
               dueTypes.size > 0
-                ? 'Predvybrané sú tie, ktorých termín je splatný do 30 dní. Výber môžeš kedykoľvek zmeniť.'
+                ? 'Predvybrané sú tie, ktorým sa termín blíži (do 30 dní) alebo je po termíne. Výber môžeš kedykoľvek zmeniť.'
                 : 'Odškrtni, čo na prevádzke urobíš. Ponuka je zo všetkých sekcií naraz.'
             }
           >
             {() => (
               <div className="flex flex-col gap-3">
-                {SECTIONS.filter((s) => SECTION_INSPECTION_TYPES[s].length > 0).map((section) => (
+                {SECTIONS.filter((s) => typesOfSection(s).length > 0).map((section) => (
                   <div key={section}>
                     <p
                       className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide"
@@ -290,7 +336,7 @@ export function VisitNewPage() {
                       {SECTION_LABELS[section]}
                     </p>
                     <div className="flex flex-wrap gap-1.5">
-                      {SECTION_INSPECTION_TYPES[section].map((type) => {
+                      {typesOfSection(section).map((type) => {
                         const active = types.has(type);
                         const due = dueTypes.has(type);
                         return (
@@ -306,10 +352,17 @@ export function VisitNewPage() {
                                 : 'border-ink-200 bg-white text-ink-700 hover:border-ink-300 hover:bg-ink-50',
                             )}
                           >
-                            {INSPECTION_TYPE_LABELS[type]}
-                            {due && !active && (
-                              <span className="rounded-full bg-[var(--color-status-warn-bg)] px-1.5 py-0.5 text-[10px] text-[var(--color-status-warn)]">
-                                splatné
+                            {visitTypeLabel(type)}
+                            {due && (
+                              <span
+                                className={cn(
+                                  'rounded-full px-1.5 py-0.5 text-[10px] transition-colors duration-150',
+                                  active
+                                    ? 'bg-white/25 text-white'
+                                    : 'bg-[var(--color-status-warn-bg)] text-[var(--color-status-warn)]',
+                                )}
+                              >
+                                {overdueTypes.has(type) ? 'po termíne' : 'blíži sa'}
                               </span>
                             )}
                           </button>
@@ -337,6 +390,16 @@ export function VisitNewPage() {
       </Card>
     </div>
   );
+}
+
+/**
+ * Types a section offers on a visit: its inspection types, and — in OPP — the
+ * školenie PO, which is a training rather than an inspection type.
+ */
+function typesOfSection(section: Section): VisitType[] {
+  const types: VisitType[] = [...SECTION_INSPECTION_TYPES[section]];
+  if (section === TRAINING_SECTION) types.push(SKOLENIE_PO);
+  return types;
 }
 
 function numericParam(raw: string | null): number | null {

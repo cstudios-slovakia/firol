@@ -18,8 +18,8 @@ export type HandoverPayload = {
 /** A protocol available for a bulk send (chapter 9.1). */
 export type SendableDocument = {
   id: number;
-  /** An úkon's protocol, or a výdajka materiálu (block 4 / chapter 21). */
-  type: InspectionType | 'vydajka';
+  /** An úkon's protocol, a výdajka materiálu (block 4 / chapter 21), the protocol of a školenie PO, or a Pokyn — žatevné práce. */
+  type: InspectionType | 'vydajka' | 'skolenie' | 'pokyn_zatva';
   number: string;
   executed_on: string | null;
   /** Null for a výdajka not tied to one prevádzka. */
@@ -27,6 +27,8 @@ export type SendableDocument = {
   facility_name: string | null;
   /** Size of the PDF, so the technician can see what is filling the message. */
   byte_size: number;
+  /** Already went out to this company in a send with status `odoslane`. */
+  already_sent: boolean;
 };
 
 export type DocumentSendPayload = {
@@ -92,7 +94,14 @@ export const Documents = {
 
   /** One e-mail carrying several protocols. */
   send: (companyId: number, payload: DocumentSendPayload, csrfToken: string | null) =>
-    api<{ send_id: number; status: string; recipients: string[]; documents: number }>(
+    api<{
+      send_id: number;
+      status: string;
+      recipients: string[];
+      documents: number;
+      /** Numbers of the protocols whose photos went out shrunk to fit the limit. */
+      shrunk: string[];
+    }>(
       `/api/companies/${companyId}/sends`,
       { method: 'POST', body: payload, csrfToken, requireOnline: true },
     ),

@@ -24,9 +24,12 @@ use Firol\Http\Response;
  * who see and edit tasks across all accounts, the same rule the inspections
  * list and the calendar follow. A task always lives in the account of the
  * úkon or firma it belongs to, so an admin's task on another tenant's úkon
- * lands with that tenant, not under the admin's own account. Tasks of an archived
- * company are left out of every list and count: the app treats an archived
- * company as gone, and chapter 25 wants it off the Dnes screen too.
+ * lands with that tenant, not under the admin's own account.
+ *
+ * Archiving a firma or prevádzka closes its open tasks as „zrušené"
+ * (cancel_reason, see ClientArchive — spec 25), so they leave every open list,
+ * count and the Dnes card, and stay findable under „Splnené". Such a task can't
+ * be reopened while its firma / prevádzka is archived.
  *
  * API shape for the Dnes screen (chapter 18, card „Úlohy do 7 dní"):
  *   GET /api/tasks/upcoming?scope=mine|team
@@ -100,9 +103,10 @@ final class TaskController
         $stmt = Db::pdo()->prepare(
             'SELECT COUNT(*)
              FROM   tasks t
-             LEFT   JOIN companies c ON c.id = t.company_id
+             LEFT   JOIN companies  c ON c.id = t.company_id
+             LEFT   JOIN facilities f ON f.id = t.facility_id
              WHERE  ' . ($scope === null ? '1 = 1' : 't.account_id = ?') . '
-               AND  t.done = 0 AND c.archived_at IS NULL'
+               AND  t.done = 0 AND c.archived_at IS NULL AND f.archived_at IS NULL'
         );
         $stmt->execute($scope === null ? [] : [$scope]);
         Response::json(['open' => (int) $stmt->fetchColumn()]);
@@ -273,9 +277,14 @@ final class TaskController
                 Response::error('Neplatný stav úlohy.', 422);
             }
             if ($done !== $current['done']) {
+                if (!$done && $current['place_archived']) {
+                    Response::error('Firma alebo prevádzka úlohy je archivovaná — úlohu nemožno znovu otvoriť.', 409);
+                }
                 $set[] = 'done = ?';
                 $args[] = $done ? 1 : 0;
                 $set[] = $done ? 'done_at = NOW()' : 'done_at = NULL';
+                // Reopened or ticked by hand: no longer „zrušená".
+                $set[] = 'cancel_reason = NULL';
             }
         }
 
@@ -329,7 +338,8 @@ final class TaskController
         $sql = 'SELECT t.id, t.account_id, t.text, t.company_id, c.name AS company_name,
                        t.facility_id, f.name AS facility_name,
                        t.assignee_user_id, au.fullname AS assignee_name,
-                       t.due_date, t.done, t.done_at,
+                       t.due_date, t.done, t.done_at, t.cancel_reason,
+                       (c.archived_at IS NOT NULL OR f.archived_at IS NOT NULL) AS place_archived,
                        t.source_inspection_id, t.source_defect_key,
                        si.type AS source_type, si.executed_on AS source_executed_on,
                        (SELECT d.number FROM documents d
@@ -346,7 +356,7 @@ final class TaskController
                                           AND si.account_id = t.account_id
                                           AND si.archived_at IS NULL
                 WHERE  ' . ($accountId === null ? '1 = 1' : 't.account_id = ?') . '
-                  AND  c.archived_at IS NULL';
+                  AND  (t.done = 1 OR (c.archived_at IS NULL AND f.archived_at IS NULL))';
         foreach ($where as $condition) {
             $sql .= ' AND ' . $condition;
         }
@@ -396,6 +406,9 @@ final class TaskController
             'due_date'         => $row['due_date'],
             'done'             => (int) $row['done'] === 1,
             'done_at'          => $row['done_at'],
+            // Spec 25 — closed by archiving its firma / prevádzka, not ticked.
+            'cancel_reason'    => $row['cancel_reason'],
+            'place_archived'   => (int) $row['place_archived'] === 1,
             // Present only while the source úkon exists (see select()).
             'source'           => $sourceId !== null && $row['source_type'] !== null ? [
                 'inspection_id'   => $sourceId,

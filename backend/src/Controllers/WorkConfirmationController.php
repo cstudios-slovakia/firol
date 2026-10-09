@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
@@ -42,7 +43,7 @@ final class WorkConfirmationController
                        w.facility_id, f.name AS facility_name,
                        w.visit_id, w.confirmed_on, w.time_from, w.time_to,
                        w.technician_user_id, u.fullname AS technician_name,
-                       w.inspection_ids, w.created_at,
+                       w.inspection_ids, w.training_ids, w.created_at,
                        d.id AS document_id, d.number AS document_number
                 FROM   work_confirmations w
                 JOIN   companies  c ON c.id = w.company_id
@@ -75,6 +76,7 @@ final class WorkConfirmationController
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
         $userId = Tenant::currentUserId();
+        $isAdmin = Admin::isAdmin($userId);
 
         $visitId = $req->jsonInt('visit_id');
         $companyId = $req->jsonInt('company_id');
@@ -84,19 +86,40 @@ final class WorkConfirmationController
         $timeFrom = self::readTime($req, 'time_from');
         $timeTo = self::readTime($req, 'time_to');
         $inspectionIds = self::readIds($req->json()['inspection_ids'] ?? null);
+        // The školenie PO of a visit (chapter 9) is an úkon like the rest, so
+        // the confirmation of a visit lists it beside the inspections.
+        $trainingIds = [];
 
         if ($visitId !== null) {
-            $visit = self::loadVisit($accountId, $visitId);
-            $companyId ??= (int) $visit['company_id'];
-            $facilityId ??= (int) $visit['facility_id'];
-            $confirmedOn ??= (string) $visit['visit_date'];
+            $visit = VisitController::findForUkon($visitId, $isAdmin, $accountId);
+            if ($visit === null) {
+                Response::error('Návšteva sa nenašla.', 404);
+            }
+            // An admin works across accounts: the confirmation (and its
+            // number) belongs to the account that owns the visit.
+            $accountId = $visit['account_id'];
+            $companyId ??= $visit['company_id'];
+            $facilityId ??= $visit['facility_id'];
+            $confirmedOn ??= $visit['visit_date'];
             if ($inspectionIds === []) {
                 $inspectionIds = self::inspectionIdsOfVisit($visitId);
             }
+            $trainingIds = self::trainingIdsOfVisit($visitId);
         }
 
         if ($companyId === null) {
             Response::error('Vyber firmu.', 422);
+        }
+        // Same for a company picked without a visit: the confirmation is filed
+        // under the account that owns the company.
+        if ($isAdmin && $visitId === null) {
+            $owner = Db::pdo()->prepare('SELECT account_id FROM companies WHERE id = ? AND archived_at IS NULL');
+            $owner->execute([$companyId]);
+            $ownerAccountId = $owner->fetchColumn();
+            if ($ownerAccountId === false) {
+                Response::error('Firma sa nenašla.', 404);
+            }
+            $accountId = (int) $ownerAccountId;
         }
         if ($confirmedOn === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $confirmedOn)) {
             Response::error('Zadaj dátum vykonania práce.', 422);
@@ -107,15 +130,17 @@ final class WorkConfirmationController
 
         // Nothing named explicitly and no visit: take everything finished at
         // this company on that day, which is what "spätne z histórie" means.
-        if ($inspectionIds === []) {
+        if ($inspectionIds === [] && $trainingIds === []) {
             $inspectionIds = self::inspectionIdsOfDay($accountId, $companyId, $facilityId, $confirmedOn);
+            $trainingIds = self::trainingIdsOfDay($accountId, $companyId, $facilityId, $confirmedOn);
         }
-        if ($inspectionIds === []) {
+        if ($inspectionIds === [] && $trainingIds === []) {
             Response::error('V ten deň nie je pri tejto firme zaznamenaný žiadny dokončený úkon.', 422);
         }
 
         $inspections = self::loadInspections($accountId, $companyId, $inspectionIds);
-        if ($inspections === []) {
+        $trainings = self::loadTrainings($accountId, $companyId, $trainingIds);
+        if ($inspections === [] && $trainings === []) {
             Response::error('Vybrané úkony sa nenašli pri tejto firme.', 404);
         }
 
@@ -130,12 +155,14 @@ final class WorkConfirmationController
             $pdo->prepare(
                 'INSERT INTO work_confirmations
                     (account_id, company_id, facility_id, visit_id, confirmed_on,
-                     time_from, time_to, technician_user_id, inspection_ids, stock_issue_ids)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     time_from, time_to, technician_user_id, inspection_ids, training_ids,
+                     stock_issue_ids)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             )->execute([
                 $accountId, $companyId, $facilityId, $visitId, $confirmedOn,
                 $timeFrom, $timeTo, $technicianId,
                 json_encode(array_column($inspections, 'id')),
+                json_encode(array_column($trainings, 'id')),
                 json_encode($stockIssueIds),
             ]);
             $id = (int) $pdo->lastInsertId();
@@ -199,7 +226,7 @@ final class WorkConfirmationController
     {
         $stmt = Db::pdo()->prepare(
             'SELECT w.id, w.confirmed_on, w.time_from, w.time_to, w.inspection_ids,
-                    w.stock_issue_ids, w.company_id, c.name AS company_name, c.ico AS company_ico,
+                    w.training_ids, w.stock_issue_ids, w.company_id, c.name AS company_name, c.ico AS company_ico,
                     c.street AS company_street, c.postal_code AS company_postal_code,
                     c.city AS company_city,
                     w.facility_id, f.name AS facility_name,
@@ -223,6 +250,13 @@ final class WorkConfirmationController
 
         $ids = self::readIds(json_decode((string) $row['inspection_ids'], true));
         $inspections = self::loadInspections($accountId, (int) $row['company_id'], $ids);
+        // Trainings are listed after the inspections, as úkony of the same
+        // visit — no findings, just the protocol number, like the rest.
+        $inspections = array_merge($inspections, self::loadTrainings(
+            $accountId,
+            (int) $row['company_id'],
+            self::readIds(json_decode((string) ($row['training_ids'] ?? ''), true)),
+        ));
 
         $accStmt = Db::pdo()->prepare(
             'SELECT invoice_company_name, invoice_ico, invoice_street, invoice_postal_code,
@@ -297,7 +331,7 @@ final class WorkConfirmationController
                     w.facility_id, f.name AS facility_name,
                     w.visit_id, w.confirmed_on, w.time_from, w.time_to,
                     w.technician_user_id, u.fullname AS technician_name,
-                    w.inspection_ids, w.created_at,
+                    w.inspection_ids, w.training_ids, w.created_at,
                     d.id AS document_id, d.number AS document_number
              FROM   work_confirmations w
              JOIN   companies  c ON c.id = w.company_id
@@ -349,6 +383,56 @@ final class WorkConfirmationController
         }, $stmt->fetchAll());
     }
 
+    /**
+     * Školenia PO of the confirmation, shaped like an úkon line: the type is
+     * printed as `skolenie_po` (one name for all kinds, as on the visit) and
+     * the „rozsah" is the number of trainees.
+     *
+     * @param list<int> $ids
+     * @return list<array<string, mixed>>
+     */
+    private static function loadTrainings(int $accountId, int $companyId, array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = Db::pdo()->prepare(
+            "SELECT t.id, t.date,
+                    (SELECT COUNT(*) FROM trainees tr WHERE tr.training_id = t.id) AS trainees_count,
+                    d.number AS document_number
+             FROM   trainings t
+             LEFT   JOIN documents d
+                    ON d.parent_type = 'training' AND d.parent_id = t.id
+             WHERE  t.account_id = ? AND t.company_id = ? AND t.archived_at IS NULL
+                AND t.id IN ($placeholders)
+             ORDER  BY t.id ASC"
+        );
+        $stmt->execute(array_merge([$accountId, $companyId], $ids));
+
+        return array_map(static function (array $r): array {
+            return [
+                'id'              => (int) $r['id'],
+                'type'            => VisitController::TYPE_SKOLENIE_PO,
+                'executed_on'     => $r['date'],
+                'item_count'      => (int) $r['trainees_count'],
+                'document_number' => $r['document_number'],
+            ];
+        }, $stmt->fetchAll());
+    }
+
+    /** @return list<int> */
+    private static function trainingIdsOfVisit(int $visitId): array
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT id FROM trainings
+             WHERE  visit_id = ? AND archived_at IS NULL AND status = "finalized"
+             ORDER  BY id ASC'
+        );
+        $stmt->execute([$visitId]);
+        return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
     /** @return list<int> */
     private static function inspectionIdsOfVisit(int $visitId): array
     {
@@ -358,6 +442,27 @@ final class WorkConfirmationController
              ORDER  BY id ASC'
         );
         $stmt->execute([$visitId]);
+        return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
+    /** @return list<int> */
+    private static function trainingIdsOfDay(
+        int $accountId,
+        int $companyId,
+        ?int $facilityId,
+        string $date,
+    ): array {
+        $sql = 'SELECT id FROM trainings
+                WHERE  account_id = ? AND company_id = ? AND date = ?
+                   AND archived_at IS NULL AND status = "finalized"';
+        $args = [$accountId, $companyId, $date];
+        if ($facilityId !== null) {
+            $sql .= ' AND facility_id = ?';
+            $args[] = $facilityId;
+        }
+        $sql .= ' ORDER BY id ASC';
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($args);
         return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
     }
 
@@ -436,21 +541,6 @@ final class WorkConfirmationController
             'quantity'        => (int) $r['qty'] . ' ' . (string) $r['unit'],
             'document_number' => $r['document_number'],
         ], $stmt->fetchAll());
-    }
-
-    /** @return array<string, mixed> */
-    private static function loadVisit(int $accountId, int $visitId): array
-    {
-        $stmt = Db::pdo()->prepare(
-            'SELECT company_id, facility_id, visit_date FROM visits
-             WHERE  id = ? AND account_id = ? AND archived_at IS NULL'
-        );
-        $stmt->execute([$visitId, $accountId]);
-        $row = $stmt->fetch();
-        if (!$row) {
-            Response::error('Návšteva sa nenašla.', 404);
-        }
-        return $row;
     }
 
     /** „3 h 15 min", or null when either end of the interval is missing. */
@@ -539,6 +629,7 @@ final class WorkConfirmationController
     private static function shape(array $row): array
     {
         $ids = json_decode((string) $row['inspection_ids'], true);
+        $trainingIds = json_decode((string) ($row['training_ids'] ?? ''), true);
         return [
             'id'                 => (int) $row['id'],
             'company_id'         => (int) $row['company_id'],
@@ -552,6 +643,7 @@ final class WorkConfirmationController
             'technician_user_id' => (int) $row['technician_user_id'],
             'technician_name'    => (string) $row['technician_name'],
             'inspection_ids'     => is_array($ids) ? array_map('intval', $ids) : [],
+            'training_ids'       => is_array($trainingIds) ? array_map('intval', $trainingIds) : [],
             'created_at'         => $row['created_at'],
             'document_id'        => $row['document_id'] !== null ? (int) $row['document_id'] : null,
             'document_number'    => $row['document_number'],

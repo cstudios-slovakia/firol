@@ -23,6 +23,7 @@ import { useAuth, type User } from "@/auth/AuthContext";
 import {
     Calendar,
     ZDROJ_LABELS,
+    formatEventTime,
     type CalendarData,
     type CalendarDeadline,
     type CalendarEvent,
@@ -34,7 +35,12 @@ import {
     type CompanyListItem,
     type FacilityListItem,
 } from "@/api/companies";
-import { INSPECTION_TYPE_LABELS } from "@/api/inspections";
+import {
+    clearDeadlinePlan,
+    deadlineHref,
+    deadlineLabel,
+    setDeadlinePlan,
+} from "@/lib/deadlines";
 import { ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { useConfirm } from "@/lib/confirm";
@@ -561,7 +567,7 @@ function dayChips(items: Termin[]): Chip[] {
         const label =
             t.zdroj === "technik"
                 ? ZDROJ_LABELS.technik
-                : (t.company_name ?? t.event?.title ?? "");
+                : (t.company_name ?? eventLabel(t.event));
         let c = map.get(key);
         if (!c) {
             c = {
@@ -589,6 +595,13 @@ function dayChips(items: Termin[]): Chip[] {
             Number(a.done) - Number(b.done) ||
             a.label.localeCompare(b.label, "sk"),
     );
+}
+
+/** Title of a firm-less event, led by its time when it has one. */
+function eventLabel(e: CalendarEvent | undefined): string {
+    if (!e) return "";
+    const time = formatEventTime(e.time_from, e.time_to);
+    return time ? `${time} ${e.title}` : e.title;
 }
 
 function DayChip({ chip }: { chip: Chip }) {
@@ -778,7 +791,7 @@ function TerminRow({
     const overdue = t.state === "po_termine";
     const done = t.state === "splneny";
 
-    const title = d ? INSPECTION_TYPE_LABELS[d.type] : (e?.title ?? "");
+    const title = d ? deadlineLabel(d) : (e?.title ?? "");
     const where =
         groupBy === "firma"
             ? [t.facility_name, t.city].filter(Boolean).join(" · ")
@@ -801,7 +814,7 @@ function TerminRow({
                 <div className="min-w-0 flex-1">
                     {d ? (
                         <Link
-                            to={`/inspections/${d.inspection_id}`}
+                            to={deadlineHref(d)}
                             className={cn(
                                 "text-sm font-medium transition-colors hover:text-firol-600",
                                 done ? "text-ink-500" : "text-ink-900",
@@ -824,7 +837,12 @@ function TerminRow({
                         {d ? (
                             <DeadlineDates deadline={d} />
                         ) : (
-                            <span>{formatDateSk(t.date)}</span>
+                            <span>
+                                {formatDateSk(t.date)}
+                                {e &&
+                                    formatEventTime(e.time_from, e.time_to) &&
+                                    ` · ${formatEventTime(e.time_from, e.time_to)}`}
+                            </span>
                         )}
                     </p>
                     {e?.note && (
@@ -932,7 +950,7 @@ export function PlanEditor({
         if (!planned) return;
         setSaving(true);
         try {
-            await Calendar.setPlan(deadline.inspection_id, planned, csrfToken);
+            await setDeadlinePlan(deadline, planned, csrfToken);
             await onDone();
             toast.success("Plánovaný dátum uložený");
         } catch (err) {
@@ -946,7 +964,7 @@ export function PlanEditor({
     async function clearPlan() {
         setSaving(true);
         try {
-            await Calendar.clearPlan(deadline.inspection_id, csrfToken);
+            await clearDeadlinePlan(deadline, csrfToken);
             await onDone();
             toast.success("Plánovaný dátum zrušený");
         } catch (err) {
@@ -1142,6 +1160,8 @@ function EventForm({
     const toast = useToast();
     const [title, setTitle] = useState(initial?.title ?? "");
     const [date, setDate] = useState(initial?.event_date ?? defaultDate);
+    const [timeFrom, setTimeFrom] = useState(initial?.time_from ?? "");
+    const [timeTo, setTimeTo] = useState(initial?.time_to ?? "");
     const [note, setNote] = useState(initial?.note ?? "");
     const [companyId, setCompanyId] = useState<number | null>(
         initial?.company_id ?? null,
@@ -1161,6 +1181,8 @@ function EventForm({
         if (!open) return;
         setTitle(initial?.title ?? "");
         setDate(initial?.event_date ?? defaultDate);
+        setTimeFrom(initial?.time_from ?? "");
+        setTimeTo(initial?.time_to ?? "");
         setNote(initial?.note ?? "");
         setCompanyId(initial?.company_id ?? null);
         setFacilityId(initial?.facility_id ?? null);
@@ -1217,11 +1239,21 @@ function EventForm({
             setError("Doplň názov a dátum.");
             return;
         }
+        if (timeTo && !timeFrom) {
+            setError("Doplň aj čas od.");
+            return;
+        }
+        if (timeTo && timeTo < timeFrom) {
+            setError("Čas do nemôže byť skôr ako čas od.");
+            return;
+        }
         setSaving(true);
         setError(null);
         const body: CalendarEventInput = {
             title: title.trim(),
             event_date: date,
+            time_from: timeFrom || null,
+            time_to: timeTo || null,
             note: note.trim() || null,
             company_id: companyId,
             facility_id: facilityId,
@@ -1273,6 +1305,28 @@ function EventForm({
                         />
                     )}
                 </Field>
+                <div className="grid grid-cols-2 gap-3">
+                    <Field label="Čas od" hint="Voliteľné">
+                        {(p) => (
+                            <Input
+                                {...p}
+                                type="time"
+                                value={timeFrom}
+                                onChange={(e) => setTimeFrom(e.target.value)}
+                            />
+                        )}
+                    </Field>
+                    <Field label="Čas do" hint="Voliteľné">
+                        {(p) => (
+                            <Input
+                                {...p}
+                                type="time"
+                                value={timeTo}
+                                onChange={(e) => setTimeTo(e.target.value)}
+                            />
+                        )}
+                    </Field>
+                </div>
                 <Field label="Firma" hint="Voliteľné">
                     {(p) => (
                         <Select

@@ -50,7 +50,12 @@ const QUICK_UNITS: { unit: PeriodicityUnit; label: string }[] = [
 
 type Props = {
   /** Inspection type — decides which values are offered as chips. */
-  type: string;
+  type?: string;
+  /**
+   * The recommended months, given directly. Wins over `type`; trainings use it
+   * because their subtypes are a different namespace from inspection types.
+   */
+  recommended?: number[];
   value: Periodicity;
   onChange: (next: Periodicity) => void;
   /**
@@ -62,8 +67,15 @@ type Props = {
   disabled?: boolean;
 };
 
-export function PeriodicityPicker({ type, value, onChange, executedOn, disabled }: Props) {
-  const recommended = RECOMMENDED_MONTHS[type] ?? [];
+export function PeriodicityPicker({
+  type,
+  recommended: recommendedProp,
+  value,
+  onChange,
+  executedOn,
+  disabled,
+}: Props) {
+  const recommended = recommendedProp ?? RECOMMENDED_MONTHS[type ?? ''] ?? [];
   const others = STANDARD_OPTIONS.filter(
     (o) => !(o.unit === 'mesiac' && recommended.includes(o.value)),
   );

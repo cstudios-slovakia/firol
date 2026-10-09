@@ -22,6 +22,8 @@ $formatDate = static function (?string $iso): string {
 };
 
 $type = (string) ($training['type'] ?? '');
+// Chapter 5: a bare „Periodicita: 12 mesiacov"; bez opakovania prints no row.
+$periodicity = $training['periodicity_label'] ?? null;
 
 // Fixed topic lists keyed by training type. Each item: [text, duration_min] or just [text] for two-part types.
 $simpleTopics = [
@@ -405,6 +407,12 @@ if (!empty($trainer['certification_number'])) {
     <td class="bl">Časový rozsah</td>
     <td class="bv"><?= $totalMin ?> minút</td>
   </tr>
+  <?php if ($periodicity !== null): ?>
+    <tr>
+      <td class="bl">Periodicita</td>
+      <td class="bv" colspan="3"><?= $h($periodicity) ?></td>
+    </tr>
+  <?php endif ?>
   <tr>
     <td class="bl">Školenie vykonal</td>
     <td colspan="3"><?= $trainerLine ?></td>

@@ -7,6 +7,7 @@ namespace Firol\Controllers;
 use Firol\Audit\AuditLog;
 use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
+use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
@@ -116,6 +117,7 @@ final class InspectionController
                        i.company_id, c.name AS company_name,
                        i.facility_id, f.name AS facility_name,
                        i.inspector_user_id, u.fullname AS inspector_name,
+                       i.created_by_user_id,
                        i.effective_inspector_user_id,
                        eu.fullname AS effective_inspector_name,
                        i.effective_cert_number,
@@ -178,7 +180,7 @@ final class InspectionController
         // placeholder is not portable across PDO emulation settings.
         $field = (string) $req->query('field');
         if (!in_array($field, ['manufacturer', 'type', 'location'], true)) {
-            Response::error('Invalid field', 422);
+            Response::error('Neplatné pole.', 422);
         }
         $val = "JSON_UNQUOTE(JSON_EXTRACT(ji.fields, '\$.$field'))";
         // A JSON column is stored with the binary collation, which would make
@@ -381,8 +383,8 @@ final class InspectionController
                 'INSERT INTO inspections
                     (account_id, company_id, facility_id, source_inspection_id, type,
                      periodicity_value, periodicity_unit, executed_on, inspector_user_id,
-                     status, notes, is_preventive_inspection)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", NULL, ?)'
+                     status, notes, is_preventive_inspection, created_by_user_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", NULL, ?, ?)'
             )->execute([
                 $accountId,
                 $source['company_id'],
@@ -393,6 +395,7 @@ final class InspectionController
                 $fuUnit,
                 $source['inspector_user_id'],
                 in_array($targetType, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
+                Tenant::currentUserId(),
             ]);
             $newId = (int) $pdo->lastInsertId();
 
@@ -529,17 +532,30 @@ final class InspectionController
         $details = self::readDetails($req, (string) $type);
 
         if ($type === null || !in_array($type, self::TYPES, true)) {
-            Response::error('Invalid inspection type', 422);
+            Response::error('Neplatný typ kontroly.', 422);
+        }
+        // Inside a visit (chapter 9) the company, prevádzka and date were chosen
+        // once, when the visit started. They are the visit's, not the request's:
+        // overriding them is friendlier offline than rejecting a draft that
+        // was queued with a stale value.
+        if ($visitId !== null) {
+            $visit = VisitController::findForUkon($visitId, $isAdmin, $accountId);
+            if ($visit === null) {
+                Response::error('Návšteva sa nenašla.', 404);
+            }
+            $companyId = $visit['company_id'];
+            $facilityId = $visit['facility_id'];
+            $executedOn = $visit['visit_date'];
         }
         // Any value in days/weeks/months, or none at all. The type only
         // decides what the app SUGGESTS (chapter 5) — it never limits what the
         // technician may choose.
         [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
         if ($companyId === null || $facilityId === null) {
-            Response::error('Field required: company_id, facility_id', 422);
+            Response::error('Vyber firmu aj prevádzku.', 422);
         }
         if ($executedOn === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $executedOn)) {
-            Response::error('Invalid executed_on (expected YYYY-MM-DD)', 422);
+            Response::error('Neplatný dátum vykonania (očakáva sa formát YYYY-MM-DD).', 422);
         }
 
         // Verify the facility exists, belongs to the company, and (for
@@ -557,7 +573,7 @@ final class InspectionController
             $check->execute([$facilityId, $companyId]);
             $facAccountId = $check->fetchColumn();
             if ($facAccountId === false) {
-                Response::error('Company or facility not found', 404);
+                Response::error('Firma alebo prevádzka sa nenašla.', 404);
             }
             $accountId = (int) $facAccountId;
         } else {
@@ -570,7 +586,7 @@ final class InspectionController
             );
             $check->execute([$facilityId, $companyId, $accountId]);
             if ($check->fetchColumn() === false) {
-                Response::error('Company or facility not found', 404);
+                Response::error('Firma alebo prevádzka sa nenašla.', 404);
             }
         }
 
@@ -583,7 +599,7 @@ final class InspectionController
             );
             $auCheck->execute([$accountId, $inspectorUserId]);
             if ($auCheck->fetchColumn() === false) {
-                Response::error('Inspector is not a member of this account', 422);
+                Response::error('Technik nie je členom tohto účtu.', 422);
             }
         }
 
@@ -616,8 +632,8 @@ final class InspectionController
                     (account_id, company_id, facility_id, visit_id, type,
                      periodicity_value, periodicity_unit, periodicity_is_custom,
                      executed_on, inspector_user_id, status, notes,
-                     is_preventive_inspection)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?)'
+                     is_preventive_inspection, created_by_user_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?)'
             );
             $stmt->execute([
                 $accountId,
@@ -632,6 +648,7 @@ final class InspectionController
                 $inspectorUserId,
                 $notes,
                 in_array($type, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
+                $userId,
             ]);
             $id = (int) $pdo->lastInsertId();
 
@@ -678,7 +695,12 @@ final class InspectionController
         $notes = $req->jsonString('notes');
 
         if ($executedOn !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $executedOn)) {
-            Response::error('Invalid executed_on (expected YYYY-MM-DD)', 422);
+            Response::error('Neplatný dátum vykonania (očakáva sa formát YYYY-MM-DD).', 422);
+        }
+        // The date of an úkon in a visit is the visit's (chapter 9) — ignored
+        // rather than rejected, so an edit queued offline still saves the rest.
+        if ($row['visit_id'] !== null) {
+            $executedOn = null;
         }
 
         // Periodicity is edited as a whole: "bez opakovania" has to be
@@ -735,6 +757,7 @@ final class InspectionController
 
         $existing = self::loadOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
+        MemberRights::requireDeleteUkon($existing, (int) $existing['inspector_user_id']);
 
         Db::pdo()->prepare(
             'UPDATE inspections SET archived_at = NOW() WHERE id = ? AND account_id = ?'
@@ -775,6 +798,9 @@ final class InspectionController
         if ($row['status'] !== 'finalized') {
             Response::error('Kontrola nie je uzamknutá.', 422);
         }
+        // Unlocking discards the issued protocol, so it is a delete under the
+        // account's práva členov (chapter 1.6).
+        MemberRights::requireDelete($accountId);
 
         $pdo = Db::pdo();
         $docsStmt = $pdo->prepare(
@@ -805,6 +831,7 @@ final class InspectionController
             $pdo->prepare(
                 'UPDATE inspections
                  SET    status = "draft",
+                        protocol_deferred_at        = NULL,
                         effective_inspector_user_id = NULL,
                         effective_cert_number       = NULL,
                         effective_cert_valid_from   = NULL,
@@ -917,8 +944,8 @@ final class InspectionController
                     (account_id, company_id, facility_id, type,
                      periodicity_value, periodicity_unit, periodicity_is_custom,
                      is_preventive_inspection, executed_on, inspector_user_id,
-                     status, notes, carried_over_from_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", ?, ?)'
+                     status, notes, carried_over_from_id, created_by_user_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", ?, ?, ?)'
             )->execute([
                 $accountId,
                 $source['company_id'],
@@ -931,6 +958,7 @@ final class InspectionController
                 $source['inspector_user_id'],
                 $source['notes'],
                 $sourceId,
+                Tenant::currentUserId(),
             ]);
             $newId = (int) $pdo->lastInsertId();
 
@@ -1301,6 +1329,7 @@ final class InspectionController
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
                        i.facility_id, f.name AS facility_name,
                        i.inspector_user_id, u.fullname AS inspector_name,
+                       i.created_by_user_id,
                        i.effective_inspector_user_id,
                        eu.fullname AS effective_inspector_name,
                        i.effective_cert_number,
@@ -1321,7 +1350,7 @@ final class InspectionController
         $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
-            Response::error('Inspection not found', 404);
+            Response::error('Kontrola sa nenašla.', 404);
         }
         return $row;
     }
@@ -1336,6 +1365,7 @@ final class InspectionController
         $row['company_id'] = (int) $row['company_id'];
         $row['facility_id'] = (int) $row['facility_id'];
         $row['inspector_user_id'] = (int) $row['inspector_user_id'];
+        $row['created_by_user_id'] = isset($row['created_by_user_id']) ? (int) $row['created_by_user_id'] : null;
         $row['periodicity_value'] = isset($row['periodicity_value'])
             ? (int) $row['periodicity_value']
             : null;

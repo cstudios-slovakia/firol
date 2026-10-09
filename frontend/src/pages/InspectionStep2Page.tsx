@@ -10,9 +10,11 @@ import {
   type InspectionType,
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { Card } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import { cn } from '@/lib/cn';
+import { visitTrail } from '@/lib/visits';
 import { getTypeModule } from '@/inspection-types';
 import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStatusBadge';
 import type { SubmitAction } from '@/inspection-types/common';
@@ -132,13 +134,23 @@ export function InspectionStep2Page() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link
-        to={`/inspections/${inspectionId}`}
-        className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start"
-      >
-        <ArrowLeft className="size-4" />
-        Späť na súhrn
-      </Link>
+      {i.visit_id !== null ? (
+        <Breadcrumb
+          items={[
+            ...visitTrail({ id: i.visit_id, companyName: i.company_name, date: i.executed_on }),
+            { label: INSPECTION_TYPE_LABELS[i.type], to: `/inspections/${inspectionId}` },
+            { label: singleItem ? 'Záznam' : editing ? `Položka č. ${currentIndex}` : 'Nová položka' },
+          ]}
+        />
+      ) : (
+        <Link
+          to={`/inspections/${inspectionId}`}
+          className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start"
+        >
+          <ArrowLeft className="size-4" />
+          Späť na súhrn
+        </Link>
+      )}
 
       <header>
         <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">

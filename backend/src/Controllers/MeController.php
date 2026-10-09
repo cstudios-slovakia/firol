@@ -50,7 +50,7 @@ final class MeController
         $userId = Tenant::currentUserId();
         $target = $req->jsonInt('account_id');
         if ($target === null) {
-            Response::error('Field required: account_id', 422);
+            Response::error('Chýba ID účtu.', 422);
         }
 
         // Confirm the user actually belongs to the target account and is
@@ -62,7 +62,7 @@ final class MeController
         );
         $stmt->execute([$target, $userId]);
         if ($stmt->fetchColumn() === false) {
-            Response::error('Not a member of that account', 403);
+            Response::error('Nie si členom tohto účtu.', 403);
         }
 
         Session::setActiveAccountId($target);

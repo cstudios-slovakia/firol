@@ -810,15 +810,47 @@ Migrations `035`–`037`.
   issues each úkon's protocol from its own number series and reports what it
   had to skip and why — one úkon that isn't ready must not cost the other
   three.
+  **Step 1 inside a visit (user decision, 28. 9. 2026):** it is still shown —
+  periodicity and the notes differ per úkon — but company, prevádzka and date
+  are read from the loaded visit and shown as locked rows („Spoločné pre celú
+  návštevu"); the server overrides them again on create
+  (`VisitController::findForUkon`). The eyebrow reads „Úkon N z M". Every
+  screen inside a visit carries a `Dnes › Návšteva › Úkon › Položka` breadcrumb
+  (`<Breadcrumb>`, collapsing to „‹ parent" on a phone) so „Späť" climbs one
+  level and ends at the visit; a finished úkon offers „Ďalší úkon" (the next
+  unfinished planned type) or „Späť na návštevu". „Pridať ďalší úkon" carries
+  `visit_id`, so an úkon added on the spot joins the visit.
+  **Školenie PO on a visit (done):** `trainings.visit_id` (migration `048`,
+  which also adds `work_confirmations.training_ids`). `skolenie_po` is a planned
+  type — offered in the OPP group of `<VisitNewPage>`, pre-ticked when a training
+  chain of the firm is due within 30 days or overdue (since item H) — and the
+  visit lists its trainings, counts
+  them in „N z M hotové", starts them at `/trainings/new?visit_id=…` (company,
+  prevádzka and date locked, type / trainer editable) and continues them.
+  „Generovať všetky protokoly" calls `DocumentController::generateForTrainingInternal`
+  (the training screen's own generator), the bulk send accepts and lists the
+  `skolenie` protocol, and the potvrdenie lists it after the inspections. The
+  The Pokyn — žatevné práce may be recorded under a visit too (owner decision
+  7. 10. 2026, item **K**); it counts as a školenie PO of the visit.
+  **Protocol at the end of the visit (done):** `inspections` / `trainings`
+  `.protocol_deferred_at` (migration `049`). On a draft úkon inside a visit the
+  technician can generate the protocol now or press „Pokračovať bez protokolu"
+  (`<VisitContinueButton>`, `POST /api/visits/{id}/defer-protocol`); a held
+  úkon counts as done (progress, „Ďalší úkon"), stays editable and is issued by
+  „Generovať všetky protokoly" with its own number. Unlocking an úkon clears the
+  held state. Standalone úkony are unchanged.
 - ✅ **Ch. 9.1 — several protocols, one e-mail.** `document_sends`,
   `POST /api/companies/{id}/sends`, `<BulkSendDialog>`. Reachable from a visit
   and from the company history, where "everything from last year" is a matter
   of ticking rows. One message per recipient (one client's address never lands
   in another's headers); every send is recorded with its protocols, recipients
-  and outcome. **Deviation from the spec:** over 20 MB the send is refused with
-  a Slovak message naming the size, rather than shrinking the photos — the PDFs
-  are already issued, and re-rendering one would mean sending a document that
-  differs from the archived original under the same number. Both this send
+  and outcome. Over 20 MB the photos are shrunk (spec 9.1): the emailed copy
+  is the issued PDF with its big JPEGs re-encoded in place
+  (`Firol\Pdf\PdfImageShrinker`, 1000 px / q60), biggest protocol first, until
+  the total fits — the archive is never modified and nothing is re-rendered,
+  so the number still resolves to the issued document. Only when the total is
+  still over 20 MB is the send refused, with a Slovak message naming the size.
+  (This replaced an earlier refuse-instead deviation, 28. 9. 2026.) Both this send
   and the single-document one now carry a Reply-To of the sending technician
   (`Firol\Mail\ReplyTo`), falling back to the account's main user for an
   admin sending on a client's behalf — MAIL_FROM stays a shared noreply@, so
@@ -995,8 +1027,8 @@ brings it back, with its tables in `039_audits.sql`.
   offer can be declined and is never repeated for the same defect: it's
   remembered per device, and the server refuses a second task for one
   defect. A task points back to the defect by inspection id + defect key.
-  Removing a member unassigns their tasks. Tasks of an archived firm are
-  hidden.
+  Removing a member unassigns their tasks. Archiving a firma / prevádzka
+  closes its open tasks as „zrušené" (ch. 25, see L).
 - ✅ **Ch. 21 — sklad a výdajka** (`045_stock.sql`, `Support/Stock.php`,
   `/sklad`). Items, one balance per holder (Sklad + each technician), and an
   append-only journal. The journal has no edit or delete routes.
@@ -1072,11 +1104,11 @@ brings it back, with its tables in `039_audits.sql`.
 - ⬜ A browser click-through of sklad, fakturácia, the calendar and the „Viac"
   sheet. Úlohy, Dnes and the časová os were clicked through; the rest was
   tested through the API.
-- ⬜ Úlohy of an archived firm aren't marked „zrušené — firma archivovaná"
-  (ch. 25); they're only hidden.
+- ✅ Úlohy of an archived firm are closed as „zrušené — firma archivovaná"
+  (ch. 25, 8. 10. 2026 — see L).
 - ⬜ Unsynced offline drafts don't appear in Dnes → Rozrobené koncepty.
-- ⬜ Sklad items can't be renamed or deleted (the spec only has „Nová
-  položka"), and a movement can't be back-dated.
+- ⬜ A sklad movement can't be back-dated. (Items can be renamed, deleted and
+  retired — see D.)
 - ⬜ `calendar_plans` / `calendar_events` aren't in the backup archive
   (predates block 4); nor are potvrdenia and handover signatures.
   `calendar_events` may also have the SET NULL + account-cascade FK problem
@@ -1097,6 +1129,162 @@ zistené žiadne nedostatky".
 - ✅ Only available with no nedostatok: choosing „Zistené nedostatky" clears and
   disables the box; the backend rejects the flag together with a defect.
 - ✅ Unchecked → protocol renders as before. Opakovať blanks the flag.
+
+---
+
+## Client report after the update (POapp_chyby_po_aktualizacii, reduced scope) (2. 10. 2026) ✅
+
+Source: `docs/POapp_chyby_po_aktualizacii.md` (13 points). The client then sent
+a **reduced scope**, which overrides the original report.
+
+- ✅ **A — scroll lock (point 8).** One reference-counted lock,
+  `frontend/src/lib/scrollLock.ts` (`lockScroll()`), used by `Dialog` and
+  `PhotoLightbox`. Overlapping dialogs used to save/restore `overflow`
+  independently, so closing them in the "wrong" order left the page at
+  `hidden`. The first lock saves the original value, the last unlock restores
+  it, each release function is idempotent.
+- ✅ **B — focus loss (point 1), verification only.** The fix is `e81f9af`
+  (Dialog focus effect depends only on `open`). Re-read every text input in
+  dialogs and modals (handover, potvrdenie, signature picker/capture, sklad
+  dialogs, bulk send, e-mail form): no component defined inside a render body,
+  no unstable `key`, no other `.focus()` effect, no early form submit.
+- ✅ **C — bulk delete and restore for the main user only (point 3).**
+  `Tenant::requireMainUser()` (main user of the active account or platform
+  admin) guards the three `DELETE /api/account/data/*` routes and
+  `POST /api/account/restore` with 403. In Nastavenia → Správa dát the
+  „Hromadné vymazanie" and „Obnova zo zálohy" sections are hidden for everyone
+  else; backup download and Excel import stay for all members.
+- ✅ **D — delete a sklad item (point 4).**
+  `DELETE /api/stock/items/{id}`; „Vymazať položku" with a confirmation in the
+  item panel. Rule: an item with any movement on a výdajka is refused (409,
+  `code: stock_item_used`) so issued documents keep their material; any other
+  item is deleted together with its balances and journal rows (schema cascade).
+  Deleting follows the members' switch (`MemberRights::requireDelete`) — with
+  „obmedzené" the trash buttons are hidden for members; editing stays open.
+  **Vyradenie zo skladu:** the 409 turns the dialog into an offer to retire the
+  item (`POST /api/stock/items/{id}/retire`, same right as deleting; migration
+  `052_stock_item_retired.sql`, `stock_items.retired_at`). A retired item is
+  gone from Položky, can't be edited or get new movements, and stays in the
+  journal and on výdajky; backup/restore carry `retired_at`.
+- ✅ **E — time of a vlastná udalosť (point 10).** Migration
+  `050_calendar_event_time.sql` adds nullable `time_from` / `time_to`
+  (`HH:MM`; `time_to` needs `time_from` and must not be earlier). Shown in the
+  calendar (chip and day list) and on Dnes as `08:30` / `08:30–10:00`; an event
+  without a time stays all-day. Časová os lists only client deadlines, so it
+  needed no change.
+- ✅ **F — bulk-send preselection (point 5, remaining gap).**
+  `sendable-documents` returns `already_sent`; opened from the company history
+  the dialog preselects only protocols not yet sent (`odoslane`). After a visit
+  the visit's own protocols are still preselected. Potvrdenie o vykonaní práce
+  is not in the list (it is a document for the technician's employer, not for
+  the client) — **decided 7. 10. 2026: never in a bulk send**, and
+  `DocumentSendController::loadDocuments()` now refuses it for a crafted id too.
+- ✅ **G — práva členov switch (point 2, spec ch. 1.6) (5. 10. 2026).** Point 2
+  is not point 3: it is about deleting single records, not bulk delete. The
+  owner corrected the earlier reading ("replaced by item C"). Migration
+  `051_member_rights.sql`: `accounts.member_rights` (`plne` default /
+  `obmedzene`) and `created_by_user_id` on `inspections` and `trainings`.
+  `Firol\Auth\MemberRights` guards deleting an inspection or training,
+  „Upraviť" (unlock) on an inspection (it discards the issued protocol) and
+  deleting a visit (403 for a restricted member). Scope picked by the owner on
+  5. 10.: stock items and archiving a firma / prevádzka stay outside the
+  switch — **reversed 7. 10. 2026, item K**: both follow the switch. A
+  member may always delete their **own draft** (creator; rows older than `051`
+  fall back to the assigned technician), never a colleague's when restricted.
+  The main user and the platform admin are never restricted. Switch on Nastavenia
+  → Technici (`MemberRightsCard`, main user only, `PATCH
+  /api/account/member-rights`, every change written to `audit_log`). Members
+  don't see the buttons at all (`useMemberRights`); on a locked inspection the
+  note points them to the main user instead of „Upraviť".
+- ✅ **H — periodicity on trainings (original point 6) (7. 10. 2026).** The
+  earlier „not in the reduced scope, do not implement" is **reversed**: on
+  7. 10. 2026 the owner decided to build point 6 in full — the fix half
+  (trainings carry a periodicity) and the new half (a recommended lehota per
+  subtype, the term in the calendar and in kniha BOZP). Migration `053`:
+  `trainings.periodicity_value` / `periodicity_unit` / `periodicity_is_custom`
+  and a nullable `training_id` on `calendar_plans` and `deadline_notices`
+  (exactly one of it and `inspection_id`, enforced by a CHECK). Recommended
+  lehoty (client's table, `TRAINING_RECOMMENDED_MONTHS` on both sides): 24
+  mesiacov for `vstupne`, `opakovane`, `zdrzujuca_sa`; 12 for `opp_mimo`,
+  `hliadka_oph`, `hliadka_opah`, `pokyn_zatva`. As on inspections the value is
+  only recommended: the technician can set any days / weeks / months or „bez
+  opakovania", and the form defaults to the last value used for the same chain
+  at that firma / prevádzka (`last_training_periodicities` on the company
+  response), else the subtype's recommendation, following the subtype until
+  touched. The period locks with the training (see item **I**). `Deadlines` computes a term per training chain per prevádzka — or per
+  whole firma when the training has none (shown as „Celá firma"); the shape is
+  the inspection one with `training_id`, `training_type`, `done_training_id`.
+  Calendar, časová os, Dnes, planned dates (`/api/calendar/plans/training/{id}`),
+  client notices (recorded by `training_id`, naming the subtype) and the visit
+  pre-tick of Školenie PO all read it. The PDFs print „Periodicita: 12
+  mesiacov" (none without recurrence) and kniha BOZP „Termíny a kontroly"
+  prints platnosť do and stav for trainings. Backup and import carry the
+  columns. **Owner decisions:** (1) Vstupné and Opakované are one term chain
+  (`trainingChain()`): the next training of either fulfils the open term, every
+  other subtype is its own chain; (2) **no back-fill** — trainings from before
+  the migration stay „podľa potreby" and create no term. Oboznámenie BOZP
+  (`skolenie_bozp`, an inspection type) already worked and keeps its default
+  of 36 mesiacov.
+- ✅ **I — a finalized training behaves like a finalized inspection (7. 10. 2026).**
+  Owner decision from the final-scope audit: make it the same as on
+  inspections. A training with a PDF is locked for **everyone** (`PATCH
+  /api/trainings/{id}` → 409; date, trainer, topics, duration, periodicity and
+  the Pokyn text). „Upraviť" on the detail page (a prompt, then „Odomknúť a
+  upraviť") calls the new `POST /api/trainings/{id}/unlock`: it deletes the
+  documents rows, their versions and the PDF files, sets `status = draft` and
+  writes `training.unlock` to `audit_log`. The number is never reused. It is a
+  delete under the switch (`MemberRights::requireDelete`), so a restricted
+  member neither sees „Upraviť" nor gets past the API (403). The pencil on the
+  list and the detail now shows on drafts only; the edit page sends a finished
+  training back to its detail.
+- ✅ **J — Enter saves the sklad „Nová položka" dialog (7. 10. 2026).** The
+  dialog is a `<form>`: Enter with a name saves, Enter on an empty name shows
+  „Zadaj názov položky." and sends nothing.
+- ✅ **K — owner decisions from the final-scope audit (7. 10. 2026).**
+  (1) **New accounts start `obmedzene`** (migration `054`, column default only;
+  existing accounts keep their value). (2) **Archiving a firma or prevádzka
+  follows the switch** (`MemberRights::requireDelete` in
+  `CompanyController::archive` / `FacilityController::archive`; the trash
+  buttons are hidden for a restricted member). (3) **Sklad delete and
+  vyradenie follow the switch** — item D stands, and the earlier „stock items
+  stay outside the switch" in G is superseded. (4) **The Pokyn — žatevné práce
+  can be recorded under a visit**: the 422 is gone, the type picker and the
+  training form offer it inside a visit and the visit pre-tick counts it. The
+  Pokyn's PDF is in the bulk-send list too (`d.type IN ("skolenie",
+  "pokyn_zatva")`, labelled „Pokyn — žatevné práce"). The switch card in
+  Nastavenia → Technici states the current effect and that new accounts start
+  off.
+- ✅ **L — spec 25, archivácia firmy a prevádzky (8. 10. 2026, audit Major
+  #5).** A firma or prevádzka can no longer be deleted from the UI at all:
+  the trash buttons are gone and „Archivovať" replaces them, with an optional
+  dôvod. Migration `055`: `companies.archived_reason`,
+  `facilities.archived_reason`, `tasks.cancel_reason`. Routes
+  `POST /api/companies/{id}/archive|restore` and
+  `POST /api/facilities/{id}/archive|restore` replace the old `DELETE`
+  routes; all four follow the members' switch and need the server (never
+  queued offline). `Support/ClientArchive.php`: archiving closes the open
+  úlohy of that firma / prevádzka (`done = 1`, `cancel_reason`; they show
+  under „Splnené" as „zrušená — firma archivovaná" and can't be reopened
+  while it stays archived); restoring clears the dôvod and drops the
+  `calendar_plans` of its úkony, so termíny come only from the last control
+  and its periodicity (overdue shows as po termíne). Both write `audit_log`
+  (`company.archive`, `company.restore`, `facility.archive`,
+  `facility.restore`). Firmy has an „Aj archivované" switch that lists
+  archived firms after the active ones, greyed out, dashed and with an
+  „Archivovaná" chip. An archived firm or prevádzka opens read-only: a strip
+  with the date, dôvod and „Obnoviť"; protocols open, download and send; no
+  new úkon, edit, repeat, potvrdenie or persons. `GET /api/companies/{id}`
+  lists archived prevádzky separately (`archived_facilities`), so every
+  new-úkon picker still gets only active ones. Calendar, časová os, Dnes,
+  client notices and the pickers already left archived rows out. Restoring
+  a firma does not reopen its zrušené úlohy. The Danger-zone bulk purge in
+  Nastavenia → Správa dát (main user only) is untouched.
+- ⏸ **Client decisions — not implemented:** points 11, 12, 13
+  (custom BOZP deadlines, personal number of trainee, patrol training fields)
+  cancelled by the client for budget reasons.
+- ✅ **Already done before this report:** point 1 (`e81f9af`), point 7, point 9
+  and the rest of point 5 (trainings in the sendable list, „Označiť všetky",
+  newest first, `preselectDocumentIds` after a visit — `BulkSendDialog.tsx`).
 
 ---
 

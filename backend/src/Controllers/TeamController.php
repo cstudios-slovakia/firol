@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Audit\AuditLog;
 use Firol\Auth\Csrf;
+use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Billing\SeatSync;
 use Firol\Db;
@@ -98,10 +100,10 @@ final class TeamController
         $userId = $req->json()['user_id'] ?? null;
 
         if ($kind !== 'php' && $kind !== 'oprava') {
-            Response::error('Invalid kind (expected "php" or "oprava")', 422);
+            Response::error('Neplatný druh (očakáva sa „php“ alebo „oprava“).', 422);
         }
         if ($userId !== null && !is_int($userId)) {
-            Response::error('user_id must be an integer or null', 422);
+            Response::error('Neplatný technik (user_id musí byť celé číslo alebo null).', 422);
         }
         $column   = $kind === 'php' ? 'default_php_user_id' : 'default_oprava_user_id';
         $certCol  = $kind === 'php' ? 'cert_php'             : 'cert_oprava';
@@ -132,6 +134,40 @@ final class TeamController
     }
 
     /**
+     * Práva členov (chapter 1.6) — whether members may delete finished úkony
+     * and protocols. One switch per account, main user only; every change
+     * goes to the audit log (chapter 1.6.2).
+     */
+    public static function setMemberRights(Request $req): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::requireMainUser('Práva členov môže meniť len hlavný používateľ účtu.');
+
+        $value = $req->jsonString('member_rights');
+        if ($value !== MemberRights::FULL && $value !== MemberRights::RESTRICTED) {
+            Response::error('Neplatné práva člena (očakáva sa „plne“ alebo „obmedzene“).', 422);
+        }
+
+        $stmt = Db::pdo()->prepare('SELECT member_rights FROM accounts WHERE id = ?');
+        $stmt->execute([$accountId]);
+        $before = (string) $stmt->fetchColumn();
+
+        if ($before !== $value) {
+            Db::pdo()->prepare('UPDATE accounts SET member_rights = ? WHERE id = ?')
+                ->execute([$value, $accountId]);
+            AuditLog::record(
+                'account.member_rights',
+                'accounts',
+                $accountId,
+                ['member_rights' => $before],
+                ['member_rights' => $value],
+            );
+        }
+
+        Response::json(['member_rights' => $value]);
+    }
+
+    /**
      * Send an invitation to a technician. Only an `account_invites` row
      * is created here — neither `users` nor `account_users` is touched.
      * The invitee confirms via the link in the email, which calls
@@ -149,10 +185,10 @@ final class TeamController
         $phone    = $req->jsonString('phone');
 
         if ($fullname === null || trim($fullname) === '') {
-            Response::error('Field required: fullname', 422);
+            Response::error('Zadaj meno a priezvisko.', 422);
         }
         if ($email === null || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-            Response::error('Valid email required', 422);
+            Response::error('Zadaj platnú e-mailovú adresu.', 422);
         }
         $email = strtolower(trim($email));
 
@@ -318,18 +354,18 @@ final class TeamController
 
         $isActive = $req->jsonBool('is_active');
         if ($isActive === null) {
-            Response::error('Field required: is_active', 422);
+            Response::error('Chýba údaj o aktivite (is_active).', 422);
         }
 
         $member = self::loadMember($accountId, $userId);
         if ($member === null) {
-            Response::error('Member not found', 404);
+            Response::error('Člen tímu sa nenašiel.', 404);
         }
         if ($member['is_main']) {
-            Response::error('Cannot deactivate the main user', 409);
+            Response::error('Hlavného používateľa nemožno deaktivovať.', 409);
         }
         if ($userId === Tenant::currentUserId()) {
-            Response::error('You cannot deactivate yourself', 409);
+            Response::error('Nemôžeš deaktivovať sám seba.', 409);
         }
 
         // Re-activating a technician needs to respect the self-service cap
@@ -366,13 +402,13 @@ final class TeamController
 
         $member = self::loadMember($accountId, $userId);
         if ($member === null) {
-            Response::error('Member not found', 404);
+            Response::error('Člen tímu sa nenašiel.', 404);
         }
         if ($member['is_main']) {
-            Response::error('Cannot remove the main user', 409);
+            Response::error('Hlavného používateľa nemožno odstrániť.', 409);
         }
         if ($userId === Tenant::currentUserId()) {
-            Response::error('You cannot remove yourself', 409);
+            Response::error('Nemôžeš odstrániť sám seba.', 409);
         }
 
         // Block 4 / chapter 21: whatever the technician holds in the sklad goes
@@ -441,7 +477,7 @@ final class TeamController
         $stmt->execute([$accountId]);
         $mainId = $stmt->fetchColumn();
         if ((int) $mainId !== $userId) {
-            Response::error('Only the main user can manage the team', 403);
+            Response::error('Tím môže spravovať len hlavný používateľ.', 403);
         }
     }
 }
