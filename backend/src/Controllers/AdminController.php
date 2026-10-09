@@ -68,11 +68,11 @@ final class AdminController
             $value = $body[$key];
             if ($rule['type'] === 'int') {
                 if (!is_int($value) && !(is_string($value) && ctype_digit($value))) {
-                    Response::error("Hodnota „$key“ musí byť celé číslo.", 422);
+                    Response::error("Hodnota „{$key}“ musí byť celé číslo.", 422);
                 }
                 $intVal = (int) $value;
                 if ($intVal < $rule['min'] || $intVal > $rule['max']) {
-                    Response::error("Hodnota „$key“ musí byť v rozsahu {$rule['min']}–{$rule['max']}.", 422);
+                    Response::error("Hodnota „{$key}“ musí byť v rozsahu {$rule['min']}–{$rule['max']}.", 422);
                 }
                 if (isset($rule['forbid_range']) && in_array($intVal, $rule['forbid_range'], true)) {
                     Response::error("$key: trial dní musí byť 0 alebo aspoň 3 (Stripe vyžaduje minimálne 48 h)", 422);
@@ -80,11 +80,11 @@ final class AdminController
                 $stmt->execute([$key, (string) $intVal]);
             } elseif ($rule['type'] === 'float') {
                 if (!is_int($value) && !is_float($value) && !(is_string($value) && is_numeric($value))) {
-                    Response::error("Hodnota „$key“ musí byť číslo.", 422);
+                    Response::error("Hodnota „{$key}“ musí byť číslo.", 422);
                 }
                 $floatVal = round((float) $value, 2);
                 if ($floatVal < $rule['min'] || $floatVal > $rule['max']) {
-                    Response::error("Hodnota „$key“ musí byť v rozsahu {$rule['min']}–{$rule['max']}.", 422);
+                    Response::error("Hodnota „{$key}“ musí byť v rozsahu {$rule['min']}–{$rule['max']}.", 422);
                 }
                 $stmt->execute([$key, sprintf('%.2f', $floatVal)]);
             }

@@ -49,7 +49,7 @@ final class StripeClient
         $key = $billingPeriod === 'yearly' ? 'STRIPE_PRICE_YEARLY' : 'STRIPE_PRICE_MONTHLY';
         $price = (string) ($_ENV[$key] ?? '');
         if ($price === '') {
-            Response::error("Platobná brána Stripe nemá na serveri nastavené „$key“.", 500);
+            Response::error("Platobná brána Stripe nemá na serveri nastavené „{$key}“.", 500);
         }
         return $price;
     }

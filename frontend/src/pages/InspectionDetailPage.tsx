@@ -449,7 +449,7 @@ export function InspectionDetailPage() {
           </span>
           <p className="text-xs text-ink-600">
             <span className="font-semibold text-ink-800">Kontrola je uzamknutá.</span>{' '}
-            Má vystavený PDF protokol, preto sa záznamy ani dátum už nedajú meniť.
+            Má vystavený PDF protokol, preto sa záznamy ani dátum už nedajú meniť.{' '}
             {canUnlock
               ? 'Pre opravu použi „Upraviť", pre nový termín „Opakovať".'
               : 'Odomknúť ju na opravu môže hlavný používateľ, pre nový termín použi „Opakovať".'}

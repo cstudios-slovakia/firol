@@ -449,6 +449,7 @@ final class AdminPanelController
         $beforeStmt = Db::pdo()->prepare('SELECT fullname, email, phone, is_admin FROM users WHERE id = ?');
         $beforeStmt->execute([$id]);
         $before = $beforeStmt->fetch() ?: null;
+        if ($before === null) Response::error('Používateľ sa nenašiel.', 404);
 
         $bind[] = $id;
         try {
