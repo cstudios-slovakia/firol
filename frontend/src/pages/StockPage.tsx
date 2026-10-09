@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   ArrowRightLeft,
   Boxes,
@@ -1088,7 +1088,11 @@ function NewItemDialog({
     setError(null);
   }, [open, item]);
 
-  async function save() {
+  // A <form>, so Enter in the name field saves — but only once there is a
+  // name; an empty field just shows the hint and nothing is sent.
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (saving) return;
     if (!name.trim()) {
       setError('Zadaj názov položky.');
       return;
@@ -1119,7 +1123,7 @@ function NewItemDialog({
       title={item ? 'Upraviť položku' : STOCK_TEXTS.nova_polozka}
       dismissible={!saving}
     >
-      <div className="flex flex-col gap-4">
+      <form onSubmit={save} className="flex flex-col gap-4" noValidate>
         <Field label="Názov" required>
           {(p) => (
             <Input
@@ -1143,14 +1147,14 @@ function NewItemDialog({
         </Field>
         {error && <p className="text-sm text-status-bad">{error}</p>}
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
             Zrušiť
           </Button>
-          <Button onClick={save} loading={saving}>
+          <Button type="submit" loading={saving}>
             {item ? 'Uložiť' : 'Pridať'}
           </Button>
         </div>
-      </div>
+      </form>
     </Dialog>
   );
 }

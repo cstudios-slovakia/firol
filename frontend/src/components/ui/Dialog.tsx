@@ -54,14 +54,21 @@ export function Dialog({
     // Prevent the body from scrolling while the dialog is open. The
     // backdrop catches scrolls on its own.
     const unlock = lockScroll();
-    // Move focus into the panel so screen readers announce it and
-    // keyboard nav starts from a sensible place.
-    panelRef.current?.focus();
     return () => {
       document.removeEventListener('keydown', onKey);
       unlock();
     };
   }, [open]);
+
+  // Move focus into the panel so screen readers announce it and keyboard nav
+  // starts from a sensible place. This waits for `mounted`: a Dialog that stays
+  // mounted while `open` flips has no panel yet when the effect above runs.
+  // An input that already took focus inside the panel is left alone.
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!open || !mounted || !panel) return;
+    if (!panel.contains(document.activeElement)) panel.focus();
+  }, [open, mounted]);
 
   if (!mounted) return null;
 
