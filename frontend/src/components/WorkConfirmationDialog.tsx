@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { FileSignature } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
-import { WorkConfirmations } from '@/api/workConfirmations';
-import { documentDownloadUrl } from '@/api/inspections';
+import { WorkConfirmations, type WorkConfirmation } from '@/api/workConfirmations';
 import { ApiError } from '@/lib/api';
 import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { ConfirmationActions } from '@/components/CompanyWorkConfirmations';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Field } from '@/components/ui/Field';
@@ -38,6 +38,7 @@ export function WorkConfirmationDialog({
   facilityName,
   date,
   actCount,
+  onCreated,
 }: {
   open: boolean;
   onClose: () => void;
@@ -51,6 +52,8 @@ export function WorkConfirmationDialog({
   date: string;
   /** How many finished úkony will go on it, so the technician can sanity-check. */
   actCount?: number;
+  /** Fired once the PDF exists, so a list of confirmations can refresh. */
+  onCreated?: () => void;
 }) {
   const { csrfToken } = useAuth();
   const toast = useToast();
@@ -59,15 +62,23 @@ export function WorkConfirmationDialog({
   const [timeFrom, setTimeFrom] = useState('');
   const [timeTo, setTimeTo] = useState('');
   const [saving, setSaving] = useState(false);
+  const [signing, setSigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState<WorkConfirmation | null>(null);
+  const dateRef = useRef(date);
+  dateRef.current = date;
 
-  useEffect(() => {
+  // Reset only when the dialog opens. A later parent render (the list
+  // refreshing) must not wipe the PDF / e-mail / signature step.
+  useLayoutEffect(() => {
     if (!open) return;
-    setConfirmedOn(date);
+    setConfirmedOn(dateRef.current);
     setTimeFrom('');
     setTimeTo('');
     setError(null);
-  }, [open, date]);
+    setCreated(null);
+    setSigning(false);
+  }, [open]);
 
   async function handleSubmit() {
     setSaving(true);
@@ -84,9 +95,9 @@ export function WorkConfirmationDialog({
         },
         csrfToken,
       );
+      setCreated(res.confirmation);
+      onCreated?.();
       toast.success(`Potvrdenie ${res.document.number} vygenerované.`);
-      window.open(documentDownloadUrl(res.document.id), '_blank', 'noopener');
-      onClose();
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -98,16 +109,56 @@ export function WorkConfirmationDialog({
     }
   }
 
+  function refreshCreated() {
+    if (!created) return;
+    onCreated?.();
+    WorkConfirmations.list(created.company_id)
+      .then((res) => {
+        const fresh = res.items.find((item) => item.id === created.id);
+        if (fresh) setCreated(fresh);
+      })
+      .catch(() => {
+        // The list on the firm still reloads; the button label can wait.
+      });
+  }
+
   return (
     <Dialog
       open={open}
       onClose={() => {
-        if (!saving) onClose();
+        if (!saving && !signing) onClose();
       }}
       title="Potvrdenie o vykonaní práce"
-      description="Doklad pre tvojho zamestnávateľa — kde si bol a čo si urobil. Neobsahuje žiadne zistenia, len čísla protokolov."
-      dismissible={!saving}
+      description={
+        created
+          ? 'Potvrdenie je uložené pri firme. Nájdeš ho aj neskôr v záložke Protokoly.'
+          : 'Doklad pre tvojho zamestnávateľa — kde si bol a čo si urobil. Neobsahuje žiadne zistenia, len čísla protokolov.'
+      }
+      dismissible={!saving && !signing}
     >
+      {created ? (
+        <div className="flex flex-col gap-4">
+          <div className="rounded-2xl bg-ink-50 px-3 py-2.5 text-xs text-ink-600">
+            <p className="font-mono text-sm font-medium text-ink-900">{created.document_number}</p>
+            <p className="mt-0.5">
+              <span className="font-medium text-ink-800">{created.company_name}</span>
+              {created.facility_name && ` · ${created.facility_name}`}
+            </p>
+          </div>
+          <ConfirmationActions
+            item={created}
+            companyId={created.company_id}
+            readOnly={false}
+            onChanged={refreshCreated}
+            onSigningChange={setSigning}
+          />
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={onClose}>
+              Zavrieť
+            </Button>
+          </div>
+        </div>
+      ) : (
       <div className="flex flex-col gap-4">
         <div className="rounded-2xl bg-ink-50 px-3 py-2.5 text-xs text-ink-600">
           <p>
@@ -167,6 +218,7 @@ export function WorkConfirmationDialog({
           </Button>
         </div>
       </div>
+      )}
     </Dialog>
   );
 }

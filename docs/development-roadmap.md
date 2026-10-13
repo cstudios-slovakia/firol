@@ -1288,6 +1288,18 @@ a **reduced scope**, which overrides the original report.
 
 ---
 
+## Potvrdenie — odoslanie a podpis (13. 10. 2026) ✅
+
+Source: `POapp_potvrdenie_odoslanie`. After a potvrdenie o vykonaní práce is
+generated, the dialog stays open with **PDF**, **E-mail** and **Podpis klienta**
+(same actions as a výdajka). The sheet is also listed on the firm, záložka
+Protokoly, in its own section **above** Odoslané protokoly. Signing still
+re-renders the same number (`potvrdenie_prace` handover). It stays out of the
+bulk „Odoslať protokoly" list (decision 7. 10. 2026) — that mail is the
+client's protocols; this e-mail is the confirmation on its own.
+
+---
+
 ## Open questions (must be answered before the relevant phase starts)
 - **Company entity:** base doc says only "name, IČO, address, contact".
   Proposed full set (need confirmation):

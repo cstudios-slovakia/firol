@@ -40,7 +40,7 @@ final class AccountCertificateController
 
         $body = $req->json();
         $rows = $body['certificates'] ?? null;
-        if (!is_array($rows)) {
+        if (!is_array($rows) || ($rows !== [] && array_is_list($rows))) {
             Response::error('Chýbajú údaje o oprávneniach.', 422);
         }
 

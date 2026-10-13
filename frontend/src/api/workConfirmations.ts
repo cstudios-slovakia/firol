@@ -25,9 +25,12 @@ export type WorkConfirmation = {
   technician_user_id: number;
   technician_name: string;
   inspection_ids: number[];
+  training_ids?: number[];
   created_at: string;
   document_id: number | null;
   document_number: string | null;
+  /** Set once the client has signed on the screen (chapter 13). */
+  handover: { fullname: string; role_title: string; place: string; signed_on: string } | null;
 };
 
 export type WorkConfirmationPayload = {

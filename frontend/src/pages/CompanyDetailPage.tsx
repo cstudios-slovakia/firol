@@ -12,6 +12,7 @@ import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { BulkSendDialog } from '@/components/BulkSendDialog';
 import { CompanyPersons } from '@/components/CompanyPersons';
 import { WorkConfirmationDialog } from '@/components/WorkConfirmationDialog';
+import { CompanyWorkConfirmations } from '@/components/CompanyWorkConfirmations';
 import { CompanyStockIssues } from '@/components/stock/CompanyStockIssues';
 import { Documents, type DocumentSend } from '@/api/documents';
 import { documentDownloadUrl } from '@/api/inspections';
@@ -49,6 +50,7 @@ export function CompanyDetailPage() {
   // Chapter 10 — a potvrdenie can also be built after the fact from whatever
   // was finished at this client on a chosen day, not only from a visit.
   const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [confirmationsKey, setConfirmationsKey] = useState(0);
 
   const loadSends = useCallback(() => {
     Documents.sends(id)
@@ -408,6 +410,13 @@ export function CompanyDetailPage() {
 
           {tab === 'protocols' && (
             <div role="tabpanel" id="company-panel-protocols" aria-labelledby="company-tab-protocols" className="flex animate-fade-up flex-col gap-6">
+              {/* Chapter 10 — potvrdenia stay with the firm, above what was mailed. */}
+              <CompanyWorkConfirmations
+                companyId={company.id}
+                readOnly={!canEdit}
+                reloadKey={confirmationsKey}
+              />
+
               {/* Spec 25 — an archived firm's protocols can still be sent. */}
               <SendHistory sends={sends} onSend={canSend ? () => setSendOpen(true) : undefined} />
 
@@ -433,6 +442,7 @@ export function CompanyDetailPage() {
         companyId={company.id}
         companyName={company.name}
         date={todayIso()}
+        onCreated={() => setConfirmationsKey((k) => k + 1)}
       />
 
       <ArchiveDialog

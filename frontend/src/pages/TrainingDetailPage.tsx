@@ -91,10 +91,12 @@ export function TrainingDetailPage() {
 
   async function refreshDetail() {
     const fresh = await Trainings.show(id);
-    setData(fresh);
     const docs = await Trainings.documents(id).catch(
       () => ({ items: [] as TrainingDocument[] }),
     );
+    // Set together so the PDF card never pairs the new training with the
+    // previous documents list.
+    setData(fresh);
     setDocuments(docs.items);
   }
 
