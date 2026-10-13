@@ -14,8 +14,8 @@ import { CompanyPersons } from '@/components/CompanyPersons';
 import { WorkConfirmationDialog } from '@/components/WorkConfirmationDialog';
 import { CompanyWorkConfirmations } from '@/components/CompanyWorkConfirmations';
 import { CompanyStockIssues } from '@/components/stock/CompanyStockIssues';
-import { Documents, type DocumentSend } from '@/api/documents';
-import { documentDownloadUrl } from '@/api/inspections';
+import { Documents, type DocumentSend, type SendableDocument } from '@/api/documents';
+import { documentDownloadUrl, INSPECTION_TYPE_LABELS } from '@/api/inspections';
 import { cn } from '@/lib/cn';
 import { companyRecipientEmail } from '@/lib/companyEmail';
 
@@ -417,6 +417,11 @@ export function CompanyDetailPage() {
                 reloadKey={confirmationsKey}
               />
 
+              {/* Protocols issued on a visit live on the úkon. This tab used to
+                  list only e-mails, so a finished visit looked empty until
+                  something was sent. */}
+              <IssuedProtocols companyId={company.id} />
+
               {/* Spec 25 — an archived firm's protocols can still be sent. */}
               <SendHistory sends={sends} onSend={canSend ? () => setSendOpen(true) : undefined} />
 
@@ -463,6 +468,69 @@ export function CompanyDetailPage() {
  * "Poslali ste nám to?" is a question technicians get often enough that the
  * app has to be able to answer it, including when a send failed and why.
  */
+/**
+ * Protocols already issued for this client — the PDFs from a visit or a
+ * single úkon. Výdajky have their own section; the potvrdenie o vykonaní
+ * práce is listed above this one and is not part of the sendable set.
+ */
+function IssuedProtocols({ companyId }: { companyId: number }) {
+  const [items, setItems] = useState<SendableDocument[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Documents.sendable(companyId)
+      .then((res) => {
+        if (!cancelled) setItems(res.items.filter((doc) => doc.type !== 'vydajka'));
+      })
+      .catch(() => {
+        if (!cancelled) setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
+  if (!items || items.length === 0) return null;
+
+  return (
+    <section>
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-500">
+        Vystavené protokoly
+      </h2>
+      <ul className="divide-y divide-ink-100">
+        {items.map((doc) => (
+          <li key={doc.id} className="flex items-center gap-3 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="font-mono text-sm text-ink-900">{doc.number}</p>
+              <p className="truncate text-xs text-ink-500">
+                {protocolKind(doc)}
+                {doc.facility_name && ` · ${doc.facility_name}`}
+                {doc.executed_on && ` · ${formatDay(doc.executed_on)}`}
+              </p>
+            </div>
+            <a
+              href={documentDownloadUrl(doc.id)}
+              target="_blank"
+              rel="noopener"
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3 text-sm font-medium text-ink-700 transition-all duration-300 hover:border-ink-300 hover:bg-ink-50 active:scale-[0.98]"
+            >
+              <FileText className="size-4" />
+              PDF
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function protocolKind(doc: SendableDocument): string {
+  if (doc.type === 'skolenie') return 'Školenie PO';
+  if (doc.type === 'pokyn_zatva') return 'Pokyn — žatevné práce';
+  if (doc.type === 'vydajka') return 'Výdajka materiálu';
+  return INSPECTION_TYPE_LABELS[doc.type] ?? doc.type;
+}
+
 function SendHistory({ sends, onSend }: { sends: DocumentSend[]; onSend?: () => void }) {
   return (
     <section>

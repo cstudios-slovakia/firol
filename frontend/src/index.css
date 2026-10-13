@@ -227,3 +227,17 @@
     cursor: pointer;
   }
 }
+
+/*
+ * iOS Safari zooms the page when a focused field computes under 16px.
+ * Unlayered so it wins over Tailwind's text-sm on inputs. Phones and
+ * tablets only — desktop density stays as the components set it. Pinch
+ * zoom and the keyboard's next/done key are left alone.
+ */
+@media (max-width: 1024px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='button']):not([type='submit']):not([type='reset']):not([type='hidden']):not([type='image']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
