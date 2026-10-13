@@ -36,8 +36,30 @@ final class WorkConfirmationController
 {
     public static function index(Request $req): void
     {
-        $accountId = Tenant::currentAccountId();
+        $sessionAccountId = Tenant::currentAccountId();
+        $isAdmin = Admin::isAdmin(Tenant::currentUserId());
         $companyId = self::queryInt($req, 'company_id');
+
+        // File the list under the company being viewed, not only the session
+        // account. An admin works across accounts; a confirmation created from
+        // a visit is stored on the visit's account, and filtering by the
+        // session account hid it on the firm's Protokoly tab.
+        $accountId = $sessionAccountId;
+        if ($companyId !== null) {
+            $ownerSql = 'SELECT account_id FROM companies WHERE id = ?';
+            $ownerArgs = [$companyId];
+            if (!$isAdmin) {
+                $ownerSql .= ' AND account_id = ?';
+                $ownerArgs[] = $sessionAccountId;
+            }
+            $owner = Db::pdo()->prepare($ownerSql);
+            $owner->execute($ownerArgs);
+            $ownerAccountId = $owner->fetchColumn();
+            if ($ownerAccountId === false) {
+                Response::error('Firma sa nenašla.', 404);
+            }
+            $accountId = (int) $ownerAccountId;
+        }
 
         $sql = 'SELECT w.id, w.company_id, c.name AS company_name,
                        w.facility_id, f.name AS facility_name,

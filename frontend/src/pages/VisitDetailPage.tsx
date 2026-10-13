@@ -276,15 +276,27 @@ export function VisitDetailPage() {
           >
             Odoslať klientovi
           </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={documentIds.length === 0}
-            onClick={() => setConfirmationOpen(true)}
-            leftIcon={<FileSignature className="size-4" />}
-          >
-            Potvrdenie o vykonaní práce
-          </Button>
+          <span className="group relative inline-flex">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={documentIds.length === 0}
+              aria-describedby={documentIds.length === 0 ? 'visit-confirmation-hint' : undefined}
+              onClick={() => setConfirmationOpen(true)}
+              leftIcon={<FileSignature className="size-4" />}
+            >
+              Potvrdenie o vykonaní práce
+            </Button>
+            {documentIds.length === 0 && (
+              <span
+                id="visit-confirmation-hint"
+                role="tooltip"
+                className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-max max-w-56 -translate-x-1/2 rounded-lg bg-ink-900 px-2.5 py-1.5 text-center text-[11px] font-medium leading-snug text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100"
+              >
+                Najprv vygeneruj protokoly. Potvrdenie vychádza z vystavených protokolov.
+              </span>
+            )}
+          </span>
           {visit.status !== 'dokoncena' && (
             <Button type="button" variant="ghost" onClick={handleComplete} leftIcon={<Check className="size-4" />}>
               Uzavrieť návštevu

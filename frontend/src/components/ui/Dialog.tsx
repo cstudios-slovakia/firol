@@ -18,10 +18,9 @@ type DialogProps = {
 };
 
 /**
- * Lightweight modal dialog. Uses a fixed overlay rather than a portal so
- * it inherits the app's CSS context (theme variables, font) without any
- * extra wiring. Closes on backdrop click and on Escape; locks body
- * scroll while open so a long form doesn't scroll the underlying page.
+ * Lightweight modal dialog, portaled to document.body. Closes on backdrop
+ * click and on Escape; locks body scroll while open. The panel is capped
+ * to the viewport: the title stays at the top and the body scrolls.
  */
 export function Dialog({
   open,
@@ -75,49 +74,62 @@ export function Dialog({
   return createPortal(
     <div
       className={cn(
-        'fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4',
-        // Backdrop fades in/out independently of the panel so we get the
-        // dimmed-room feel without the panel popping in cold.
+        // The outer scroller starts at the top. A tall form (signature,
+        // handover) used to be centered with items-center, which clips the
+        // top on a phone and leaves it unreachable.
+        'fixed inset-0 z-50 overflow-y-auto overscroll-contain p-4',
         'bg-ink-900/40 backdrop-blur-sm transition-opacity duration-200 ease-out',
         entered ? 'opacity-100' : 'opacity-0',
       )}
       onClick={dismissible ? onClose : undefined}
       aria-hidden={!open}
     >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        tabIndex={-1}
-        // Stop click bubbling so clicking inside the panel doesn't dismiss.
-        onClick={(e) => e.stopPropagation()}
-        className={cn(
-          'relative w-full overflow-hidden rounded-2xl bg-white shadow-[var(--shadow-lift)] outline-none',
-          'transition-[opacity,transform] duration-200 ease-out',
-          entered ? 'scale-100 opacity-100' : 'scale-95 opacity-0',
-          maxWidthClassName,
-        )}
-      >
-        <header className="flex items-start justify-between gap-3 border-b border-ink-100 px-5 py-4">
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold text-ink-900">{title}</h2>
-            {description && (
-              <p className="mt-0.5 text-sm text-ink-500">{description}</p>
-            )}
-          </div>
-          {dismissible && (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Zavrieť"
-              className="grid size-9 shrink-0 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700"
-            >
-              <X className="size-4" />
-            </button>
+      <div className="flex min-h-full items-start justify-center sm:items-center">
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
+          tabIndex={-1}
+          // Stop click bubbling so clicking inside the panel doesn't dismiss.
+          onClick={(e) => e.stopPropagation()}
+          className={cn(
+            'relative my-auto flex w-full max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-2xl bg-white shadow-[var(--shadow-lift)] outline-none',
+            'transition-[opacity,transform] duration-200 ease-out',
+            entered ? 'scale-100 opacity-100' : 'scale-95 opacity-0',
+            maxWidthClassName,
           )}
-        </header>
-        <div className="px-5 py-4">{children}</div>
+        >
+          <header className="flex shrink-0 items-start justify-between gap-3 border-b border-ink-100 px-5 py-4">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-ink-900">{title}</h2>
+              {description && (
+                <p className="mt-0.5 text-sm text-ink-500">{description}</p>
+              )}
+            </div>
+            {dismissible && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Zavrieť"
+                className="grid size-9 shrink-0 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700"
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </header>
+          <div
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4"
+            onFocus={(e) => {
+              const target = e.target;
+              if (target instanceof HTMLElement) {
+                target.scrollIntoView({ block: 'nearest' });
+              }
+            }}
+          >
+            {children}
+          </div>
+        </div>
       </div>
     </div>,
     document.body,

@@ -25,31 +25,40 @@ export function CompanyWorkConfirmations({
   reloadKey?: number;
 }) {
   const [items, setItems] = useState<WorkConfirmation[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
+    setError(null);
     WorkConfirmations.list(companyId)
       .then((res) => setItems(res.items))
-      .catch(() => setItems([]));
+      .catch(() => {
+        setItems([]);
+        setError('Potvrdenia sa nepodarilo načítať.');
+      });
   }, [companyId]);
 
   useEffect(() => {
     load();
   }, [load, reloadKey]);
 
-  if (items.length === 0) return null;
+  if (items.length === 0 && !error) return null;
 
   return (
     <section>
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-500">
         Potvrdenia o vykonaní práce
       </h2>
-      <ul className="divide-y divide-ink-100">
-        {items.map((item) => (
-          <li key={item.id} className="py-3">
-            <ConfirmationRow item={item} companyId={companyId} readOnly={readOnly} onChanged={load} />
-          </li>
-        ))}
-      </ul>
+      {error && items.length === 0 ? (
+        <p className="text-sm text-status-bad">{error}</p>
+      ) : (
+        <ul className="divide-y divide-ink-100">
+          {items.map((item) => (
+            <li key={item.id} className="py-3">
+              <ConfirmationRow item={item} companyId={companyId} readOnly={readOnly} onChanged={load} />
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
