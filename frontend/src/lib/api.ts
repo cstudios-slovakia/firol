@@ -185,7 +185,9 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
     const message =
       parsed && typeof parsed === 'object' && 'error' in parsed
         ? String((parsed as { error: unknown }).error)
-        : `HTTP ${res.status}`;
+        : res.status >= 500
+          ? 'Server neodpovedá, skús to neskôr.'
+          : `HTTP ${res.status}`;
     const code =
       parsed && typeof parsed === 'object' && 'code' in parsed
         ? String((parsed as { code: unknown }).code)

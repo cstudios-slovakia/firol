@@ -4,6 +4,7 @@ import { useAuth } from '@/auth/AuthContext';
 import { Companies } from '@/api/companies';
 import { Documents } from '@/api/documents';
 import { ApiError } from '@/lib/api';
+import { cn } from '@/lib/cn';
 import { companyRecipientEmail } from '@/lib/companyEmail';
 import { useToast } from '@/lib/toast';
 import { Input } from '@/components/ui/Input';
@@ -18,11 +19,22 @@ export function EmailDocumentForm({
   documentId,
   documentNumber,
   companyId,
+  heading = 'Odoslať protokol e-mailom',
+  sentNoun = 'Protokol',
+  sentVerb = 'odoslaný',
+  className,
 }: {
   documentId: number;
   documentNumber: string;
   /** When given, the client's recorded e-mail is prefilled (and stays editable). */
   companyId?: number;
+  /** Line above the address. Defaults to the protocol wording. */
+  heading?: string;
+  /** Toast subject, e.g. „Potvrdenie". */
+  sentNoun?: string;
+  /** Agrees with sentNoun: „odoslaný" / „odoslané". */
+  sentVerb?: string;
+  className?: string;
 }) {
   const { csrfToken } = useAuth();
   const toast = useToast();
@@ -64,7 +76,7 @@ export function EmailDocumentForm({
         { email: trimmed, note: note.trim() || null },
         csrfToken,
       );
-      toast.success(`Protokol ${documentNumber} odoslaný na ${trimmed}.`);
+      toast.success(`${sentNoun} ${documentNumber} ${sentVerb} na ${trimmed}.`);
       setEmail('');
       setNote('');
     } catch (err) {
@@ -77,11 +89,14 @@ export function EmailDocumentForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex flex-col gap-2 border-t border-ink-100 bg-ink-50/40 px-4 py-3"
+      className={cn(
+        'flex flex-col gap-2',
+        className ?? 'border-t border-ink-100 bg-ink-50/40 px-4 py-3',
+      )}
     >
       <div className="flex items-center gap-2 text-xs font-medium text-ink-600">
         <Mail className="size-3.5" />
-        Odoslať protokol e-mailom
+        {heading}
       </div>
       <div className="flex flex-col gap-2 sm:flex-row">
         <Input

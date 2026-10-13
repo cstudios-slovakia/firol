@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { PenLine, Upload, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
+import { lockScroll } from '@/lib/scrollLock';
 import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
 
 type Mode = 'draw' | 'upload';
@@ -19,6 +20,21 @@ export function SignaturePickerModal({ onClose, onSave, saving }: Props) {
   const [padEmpty, setPadEmpty] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
   const [pickedFile, setPickedFile] = useState<File | null>(null);
+
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseRef.current();
+    };
+    document.addEventListener('keydown', onKey);
+    const unlock = lockScroll();
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      unlock();
+    };
+  }, []);
 
   const canSave = mode === 'draw' ? !padEmpty : pickedFile !== null;
 

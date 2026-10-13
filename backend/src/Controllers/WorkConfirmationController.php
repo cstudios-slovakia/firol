@@ -44,13 +44,16 @@ final class WorkConfirmationController
                        w.visit_id, w.confirmed_on, w.time_from, w.time_to,
                        w.technician_user_id, u.fullname AS technician_name,
                        w.inspection_ids, w.training_ids, w.created_at,
-                       d.id AS document_id, d.number AS document_number
+                       d.id AS document_id, d.number AS document_number,
+                       h.fullname AS handover_fullname, h.role_title AS handover_role,
+                       h.place AS handover_place, h.signed_on AS handover_signed_on
                 FROM   work_confirmations w
                 JOIN   companies  c ON c.id = w.company_id
                 LEFT   JOIN facilities f ON f.id = w.facility_id
                 JOIN   users      u ON u.id = w.technician_user_id
                 LEFT   JOIN documents d
                        ON d.parent_type = "work_confirmation" AND d.parent_id = w.id
+                LEFT   JOIN document_handovers h ON h.document_id = d.id
                 WHERE  w.account_id = ? AND w.archived_at IS NULL';
         $args = [$accountId];
         if ($companyId !== null) {
@@ -332,13 +335,16 @@ final class WorkConfirmationController
                     w.visit_id, w.confirmed_on, w.time_from, w.time_to,
                     w.technician_user_id, u.fullname AS technician_name,
                     w.inspection_ids, w.training_ids, w.created_at,
-                    d.id AS document_id, d.number AS document_number
+                    d.id AS document_id, d.number AS document_number,
+                    h.fullname AS handover_fullname, h.role_title AS handover_role,
+                    h.place AS handover_place, h.signed_on AS handover_signed_on
              FROM   work_confirmations w
              JOIN   companies  c ON c.id = w.company_id
              LEFT   JOIN facilities f ON f.id = w.facility_id
              JOIN   users      u ON u.id = w.technician_user_id
              LEFT   JOIN documents d
                     ON d.parent_type = "work_confirmation" AND d.parent_id = w.id
+             LEFT   JOIN document_handovers h ON h.document_id = d.id
              WHERE  w.id = ? AND w.account_id = ?'
         );
         $stmt->execute([$id, $accountId]);
@@ -647,6 +653,12 @@ final class WorkConfirmationController
             'created_at'         => $row['created_at'],
             'document_id'        => $row['document_id'] !== null ? (int) $row['document_id'] : null,
             'document_number'    => $row['document_number'],
+            'handover'           => ($row['handover_fullname'] ?? null) === null ? null : [
+                'fullname'   => (string) $row['handover_fullname'],
+                'role_title' => (string) $row['handover_role'],
+                'place'      => (string) $row['handover_place'],
+                'signed_on'  => (string) $row['handover_signed_on'],
+            ],
         ];
     }
 
