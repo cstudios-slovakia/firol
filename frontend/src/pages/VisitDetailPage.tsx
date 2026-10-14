@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, Check, CheckCircle2, FileSignature,
-  FileText, Plus, Route, Send, Warehouse,
+  FileText, Info, Plus, Route, Send, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { documentDownloadUrl } from '@/api/inspections';
@@ -276,27 +276,21 @@ export function VisitDetailPage() {
           >
             Odoslať klientovi
           </Button>
-          <span className="group relative inline-flex">
+          <HoverClickHint
+            active={documentIds.length === 0}
+            label="Informácia o potvrdení o vykonaní práce"
+            hint="Najprv vygeneruj protokoly. Potvrdenie vychádza z vystavených protokolov."
+          >
             <Button
               type="button"
               variant="secondary"
               disabled={documentIds.length === 0}
-              aria-describedby={documentIds.length === 0 ? 'visit-confirmation-hint' : undefined}
               onClick={() => setConfirmationOpen(true)}
               leftIcon={<FileSignature className="size-4" />}
             >
               Potvrdenie o vykonaní práce
             </Button>
-            {documentIds.length === 0 && (
-              <span
-                id="visit-confirmation-hint"
-                role="tooltip"
-                className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-max max-w-56 -translate-x-1/2 rounded-lg bg-ink-900 px-2.5 py-1.5 text-center text-[11px] font-medium leading-snug text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100"
-              >
-                Najprv vygeneruj protokoly. Potvrdenie vychádza z vystavených protokolov.
-              </span>
-            )}
-          </span>
+          </HoverClickHint>
           {visit.status !== 'dokoncena' && (
             <Button type="button" variant="ghost" onClick={handleComplete} leftIcon={<Check className="size-4" />}>
               Uzavrieť návštevu
@@ -328,6 +322,106 @@ export function VisitDetailPage() {
         }
       />
     </div>
+  );
+}
+
+/**
+ * Explains a disabled action. Hover shows the note; a tap on the action or
+ * the info mark toggles it, so the same text is reachable on a touch screen.
+ * A click while the pointer is still over the control hides it until the
+ * pointer leaves, so click and hover both open and close the note.
+ */
+function HoverClickHint({
+  active,
+  label,
+  hint,
+  children,
+}: {
+  active: boolean;
+  label: string;
+  hint: string;
+  children: React.ReactNode;
+}) {
+  const hintId = useId();
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const [pinned, setPinned] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [suppressHover, setSuppressHover] = useState(false);
+  const visible = active && (pinned || (hovered && !suppressHover));
+
+  useEffect(() => {
+    if (!pinned) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setPinned(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setPinned(false);
+        setSuppressHover(true);
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [pinned]);
+
+  if (!active) return children;
+
+  function toggle() {
+    if (pinned || (hovered && !suppressHover)) {
+      setPinned(false);
+      setSuppressHover(true);
+      return;
+    }
+    setPinned(true);
+    setSuppressHover(false);
+  }
+
+  return (
+    <span
+      ref={rootRef}
+      className="relative inline-flex cursor-help items-center gap-1"
+      onPointerEnter={(event) => {
+        if (event.pointerType !== 'mouse') return;
+        setHovered(true);
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType !== 'mouse') return;
+        setHovered(false);
+        setSuppressHover(false);
+      }}
+      onClick={toggle}
+    >
+      {children}
+      <button
+        type="button"
+        className={cn(
+          'inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-ink-400',
+          'transition-colors duration-200 hover:bg-ink-100 hover:text-ink-700 active:bg-ink-200',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300 focus-visible:ring-offset-2',
+          visible && 'bg-ink-100 text-ink-700',
+        )}
+        aria-label={label}
+        aria-expanded={visible}
+        aria-controls={hintId}
+      >
+        <Info className="size-4" aria-hidden />
+      </button>
+      <span
+        id={hintId}
+        role="tooltip"
+        aria-hidden={!visible}
+        className={cn(
+          'pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-max max-w-56 -translate-x-1/2 rounded-lg bg-ink-900 px-2.5 py-1.5 text-center text-[11px] font-medium leading-snug text-white shadow-lg transition-opacity duration-150',
+          visible ? 'opacity-100' : 'opacity-0',
+        )}
+      >
+        {hint}
+      </span>
+    </span>
   );
 }
 
