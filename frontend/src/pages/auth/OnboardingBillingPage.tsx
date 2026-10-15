@@ -6,6 +6,7 @@ import { AccountApi, type Account } from '@/api/account';
 import { Billing, type BillingPeriod } from '@/api/billing';
 import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { periodPriceLabel, usePricing, yearlyHint } from '@/lib/pricing';
 import { AuthLayout } from './AuthLayout';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -22,6 +23,7 @@ export function OnboardingBillingPage() {
   const { csrfToken, logout, accounts, activeAccountId } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
+  const pricing = usePricing();
 
   const activeAccount = accounts.find((a) => a.id === activeAccountId) ?? null;
   // No fallback here — until the account row has loaded with an explicit
@@ -108,12 +110,12 @@ export function OnboardingBillingPage() {
     }
   }
 
-  const priceLabel = plan === null ? '—' : plan === 'yearly' ? '199 € / rok' : '19 € / mesiac';
+  const priceLabel = plan === null ? '—' : periodPriceLabel(pricing, plan);
   const planLabel  = plan === null ? 'Načítavam plán…' : plan === 'yearly' ? 'Ročné predplatné' : 'Mesačné predplatné';
   const planHint   = plan === null
     ? ''
     : plan === 'yearly'
-      ? 'Ekvivalent ~16,60 € / mesiac, ušetríš 2 mesiace oproti mesačnému.'
+      ? (pricing ? `${yearlyHint(pricing, ',')} oproti mesačnému.` : '')
       : 'Účtuje sa každý mesiac, môžeš kedykoľvek zrušiť cez Stripe portál.';
 
   return (

@@ -16,6 +16,7 @@ import { Skeleton, CardBlockSkeleton } from '@/components/ui/Skeleton';
 import { Badge } from '@/components/ui/Badge';
 import { Dialog } from '@/components/ui/Dialog';
 import { cn } from '@/lib/cn';
+import { periodPriceLabel, usePricing, yearlyHint } from '@/lib/pricing';
 
 export function BillingPage() {
   const [account, setAccount] = useState<Account | null>(null);
@@ -147,6 +148,7 @@ function BillingSection({
 }) {
   const { csrfToken, refresh } = useAuth();
   const toast = useToast();
+  const pricing = usePricing();
   const [period, setPeriod] = useState<BillingPeriod>('monthly');
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -274,9 +276,7 @@ function BillingSection({
   const hasSub = isActive || isTrialing;
   const humanEnd = end ? end.toLocaleDateString('sk-SK', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
 
-  const periodPrice = account.billing_period === 'yearly'
-    ? '199 € / rok'
-    : '19 € / mesiac';
+  const periodPrice = periodPriceLabel(pricing, account.billing_period === 'yearly' ? 'yearly' : 'monthly');
 
   const cancelScheduled = account.stripe_cancel_at_period_end && (isActive || isTrialing);
 
@@ -393,15 +393,15 @@ function BillingSection({
                 <PeriodCard
                   active={period === 'monthly'}
                   title="Mesačne"
-                  price="19 € / mesiac"
+                  price={periodPriceLabel(pricing, 'monthly')}
                   hint="Flexibilita, môžeš kedykoľvek zrušiť."
                   onClick={() => setPeriod('monthly')}
                 />
                 <PeriodCard
                   active={period === 'yearly'}
                   title="Ročne"
-                  price="199 € / rok"
-                  hint="Ekvivalent ~16,60 € / mesiac — ušetríš 2 mesiace."
+                  price={periodPriceLabel(pricing, 'yearly')}
+                  hint={pricing ? `${yearlyHint(pricing)}.` : ''}
                   onClick={() => setPeriod('yearly')}
                 />
               </div>
