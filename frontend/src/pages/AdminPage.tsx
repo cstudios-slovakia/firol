@@ -41,6 +41,7 @@ import {
 import { Feedback, type FeedbackSubmission } from "@/api/feedback";
 import { ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { invalidatePricing } from "@/lib/pricing";
 import { cn } from "@/lib/cn";
 import { useConfirm } from "@/lib/confirm";
 import { Card } from "@/components/ui/Card";
@@ -1326,6 +1327,7 @@ function AdminSettingsSection() {
                 csrfToken,
             );
             setSettings(res.settings);
+            invalidatePricing();
             toast.success("Systémové nastavenia uložené.");
         } catch (err) {
             toast.error(

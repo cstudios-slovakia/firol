@@ -19,6 +19,7 @@ import { Billing } from "@/api/billing";
 import { ApiError } from "@/lib/api";
 import { offlineMessage } from "@/lib/offline";
 import { useToast } from "@/lib/toast";
+import { periodPriceLabel, usePricing } from "@/lib/pricing";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { OfflineIndicator } from "./OfflineIndicator";
 import { AuroraBackground } from "./AuroraBackground";
@@ -386,6 +387,7 @@ function TrialBanner() {
     const { accounts, activeAccountId, csrfToken, isAdmin } = useAuth();
     const toast = useToast();
     const navigate = useNavigate();
+    const pricing = usePricing();
 
     const account = accounts.find((a) => a.id === activeAccountId);
     if (!account) return null;
@@ -410,8 +412,10 @@ function TrialBanner() {
         month: "long",
     });
 
-    const periodPrice =
-        account.billing_period === "yearly" ? "199 € / rok" : "19 € / mesiac";
+    const periodPrice = periodPriceLabel(
+        pricing,
+        account.billing_period === "yearly" ? "yearly" : "monthly",
+    );
 
     const isTrialPaid = state === "trial_paid";
 

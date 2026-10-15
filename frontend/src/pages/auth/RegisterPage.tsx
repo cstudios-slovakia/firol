@@ -52,6 +52,11 @@ export function RegisterPage() {
     priceMonthly !== null && vatPercent !== null ? priceMonthly * (1 + vatPercent / 100) : null;
   const priceYearlyWithVat =
     priceYearly !== null && vatPercent !== null ? priceYearly * (1 + vatPercent / 100) : null;
+  // Yearly discount against 12 × monthly, in whole percent.
+  const yearlyDiscount =
+    priceMonthly !== null && priceYearly !== null && priceMonthly > 0
+      ? Math.round((1 - priceYearly / (priceMonthly * 12)) * 100)
+      : 0;
 
   // Surface the mismatch only after the user has typed enough that they're
   // clearly past the "still typing the same thing" stage — saves one
@@ -235,7 +240,7 @@ export function RegisterPage() {
                 label="Ročné"
                 price={priceYearly !== null ? `${formatEur(priceYearly)} €` : '— €'}
                 priceWithVat={priceYearlyWithVat !== null ? `${formatEur(priceYearlyWithVat)} €` : null}
-                badge="−13 %"
+                badge={yearlyDiscount > 0 ? `−${yearlyDiscount} %` : undefined}
               />
               <PeriodOption
                 active={plan === 'monthly'}
