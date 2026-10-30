@@ -1311,10 +1311,10 @@ Points 11, 12 and 13 of the 2. 10. report (cancelled then for budget) are back i
 | Phase | Content | Status |
 |---|---|---|
 | 0 | Branch (`poapp-oct-2026`), roadmap; questions to FIROL still to send | 🟨 |
-| 1 | Small fixes (rename, Paušál, IČO, after-create, address button, hints, O follow-up) | ✅ built, not yet browser-tested |
-| 2 | Client type (firma / bytové družstvo), prevádzka data, e-mail precedence, device list | ⬜ |
-| 3 | Školenia (osobné číslo, bulk, edit, take-over, hliadky, platnosť override) | ✅ built, not yet browser-tested |
-| 4 | Defect catalogue (27 items + own items) | ✅ built, API/migrations not yet run on a DB |
+| 1 | Small fixes (rename, Paušál, IČO, after-create, address button, hints, O follow-up) | ✅ |
+| 2 | Client type (firma / bytové družstvo), prevádzka data, e-mail precedence, device list | ✅ built, not yet browser-tested |
+| 3 | Školenia (osobné číslo, bulk, edit, take-over, hliadky, platnosť override) | ✅ |
+| 4 | Defect catalogue (27 items + own items) | ✅ |
 | 5 | Požiarna kniha and kniha BOZP as ledgers; old book úkony retired | ⬜ |
 | 6 | Termíny split by book, cudzie revízie | ⬜ |
 | 7a | Preventívna prehliadka: step 1, walk-through, defect entry | ⬜ |
@@ -1323,8 +1323,30 @@ Points 11, 12 and 13 of the 2. 10. report (cancelled then for budget) are back i
 | 8b | Concept checks, visits, Dnes, backup | ⬜ |
 | 9 | Acceptance pass, manual | ⬜ |
 
-**Built so far (Phases 1, 3, 4 — implemented in parallel, code only; migrations 056–059 and the
-browser acceptance checks still need a run on the local stack):**
+**Phases 1, 3 and 4 accepted (30. 10. 2026).** Checked in the browser at 360 px and on the
+API: 7-digit IČO at the field, new firm opens Pridať prevádzku, seat-address button (hidden with
+no address), Paušál, the documentation rename, training hint, approver hint, bulk paste of 20
+(semicolon and tab, 11 with a number), attendee edit, hliadka labels, platnosť override on the
+calendar and časová os, status `O` offering Oprava/plnenie/TS, take-over (copy then skip),
+training and BOZP PDFs (osobné číslo column only when someone has a number; hliadka line and
+Platnosť do when overridden), `/api/defect-catalog` (27 items). A future override is not on Dnes:
+that screen lists a term only when it is planned for today or already overdue. Backup merge and
+replace round-trip (own číselník, `personal_number`, `patrol_scope`, `valid_until_override`,
+`fields.catalog_id` remap) and the usage SQL against a fake `preventivna_prehliadka` item both
+passed; the throwaway account was removed. Migration 060 is applied on the local DB.
+
+**Built so far:**
+- **Phase 2** — migration 060. `companies.client_type` (`firma` / `bytove_druzstvo`) with a selector
+  on the company form. Nouns (Prevádzka / Bytový dom) on the company list, company detail, the
+  prevádzka form and the „Pridať …" buttons (`lib/clientKind.ts`, `Support/ClientKind.php`).
+  Prevádzka: e-mail, hlavné vypínače a uzávery, popis objektu, and for a bytový dom the floor
+  counts (no vchody field). `entrances` and `places` are stored for the walk-through and are not
+  on the form. E-mail precedence (prevádzka → kontaktný e-mail firmy → adresa v Kontakte) is
+  `ClientEmail` / `clientRecipientEmail`, used by single send, bulk send, termín notices and the
+  prevádzka detail. Zodpovedná osoba resolver (`ResponsiblePerson`, `lib/responsiblePerson.ts`)
+  is ready for Phase 5 and not wired into documents yet. Tab Objekt and a read-only Zariadenia
+  screen from the latest finalized úkon per type (`FacilityDevices`, disposed items left behind).
+  `FacilityEditPage` now uses `FacilityForm`. Phase 5's reserved migrations therefore start at 061.
 - **Phase 1** — migration 056 (Paušál column default), 8-digit IČO at the field + 422 `field: ico`,
   new company → add-prevádzka dialog, "Rovnaká adresa ako sídlo firmy" button, training and approver
   hints, rename to "ochrany pred požiarmi", status `O` follow-up (`OPRAVA_FOLLOW_UP_STATUSES` /
