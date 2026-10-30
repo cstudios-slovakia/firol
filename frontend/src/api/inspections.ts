@@ -136,6 +136,13 @@ export const PHP_STATUS_LABELS: Record<PhpStatus, string> = {
   V: 'Vyradený',
 };
 
+/**
+ * PHP statuses that offer an Oprava/plnenie/TS PHP follow-up (spec 7.3, D3).
+ * The one place to change if FIROL drops `O` — keep in step with
+ * InspectionController::OPRAVA_FOLLOW_UP_STATUSES on the server.
+ */
+export const PHP_OPRAVA_FOLLOW_UP_STATUSES: readonly PhpStatus[] = ['TS', 'O'];
+
 export const PHP_STATUS_TONES: Record<PhpStatus, 'ok' | 'warn' | 'bad' | 'neutral'> = {
   A: 'ok',
   TS: 'warn',
@@ -217,7 +224,7 @@ export const PK_ACTIVITY_LABELS: Record<PkActivity, string> = {
   electrical_equipment_check: 'Kontrola stavu používaných elektrických zariadení',
   technical_equipment_check: 'Kontrola stavu používaných technických zariadení',
   electrical_appliances_check: 'Kontrola stavu používaných elektrických spotrebičov',
-  documentation_check: 'Kontrola aktuálnosti dokumentácie požiarnej ochrany',
+  documentation_check: 'Kontrola aktuálnosti dokumentácie ochrany pred požiarmi',
   employee_list_check: 'Kontrola aktuálneho zoznamu zamestnancov a ich školení',
   fire_drill: 'Vykonaný cvičný požiarny poplach',
 };

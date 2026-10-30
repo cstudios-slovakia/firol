@@ -63,7 +63,7 @@ $activityLabels = [
   'electrical_equipment_check' => 'Kontrola stavu používaných elektrických zariadení',
   'technical_equipment_check' => 'Kontrola stavu používaných technických zariadení',
   'electrical_appliances_check' => 'Kontrola stavu používaných elektrických spotrebičov',
-  'documentation_check' => 'Kontrola aktuálnosti dokumentácie požiarnej ochrany',
+  'documentation_check' => 'Kontrola aktuálnosti dokumentácie ochrany pred požiarmi',
   'employee_list_check' => 'Kontrola aktuálneho zoznamu zamestnancov a ich školení',
   'fire_drill' => 'Vykonaný cvičný požiarny poplach',
 ];

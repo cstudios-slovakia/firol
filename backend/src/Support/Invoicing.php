@@ -31,7 +31,7 @@ final class Invoicing
     public const COMPANY_MODES = [self::PAUSAL, self::NA_FAKTURU];
 
     /** Column default for a firm that never had the setting chosen. */
-    public const COMPANY_DEFAULT = self::NA_FAKTURU;
+    public const COMPANY_DEFAULT = self::PAUSAL;
 
     /**
      * SQL condition for „nevyfakturované" on a table aliased `$alias` — the

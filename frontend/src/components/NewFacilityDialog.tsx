@@ -1,6 +1,7 @@
 import { Dialog } from '@/components/ui/Dialog';
 import { FacilityForm } from '@/components/FacilityForm';
 import type { Facility } from '@/api/facilities';
+import type { CompanyAddress } from '@/components/FacilityForm';
 
 type Props = {
   open: boolean;
@@ -9,6 +10,8 @@ type Props = {
   companyId: number;
   /** Company name shown in the dialog subtitle. */
   companyName: string;
+  /** The firm's seat — offered by the "Rovnaká adresa ako sídlo firmy" button. */
+  companyAddress?: CompanyAddress | null;
   /**
    * Called once the facility has been created. The caller is expected
    * to refresh its facility list and (optionally) auto-select the new
@@ -23,7 +26,7 @@ type Props = {
  * inline-create affordance one level deeper, without bouncing out to
  * the standalone facility editor.
  */
-export function NewFacilityDialog({ open, onClose, companyId, companyName, onCreated }: Props) {
+export function NewFacilityDialog({ open, onClose, companyId, companyName, companyAddress, onCreated }: Props) {
   return (
     <Dialog
       open={open}
@@ -35,6 +38,7 @@ export function NewFacilityDialog({ open, onClose, companyId, companyName, onCre
       <FacilityForm
         mode="create"
         companyId={companyId}
+        companyAddress={companyAddress}
         onSaved={(facility) => {
           onCreated(facility);
           onClose();

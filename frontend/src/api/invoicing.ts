@@ -25,8 +25,8 @@ export const BILLING_MODE_LABELS: Record<BillingMode, string> = {
 export const BILLING_MODES: BillingMode[] = ['pausal', 'na_fakturu', 'nefakturuje_sa'];
 export const COMPANY_BILLING_MODES: CompanyBillingMode[] = ['pausal', 'na_fakturu'];
 
-/** Column default for a firm that never had the setting chosen (migration 046). */
-export const COMPANY_BILLING_DEFAULT: CompanyBillingMode = 'na_fakturu';
+/** Column default for a firm that never had the setting chosen (migration 056; was na_fakturu before). */
+export const COMPANY_BILLING_DEFAULT: CompanyBillingMode = 'pausal';
 
 /** texty_ui.json `dnes.karta_nefakturovane`. */
 export const UNINVOICED_LABEL = 'Nevyfakturované';

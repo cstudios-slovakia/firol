@@ -9,6 +9,8 @@ import { useAuth } from '@/auth/AuthContext';
 import {
   INSPECTION_TYPE_LABELS,
   Inspections,
+  PHP_OPRAVA_FOLLOW_UP_STATUSES,
+  PHP_STATUS_LABELS,
   documentDownloadUrl,
   periodicityOf,
   type InspectionDetail,
@@ -870,7 +872,7 @@ function deviceCountPhrase(n: number): string {
  * Linked protocols (change request 2.1). Two things live here:
  *  - a "created from" back-link when this inspection is itself a follow-up draft;
  *  - existing follow-up drafts spawned from this inspection, and — when the
- *    items qualify — offers to create them: PHP → Oprava/TS (status TS) and
+ *    items qualify — offers to create them: PHP → Oprava/TS (status TS or O) and
  *    PHP → Vyraďovací protokol (status V), Hydranty → TS hadíc.
  *
  * A PHP inspection can qualify for both of its follow-ups at once, so the
@@ -893,11 +895,13 @@ function FollowUpBlock({
 }) {
   const candidates: { targetType: InspectionType; qualifying: number; offerText: string }[] = [];
   if (type === 'php') {
-    const forTest = items.filter((it) => it.fields.status === 'TS').length;
+    const forRepair = items.filter((it) =>
+      (PHP_OPRAVA_FOLLOW_UP_STATUSES as readonly unknown[]).includes(it.fields.status),
+    ).length;
     candidates.push({
       targetType: 'oprava_ts_php',
-      qualifying: forTest,
-      offerText: `${deviceCountPhrase(forTest)} stav „Tlaková skúška"`,
+      qualifying: forRepair,
+      offerText: `${deviceCountPhrase(forRepair)} stav ${PHP_OPRAVA_FOLLOW_UP_STATUSES.map((s) => `„${PHP_STATUS_LABELS[s]}"`).join(' alebo ')}`,
     });
     const forDisposal = items.filter((it) => it.fields.status === 'V').length;
     candidates.push({

@@ -38,7 +38,12 @@ export function CompanyEditPage() {
   }, [editing, id]);
 
   function handleSaved(saved: Company) {
-    navigate(`/companies/${saved.id}`, { replace: true });
+    // A new firma has no prevádzka yet and every úkon happens on one — land on
+    // the prevádzky tab with the "Pridať prevádzku" dialog already open.
+    navigate(
+      editing ? `/companies/${saved.id}` : `/companies/${saved.id}?tab=facilities&nova_prevadzka=1`,
+      { replace: true },
+    );
   }
 
   return (

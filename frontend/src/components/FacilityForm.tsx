@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Map, Mailbox, MapPin, NotebookPen, User, Warehouse } from 'lucide-react';
+import { Building, Map, Mailbox, MapPin, NotebookPen, User, Warehouse } from 'lucide-react';
 import { Facilities, type Facility, type FacilityPayload } from '@/api/facilities';
 import { ApiError } from '@/lib/api';
 import { facilityCreateOptimistic } from '@/lib/offlineEntities';
@@ -9,12 +9,22 @@ import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/auth/AuthContext';
+import { formatAddress } from '@/lib/address';
+
+/** The firm's seat, as far as the "Rovnaká adresa ako sídlo firmy" button needs it. */
+export type CompanyAddress = {
+  street: string | null;
+  postal_code: string | null;
+  city: string | null;
+};
 
 type FacilityFormProps = {
   /** Pre-fill an existing facility for edit mode. */
   initial?: Facility;
   /** When creating a new facility, the company it should attach to. */
   companyId?: number;
+  /** The firm's address; without one the "same address as the seat" button is hidden. */
+  companyAddress?: CompanyAddress | null;
   /** Called after a successful save with the resulting facility. */
   onSaved: (facility: Facility) => void;
   /** Optional cancel button — only rendered if provided. */
@@ -36,6 +46,7 @@ type FacilityFormProps = {
 export function FacilityForm({
   initial,
   companyId,
+  companyAddress,
   onSaved,
   onCancel,
   submitLabel,
@@ -54,6 +65,18 @@ export function FacilityForm({
   const [submitting, setSubmitting] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  // Spec 5 — offered only when the firm has an address to take over (street
+  // or obec, like the prototype).
+  const seatAddress = formatAddress(companyAddress?.street, companyAddress?.postal_code, companyAddress?.city);
+  const canTakeSeat = mode === 'create' && Boolean(companyAddress?.street?.trim() || companyAddress?.city?.trim());
+
+  function takeSeatAddress() {
+    setStreet(companyAddress?.street ?? '');
+    setPostalCode(companyAddress?.postal_code ?? '');
+    setCity(companyAddress?.city ?? '');
+    toast.success('Adresa prevzatá zo sídla firmy');
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -120,6 +143,23 @@ export function FacilityForm({
           />
         )}
       </Field>
+
+      {canTakeSeat && (
+        <div className="flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={takeSeatAddress}
+            className="flex items-start gap-3 rounded-2xl border border-dashed border-firol-300 bg-firol-50/40 px-3.5 py-3 text-left transition-all duration-200 hover:border-firol-400 hover:bg-firol-50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
+          >
+            <Building className="mt-0.5 size-4 shrink-0 text-firol-600" />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-ink-800">Rovnaká adresa ako sídlo firmy</span>
+              <span className="mt-0.5 block break-words text-xs text-ink-500">{seatAddress}</span>
+            </span>
+          </button>
+          <p className="text-xs text-ink-400">Doplní ulicu, PSČ aj obec. Potom sa to dá prepísať.</p>
+        </div>
+      )}
 
       <Field label="Ulica a číslo">
         {(p) => (

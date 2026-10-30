@@ -11,6 +11,7 @@ import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { BulkSendDialog } from '@/components/BulkSendDialog';
 import { CompanyPersons } from '@/components/CompanyPersons';
+import { NewFacilityDialog } from '@/components/NewFacilityDialog';
 import { WorkConfirmationDialog } from '@/components/WorkConfirmationDialog';
 import { CompanyWorkConfirmations } from '@/components/CompanyWorkConfirmations';
 import { CompanyStockIssues } from '@/components/stock/CompanyStockIssues';
@@ -51,6 +52,9 @@ export function CompanyDetailPage() {
   // was finished at this client on a chosen day, not only from a visit.
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [confirmationsKey, setConfirmationsKey] = useState(0);
+  // "Pridať prevádzku" dialog. A freshly created firm lands here with
+  // `?nova_prevadzka=1` so the first prevádzka is asked for straight away.
+  const [facilityOpen, setFacilityOpen] = useState(params.get('nova_prevadzka') === '1');
 
   const loadSends = useCallback(() => {
     Documents.sends(id)
@@ -77,6 +81,16 @@ export function CompanyDetailPage() {
   async function onRestore(kind: 'company' | 'facility', targetId: number, name: string) {
     if (await restoreArchived(kind, targetId, name)) reload();
   }
+
+  // Drop the one-shot flag from the URL once it has opened the dialog, so a
+  // reload or a tab hop does not reopen it.
+  useEffect(() => {
+    if (params.get('nova_prevadzka') !== '1') return;
+    setFacilityOpen(true);
+    const next = new URLSearchParams(params);
+    next.delete('nova_prevadzka');
+    setParams(next, { replace: true });
+  }, [params, setParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -199,6 +213,14 @@ export function CompanyDetailPage() {
             )}
           </div>
 
+          {/* Every úkon is done on a prevádzka — with none yet, say why the
+              start buttons are missing instead of leaving the card bare. */}
+          {canEdit && facilities.length === 0 && (
+            <p className="mt-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-600">
+              Úkony sa robia na prevádzke — najprv pridaj prevádzku.
+            </p>
+          )}
+
           {canStart && (
             <div className="mt-4 flex flex-wrap gap-2">
               {/* A visit is the right start when several úkony are planned:
@@ -298,13 +320,14 @@ export function CompanyDetailPage() {
             <div role="tabpanel" id="company-panel-facilities" aria-labelledby="company-tab-facilities" className="animate-fade-up">
               {canEdit && (
                 <div className="mb-3 flex justify-end">
-                  <Link
-                    to={`/companies/${company.id}/facilities/new`}
-                    className="inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+                  <button
+                    type="button"
+                    onClick={() => setFacilityOpen(true)}
+                    className="inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] transition-all duration-200 hover:bg-firol-600 active:scale-[0.98]"
                   >
                     <Plus className="size-3.5" />
                     Pridať prevádzku
-                  </Link>
+                  </button>
                 </div>
               )}
 
@@ -448,6 +471,15 @@ export function CompanyDetailPage() {
         companyName={company.name}
         date={todayIso()}
         onCreated={() => setConfirmationsKey((k) => k + 1)}
+      />
+
+      <NewFacilityDialog
+        open={facilityOpen}
+        onClose={() => setFacilityOpen(false)}
+        companyId={company.id}
+        companyName={company.name}
+        companyAddress={company}
+        onCreated={(f) => navigate(`/facilities/${f.id}`)}
       />
 
       <ArchiveDialog

@@ -461,7 +461,7 @@ export function TrainingDetailPage() {
                 </div>
                 <p className="text-sm text-ink-700">Zatiaľ žiadny účastník.</p>
                 <p className="max-w-xs text-xs text-ink-500">
-                  Po pridaní prvého účastníka uvidíš tu jeho podpis a v ďalšom kroku vznikne PDF protokol.
+                  Po pridaní prvého účastníka ho uvidíš tu a v ďalšom kroku vznikne PDF protokol.
                 </p>
               </Card>
             )

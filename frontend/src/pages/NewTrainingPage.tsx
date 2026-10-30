@@ -591,6 +591,7 @@ export function NewTrainingPage() {
           onClose={() => setNewFacilityOpen(false)}
           companyId={companyId}
           companyName={companies?.find((c) => c.id === companyId)?.name ?? ''}
+          companyAddress={companies?.find((c) => c.id === companyId)}
           onCreated={(f) => {
             setFacilities((prev) => {
               const enriched: FacilityListItem = {

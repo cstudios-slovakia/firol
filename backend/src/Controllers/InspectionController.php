@@ -100,6 +100,15 @@ final class InspectionController
      */
     private const NON_CYCLIC_TYPES = ['vyradenie'];
 
+    /**
+     * PHP statuses that feed an Oprava/plnenie/TS PHP follow-up (spec 7.3, D3).
+     * The one place to change if FIROL drops `O` — keep in step with
+     * PHP_OPRAVA_FOLLOW_UP_STATUSES in frontend/src/api/inspections.ts.
+     *
+     * @var list<string>
+     */
+    private const OPRAVA_FOLLOW_UP_STATUSES = ['TS', 'O'];
+
     public static function index(Request $req): void
     {
         $accountId = Tenant::currentAccountId();
@@ -303,7 +312,7 @@ final class InspectionController
     /**
      * Create a pre-filled DRAFT of a follow-up control off the back of this
      * inspection (change request 2.1):
-     *   php      → oprava_ts_php   (prístroje with status "TS")
+     *   php      → oprava_ts_php   (prístroje with status "TS" or "O")
      *   php      → vyradenie       (prístroje with status "V")
      *   hydranty → ts_hadic        (hoses from the checked hydrants)
      * The draft is never finalized — the technician opens it later, enters the
@@ -420,8 +429,8 @@ final class InspectionController
     }
 
     /**
-     * PHP items with status "TS" (na tlakovú skúšku) → Oprava/plnenie/TS PHP
-     * draft items. Carries identification only; the standard scope of work is
+     * PHP items with status "TS" (na tlakovú skúšku) or "O" (vyžaduje opravu,
+     * spec 7.3) → Oprava/plnenie/TS PHP draft items. Carries identification only; the standard scope of work is
      * fixed on that protocol and the note starts blank.
      *
      * @param list<array<string, mixed>> $items
@@ -431,7 +440,7 @@ final class InspectionController
     {
         $out = [];
         foreach ($items as $f) {
-            if (($f['status'] ?? null) !== 'TS') {
+            if (!in_array($f['status'] ?? null, self::OPRAVA_FOLLOW_UP_STATUSES, true)) {
                 continue;
             }
             $out[] = [

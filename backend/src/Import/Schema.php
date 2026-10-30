@@ -162,7 +162,7 @@ final class Schema
         ['value' => 'electrical_equipment_check', 'label' => 'Kontrola stavu používaných elektrických zariadení'],
         ['value' => 'technical_equipment_check', 'label' => 'Kontrola stavu používaných technických zariadení'],
         ['value' => 'electrical_appliances_check', 'label' => 'Kontrola stavu používaných elektrických spotrebičov'],
-        ['value' => 'documentation_check', 'label' => 'Kontrola aktuálnosti dokumentácie požiarnej ochrany'],
+        ['value' => 'documentation_check', 'label' => 'Kontrola aktuálnosti dokumentácie ochrany pred požiarmi'],
         ['value' => 'employee_list_check', 'label' => 'Kontrola aktuálneho zoznamu zamestnancov a ich školení'],
         ['value' => 'fire_drill', 'label' => 'Cvičný požiarny poplach'],
     ];

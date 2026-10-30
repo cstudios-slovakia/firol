@@ -17,6 +17,18 @@ import {
 } from '@/api/invoicing';
 import { cn } from '@/lib/cn';
 
+const ICO_PATTERN = /^\d{8}$/;
+const ICO_MESSAGE = 'IČO musí mať presne 8 číslic.';
+
+/** The `field` key a 422 from the backend carries, if any. */
+function fieldOf(body: unknown): string | null {
+  if (body && typeof body === 'object' && 'field' in body) {
+    const f = (body as { field?: unknown }).field;
+    return typeof f === 'string' ? f : null;
+  }
+  return null;
+}
+
 type CompanyFormProps = {
   /** Pass to render an Edit form prefilled with this row. Omit for create. */
   initial?: Company;
@@ -61,6 +73,7 @@ export function CompanyForm({
   const [submitting, setSubmitting] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [icoError, setIcoError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
@@ -69,12 +82,20 @@ export function CompanyForm({
       setNameError('Doplň názov firmy.');
       return;
     }
+    // Spec 4 — IČO is optional, but exactly 8 digits when filled. An untouched
+    // legacy value on an existing firm is not re-checked (same rule as the server).
+    const icoClean = ico.replace(/\s+/g, '');
+    if (icoClean && icoClean !== (initial?.ico ?? '').replace(/\s+/g, '') && !ICO_PATTERN.test(icoClean)) {
+      setIcoError(ICO_MESSAGE);
+      return;
+    }
     if (contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim())) {
       setEmailError('Zadaj platnú e-mailovú adresu.');
       return;
     }
     setNameError(null);
     setEmailError(null);
+    setIcoError(null);
     setError(null);
     setSubmitting(true);
     const payload: CompanyPayload = {
@@ -113,6 +134,12 @@ export function CompanyForm({
         if (initial) onSaved(initial);
         return;
       }
+      // The server flags which field a 422 belongs to — show it there, not in
+      // the form-level box above the button.
+      if (err instanceof ApiError && err.status === 422 && fieldOf(err.body) === 'ico') {
+        setIcoError(err.message);
+        return;
+      }
       const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
       setError(msg);
       toast.error(msg);
@@ -137,14 +164,14 @@ export function CompanyForm({
         )}
       </Field>
 
-      <Field label="IČO">
+      <Field label="IČO" hint="Nepovinné — ak ho vyplníš, musí mať presne 8 číslic." error={icoError}>
         {(p) => (
           <Input
             {...p}
             inputMode="numeric"
             leftIcon={<Hash className="size-4" />}
             value={ico}
-            onChange={(e) => setIco(e.target.value)}
+            onChange={(e) => { setIco(e.target.value); if (icoError) setIcoError(null); }}
             placeholder="12345678"
           />
         )}
@@ -221,7 +248,18 @@ export function CompanyForm({
 
       <Field
         label="Schvaľujúca osoba"
-        hint="Meno a funkcia — dopĺňa sa do poľa „Schválil“ na pokynoch a protokoloch."
+        hint={
+          <>
+            Meno a funkcia — dopĺňa sa do poľa „Schválil“ na pokynoch a protokoloch.
+            <br />
+            <br />
+            <b className="font-semibold text-ink-600">Požiarnu knihu neschvaľuje</b> — § 31 ods. 1 dáva
+            štatutárnemu orgánu na schválenie identifikačnú kartu, požiarne poriadky pracovísk, poplachové
+            smernice a evakuačné plány, kniha medzi nimi nie je. V knihe sa tá istá osoba podpisuje ako{' '}
+            <b className="font-semibold text-ink-600">vedúci zamestnanec organizačnej zložky</b>, ktorý bol
+            so záznamom oboznámený.
+          </>
+        }
       >
         {(p) => (
           <Input

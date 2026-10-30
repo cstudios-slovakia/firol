@@ -595,6 +595,7 @@ export function InspectionStep1Page() {
           onClose={() => setNewFacilityOpen(false)}
           companyId={companyId}
           companyName={companies?.find((c) => c.id === companyId)?.name ?? ''}
+          companyAddress={companies?.find((c) => c.id === companyId)}
           onCreated={(f) => {
             // Splice the new row into the list (last_periodicities empty —
             // history kicks in only after the first inspection) and

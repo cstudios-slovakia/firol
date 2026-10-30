@@ -228,7 +228,7 @@ final class CompanyController
         $existing = self::findOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
-        [$name, $ico, $addr, $contact, $contactEmail, $approver] = self::readBody($req);
+        [$name, $ico, $addr, $contact, $contactEmail, $approver] = self::readBody($req, $existing['ico']);
         // Chapter 22 — validated up front so a bad value never half-saves the firm.
         $billingMode = self::readBillingMode($req);
 
@@ -299,12 +299,14 @@ final class CompanyController
     }
 
     /**
+     * @param ?string $storedIco the IČO already on the firm (update only), so an
+     *                           untouched legacy value is not rejected
      * @return array{
      *   0:string, 1:?string,
      *   2:array{street:?string,postal_code:?string,city:?string}, 3:?string, 4:?string, 5:?string
      * }
      */
-    private static function readBody(Request $req): array
+    private static function readBody(Request $req, ?string $storedIco = null): array
     {
         $name    = $req->jsonString('name');
         $ico     = $req->jsonString('ico');
@@ -324,8 +326,11 @@ final class CompanyController
             $ico = preg_replace('/\s+/', '', $ico);
             if ($ico === '') {
                 $ico = null;
-            } elseif (!preg_match('/^\d{1,12}$/', $ico)) {
-                Response::error('IČO môže obsahovať len číslice.', 422);
+            } elseif (!preg_match('/^\d{8}$/', $ico) && $ico !== preg_replace('/\s+/', '', (string) $storedIco)) {
+                // Spec 4 — optional, but exactly 8 digits when filled. A stored
+                // legacy value is only re-checked when the user changed it. The
+                // `field` key lets the form show the message at the IČO field.
+                Response::error('IČO musí mať presne 8 číslic.', 422, ['field' => 'ico']);
             }
         }
 
