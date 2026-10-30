@@ -99,6 +99,22 @@ final class AccountPurge
         return $count;
     }
 
+    /**
+     * The account's own číselník nedostatkov items (Phase 4), archived ones
+     * included. Shipped items (account_id NULL) are never touched. Only for a
+     * replace-mode restore, which writes the own items back from the backup;
+     * deleting the firms or the account's úkony leaves the číselník alone, and
+     * deleting the whole account removes it through the FK cascade.
+     *
+     * @return int number of items removed
+     */
+    public static function defectCatalog(int $accountId): int
+    {
+        $stmt = Db::pdo()->prepare('DELETE FROM defect_catalog WHERE account_id = ?');
+        $stmt->execute([$accountId]);
+        return $stmt->rowCount();
+    }
+
     /** Inspections + items + photos + their protocols. Companies survive. */
     public static function inspections(int $accountId): int
     {

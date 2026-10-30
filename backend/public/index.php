@@ -244,6 +244,14 @@ $router->patch('/api/tasks/{id}',                   [\Firol\Controllers\TaskCont
 $router->delete('/api/tasks/{id}',                  [\Firol\Controllers\TaskController::class, 'destroy']);
 
 $router->get('/api/me/inspector-profile',            [InspectorProfileController::class, 'show']);
+// Phase 4 — číselník nedostatkov. Shipped items are read-only; the writes touch
+// the account's own items only (DELETE archives). `usage` feeds „Najčastejšie".
+$router->get('/api/defect-catalog',                 [\Firol\Controllers\DefectCatalogController::class, 'index']);
+$router->get('/api/defect-catalog/usage',           [\Firol\Controllers\DefectCatalogController::class, 'usage']);
+$router->post('/api/defect-catalog',                [\Firol\Controllers\DefectCatalogController::class, 'store']);
+$router->patch('/api/defect-catalog/{id}',          [\Firol\Controllers\DefectCatalogController::class, 'update']);
+$router->delete('/api/defect-catalog/{id}',         [\Firol\Controllers\DefectCatalogController::class, 'destroy']);
+
 $router->patch('/api/me/inspector-profile',          [InspectorProfileController::class, 'update']);
 $router->post('/api/me/inspector-profile/signature', [InspectorProfileController::class, 'uploadSignature']);
 $router->get('/api/me/inspector-profile/signature',  [InspectorProfileController::class, 'downloadSignature']);

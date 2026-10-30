@@ -2590,6 +2590,7 @@ const RESTORE_LABELS: Record<string, string> = {
     stock_items: "skladových položiek",
     stock_movements: "pohybov v sklade",
     tasks: "úloh",
+    defect_catalog: "vlastných nedostatkov v číselníku",
 };
 
 const RESTORE_MODES: {

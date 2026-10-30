@@ -48,6 +48,9 @@ final class Writer
             // výdajky and the movements journal.
             'stock'       => self::stock($accountId, $pdo),
             'tasks'       => self::tasks($accountId, $pdo),
+            // Phase 4 — the account's own číselník nedostatkov items. Shipped
+            // ones (account_id NULL) are the same everywhere and not backed up.
+            'defect_catalog' => self::defectCatalog($accountId, $pdo),
             // Chapter 11.3 — which deadlines already had their automatic
             // client notice, so a restore does not send it a second time.
             'deadline_notices' => self::deadlineNotices($accountId, $pdo),
@@ -60,6 +63,7 @@ final class Writer
             'trainings'   => count($manifest['trainings']),
             'documents'   => count($manifest['documents']),
             'tasks'       => count($manifest['tasks']),
+            'defect_catalog' => count($manifest['defect_catalog']),
             'photos'      => count(array_filter(array_keys($files), static fn (string $e): bool => str_starts_with($e, 'photos/') && !str_ends_with($e, '_t.jpg'))),
         ];
 
@@ -410,6 +414,34 @@ final class Writer
 
     /**
      * Automatic client notices already sent (chapter 11.3), keyed by the
+    /**
+     * The account's own číselník nedostatkov items, archived ones included: a
+     * defect's `fields.catalog_id` may still name one. The author goes by
+     * e-mail, like the inspector of an úkon.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function defectCatalog(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT d.id, d.title, d.scope, d.area, d.default_deadline, d.description,
+                    d.regulation, d.justification, d.measure, d.archived_at, d.created_at,
+                    u.email AS created_by_email
+             FROM   defect_catalog d
+             LEFT   JOIN users u ON u.id = d.created_by_user_id
+             WHERE  d.account_id = ?
+             ORDER  BY d.id'
+        );
+        $stmt->execute([$accountId]);
+
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row['id'] = (int) $row['id'];
+            $out[] = $row;
+        }
+        return $out;
+    }
+
      * úkon whose deadline they announced — an inspection or, since
      * change request 6, a training (exactly one of the two ids is set).
      *

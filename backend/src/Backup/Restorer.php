@@ -59,6 +59,7 @@ final class Restorer
         'stock_items'     => 0,
         'stock_movements' => 0,
         'tasks'       => 0,
+        'defect_catalog' => 0,
     ];
 
     /** @var array<string, int> */
@@ -70,6 +71,7 @@ final class Restorer
         'documents'   => 0,
         'stock_items' => 0,
         'tasks'       => 0,
+        'defect_catalog' => 0,
     ];
 
     /** @var list<string> */
@@ -83,6 +85,8 @@ final class Restorer
     private array $inspectionMap = [];
     /** @var array<int, int> old training id → new */
     private array $trainingMap = [];
+    /** @var array<int, int> old own číselník item id → new (shipped ids are the same everywhere) */
+    private array $defectCatalogMap = [];
     /** @var array<int, int> old výdajka (stock_issues) id → new */
     private array $stockIssueMap = [];
     /** @var array<string, int> lowercased email → user id on this account */
@@ -177,11 +181,18 @@ final class Restorer
             // The sklad is not firm data, so the firm purge leaves it; a
             // replace restore writes it back whole and has to clear it first.
             AccountPurge::stock($this->accountId);
+            // Own číselník items come back with the backup; an archive from
+            // before the číselník existed has no key and must not wipe them.
+            if (array_key_exists('defect_catalog', $manifest)) {
+                AccountPurge::defectCatalog($this->accountId);
+            }
         }
 
         $this->pdo->beginTransaction();
         try {
             $this->restoreCompanies($this->list($manifest, 'companies'));
+            // Before the inspections: a defect's fields.catalog_id is remapped onto it.
+            $this->restoreDefectCatalog($this->list($manifest, 'defect_catalog'));
             $this->restoreInspections($this->list($manifest, 'inspections'));
             $this->restoreTrainings($this->list($manifest, 'trainings'));
             // Chapter 21 — before the documents, which map výdajky onto it.
@@ -406,7 +417,7 @@ final class Restorer
                 $insertItem->execute([
                     $inspectionId,
                     (int) ($item['position'] ?? 0),
-                    (string) json_encode($item['fields'] ?? new \stdClass(), JSON_UNESCAPED_UNICODE),
+                    (string) json_encode($this->remapCatalogId($item['fields'] ?? null) ?? new \stdClass(), JSON_UNESCAPED_UNICODE),
                     $this->createdAt($item),
                 ]);
                 $itemId = (int) $this->pdo->lastInsertId();
@@ -751,6 +762,107 @@ final class Restorer
     /**
      * Tasks, remapped onto the restored firms, prevádzky and úkony. Merge key:
      * created_at + text. A task whose firm didn't make it into the account is
+    // ── Číselník nedostatkov (Phase 4) ───────────────────────────────────────
+
+    /**
+     * The account's own číselník items (archived ones too, so a defect that
+     * names one still resolves), remapped to fresh ids. Shipped items are not
+     * in the backup — they are the same rows on every installation. Merge key:
+     * created_at + title; an item already here is reused, not duplicated.
+     * Authors are matched by e-mail like the inspector of an úkon.
+     *
+     * @param list<array<string, mixed>> $items
+     */
+    private function restoreDefectCatalog(array $items): void
+    {
+        $stmt = $this->pdo->prepare('SELECT id, created_at, title FROM defect_catalog WHERE account_id = ?');
+        $stmt->execute([$this->accountId]);
+        $existing = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $existing[self::normalizeDateTime((string) $row['created_at']) . '|' . $row['title']] = (int) $row['id'];
+        }
+
+        $insert = $this->pdo->prepare(
+            'INSERT INTO defect_catalog
+                (account_id, title, scope, area, default_deadline, description, regulation,
+                 justification, measure, created_by_user_id, archived_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+
+        foreach ($items as $item) {
+            $title = $this->str($item, 'title');
+            if ($title === null) {
+                continue;
+            }
+            $oldId = (int) ($item['id'] ?? 0);
+            $createdAt = $this->createdAt($item);
+            $key = $createdAt . '|' . $title;
+            if (isset($existing[$key])) {
+                $this->defectCatalogMap[$oldId] = $existing[$key];
+                $this->skipped['defect_catalog']++;
+                continue;
+            }
+
+            $scope = $this->str($item, 'scope');
+            $insert->execute([
+                $this->accountId,
+                $title,
+                in_array($scope, ['po', 'bo', 'ob'], true) ? $scope : 'po',
+                (string) ($this->str($item, 'area') ?? ''),
+                (string) ($this->str($item, 'default_deadline') ?? 'do 30 dní'),
+                (string) ($this->str($item, 'description') ?? ''),
+                (string) ($this->str($item, 'regulation') ?? ''),
+                (string) ($this->str($item, 'justification') ?? ''),
+                (string) ($this->str($item, 'measure') ?? ''),
+                $this->user($item, 'created_by_email') ?? $this->userId,
+                $this->dateTime($item, 'archived_at'),
+                $createdAt,
+            ]);
+            $newId = (int) $this->pdo->lastInsertId();
+            $this->defectCatalogMap[$oldId] = $newId;
+            $existing[$key] = $newId;
+            $this->restored['defect_catalog']++;
+        }
+    }
+
+    /**
+     * A defect's `fields.catalog_id` (Phase 7a) points at a číselník row. A
+     * shipped id is the same everywhere and stays; an own one is remapped to
+     * the restored row, and one that could not be restored is dropped (the
+     * defect keeps its copied texts) rather than left pointing at a stranger's
+     * item.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function remapCatalogId(mixed $fields): ?array
+    {
+        if (!is_array($fields)) {
+            return null;
+        }
+        if (!isset($fields['catalog_id']) || !is_numeric($fields['catalog_id'])) {
+            return $fields;
+        }
+        $old = (int) $fields['catalog_id'];
+        if (isset($this->defectCatalogMap[$old])) {
+            $fields['catalog_id'] = $this->defectCatalogMap[$old];
+        } elseif (!$this->isShippedCatalogId($old)) {
+            $fields['catalog_id'] = null;
+        }
+        return $fields;
+    }
+
+    private function isShippedCatalogId(int $id): bool
+    {
+        static $shipped = null;
+        if ($shipped === null) {
+            $shipped = array_flip(array_map(
+                'intval',
+                $this->pdo->query('SELECT id FROM defect_catalog WHERE account_id IS NULL')->fetchAll(PDO::FETCH_COLUMN),
+            ));
+        }
+        return isset($shipped[$id]);
+    }
+
      * skipped rather than turned into a „všeobecná" one — that would change
      * what the task is about. Assignee and author are matched by e-mail like
      * the inspector of an úkon; an unknown one is left unassigned.
