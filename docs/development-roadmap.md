@@ -1300,6 +1300,47 @@ client's protocols; this e-mail is the confirmation on its own.
 
 ---
 
+## POapp zadanie 26. 10. 2026 — preventívna prehliadka, kniha, školenia ⬜
+
+Package: `POapp_zadanie_26_10_2026/` (binding spec `5_Zadanie_pre_AI.md`). Full plan,
+owner decisions D1–D8 and the open questions for FIROL:
+`docs/implementation-plan-2026-10-preventivna-prehliadka.md`.
+
+Points 11, 12 and 13 of the 2. 10. report (cancelled then for budget) are back in scope.
+
+| Phase | Content | Status |
+|---|---|---|
+| 0 | Branch (`poapp-oct-2026`), roadmap; questions to FIROL still to send | 🟨 |
+| 1 | Small fixes (rename, Paušál, IČO, after-create, address button, hints, O follow-up) | ✅ built, not yet browser-tested |
+| 2 | Client type (firma / bytové družstvo), prevádzka data, e-mail precedence, device list | ⬜ |
+| 3 | Školenia (osobné číslo, bulk, edit, take-over, hliadky, platnosť override) | ✅ built, not yet browser-tested |
+| 4 | Defect catalogue (27 items + own items) | ✅ built, API/migrations not yet run on a DB |
+| 5 | Požiarna kniha and kniha BOZP as ledgers; old book úkony retired | ⬜ |
+| 6 | Termíny split by book, cudzie revízie | ⬜ |
+| 7a | Preventívna prehliadka: step 1, walk-through, defect entry | ⬜ |
+| 7b | Preventívna prehliadka: previous defects, step 3, uzavretie | ⬜ |
+| 8a | Closing: PP record, BOZP zápis, book entries | ⬜ |
+| 8b | Concept checks, visits, Dnes, backup | ⬜ |
+| 9 | Acceptance pass, manual | ⬜ |
+
+**Built so far (Phases 1, 3, 4 — implemented in parallel, code only; migrations 056–059 and the
+browser acceptance checks still need a run on the local stack):**
+- **Phase 1** — migration 056 (Paušál column default), 8-digit IČO at the field + 422 `field: ico`,
+  new company → add-prevádzka dialog, "Rovnaká adresa ako sídlo firmy" button, training and approver
+  hints, rename to "ochrany pred požiarmi", status `O` follow-up (`OPRAVA_FOLLOW_UP_STATUSES` /
+  `PHP_OPRAVA_FOLLOW_UP_STATUSES`, one line each to drop O). Company detail "Pridať prevádzku" now opens
+  `NewFacilityDialog`; `FacilityEditPage` is left for Phase 2 to drop or share the form.
+- **Phase 3** — migration 057; osobné číslo (PDF column only when someone has one), JSON PATCH to edit
+  an attendee, bulk add (`;`/TAB, online-only), take-over from the last training (online-only),
+  hliadka `patrol_scope`, `valid_until_override` honoured by `Deadlines` / `ClientTerms`, import column,
+  backup fields. Added (not in spec): a "Platnosť do" row on the training PDF when overridden.
+- **Phase 4** — migrations 058 (table) + 059 (PHP seed, ids 1–27 = JSON ids), `DefectCatalogController`,
+  usage endpoint, backup/restore with `catalog_id` remap, `DefectPicker` component (not mounted anywhere
+  until Phase 7a). Own items: delete rights follow `MemberRights` unless the user created the item;
+  empty popis / opatrenie saved as "Doplní technik." (prototype).
+
+---
+
 ## Open questions (must be answered before the relevant phase starts)
 - **Company entity:** base doc says only "name, IČO, address, contact".
   Proposed full set (need confirmation):
