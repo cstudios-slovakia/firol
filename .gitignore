@@ -53,3 +53,6 @@ CLAUDE.md
 # Client change-request source document — lives in docs/handoff/ with the
 # other client material, which is untracked. Keep the root copy out too.
 fixes-and-new-features.docx
+
+# Client package for the POapp 26. 10. 2026 work (reference only, not in the repo)
+POapp_zadanie_26_10_2026/
