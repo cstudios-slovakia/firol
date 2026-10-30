@@ -1403,6 +1403,7 @@ final class DocumentController
     {
         $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics, t.status,
                        t.periodicity_value, t.periodicity_unit,
+                       t.patrol_scope, t.valid_until_override,
                        t.fields,
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
@@ -1437,7 +1438,7 @@ final class DocumentController
     private static function loadTrainees(int $trainingId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT id, fullname, position, signature_path, signed_at
+            'SELECT id, fullname, position, personal_number, signature_path, signed_at
              FROM   trainees WHERE training_id = ? ORDER BY id ASC'
         );
         $stmt->execute([$trainingId]);
@@ -1447,6 +1448,7 @@ final class DocumentController
                 'id'             => (int) $r['id'],
                 'fullname'       => $r['fullname'],
                 'position'       => $r['position'],
+                'personal_number' => $r['personal_number'],
                 'signature_path' => $r['signature_path'],
                 'signed_at'      => $r['signed_at'],
             ];
@@ -1480,6 +1482,7 @@ final class DocumentController
                 'id'                 => (int) $r['id'],
                 'fullname'           => $r['fullname'],
                 'position'           => $r['position'],
+                'personal_number'    => $r['personal_number'] ?? null,
                 'signature_data_uri' => self::signatureToDataUri($r['signature_path'] ?? null),
                 'signed_at'          => $r['signed_at'],
             ];
@@ -1507,6 +1510,10 @@ final class DocumentController
                         (string) $training['periodicity_unit'],
                     )
                     : null,
+                // Spec 8.2: the workplace / activity of a hliadka; null for the rest.
+                'patrol_scope'        => $training['patrol_scope'] ?? null,
+                // Spec 8.1: set only when the validity was written by hand.
+                'valid_until_override' => $training['valid_until_override'] ?? null,
                 'duration_min'        => $training['duration_min'],
                 'topics'              => $training['topics'],
                 'status'              => $training['status'],

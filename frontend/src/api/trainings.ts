@@ -49,6 +49,15 @@ export function isPokyn(type: TrainingType): boolean {
   return type === POKYN_ZATVA;
 }
 
+/**
+ * The two hliadka types name where / what the hliadka covers (spec 8.2). The
+ * label differs by type; both are one optional free-text `patrol_scope`.
+ */
+export const PATROL_SCOPE_LABELS: Partial<Record<TrainingType, { label: string; placeholder: string }>> = {
+  hliadka_oph: { label: 'Pracovisko', placeholder: 'Hala B — lakovňa' },
+  hliadka_opah: { label: 'Činnosť alebo udalosť', placeholder: 'zváranie v hale B, 12. 11. 2026' },
+};
+
 /** One editable block of the Pokyn's instruction text. */
 export type PokynSection = { title: string; text: string };
 
@@ -76,8 +85,17 @@ export type TrainingListItem = InvoicingFields & {
   periodicity_unit: PeriodicityUnit | null;
   /** The technician chose a value other than the recommended one for the subtype. */
   periodicity_is_custom: boolean;
-  /** `date` + periodicity (platnosť do); null without recurrence or without a date. */
+  /**
+   * Platnosť do: the hand-written `valid_until_override` when there is one,
+   * else `date` + periodicity; null without either (spec 8.1).
+   */
   valid_until: string | null;
+  /** What date + periodicity alone would give — shown next to a manual override. */
+  valid_until_computed?: string | null;
+  /** Platnosť written by hand (spec 8.1 „Prepísať platnosť rukou"); null = computed. */
+  valid_until_override: string | null;
+  /** Workplace / activity of a hliadka (spec 8.2); null for the other types. */
+  patrol_scope: string | null;
   duration_min: number | null;
   topics: string | null;
   status: TrainingStatus;
@@ -111,6 +129,8 @@ export type Trainee = {
   id: number;
   fullname: string;
   position: string | null;
+  /** Spec 8.3 — optional; the protocol prints the column only if somebody has one. */
+  personal_number: string | null;
   has_signature: boolean;
   signed_at: string | null;
   created_at: string;
@@ -147,6 +167,10 @@ export type TrainingPayload = {
   date: string;
   periodicity_value?: number | null;
   periodicity_unit?: PeriodicityUnit | null;
+  /** Spec 8.1 — hand-written validity; omitted / null = date + periodicity. */
+  valid_until_override?: string | null;
+  /** Spec 8.2 — hliadka types only. */
+  patrol_scope?: string | null;
   trainer_id?: number | null;
   topics?: string | null;
   duration_min?: number | null;
@@ -161,10 +185,30 @@ export type TrainingUpdatePayload = {
   /** Sent as a pair; both null clears the recurrence („bez opakovania"). */
   periodicity_value?: number | null;
   periodicity_unit?: PeriodicityUnit | null;
+  /** Sending the key sets (or, with null, clears) the hand-written validity. */
+  valid_until_override?: string | null;
+  /** Sending the key sets (or, with null, clears) the hliadka's workplace / activity. */
+  patrol_scope?: string | null;
   trainer_id?: number | null;
   topics?: string | null;
   duration_min?: number | null;
   fields?: PokynZatvaFields | null;
+};
+
+/** One row of a pasted attendee list (spec 8.3), as the bulk endpoint takes it. */
+export type TraineeDraft = {
+  fullname: string;
+  position: string | null;
+  personal_number: string | null;
+};
+
+/** The earlier training whose attendees can be taken over (spec 8.3). */
+export type TraineeSource = {
+  id: number;
+  type: TrainingType;
+  date: string | null;
+  facility_name: string | null;
+  people: number;
 };
 
 export type TrainingListFilters = {
@@ -198,12 +242,13 @@ export const Trainings = {
   addTrainee: (
     trainingId: number,
     // SIGNATURE DISABLED — restore `signature: Blob` to the payload type when re-enabling on-screen capture
-    payload: { fullname: string; position?: string | null },
+    payload: { fullname: string; position?: string | null; personal_number?: string | null },
     csrfToken: string | null,
   ) => {
     const fd = new FormData();
     fd.append('fullname', payload.fullname);
     if (payload.position) fd.append('position', payload.position);
+    if (payload.personal_number) fd.append('personal_number', payload.personal_number);
     // SIGNATURE DISABLED — fd.append('signature', payload.signature, 'signature.png');
     return api<{ trainee: Trainee }>(`/api/trainings/${trainingId}/trainees`, {
       method: 'POST',
@@ -211,6 +256,42 @@ export const Trainings = {
       csrfToken,
     });
   },
+  /**
+   * Edit one attendee (spec 8.3). Queues offline like the add: a JSON PATCH on
+   * an existing training, patched into the cached detail optimistically.
+   */
+  updateTrainee: (
+    trainingId: number,
+    traineeId: number,
+    payload: { fullname: string; position: string | null; personal_number: string | null },
+    csrfToken: string | null,
+  ) =>
+    api<{ trainee: Trainee }>(`/api/trainings/${trainingId}/trainees/${traineeId}`, {
+      method: 'PATCH',
+      body: payload,
+      csrfToken,
+    }),
+  /**
+   * „Viacerí naraz" (spec 8.3): every row in one transactional request. Online
+   * only — the rows would need one temporary id each to be editable before the
+   * queue drains, and a half-synced paste is worse than asking for a signal.
+   */
+  addTraineesBulk: (trainingId: number, rows: TraineeDraft[], csrfToken: string | null) =>
+    api<{ added: number; trainees: Trainee[] }>(`/api/trainings/${trainingId}/trainees/bulk`, {
+      method: 'POST',
+      body: { rows },
+      csrfToken,
+      requireOnline: true,
+    }),
+  /** The list that „Prevziať z minulého školenia" would copy; null when there is none. */
+  traineeSource: (trainingId: number) =>
+    api<{ source: TraineeSource | null }>(`/api/trainings/${trainingId}/trainee-source`),
+  /** Online only, for the same reason as the bulk add. */
+  takeOverTrainees: (trainingId: number, sourceId: number, csrfToken: string | null) =>
+    api<{ added: number; skipped: number; trainees: Trainee[] }>(
+      `/api/trainings/${trainingId}/trainees/take-over`,
+      { method: 'POST', body: { source_id: sourceId }, csrfToken, requireOnline: true },
+    ),
   deleteTrainee: (trainingId: number, traineeId: number, csrfToken: string | null) =>
     api<void>(`/api/trainings/${trainingId}/trainees/${traineeId}`, {
       method: 'DELETE',

@@ -7,6 +7,7 @@ import { useAuth } from '@/auth/AuthContext';
 import { Team, type TeamMember } from '@/api/team';
 import {
   isPokyn,
+  PATROL_SCOPE_LABELS,
   TRAINING_TYPE_LABELS,
   Trainings,
   type Training,
@@ -22,6 +23,7 @@ import { Field } from '@/components/ui/Field';
 import { Select } from '@/components/ui/Select';
 import { Spinner } from '@/components/ui/Spinner';
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
+import { ValidityOverride } from '@/components/ValidityOverride';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { visitTrail } from '@/lib/visits';
 
@@ -40,6 +42,9 @@ export function TrainingEditPage() {
   const [date, setDate] = useState('');
   const [trainerId, setTrainerId] = useState<number | null>(null);
   const [periodicity, setPeriodicity] = useState<Periodicity>(PERIODICITY_NONE);
+  // Spec 8.1 / 8.2 — validity written by hand, and the hliadka's workplace.
+  const [validOverride, setValidOverride] = useState<string | null>(null);
+  const [patrolScope, setPatrolScope] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
 
@@ -61,6 +66,8 @@ export function TrainingEditPage() {
         setDate(t.date ?? '');
         setTrainerId(t.trainer_id);
         setPeriodicity({ value: t.periodicity_value, unit: t.periodicity_unit });
+        setValidOverride(t.valid_until_override ?? null);
+        setPatrolScope(t.patrol_scope ?? '');
         const tm = await Team.list().catch(() => ({ items: [] as TeamMember[] }));
         if (cancelled) return;
         setMembers(tm.items.filter((m) => m.is_active));
@@ -87,12 +94,20 @@ export function TrainingEditPage() {
       const periodicityChanged = training !== null
         && (periodicity.value !== training.periodicity_value
           || periodicity.unit !== training.periodicity_unit);
+      // Same for the two optional fields: the key is sent only when changed,
+      // and null clears it.
+      const validityChanged = training !== null
+        && validOverride !== (training.valid_until_override ?? null);
+      const patrolChanged = training !== null
+        && patrolScope.trim() !== (training.patrol_scope ?? '');
       await Trainings.update(id, {
         date,
         trainer_id: trainerId,
         ...(periodicityChanged
           ? { periodicity_value: periodicity.value, periodicity_unit: periodicity.unit }
           : {}),
+        ...(validityChanged ? { valid_until_override: validOverride } : {}),
+        ...(patrolChanged ? { patrol_scope: patrolScope.trim() || null } : {}),
       }, csrfToken);
       toast.success('Školenie uložené');
       navigate(`/trainings/${id}`, { replace: true });
@@ -139,6 +154,7 @@ export function TrainingEditPage() {
   // The Pokyn's own text is edited on the detail page — this form only carries
   // the header data both kinds of document share.
   const pokyn = training !== null && isPokyn(training.type);
+  const patrolMeta = training ? PATROL_SCOPE_LABELS[training.type] : undefined;
 
   return (
     <div className="flex flex-col gap-4">
@@ -198,14 +214,36 @@ export function TrainingEditPage() {
             )}
           </Field>
 
+          {patrolMeta && (
+            <Field
+              label={patrolMeta.label}
+              required
+              hint="Bez toho sa z protokolu nedá určiť, pre koho hliadka platí."
+            >
+              {(p) => (
+                <Input {...p} autoComplete="off" maxLength={255}
+                  value={patrolScope} onChange={(e) => setPatrolScope(e.target.value)}
+                  placeholder={patrolMeta.placeholder} />
+              )}
+            </Field>
+          )}
+
           <Field label="Periodicita">
             {() => (
-              <PeriodicityPicker
-                recommended={training ? TRAINING_RECOMMENDED_MONTHS[training.type] ?? [] : []}
-                value={periodicity}
-                executedOn={date || null}
-                onChange={setPeriodicity}
-              />
+              <div className="flex flex-col gap-3">
+                <PeriodicityPicker
+                  recommended={training ? TRAINING_RECOMMENDED_MONTHS[training.type] ?? [] : []}
+                  value={periodicity}
+                  executedOn={date || null}
+                  onChange={setPeriodicity}
+                />
+                <ValidityOverride
+                  date={date || null}
+                  periodicity={periodicity}
+                  value={validOverride}
+                  onChange={setValidOverride}
+                />
+              </div>
             )}
           </Field>
 

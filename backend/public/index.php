@@ -171,6 +171,7 @@ $router->post('/api/inspections/{id}/carry-over',  [InspectionController::class,
 // blank to type in the handwritten results.
 $router->get('/api/inspections/{id}/person-sources',     [\Firol\Controllers\PersonListController::class, 'sources']);
 $router->post('/api/inspections/{id}/persons/take-over', [\Firol\Controllers\PersonListController::class, 'takeOver']);
+$router->post('/api/inspections/{id}/persons/bulk',      [\Firol\Controllers\PersonListController::class, 'bulk']);
 $router->post('/api/inspections/{id}/fill-results',      [\Firol\Controllers\PersonListController::class, 'fillResults']);
 // "Upraviť" on a locked inspection — discards the issued protocol and puts
 // the inspection back into draft so it can be corrected.
@@ -263,6 +264,10 @@ $router->patch('/api/trainings/{id}',               [TrainingController::class, 
 $router->post('/api/trainings/{id}/unlock',         [TrainingController::class, 'unlock']);
 $router->delete('/api/trainings/{id}',              [TrainingController::class, 'archive']);
 $router->post('/api/trainings/{id}/trainees',       [TraineeController::class, 'store']);
+$router->post('/api/trainings/{id}/trainees/bulk',  [TraineeController::class, 'bulk']);
+$router->post('/api/trainings/{id}/trainees/take-over', [TraineeController::class, 'takeOver']);
+$router->get('/api/trainings/{id}/trainee-source',  [TraineeController::class, 'source']);
+$router->patch('/api/trainings/{id}/trainees/{trainee_id}', [TraineeController::class, 'update']);
 $router->delete('/api/trainings/{id}/trainees/{trainee_id}', [TraineeController::class, 'destroy']);
 $router->get('/api/trainees/{id}/signature',        [TraineeController::class, 'downloadSignature']);
 $router->post('/api/trainings/{id}/generate-pdf',   [DocumentController::class, 'generateForTraining']);

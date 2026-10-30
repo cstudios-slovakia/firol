@@ -33,6 +33,9 @@ final class TrainingController
         self::TYPE_POKYN,
     ];
 
+    /** The two hliadka types that name a workplace / activity (spec 8.2). */
+    public const PATROL_TYPES = ['hliadka_oph', 'hliadka_opah'];
+
     /** The one training type that carries a `fields` payload instead of trainees. */
     public const TYPE_POKYN = 'pokyn_zatva';
 
@@ -50,6 +53,7 @@ final class TrainingController
         // fetched with the detail.
         $sql = 'SELECT t.id, t.type, t.date, t.duration_min, t.topics, t.status,
                        t.periodicity_value, t.periodicity_unit, t.periodicity_is_custom,
+                       t.valid_until_override, t.patrol_scope,
                        t.created_at,
                        JSON_UNQUOTE(JSON_EXTRACT(t.fields, \'$.year\')) AS pokyn_year,
                        t.company_id, c.name AS company_name,
@@ -112,7 +116,7 @@ final class TrainingController
         }
 
         $tStmt = Db::pdo()->prepare(
-            'SELECT id, fullname, position, signature_path, signed_at,
+            'SELECT id, fullname, position, personal_number, signature_path, signed_at,
                     created_at, updated_at
              FROM   trainees
              WHERE  training_id = ?
@@ -124,6 +128,7 @@ final class TrainingController
                 'id'             => (int) $r['id'],
                 'fullname'       => $r['fullname'],
                 'position'       => $r['position'],
+                'personal_number' => $r['personal_number'],
                 'has_signature'  => !empty($r['signature_path']),
                 'signed_at'      => $r['signed_at'],
                 'created_at'     => $r['created_at'],
@@ -177,6 +182,8 @@ final class TrainingController
         // required once the PDF is generated.
         $fields = self::fieldsForType($req, $type, required: false);
         [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
+        $validUntilOverride = self::readValidUntilOverride($req);
+        $patrolScope        = self::readPatrolScope($req, $type);
         if ($companyId === null) {
             Response::error('Vyber firmu.', 422);
         }
@@ -243,12 +250,14 @@ final class TrainingController
             'INSERT INTO trainings
                 (account_id, company_id, facility_id, visit_id, type, date,
                  periodicity_value, periodicity_unit, periodicity_is_custom,
+                 valid_until_override, patrol_scope,
                  trainer_id, topics, duration_min, fields, status, created_by_user_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?)'
         )->execute([
             $accountId, $companyId, $facilityId, $visitId, $type, $date,
             $periodicityValue, $periodicityUnit,
             Periodicity::isCustomForTraining($type, $periodicityValue, $periodicityUnit) ? 1 : 0,
+            $validUntilOverride, $patrolScope,
             $trainerId, $topics, $durationMin,
             $fields !== null ? json_encode($fields, JSON_UNESCAPED_UNICODE) : null,
             Tenant::currentUserId(),
@@ -305,6 +314,17 @@ final class TrainingController
         if ($touchesPeriodicity) {
             [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
         }
+        // Same rule for the two optional fields below: sending the key means
+        // the technician touched it, and null clears it (a COALESCE could not
+        // tell "leave it" from "clear it").
+        $touchesValidity = array_key_exists('valid_until_override', $body);
+        if ($touchesValidity) {
+            $validUntilOverride = self::readValidUntilOverride($req);
+        }
+        $touchesPatrol = array_key_exists('patrol_scope', $body);
+        if ($touchesPatrol) {
+            $patrolScope = self::readPatrolScope($req, (string) $existing['type']);
+        }
         if ($trainerId !== null) {
             if ($isAdmin) {
                 $tc = Db::pdo()->prepare('SELECT 1 FROM users WHERE id = ?');
@@ -348,6 +368,16 @@ final class TrainingController
                 $id,
                 $scopeAccountId,
             ]);
+        }
+        if ($touchesValidity) {
+            Db::pdo()->prepare(
+                'UPDATE trainings SET valid_until_override = ? WHERE id = ? AND account_id = ?'
+            )->execute([$validUntilOverride, $id, $scopeAccountId]);
+        }
+        if ($touchesPatrol) {
+            Db::pdo()->prepare(
+                'UPDATE trainings SET patrol_scope = ? WHERE id = ? AND account_id = ?'
+            )->execute([$patrolScope, $id, $scopeAccountId]);
         }
         unset($existing);
 
@@ -475,6 +505,7 @@ final class TrainingController
     {
         $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics,
                        t.periodicity_value, t.periodicity_unit, t.periodicity_is_custom,
+                       t.valid_until_override, t.patrol_scope,
                        t.fields, t.status, t.created_at, t.updated_at,
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.approver AS company_approver,
@@ -524,12 +555,23 @@ final class TrainingController
             : null;
         $row['periodicity_unit'] = $row['periodicity_unit'] ?? null;
         $row['periodicity_is_custom'] = (bool) ($row['periodicity_is_custom'] ?? false);
-        // Derived, never stored — null without recurrence or without a date.
-        $row['valid_until'] = Periodicity::validUntil(
+        // Derived unless the technician wrote it by hand (spec 8.1 "Platnost sa
+        // musi dat prepisat rukou"): the override then wins, and
+        // `valid_until_computed` keeps what date + periodicity would have given,
+        // so the UI can show both. Null without recurrence or without a date.
+        $override = isset($row['valid_until_override']) && $row['valid_until_override'] !== ''
+            ? (string) $row['valid_until_override']
+            : null;
+        $row['valid_until_override'] = $override;
+        $row['patrol_scope'] = isset($row['patrol_scope']) && $row['patrol_scope'] !== ''
+            ? (string) $row['patrol_scope']
+            : null;
+        $row['valid_until_computed'] = Periodicity::validUntil(
             $row['date'] ?? null,
             $row['periodicity_value'],
             $row['periodicity_unit'],
         );
+        $row['valid_until'] = $override ?? $row['valid_until_computed'];
         // `fields` reaches the client decoded (detail) — the list only carries
         // the year it extracted, so the Pokyn's text never rides along there.
         if (array_key_exists('fields', $row)) {
@@ -595,6 +637,45 @@ final class TrainingController
         } catch (\InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422);
         }
+    }
+
+    /**
+     * The hand-written validity (spec 8.1): a YYYY-MM-DD date, or null for "no
+     * override". A blank string reads as null so a cleared date input clears it.
+     */
+    private static function readValidUntilOverride(Request $req): ?string
+    {
+        $raw = $req->json()['valid_until_override'] ?? null;
+        if ($raw === null || (is_string($raw) && trim($raw) === '')) {
+            return null;
+        }
+        $value = is_string($raw) ? trim($raw) : '';
+        $d = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        if ($d === false || $d->format('Y-m-d') !== $value) {
+            Response::error('Platnosť do zadaj ako dátum v tvare RRRR-MM-DD.', 422);
+        }
+        return $value;
+    }
+
+    /**
+     * Workplace / activity of a hliadka (spec 8.2). Only the two hliadka types
+     * carry it; for any other type it is dropped rather than rejected, so a
+     * client that always sends the key cannot break a normal training.
+     */
+    private static function readPatrolScope(Request $req, string $type): ?string
+    {
+        if (!in_array($type, self::PATROL_TYPES, true)) {
+            return null;
+        }
+        $raw = $req->json()['patrol_scope'] ?? null;
+        if (!is_string($raw) || trim($raw) === '') {
+            return null;
+        }
+        $value = trim($raw);
+        if (mb_strlen($value) > 255) {
+            Response::error('Pracovisko / činnosť môže mať najviac 255 znakov.', 422);
+        }
+        return $value;
     }
 
     private static function queryInt(Request $req, string $key): ?int

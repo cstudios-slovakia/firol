@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, CopyPlus,
-  Lock, Plus, Trash2, UserPlus, Users, Warehouse,
+  AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardPaste, CopyPlus,
+  Hash, Lock, Plus, Trash2, UserPlus, Users, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
@@ -43,6 +43,8 @@ import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleto
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { PersonHeaderFields, saveHeader, type HeaderValue } from '@/components/persons/PersonHeaderFields';
 import { SignatureCapture } from '@/components/persons/SignatureCapture';
+import { BulkAttendeesForm } from '@/components/TraineeForms';
+import { peopleCount, type ParsedAttendee } from '@/lib/attendeeLines';
 
 /**
  * Step 2 of a dychová skúška, kontrola omamných látok or oboznámenie BOZP —
@@ -72,6 +74,9 @@ export function PersonsFillPage() {
   const [header, setHeader] = useState<HeaderValue>({});
   const [headerError, setHeaderError] = useState<string | null>(null);
   const [blockers, setBlockers] = useState<string[]>([]);
+  // „Viacerí naraz" (spec 8.3) — oboznámenie BOZP only.
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulkAdding, setBulkAdding] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   async function reload() {
@@ -149,6 +154,27 @@ export function PersonsFillPage() {
     }
   }
 
+  /** Spec 8.3 — the whole paste in one transactional request, then re-read the list. */
+  async function addBulk(rows: ParsedAttendee[]) {
+    setBulkAdding(true);
+    try {
+      const res = await PersonList.addBulk(
+        id,
+        rows.map((r) => ({ name: r.name, position: r.position, personal_number: r.personalNumber })),
+        csrfToken,
+      );
+      await reload();
+      setShowBulk(false);
+      toast.success(`Pridaných: ${peopleCount(res.added)}`);
+    } catch (err) {
+      const message = offlineMessage(err, 'Účastníkov sa nepodarilo pridať.');
+      toast.error(message);
+      throw err instanceof ApiError ? err : new ApiError(0, message, null);
+    } finally {
+      setBulkAdding(false);
+    }
+  }
+
   function replaceItem(item: InspectionItem) {
     setData((prev) => (prev ? { ...prev, items: prev.items.map((it) => (it.id === item.id ? item : it)) } : prev));
   }
@@ -218,8 +244,22 @@ export function PersonsFillPage() {
             <Users className="size-3.5" />
             {type === 'skolenie_bozp' ? 'Účastníci' : 'Zoznam osôb'}
           </p>
-          <span className="text-xs text-ink-500">spolu {items.length}</span>
+          <div className="flex items-center gap-2">
+            {type === 'skolenie_bozp' && isDraft && !showBulk && (
+              <button type="button" onClick={() => setShowBulk(true)}
+                className="inline-flex h-8 items-center gap-1 rounded-2xl border border-ink-200 bg-white px-3 text-xs font-medium text-ink-700 transition-all duration-200 hover:border-ink-300 hover:bg-ink-50 active:scale-[0.97]">
+                <ClipboardPaste className="size-3.5" />
+                Viacerí naraz
+              </button>
+            )}
+            <span className="text-xs text-ink-500">spolu {items.length}</span>
+          </div>
         </div>
+
+        {showBulk && isDraft && (
+          <BulkAttendeesForm warnMissingPosition submitting={bulkAdding}
+            onCancel={() => setShowBulk(false)} onSubmit={addBulk} />
+        )}
 
         {items.map((it, idx) => (
           <PersonRow key={it.id} type={type} inspectionId={id} index={idx + 1} item={it}
@@ -323,6 +363,7 @@ function rowPayload(base: PersonFields, patch: Partial<PersonFields>, type: Pers
   };
   if (type === 'skolenie_bozp') {
     out.date = f.date || null;
+    out.personal_number = (f.personal_number ?? '').trim() || null;
   } else {
     out.time = f.time || null;
     out.result = f.result ?? null;
@@ -461,7 +502,12 @@ function PersonRow({
       )}
 
       {type === 'skolenie_bozp' && (
-        <div className="pl-0 sm:pl-10">
+        <div className="flex flex-col gap-2 pl-0 sm:pl-10">
+          <Input data-nav aria-label="Osobné číslo" placeholder="Osobné číslo (voliteľné)" maxLength={32}
+            leftIcon={<Hash className="size-4" />} value={f.personal_number ?? ''}
+            disabled={!canEdit} autoComplete="off" enterKeyHint="next"
+            onChange={(e) => setF({ ...f, personal_number: e.target.value })}
+            onBlur={() => save({ personal_number: f.personal_number })} onKeyDown={focusNext} />
           {dateOpen ? (
             <Input type="date" aria-label="Dátum" value={f.date ?? ''} disabled={!canEdit}
               onChange={(e) => save({ date: e.target.value || null })} />
@@ -505,9 +551,12 @@ function NewPersonRow({
   const toast = useToast();
   const [name, setName] = useState('');
   const [position, setPosition] = useState('');
+  const [personalNumber, setPersonalNumber] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement | null>(null);
   const positionRef = useRef<HTMLInputElement | null>(null);
+  const numberRef = useRef<HTMLInputElement | null>(null);
+  const hasNumber = type === 'skolenie_bozp';
   // Adds are sent one after another: the row order on the protocol follows
   // the order people were typed in, and the server's position counter never
   // sees two inserts at once.
@@ -523,10 +572,15 @@ function NewPersonRow({
     // while the request is in flight, and on a weak signal that is seconds.
     // A shift usually shares a pracovné zaradenie, so that one is kept.
     setName('');
+    setPersonalNumber('');
     nameRef.current?.focus();
     // A test row starts with the current time — the person is tested as
     // they are added; the field stays editable.
-    const payload = rowPayload({ name: n, position: p, defects: [], time: nowHm() }, {}, type);
+    const payload = rowPayload(
+      { name: n, position: p, defects: [], time: nowHm(), personal_number: personalNumber },
+      {},
+      type,
+    );
     queueRef.current = queueRef.current.then(async () => {
       try {
         const res = await Inspections.addItem(inspectionId, payload, csrfToken);
@@ -553,8 +607,18 @@ function NewPersonRow({
           enterKeyHint="next" onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); positionRef.current?.focus(); } }} />
         <Input ref={positionRef} data-nav placeholder="Pracovné zaradenie" value={position} autoComplete="off"
-          list="person-positions" enterKeyHint="done" onChange={(e) => setPosition(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+          list="person-positions" enterKeyHint={hasNumber ? 'next' : 'done'} onChange={(e) => setPosition(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            if (hasNumber) numberRef.current?.focus(); else add();
+          }} />
+        {hasNumber && (
+          <Input ref={numberRef} data-nav placeholder="Osobné číslo (voliteľné)" maxLength={32}
+            leftIcon={<Hash className="size-4" />} value={personalNumber} autoComplete="off"
+            enterKeyHint="done" onChange={(e) => setPersonalNumber(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+        )}
       </div>
       {err && <p className="text-xs text-status-bad">{err}</p>}
       <Button type="button" variant="secondary" onClick={add} leftIcon={<Plus className="size-4" />}>
@@ -641,7 +705,9 @@ function TakeOverOffer({
             {chosen.date ? ` (${skDate(chosen.date)})` : ''}?
           </p>
           <p className="mt-1 text-xs text-ink-600">
-            Prenesú sa len mená a pracovné zaradenia — výsledky ani podpisy nie.
+            {type === 'skolenie_bozp'
+              ? 'Prenesú sa mená, pracovné zaradenia a osobné čísla — podpisy nie.'
+              : 'Prenesú sa len mená a pracovné zaradenia — výsledky ani podpisy nie.'}
             {!empty && ' Kto už v zozname je, sa nepridá druhýkrát.'}
           </p>
         </div>

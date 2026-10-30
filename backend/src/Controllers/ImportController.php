@@ -629,8 +629,8 @@ final class ImportController
             // errors are surfaced only after the parent sheet is sound.
             if ($errors === []) {
                 $insertTrainee = $pdo->prepare(
-                    'INSERT INTO trainees (training_id, fullname, position)
-                     VALUES (?, ?, ?)'
+                    'INSERT INTO trainees (training_id, fullname, position, personal_number)
+                     VALUES (?, ?, ?, ?)'
                 );
                 foreach ($rowsBySheet['Ucastnici'] as $idx => $row) {
                     $rowNum = $idx + 2;
@@ -645,7 +645,14 @@ final class ImportController
                         $errors[] = ['sheet' => 'Ucastnici', 'row' => $rowNum, 'message' => "Školenie s # $trainingRowNo neexistuje v sheete Školenia."];
                         continue;
                     }
-                    $insertTrainee->execute([$trainingId, $fullname, self::str($row, 'position')]);
+                    $personalNumber = self::str($row, 'personal_number');
+                    if ($personalNumber !== null && mb_strlen($personalNumber) > 32) {
+                        $errors[] = ['sheet' => 'Ucastnici', 'row' => $rowNum, 'message' => 'Osobné číslo môže mať najviac 32 znakov.'];
+                        continue;
+                    }
+                    $insertTrainee->execute([
+                        $trainingId, $fullname, self::str($row, 'position'), $personalNumber,
+                    ]);
                     $createdTrainees++;
                 }
             }

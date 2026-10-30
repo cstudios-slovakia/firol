@@ -111,6 +111,9 @@ final class Schema
                     ],
                     ['header' => 'Meno a priezvisko *', 'key' => 'fullname', 'hint' => 'Ján Účastník'],
                     ['header' => 'Pracovné zaradenie', 'key' => 'position', 'hint' => 'Skladník'],
+                    // Appended last: the importer reads columns by position, so a sheet
+                    // downloaded before the osobné číslo existed still lines up.
+                    ['header' => 'Osobné číslo', 'key' => 'personal_number', 'hint' => '1042'],
                 ],
             ],
         ];

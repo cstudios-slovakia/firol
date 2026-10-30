@@ -5,11 +5,12 @@
  * @var string $number
  * @var string $generated_at
  * @var array  $brand           name, color, logo_data_uri
- * @var array  $training        type, training_type_label, date, duration_min, topics, status
+ * @var array  $training        type, training_type_label, date, duration_min, topics, status,
+ *                              periodicity_label, patrol_scope, valid_until_override
  * @var array  $company         name, ico, address
  * @var array  $facility        name, address
  * @var array  $trainer         fullname, certification_number, signature_data_uri
- * @var list<array> $trainees   id, fullname, position, signature_data_uri, signed_at
+ * @var list<array> $trainees   id, fullname, position, personal_number, signature_data_uri, signed_at
  */
 $h = static fn(?string $v): string => htmlspecialchars((string) ($v ?? '—'), ENT_QUOTES, 'UTF-8');
 $brandColor = $brand['color'] ?? '#E8433A';
@@ -24,6 +25,21 @@ $formatDate = static function (?string $iso): string {
 $type = (string) ($training['type'] ?? '');
 // Chapter 5: a bare „Periodicita: 12 mesiacov"; bez opakovania prints no row.
 $periodicity = $training['periodicity_label'] ?? null;
+// Spec 8.1: a validity written by hand is printed, so the protocol never
+// contradicts the term the app keeps in the calendar.
+$validOverride = $training['valid_until_override'] ?? null;
+// Spec 8.2: the workplace of a protipožiarna hliadka, or the activity / event
+// of an asistenčná hliadka — printed under the type label.
+$patrolScope = trim((string) ($training['patrol_scope'] ?? ''));
+$patrolLabel = $type === 'hliadka_opah' ? 'Činnosť alebo udalosť' : 'Pracovisko';
+// Spec 8.3: the Osobné číslo column is printed only when somebody has one.
+$hasPersonalNumbers = false;
+foreach ($trainees as $traineeRow) {
+  if (trim((string) ($traineeRow['personal_number'] ?? '')) !== '') {
+    $hasPersonalNumbers = true;
+    break;
+  }
+}
 
 // Fixed topic lists keyed by training type. Each item: [text, duration_min] or just [text] for two-part types.
 $simpleTopics = [
@@ -391,7 +407,7 @@ if (!empty($trainer['certification_number'])) {
     <td class="bl">Spoločnosť</td>
     <td class="bv"><?= $h($company['name']) ?></td>
     <td class="bl"><?= in_array($type, ['hliadka_oph', 'hliadka_opah'], true) ? 'Druh' : 'Druh školenia' ?></td>
-    <td class="bv"><?= $h($training['training_type_label'] ?? '') ?></td>
+    <td class="bv"><?= $h($training['training_type_label'] ?? '') ?><?php if ($patrolScope !== '' && in_array($type, ['hliadka_oph', 'hliadka_opah'], true)): ?><br><span style="font-weight:normal;color:#555;"><?= $h($patrolLabel) ?>: <?= $h($patrolScope) ?></span><?php endif ?></td>
   </tr>
   <tr>
     <td class="bl">IČO</td>
@@ -407,10 +423,20 @@ if (!empty($trainer['certification_number'])) {
     <td class="bl">Časový rozsah</td>
     <td class="bv"><?= $totalMin ?> minút</td>
   </tr>
-  <?php if ($periodicity !== null): ?>
+  <?php if ($periodicity !== null || $validOverride !== null): ?>
     <tr>
-      <td class="bl">Periodicita</td>
-      <td class="bv" colspan="3"><?= $h($periodicity) ?></td>
+      <?php if ($periodicity !== null && $validOverride !== null): ?>
+        <td class="bl">Periodicita</td>
+        <td class="bv"><?= $h($periodicity) ?></td>
+        <td class="bl">Platnosť do</td>
+        <td class="bv"><?= $formatDate($validOverride) ?></td>
+      <?php elseif ($periodicity !== null): ?>
+        <td class="bl">Periodicita</td>
+        <td class="bv" colspan="3"><?= $h($periodicity) ?></td>
+      <?php else: ?>
+        <td class="bl">Platnosť do</td>
+        <td class="bv" colspan="3"><?= $formatDate($validOverride) ?></td>
+      <?php endif ?>
     </tr>
   <?php endif ?>
   <tr>
@@ -483,10 +509,13 @@ if (!empty($trainer['certification_number'])) {
   <thead>
     <tr>
       <th style="width:6%">Por. č.</th>
-      <th style="width:28%">Meno, priezvisko, titul</th>
-      <th style="width:22%">Pracovné zaradenie</th>
-      <th style="width:15%">Dátum školenia</th>
-      <th style="width:29%">Podpis</th>
+      <th style="width:<?= $hasPersonalNumbers ? '25' : '28' ?>%">Meno, priezvisko, titul</th>
+      <?php if ($hasPersonalNumbers): ?>
+        <th style="width:11%">Osobné číslo</th>
+      <?php endif ?>
+      <th style="width:<?= $hasPersonalNumbers ? '19' : '22' ?>%">Pracovné zaradenie</th>
+      <th style="width:<?= $hasPersonalNumbers ? '14' : '15' ?>%">Dátum školenia</th>
+      <th style="width:<?= $hasPersonalNumbers ? '25' : '29' ?>%">Podpis</th>
     </tr>
   </thead>
   <tbody>
@@ -494,6 +523,9 @@ if (!empty($trainer['certification_number'])) {
       <tr style="height:30pt;">
         <td><?= $idx + 1 ?></td>
         <td><?= $h($tr['fullname']) ?></td>
+        <?php if ($hasPersonalNumbers): ?>
+          <td><?= $h($tr['personal_number'] ?? null) ?></td>
+        <?php endif ?>
         <td><?= $h($tr['position'] ?? null) ?></td>
         <td><?= $formatDate($training['date'] ?? null) ?></td>
         <td class="sig-cell">

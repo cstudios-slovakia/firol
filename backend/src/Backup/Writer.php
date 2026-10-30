@@ -265,6 +265,7 @@ final class Writer
         $stmt = $pdo->prepare(
             'SELECT t.id, t.company_id, t.facility_id, t.type, t.date,
                     t.periodicity_value, t.periodicity_unit, t.periodicity_is_custom,
+                    t.valid_until_override, t.patrol_scope,
                     t.topics, t.duration_min, t.fields, t.status, t.created_at,
                     t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
                     u.email AS trainer_email
@@ -281,7 +282,7 @@ final class Writer
 
         $ids = implode(',', array_map(static fn (array $t): int => (int) $t['id'], $trainings));
         $traineeStmt = $pdo->query(
-            "SELECT id, training_id, fullname, position, signature_path, signed_at, created_at
+            "SELECT id, training_id, fullname, position, personal_number, signature_path, signed_at, created_at
              FROM   trainees WHERE training_id IN ($ids) ORDER BY training_id, id"
         );
 
@@ -300,6 +301,7 @@ final class Writer
                 'id'        => $traineeId,
                 'fullname'  => $trainee['fullname'],
                 'position'  => $trainee['position'],
+                'personal_number' => $trainee['personal_number'],
                 'signed_at' => $trainee['signed_at'],
                 'created_at' => $trainee['created_at'],
                 'signature' => $entry,
@@ -413,8 +415,6 @@ final class Writer
     }
 
     /**
-     * Automatic client notices already sent (chapter 11.3), keyed by the
-    /**
      * The account's own číselník nedostatkov items, archived ones included: a
      * defect's `fields.catalog_id` may still name one. The author goes by
      * e-mail, like the inspector of an úkon.
@@ -442,6 +442,8 @@ final class Writer
         return $out;
     }
 
+    /**
+     * Automatic client notices already sent (chapter 11.3), keyed by the
      * úkon whose deadline they announced — an inspection or, since
      * change request 6, a training (exactly one of the two ids is set).
      *

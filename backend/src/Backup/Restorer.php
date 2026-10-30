@@ -536,13 +536,14 @@ final class Restorer
             'INSERT INTO trainings
                 (account_id, company_id, facility_id, type, date,
                  periodicity_value, periodicity_unit, periodicity_is_custom, trainer_id,
+                 valid_until_override, patrol_scope,
                  topics, duration_min, fields, status, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insertTrainee = $this->pdo->prepare(
             'INSERT INTO trainees
-                (training_id, fullname, position, signature_path, signed_at, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)'
+                (training_id, fullname, position, personal_number, signature_path, signed_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
         $updateSignature = $this->pdo->prepare(
             'UPDATE trainees SET signature_path = ? WHERE id = ?'
@@ -580,6 +581,9 @@ final class Restorer
                 // trainings themselves did before the migration.
                 ...$this->periodicity($training),
                 $this->user($training, 'trainer_email'),
+                // Spec 8.1 / 8.2 — absent in an archive written before they existed.
+                $this->date($training, 'valid_until_override'),
+                $this->str($training, 'patrol_scope'),
                 $this->str($training, 'topics'),
                 isset($training['duration_min']) ? (int) $training['duration_min'] : null,
                 // Pokyn text, re-encoded from the manifest. Restored verbatim
@@ -606,6 +610,7 @@ final class Restorer
                     $trainingId,
                     $fullname,
                     $this->str($trainee, 'position'),
+                    $this->str($trainee, 'personal_number'),
                     null, // path needs the trainee id, filled in right below
                     $this->dateTime($trainee, 'signed_at'),
                     $this->createdAt($trainee),
@@ -757,11 +762,6 @@ final class Restorer
         return (int) $m[1];
     }
 
-    // ── Úlohy (chapter 20) ───────────────────────────────────────────────────
-
-    /**
-     * Tasks, remapped onto the restored firms, prevádzky and úkony. Merge key:
-     * created_at + text. A task whose firm didn't make it into the account is
     // ── Číselník nedostatkov (Phase 4) ───────────────────────────────────────
 
     /**
@@ -863,6 +863,11 @@ final class Restorer
         return isset($shipped[$id]);
     }
 
+    // ── Úlohy (chapter 20) ───────────────────────────────────────────────────
+
+    /**
+     * Tasks, remapped onto the restored firms, prevádzky and úkony. Merge key:
+     * created_at + text. A task whose firm didn't make it into the account is
      * skipped rather than turned into a „všeobecná" one — that would change
      * what the task is about. Assignee and author are matched by e-mail like
      * the inspector of an úkon; an unknown one is left unassigned.

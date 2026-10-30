@@ -131,6 +131,7 @@ final class Deadlines
         // but a prevádzka that does exist must not be archived.
         $sql = 'SELECT t.id, t.account_id, t.type, t.date AS executed_on,
                        t.periodicity_value, t.periodicity_unit,
+                       t.valid_until_override,
                        t.trainer_id AS inspector_user_id,
                        t.company_id, c.name AS company_name, c.contact_email AS company_email,
                        t.facility_id, f.name AS facility_name, f.city AS facility_city,
@@ -273,7 +274,13 @@ final class Deadlines
     {
         $value = $r['periodicity_value'] !== null ? (int) $r['periodicity_value'] : null;
         $unit  = $r['periodicity_unit'] !== null ? (string) $r['periodicity_unit'] : null;
-        $due = Periodicity::validUntil((string) $r['executed_on'], $value, $unit);
+        // A training's validity written by hand (spec 8.1) wins over date +
+        // periodicity — and defines a term even for a training without one.
+        // Inspection rows carry no such column.
+        $override = isset($r['valid_until_override']) && $r['valid_until_override'] !== ''
+            ? (string) $r['valid_until_override']
+            : null;
+        $due = $override ?? Periodicity::validUntil((string) $r['executed_on'], $value, $unit);
         if ($due === null) {
             return null;
         }
@@ -308,6 +315,8 @@ final class Deadlines
             'facility_city'      => $city !== null && trim((string) $city) !== '' ? trim((string) $city) : null,
             'last_done_on'       => (string) $r['executed_on'],
             'due_date'           => $due,
+            // True when the term date was written by hand, not computed.
+            'due_overridden'     => $override !== null,
             'planned_date'       => $r['planned_date'] !== null ? (string) $r['planned_date'] : null,
             'state'              => $due < $today ? 'po_termine' : 'planovany',
             'done_on'            => null,

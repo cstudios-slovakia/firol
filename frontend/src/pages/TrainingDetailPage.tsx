@@ -1,23 +1,25 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 // SIGNATURE DISABLED — import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { InvoicingBlock } from '@/components/InvoicingBlock';
 import { invoicingOf } from '@/api/invoicing';
 import {
-  ArrowLeft, Briefcase, Building2, CalendarCheck, CalendarDays, CheckCircle2, Clock,
-  Download, Edit2, FileText, GraduationCap, Lock, LockOpen, Pencil, Plus, Repeat, Trash2, User,
-  Users, Warehouse, Wheat,
+  ArrowLeft, Briefcase, Building2, CalendarCheck, CalendarDays, Clock,
+  ClipboardPaste, Download, Edit2, FileText, GraduationCap, Hash, Lock, LockOpen, MapPin, Pencil, Plus, Repeat,
+  Trash2, User, Users, Warehouse, Wheat,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { useMemberRights } from '@/auth/useMemberRights';
 import {
   isPokyn,
+  PATROL_SCOPE_LABELS,
   TRAINING_TYPE_LABELS,
   Trainings,
   // SIGNATURE DISABLED — traineeSignatureUrl,
   trainingDocumentDownloadUrl,
   type Trainee,
+  type TraineeSource,
   type TrainingDetail,
   type TrainingDocument,
 } from '@/api/trainings';
@@ -25,13 +27,12 @@ import { ApiError } from '@/lib/api';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { TRAININGS_PATH } from '@/lib/sections';
 import { periodicityLabel } from '@/lib/periodicity';
+import { peopleCount, type ParsedAttendee } from '@/lib/attendeeLines';
 import { useToast } from '@/lib/toast';
 import { useConfirm } from '@/lib/confirm';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Field } from '@/components/ui/Field';
 import { Spinner } from '@/components/ui/Spinner';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { VisitContinueButton } from '@/components/VisitContinueButton';
@@ -42,6 +43,12 @@ import { CardBlockSkeleton, DetailHeaderSkeleton } from '@/components/ui/Skeleto
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { PokynSectionsEditor } from '@/components/PokynSectionsEditor';
+import {
+  BulkAttendeesForm,
+  TraineeForm,
+  TraineeSourceOffer,
+  type TraineeFormValue,
+} from '@/components/TraineeForms';
 
 export function TrainingDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
@@ -60,6 +67,15 @@ export function TrainingDetailPage() {
   const [adding, setAdding] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  // Spec 8.3: „Viacerí naraz", correcting one attendee, and the list of the
+  // previous training.
+  const [showBulkForm, setShowBulkForm] = useState(false);
+  const [bulkAdding, setBulkAdding] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [source, setSource] = useState<TraineeSource | null>(null);
+  const [takingOver, setTakingOver] = useState(false);
+  const [sourceError, setSourceError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   // „Upraviť" on a locked training asks first — unlocking throws the issued
   // protocol away, so it never happens on a single tap.
@@ -88,6 +104,25 @@ export function TrainingDetailPage() {
       cancelled = true;
     };
   }, [id]);
+
+  // The list a „Prevziať z minulého školenia" would copy. Only a draft that is
+  // an attendee training can use it, and it needs the server (online only), so
+  // a failed lookup simply offers nothing.
+  const sourceTrainingType = data?.training.type;
+  const sourceStatus = data?.training.status;
+  useEffect(() => {
+    if (!sourceTrainingType || sourceStatus !== 'draft' || isPokyn(sourceTrainingType)) {
+      setSource(null);
+      return;
+    }
+    let cancelled = false;
+    Trainings.traineeSource(id)
+      .then((res) => { if (!cancelled) setSource(res.source); })
+      .catch(() => { if (!cancelled) setSource(null); });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, sourceTrainingType, sourceStatus]);
 
   async function refreshDetail() {
     const fresh = await Trainings.show(id);
@@ -139,7 +174,7 @@ export function TrainingDetailPage() {
   }
 
   // SIGNATURE DISABLED — async function handleAdd(payload: { fullname: string; position: string; signature: Blob }) {
-  async function handleAdd(payload: { fullname: string; position: string }) {
+  async function handleAdd(payload: TraineeFormValue) {
     setAdding(true);
     setError(null);
     try {
@@ -148,6 +183,7 @@ export function TrainingDetailPage() {
         {
           fullname: payload.fullname,
           position: payload.position || null,
+          personal_number: payload.personal_number || null,
           // SIGNATURE DISABLED — signature: payload.signature,
         },
         csrfToken,
@@ -172,6 +208,86 @@ export function TrainingDetailPage() {
       throw apiErr;
     } finally {
       setAdding(false);
+    }
+  }
+
+  /** Correct one attendee in place (spec 8.3) — queues offline like the add. */
+  async function handleUpdate(traineeId: number, payload: TraineeFormValue) {
+    setUpdating(true);
+    try {
+      await Trainings.updateTrainee(
+        id,
+        traineeId,
+        {
+          fullname: payload.fullname,
+          position: payload.position || null,
+          personal_number: payload.personal_number || null,
+        },
+        csrfToken,
+      );
+      await refreshDetail();
+      setEditingId(null);
+      toast.success('Účastník upravený');
+    } catch (err) {
+      if (handleOfflineSave(err, toast)) {
+        await refreshDetail().catch(() => undefined);
+        setEditingId(null);
+        return;
+      }
+      const apiErr = err instanceof ApiError
+        ? err
+        : new ApiError(0, 'Účastníka sa nepodarilo upraviť.', null);
+      toast.error(apiErr.message);
+      throw apiErr;
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  /** „Viacerí naraz" — one transactional request for the whole paste. */
+  async function handleBulkAdd(rows: ParsedAttendee[]) {
+    setBulkAdding(true);
+    try {
+      const res = await Trainings.addTraineesBulk(
+        id,
+        rows.map((r) => ({
+          fullname: r.name,
+          position: r.position,
+          personal_number: r.personalNumber,
+        })),
+        csrfToken,
+      );
+      await refreshDetail();
+      setShowBulkForm(false);
+      toast.success(`Pridaných: ${peopleCount(res.added)}`);
+    } catch (err) {
+      const apiErr = err instanceof ApiError
+        ? err
+        : new ApiError(0, offlineMessage(err, 'Účastníkov sa nepodarilo pridať.'), null);
+      toast.error(apiErr.message);
+      throw apiErr;
+    } finally {
+      setBulkAdding(false);
+    }
+  }
+
+  async function handleTakeOver() {
+    if (!source) return;
+    setTakingOver(true);
+    setSourceError(null);
+    try {
+      const res = await Trainings.takeOverTrainees(id, source.id, csrfToken);
+      await refreshDetail();
+      setSource(null);
+      toast.success(
+        res.added > 0
+          ? `Prevzatých: ${peopleCount(res.added)}`
+          : 'Všetci účastníci už v zozname sú.',
+      );
+    } catch (err) {
+      setSourceError(offlineMessage(err, 'Prevzatie sa nepodarilo.'));
+    } finally {
+      setTakingOver(false);
     }
   }
 
@@ -329,6 +445,14 @@ export function TrainingDetailPage() {
           {t.valid_until && (
             <DetailRow icon={<CalendarCheck className="size-4" />} label="Platí do">
               {new Date(t.valid_until + 'T00:00:00').toLocaleDateString('sk-SK')}
+              {t.valid_until_override && (
+                <Badge tone="warn" className="ml-2 align-middle">prepísané rukou</Badge>
+              )}
+            </DetailRow>
+          )}
+          {PATROL_SCOPE_LABELS[t.type] && (
+            <DetailRow icon={<MapPin className="size-4" />} label={PATROL_SCOPE_LABELS[t.type]!.label}>
+              {t.patrol_scope ?? <span className="text-ink-400 italic">— nevyplnené —</span>}
             </DetailRow>
           )}
           {!pokyn && t.duration_min !== null && (
@@ -429,23 +553,51 @@ export function TrainingDetailPage() {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-500">
               Účastníci ({trainees.length})
             </h2>
-            {isDraft && !showAddForm && !isReadOnly && (
-              <button
-                type="button"
-                onClick={() => setShowAddForm(true)}
-                className="inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
-              >
-                <Plus className="size-3.5" />
-                Pridať účastníka
-              </button>
+            {isDraft && !showAddForm && !showBulkForm && !isReadOnly && (
+              <div className="flex flex-wrap justify-end gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => { setEditingId(null); setShowAddForm(true); }}
+                  className="inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] transition-all duration-200 hover:bg-firol-600 active:scale-[0.97]"
+                >
+                  <Plus className="size-3.5" />
+                  Pridať účastníka
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setEditingId(null); setShowBulkForm(true); }}
+                  className="inline-flex h-8 items-center gap-1 rounded-2xl border border-ink-200 bg-white px-3 text-xs font-medium text-ink-700 transition-all duration-200 hover:border-ink-300 hover:bg-ink-50 active:scale-[0.97]"
+                >
+                  <ClipboardPaste className="size-3.5" />
+                  Viacerí naraz
+                </button>
+              </div>
             )}
           </header>
 
+          {isDraft && !isReadOnly && source && !showAddForm && !showBulkForm && (
+            <TraineeSourceOffer
+              source={source}
+              busy={takingOver}
+              error={sourceError}
+              onTake={handleTakeOver}
+            />
+          )}
+
           {showAddForm && !isReadOnly && (
-            <AddTraineeForm
+            <TraineeForm
+              submitLabel="Uložiť účastníka"
               onCancel={() => setShowAddForm(false)}
               onSubmit={handleAdd}
               submitting={adding}
+            />
+          )}
+
+          {showBulkForm && !isReadOnly && (
+            <BulkAttendeesForm
+              onCancel={() => setShowBulkForm(false)}
+              onSubmit={handleBulkAdd}
+              submitting={bulkAdding}
             />
           )}
 
@@ -454,7 +606,7 @@ export function TrainingDetailPage() {
           )}
 
           {trainees.length === 0 ? (
-            !showAddForm && (
+            !showAddForm && !showBulkForm && (
               <Card className="flex flex-col items-center gap-2 px-6 py-10 text-center">
                 <div className="grid size-12 place-items-center rounded-2xl bg-firol-50 text-firol-500">
                   <Users className="size-5" />
@@ -469,13 +621,29 @@ export function TrainingDetailPage() {
             <ul className="flex flex-col gap-2">
               {trainees.map((tr, idx) => (
                 <li key={tr.id}>
-                  <TraineeRow
-                    index={idx + 1}
-                    trainee={tr}
-                    canEdit={isDraft && !isReadOnly}
-                    deleting={deletingId === tr.id}
-                    onDelete={() => handleDelete(tr.id)}
-                  />
+                  {editingId === tr.id ? (
+                    <TraineeForm
+                      title={`Upraviť účastníka č. ${idx + 1}`}
+                      initial={{
+                        fullname: tr.fullname,
+                        position: tr.position ?? '',
+                        personal_number: tr.personal_number ?? '',
+                      }}
+                      submitLabel="Uložiť zmeny"
+                      onCancel={() => setEditingId(null)}
+                      onSubmit={(value) => handleUpdate(tr.id, value)}
+                      submitting={updating}
+                    />
+                  ) : (
+                    <TraineeRow
+                      index={idx + 1}
+                      trainee={tr}
+                      canEdit={isDraft && !isReadOnly}
+                      deleting={deletingId === tr.id}
+                      onEdit={() => { setShowAddForm(false); setShowBulkForm(false); setEditingId(tr.id); }}
+                      onDelete={() => handleDelete(tr.id)}
+                    />
+                  )}
                 </li>
               ))}
             </ul>
@@ -669,120 +837,19 @@ function DocumentsBlock({
   );
 }
 
-function AddTraineeForm({
-  onCancel,
-  onSubmit,
-  submitting,
-}: {
-  onCancel: () => void;
-  // SIGNATURE DISABLED — onSubmit: (payload: { fullname: string; position: string; signature: Blob }) => Promise<void>;
-  onSubmit: (payload: { fullname: string; position: string }) => Promise<void>;
-  submitting: boolean;
-}) {
-  // SIGNATURE DISABLED — const padRef = useRef<SignaturePadHandle>(null);
-  const confirm = useConfirm();
-  const [fullname, setFullname] = useState('');
-  const [position, setPosition] = useState('');
-  // SIGNATURE DISABLED — const [empty, setEmpty] = useState(true);
-  const [fullnameError, setFullnameError] = useState<string | null>(null);
-  // SIGNATURE DISABLED — const [signatureError, setSignatureError] = useState<string | null>(null);
-  const [apiError, setApiError] = useState<string | null>(null);
-
-  async function handleCancel() {
-    // SIGNATURE DISABLED — const hasData = !!fullname.trim() || !!position.trim() || !empty;
-    const hasData = !!fullname.trim() || !!position.trim();
-    if (hasData) {
-      const ok = await confirm({
-        title: 'Zavrieť formulár?',
-        description: 'Formulár obsahuje neuložené údaje, ktoré sa stratia.',
-        confirmLabel: 'Zavrieť bez uloženia',
-      });
-      if (!ok) return;
-    }
-    onCancel();
-  }
-
-  async function handle(e: FormEvent) {
-    e.preventDefault();
-    // SIGNATURE DISABLED — const blob = await padRef.current?.toBlob();
-    let hasError = false;
-    if (!fullname.trim()) { setFullnameError('Doplň meno a priezvisko účastníka.'); hasError = true; }
-    // SIGNATURE DISABLED — if (!blob) { setSignatureError('Účastník sa musí podpísať na obrazovku.'); hasError = true; }
-    if (hasError) return;
-    setFullnameError(null);
-    // SIGNATURE DISABLED — setSignatureError(null);
-    setApiError(null);
-    try {
-      // SIGNATURE DISABLED — await onSubmit({ fullname: fullname.trim(), position: position.trim(), signature: blob! });
-      await onSubmit({ fullname: fullname.trim(), position: position.trim() });
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Účastníka sa nepodarilo pridať.';
-      setApiError(message);
-    }
-  }
-
-  return (
-    <Card className="mb-3 p-5">
-      <form onSubmit={handle} className="flex flex-col gap-4" noValidate>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Meno a priezvisko" required error={fullnameError}>
-            {(p) => (
-              <Input {...p} required leftIcon={<User className="size-4" />}
-                value={fullname} onChange={(e) => { setFullname(e.target.value); if (fullnameError) setFullnameError(null); }}
-                placeholder="Mária Novotná" />
-            )}
-          </Field>
-          <Field label="Pracovné zaradenie" hint='Voliteľné — napr. „Vedúci skladu".'>
-            {(p) => (
-              <Input {...p} leftIcon={<Briefcase className="size-4" />}
-                value={position} onChange={(e) => setPosition(e.target.value)}
-                placeholder="Vedúci zmeny" />
-            )}
-          </Field>
-        </div>
-
-        {/* SIGNATURE DISABLED — on-screen pad; restore by uncommenting and re-enabling all SIGNATURE DISABLED markers
-        <Field label="Podpis" required error={signatureError} hint={signatureError ? undefined : 'Podpíšte sa prstom alebo myšou. Rovnaký podpis pôjde na PDF.'}>
-          {() => <SignaturePad ref={padRef} heightPx={180} onEmptyChange={(isEmpty) => { setEmpty(isEmpty); if (!isEmpty && signatureError) setSignatureError(null); }} />}
-        </Field>
-        */}
-
-        {apiError && (
-          <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
-            {apiError}
-          </div>
-        )}
-
-        <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-end">
-          <Button type="button" variant="ghost" onClick={handleCancel}>
-            Zrušiť
-          </Button>
-          {/* SIGNATURE DISABLED — when restoring, replace disabled with: disabled={empty || !fullname.trim()} and add: title={empty ? 'Najprv sa podpíšte' : ''} */}
-          <Button
-            type="submit"
-            loading={submitting}
-            leftIcon={<CheckCircle2 className="size-4" />}
-            disabled={!fullname.trim()}
-          >
-            Uložiť účastníka
-          </Button>
-        </div>
-      </form>
-    </Card>
-  );
-}
-
 function TraineeRow({
   index,
   trainee,
   canEdit,
   deleting,
+  onEdit,
   onDelete,
 }: {
   index: number;
   trainee: Trainee;
   canEdit: boolean;
   deleting: boolean;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -801,6 +868,12 @@ function TraineeRow({
             {trainee.position}
           </p>
         )}
+        {trainee.personal_number && (
+          <p className="mt-0.5 truncate text-xs text-ink-500">
+            <Hash className="-mt-0.5 mr-1 inline size-3" />
+            os. č. {trainee.personal_number}
+          </p>
+        )}
       </div>
       {/* SIGNATURE DISABLED — signature preview box; restore together with all other SIGNATURE DISABLED markers
       <div className="flex h-12 w-32 shrink-0 items-center justify-center rounded-xl border border-ink-100 bg-white p-1">
@@ -816,15 +889,26 @@ function TraineeRow({
       </div>
       */}
       {canEdit && (
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={deleting}
-          aria-label="Zmazať"
-          className="grid size-9 place-items-center rounded-xl text-ink-500 transition-colors hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad disabled:opacity-50"
-        >
-          {deleting ? <Spinner size="sm" /> : <Trash2 className="size-4" />}
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={onEdit}
+            disabled={deleting}
+            aria-label={`Upraviť účastníka ${trainee.fullname}`}
+            className="grid size-9 place-items-center rounded-xl text-[var(--color-status-warn)] transition-all duration-200 hover:bg-[var(--color-status-warn-bg)] active:scale-95 disabled:opacity-50"
+          >
+            <Pencil className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            aria-label="Zmazať"
+            className="grid size-9 place-items-center rounded-xl text-ink-500 transition-all duration-200 hover:bg-[var(--color-status-bad-bg)] hover:text-status-bad active:scale-95 disabled:opacity-50"
+          >
+            {deleting ? <Spinner size="sm" /> : <Trash2 className="size-4" />}
+          </button>
+        </div>
       )}
     </Card>
   );

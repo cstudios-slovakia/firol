@@ -182,10 +182,16 @@ export function trainingCreateOptimistic(args: {
     // As for inspections: the server decides whether the period is custom when
     // the create syncs, and nothing in the UI reads the flag before then.
     periodicity_is_custom: false,
-    valid_until: validUntil(args.payload.date ?? null, {
+    valid_until: args.payload.valid_until_override ?? validUntil(args.payload.date ?? null, {
       value: args.payload.periodicity_value ?? null,
       unit: args.payload.periodicity_unit ?? null,
     }),
+    valid_until_computed: validUntil(args.payload.date ?? null, {
+      value: args.payload.periodicity_value ?? null,
+      unit: args.payload.periodicity_unit ?? null,
+    }),
+    valid_until_override: args.payload.valid_until_override ?? null,
+    patrol_scope: args.payload.patrol_scope ?? null,
     duration_min: args.payload.duration_min ?? null,
     topics: args.payload.topics ?? null,
     status: 'draft',
@@ -455,16 +461,20 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
     const keys = [
       'date', 'periodicity_value', 'periodicity_unit', 'duration_min', 'topics',
       'trainer_id', 'facility_id', 'type', 'fields',
+      'valid_until_override', 'patrol_scope',
     ];
-    // `valid_until` is derived from the date and the period, so it follows them.
+    // `valid_until` is derived from the date and the period — unless the
+    // technician wrote the validity by hand (spec 8.1) — so it follows them.
     const merged = <T extends Record<string, unknown>>(row: T): T => {
       const next = mergeFields(row, f, keys);
+      const computed = validUntil(next.date as string | null, {
+        value: next.periodicity_value as Periodicity['value'],
+        unit: next.periodicity_unit as Periodicity['unit'],
+      });
       return {
         ...next,
-        valid_until: validUntil(next.date as string | null, {
-          value: next.periodicity_value as Periodicity['value'],
-          unit: next.periodicity_unit as Periodicity['unit'],
-        }),
+        valid_until_computed: computed,
+        valid_until: (next.valid_until_override as string | null | undefined) || computed,
       };
     };
     return {
@@ -708,6 +718,7 @@ export function autoOptimistic(
       const ts = nowIso();
       const fullname = body instanceof FormData ? String(body.get('fullname') ?? '') : '';
       const position = body instanceof FormData ? (body.get('position') as string | null) : null;
+      const personalNumber = body instanceof FormData ? (body.get('personal_number') as string | null) : null;
       const patchTrainee: CachePatch = {
         path: detailPath,
         apply: (current) => {
@@ -717,6 +728,7 @@ export function autoOptimistic(
             id: newId,
             fullname,
             position: position || null,
+            personal_number: personalNumber || null,
             has_signature: false,
             signed_at: null,
             created_at: ts,
@@ -735,6 +747,33 @@ export function autoOptimistic(
         label: 'Nový účastník',
         detail: fullname || undefined,
       };
+    }
+
+    if (traineeId !== null && method === 'PATCH') {
+      const edit = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+      const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+      const patch: CachePatch = {
+        path: detailPath,
+        apply: (current) => {
+          const d = current as TrainingDetail | undefined;
+          if (!d) return undefined;
+          return {
+            ...d,
+            trainees: d.trainees.map((t) =>
+              t.id === traineeId
+                ? {
+                  ...t,
+                  fullname: text(edit.fullname) ?? t.fullname,
+                  position: text(edit.position),
+                  personal_number: text(edit.personal_number),
+                  updated_at: nowIso(),
+                }
+                : t,
+            ),
+          };
+        },
+      };
+      return { patches: [patch], label: 'Úprava účastníka', detail: text(edit.fullname) ?? undefined };
     }
 
     if (traineeId !== null && method === 'DELETE') {

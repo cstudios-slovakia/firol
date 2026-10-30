@@ -135,7 +135,7 @@ final class ClientTerms
         // last one seen for a chain is its latest; Vstupné and Opakované share
         // a chain and print one row, named after the later one.
         $tStmt = Db::pdo()->prepare(
-            'SELECT t.type, t.date, t.periodicity_value, t.periodicity_unit
+            'SELECT t.type, t.date, t.periodicity_value, t.periodicity_unit, t.valid_until_override
              FROM   trainings t
              WHERE  t.account_id = :acct AND t.company_id = :comp
                AND  (t.facility_id = :fac OR t.facility_id IS NULL)
@@ -158,7 +158,8 @@ final class ClientTerms
             $rows[] = self::row(
                 self::TRAINING_LABELS[$type] ?? $type,
                 (string) $r['date'],
-                Periodicity::validUntil((string) $r['date'], $value, $unit),
+                // The validity written by hand (spec 8.1) wins over date + periodicity.
+                $r['valid_until_override'] ?? Periodicity::validUntil((string) $r['date'], $value, $unit),
                 $asOf,
             );
         }

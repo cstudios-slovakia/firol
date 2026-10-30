@@ -8,6 +8,7 @@ import { Companies, type Company, type CompanyDetail, type CompanyListItem, type
 import { Team, type TeamMember } from '@/api/team';
 import {
   isPokyn,
+  PATROL_SCOPE_LABELS,
   TRAINING_TYPES,
   TRAINING_TYPE_LABELS,
   TRAINING_TYPE_SHORT,
@@ -34,6 +35,7 @@ import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
+import { ValidityOverride } from '@/components/ValidityOverride';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { VisitSharedFields, VisitSharedFieldsSkeleton } from '@/components/VisitSharedFields';
 import { visitTrail, visitUkonPosition } from '@/lib/visits';
@@ -77,6 +79,10 @@ export function NewTrainingPage() {
   // technician picks one themselves.
   const [periodicity, setPeriodicity] = useState<Periodicity>(() => defaultTrainingPeriodicity(presetType ?? 'vstupne'));
   const [periodicityTouched, setPeriodicityTouched] = useState(false);
+  // Spec 8.1 — validity written by hand (null = date + periodicity), and
+  // spec 8.2 — the workplace / activity of a hliadka.
+  const [validOverride, setValidOverride] = useState<string | null>(null);
+  const [patrolScope, setPatrolScope] = useState('');
   const [companyTrainingHistory, setCompanyTrainingHistory] =
     useState<NonNullable<CompanyDetail['company_last_training_periodicities']>>({});
 
@@ -201,6 +207,8 @@ export function NewTrainingPage() {
   // The Pokyn is a document for the client's employees, not a session they
   // attend — the same form, but the wording follows what is being issued.
   const pokyn = isPokyn(type);
+  // Only the two hliadka types name a workplace / activity (spec 8.2).
+  const patrolMeta = PATROL_SCOPE_LABELS[type];
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -224,6 +232,8 @@ export function NewTrainingPage() {
         date,
         periodicity_value: periodicity.value,
         periodicity_unit: periodicity.unit,
+        valid_until_override: validOverride,
+        patrol_scope: patrolMeta && patrolScope.trim() ? patrolScope.trim() : undefined,
         trainer_id: trainerId ?? undefined,
         ...(visitId !== null ? { visit_id: visitId } : {}),
         // The Pokyn starts from the client's template text; the technician
@@ -488,17 +498,39 @@ export function NewTrainingPage() {
             </>
           )}
 
+          {patrolMeta && (
+            <Field
+              label={patrolMeta.label}
+              required
+              hint="Bez toho sa z protokolu nedá určiť, pre koho hliadka platí."
+            >
+              {(p) => (
+                <Input {...p} autoComplete="off" maxLength={255}
+                  value={patrolScope} onChange={(e) => setPatrolScope(e.target.value)}
+                  placeholder={patrolMeta.placeholder} />
+              )}
+            </Field>
+          )}
+
           <Field label="Periodicita">
             {() => (
-              <PeriodicityPicker
-                recommended={TRAINING_RECOMMENDED_MONTHS[type] ?? []}
-                value={periodicity}
-                executedOn={date || null}
-                onChange={(next) => {
-                  setPeriodicity(next);
-                  setPeriodicityTouched(true);
-                }}
-              />
+              <div className="flex flex-col gap-3">
+                <PeriodicityPicker
+                  recommended={TRAINING_RECOMMENDED_MONTHS[type] ?? []}
+                  value={periodicity}
+                  executedOn={date || null}
+                  onChange={(next) => {
+                    setPeriodicity(next);
+                    setPeriodicityTouched(true);
+                  }}
+                />
+                <ValidityOverride
+                  date={date || null}
+                  periodicity={periodicity}
+                  value={validOverride}
+                  onChange={setValidOverride}
+                />
+              </div>
             )}
           </Field>
 

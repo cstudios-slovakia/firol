@@ -19,18 +19,23 @@ use Firol\Support\PersonList;
  *
  *   GET  /api/inspections/{id}/person-sources   where names could be taken from
  *   POST /api/inspections/{id}/persons/take-over take them
+ *   POST /api/inspections/{id}/persons/bulk      add many at once (oboznámenie BOZP)
  *   POST /api/inspections/{id}/fill-results      reopen a test printed blank
  *
  * „Zoznam osôb sa dá prevziať z predchádzajúcej skúšky alebo zo školenia tej
  * istej firmy." The source is the COMPANY, not the prevádzka: people move
  * between a firm's sites, and the test at the warehouse is taken by the same
  * shift that was trained at the head office. Only names and pracovné
- * zaradenie travel — never a result, a time, a value or a signature.
+ * zaradenie travel (and the osobné číslo of an oboznámenie) — never a result,
+ * a time, a value or a signature.
  */
 final class PersonListController
 {
     /** How many alternative sources the picker offers. */
     private const SOURCE_LIMIT = 8;
+
+    /** Spec 8.3 — a shift of twenty is the case; this only stops a runaway paste. */
+    private const BULK_LIMIT = 500;
 
     public static function sources(Request $req, array $params): void
     {
@@ -108,6 +113,85 @@ final class PersonListController
         }
 
         Response::json(['added' => $added, 'skipped' => count($people) - $added], 201);
+    }
+
+    /**
+     * Add many people to an oboznámenie BOZP in one request (spec 8.3
+     * „Hromadné pridanie" — „aj v oboznámení BOZP"). The client has split the
+     * pasted text into rows; they are inserted in one transaction, so a paste
+     * is never half-applied. A row without a pracovné zaradenie is accepted —
+     * the summary flags it, exactly like a taken-over row without one.
+     *
+     * Body: {"rows": [{"name", "position"?, "personal_number"?}, ...]}
+     */
+    public static function bulk(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $inspection = self::loadPersonInspection((int) $params['id']);
+        if ($inspection['type'] !== PersonList::SKOLENIE_BOZP) {
+            Response::error('Hromadne sa dajú pridať len účastníci oboznámenia BOZP.', 422);
+        }
+        if ($inspection['status'] !== 'draft') {
+            Response::error('Kontrola je uzamknutá — zoznam osôb sa už nedá meniť.', 409);
+        }
+
+        $rows = $req->json()['rows'] ?? null;
+        if (!is_array($rows) || $rows === []) {
+            Response::error('Nalep aspoň jedno meno.', 422);
+        }
+        if (count($rows) > self::BULK_LIMIT) {
+            Response::error('Naraz sa dá pridať najviac ' . self::BULK_LIMIT . ' ľudí.', 422);
+        }
+
+        $clean = [];
+        foreach (array_values($rows) as $idx => $row) {
+            $line = $idx + 1;
+            if (!is_array($row)) {
+                Response::error("Riadok $line: neplatné údaje.", 422);
+            }
+            $name = trim((string) ($row['name'] ?? ''));
+            if ($name === '') {
+                Response::error("Riadok $line: chýba meno.", 422);
+            }
+            $position = trim((string) ($row['position'] ?? ''));
+            $number = trim((string) ($row['personal_number'] ?? ''));
+            if (mb_strlen($name) > 191 || mb_strlen($position) > 191) {
+                Response::error("Riadok $line: text je príliš dlhý (najviac 191 znakov).", 422);
+            }
+            if (mb_strlen($number) > PersonList::MAX_PERSONAL_NUMBER) {
+                Response::error("Riadok $line: osobné číslo je príliš dlhé (najviac " . PersonList::MAX_PERSONAL_NUMBER . ' znakov).', 422);
+            }
+            $carried = PersonList::carryRow(PersonList::SKOLENIE_BOZP, [
+                'name' => $name, 'position' => $position, 'personal_number' => $number,
+            ]);
+            if ($carried !== null) {
+                $clean[] = $carried;
+            }
+        }
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            $max = $pdo->prepare('SELECT COALESCE(MAX(position), 0) FROM inspection_items WHERE inspection_id = ?');
+            $max->execute([(int) $inspection['id']]);
+            $position = (int) $max->fetchColumn();
+            $insert = $pdo->prepare(
+                'INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)'
+            );
+            foreach ($clean as $fields) {
+                $insert->execute([
+                    (int) $inspection['id'],
+                    ++$position,
+                    json_encode($fields, JSON_UNESCAPED_UNICODE),
+                ]);
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        Response::json(['added' => count($clean)], 201);
     }
 
     /**
@@ -260,7 +344,7 @@ final class PersonListController
             return null;
         }
         $stmt = Db::pdo()->prepare(
-            'SELECT fullname AS name, position FROM trainees WHERE training_id = ? ORDER BY id ASC'
+            'SELECT fullname AS name, position, personal_number FROM trainees WHERE training_id = ? ORDER BY id ASC'
         );
         $stmt->execute([$sourceId]);
         return $stmt->fetchAll();
