@@ -18,6 +18,7 @@ import {
 import { Visits, type Visit } from '@/api/visits';
 import { ApiError } from '@/lib/api';
 import { TRAINING_SECTION, TRAININGS_PATH } from '@/lib/sections';
+import { facilityNouns } from '@/lib/clientKind';
 import { todayIso } from '@/lib/dates';
 import {
   TRAINING_RECOMMENDED_MONTHS,
@@ -476,7 +477,7 @@ export function NewTrainingPage() {
                       <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
                         <Plus className="size-3.5" />
                       </span>
-                      Pridať prevádzku
+                      {facilityNouns(companies?.find((c) => c.id === companyId)?.client_type).addLabel}
                     </button>
                   ) : undefined}
                 />
@@ -624,6 +625,7 @@ export function NewTrainingPage() {
           companyId={companyId}
           companyName={companies?.find((c) => c.id === companyId)?.name ?? ''}
           companyAddress={companies?.find((c) => c.id === companyId)}
+          clientType={companies?.find((c) => c.id === companyId)?.client_type}
           onCreated={(f) => {
             setFacilities((prev) => {
               const enriched: FacilityListItem = {

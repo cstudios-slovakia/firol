@@ -22,7 +22,8 @@ use PDO;
 final class AccountPurge
 {
     /**
-     * Companies + facilities + everything hanging off them (inspections,
+     * Companies + facilities (client type and the prevádzka objekt columns
+     * go with those rows) + everything hanging off them (inspections,
      * items, photos, trainings, trainees, documents).
      *
      * @return int number of companies removed

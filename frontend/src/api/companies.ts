@@ -1,10 +1,13 @@
 import { api, type OptimisticSpec } from '@/lib/api';
 import type { PeriodicityUnit } from '@/lib/periodicity';
 import type { CompanyBillingMode } from '@/api/invoicing';
+import type { ClientType } from '@/lib/clientKind';
 
 export type CompanyListItem = {
   id: number;
   name: string;
+  /** Spec 3.1. Missing on a row cached before phase 2 — treat as firma. */
+  client_type?: ClientType;
   ico: string | null;
   /** Combined address for read-only display; reassembled from the parts below. */
   address: string | null;
@@ -32,6 +35,8 @@ export type CompanyListItem = {
 export type Company = {
   id: number;
   name: string;
+  /** Spec 3.1. Missing on a row cached before phase 2 — treat as firma. */
+  client_type?: ClientType;
   ico: string | null;
   /** Combined address for read-only display; reassembled from the parts below. */
   address: string | null;
@@ -115,6 +120,7 @@ export type CompanyDetail = {
 
 export type CompanyPayload = {
   name: string;
+  client_type?: ClientType;
   ico?: string;
   street?: string;
   postal_code?: string;

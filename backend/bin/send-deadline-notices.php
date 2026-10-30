@@ -11,7 +11,8 @@ declare(strict_types=1);
  * e-mails the client about each termín falling within the chosen number of
  * days (7 / 14 / 30):
  *
- *   - only when the company has a contact e-mail (`companies.contact_email`);
+ *   - only when a recipient resolves (spec 3.2): the prevádzka e-mail, else
+ *     the firm's contact e-mail, else an address found in the firm's Kontakt;
  *   - one message per prevádzka and day, listing every control due there —
  *     the same grouping and the same words as the manual button
  *     („Oznámiť klientovi e-mailom", lib/clientNoticeEmail.ts);

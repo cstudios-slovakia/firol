@@ -25,6 +25,8 @@ export type SendableDocument = {
   /** Null for a výdajka not tied to one prevádzka. */
   facility_id: number | null;
   facility_name: string | null;
+  /** Set when that prevádzka has its own e-mail (spec 3.2). Optional on a cached row. */
+  facility_email?: string | null;
   /** Size of the PDF, so the technician can see what is filling the message. */
   byte_size: number;
   /** Already went out to this company in a send with status `odoslane`. */

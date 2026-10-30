@@ -12,6 +12,7 @@ import { CompaniesPage } from '@/pages/CompaniesPage';
 import { CompanyDetailPage } from '@/pages/CompanyDetailPage';
 import { CompanyEditPage } from '@/pages/CompanyEditPage';
 import { FacilityDetailPage } from '@/pages/FacilityDetailPage';
+import { FacilityDevicesPage } from '@/pages/FacilityDevicesPage';
 import { FacilityEditPage } from '@/pages/FacilityEditPage';
 import { NewInspectionTypePicker } from '@/pages/NewInspectionTypePicker';
 import { InspectionStep1Page } from '@/pages/InspectionStep1Page';
@@ -92,6 +93,7 @@ export default function App() {
         <Route path="/companies/:id/edit" element={<CompanyEditPage />} />
         <Route path="/companies/:companyId/facilities/new" element={<FacilityEditPage />} />
 
+        <Route path="/facilities/:id/devices" element={<FacilityDevicesPage />} />
         <Route path="/facilities/:id" element={<FacilityDetailPage />} />
         <Route path="/facilities/:id/edit" element={<FacilityEditPage />} />
 

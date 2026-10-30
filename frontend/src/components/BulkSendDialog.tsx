@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Mail, Plus, Send, X } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Documents, type SendableDocument } from '@/api/documents';
@@ -12,6 +12,7 @@ import { Field } from '@/components/ui/Field';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
 import { cn } from '@/lib/cn';
+import { bulkRecipientEmail } from '@/lib/companyEmail';
 
 /**
  * Several protocols in one e-mail — block 1 / chapter 9.1.
@@ -55,6 +56,8 @@ export function BulkSendDialog({
   const [subject, setSubject] = useState('');
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
+  /** Last address the dialog filled in, so a hand-typed one is left alone. */
+  const autoRecipient = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -63,6 +66,7 @@ export function BulkSendDialog({
     // The client's address goes into the input rather than straight into a chip:
     // a chip can only be removed, the input can be corrected.
     setRecipients([]);
+    autoRecipient.current = defaultRecipient ?? null;
     setRecipientDraft(defaultRecipient ?? '');
     setSubject(`Protokoly z kontroly — ${companyName}, ${new Date().toLocaleDateString('sk-SK')}`);
     setNote('');
@@ -104,6 +108,18 @@ export function BulkSendDialog({
     [documents, selected],
   );
   const overLimit = totalBytes > maxTotalBytes;
+
+  // Spec 3.2 — one prevádzka in the selection, and it has an e-mail: use that.
+  // A mixed selection stays on the firm's address. A typed address is kept.
+  useEffect(() => {
+    if (!documents) return;
+    const next = bulkRecipientEmail(
+      documents.filter((d) => selected.has(d.id)),
+      defaultRecipient ?? null,
+    );
+    setRecipientDraft((current) => (current === (autoRecipient.current ?? '') ? (next ?? '') : current));
+    autoRecipient.current = next;
+  }, [documents, selected, defaultRecipient]);
 
   function toggle(id: number) {
     setSelected((prev) => {

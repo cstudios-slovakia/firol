@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Building, Map, Mailbox, MapPin, NotebookPen, User, Warehouse } from 'lucide-react';
+import { Building, Droplets, Flame, Mail, Map, Mailbox, MapPin, NotebookPen, User, Warehouse, Zap } from 'lucide-react';
 import { Facilities, type Facility, type FacilityPayload } from '@/api/facilities';
 import { ApiError } from '@/lib/api';
 import { facilityCreateOptimistic } from '@/lib/offlineEntities';
@@ -10,6 +10,7 @@ import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/auth/AuthContext';
 import { formatAddress } from '@/lib/address';
+import { descriptionHint, facilityNouns, isBytoveDruzstvo, type ClientType } from '@/lib/clientKind';
 
 /** The firm's seat, as far as the "Rovnaká adresa ako sídlo firmy" button needs it. */
 export type CompanyAddress = {
@@ -25,6 +26,8 @@ type FacilityFormProps = {
   companyId?: number;
   /** The firm's address; without one the "same address as the seat" button is hidden. */
   companyAddress?: CompanyAddress | null;
+  /** Decides the nouns and whether the floor fields are shown. Defaults to firma. */
+  clientType?: ClientType | null;
   /** Called after a successful save with the resulting facility. */
   onSaved: (facility: Facility) => void;
   /** Optional cancel button — only rendered if provided. */
@@ -47,6 +50,7 @@ export function FacilityForm({
   initial,
   companyId,
   companyAddress,
+  clientType,
   onSaved,
   onCancel,
   submitLabel,
@@ -60,11 +64,26 @@ export function FacilityForm({
   const [postalCode, setPostalCode] = useState(initial?.postal_code ?? '');
   const [city, setCity] = useState(initial?.city ?? '');
   const [contactPerson, setContactPerson] = useState(initial?.contact_person ?? '');
+  const [email, setEmail] = useState(initial?.email ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
+  const [power, setPower] = useState(initial?.main_power_location ?? '');
+  const [gas, setGas] = useState(initial?.main_gas_location ?? '');
+  const [water, setWater] = useState(initial?.main_water_location ?? '');
+  const [description, setDescription] = useState(initial?.description ?? '');
+  const bd = isBytoveDruzstvo(clientType);
+  const [floorsAbove, setFloorsAbove] = useState(
+    initial?.floors_above != null ? String(initial.floors_above) : bd ? '4' : '',
+  );
+  const [floorsBelow, setFloorsBelow] = useState(
+    initial?.floors_below != null ? String(initial.floors_below) : bd ? '1' : '',
+  );
 
   const [submitting, setSubmitting] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [floorError, setFloorError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const nouns = facilityNouns(clientType);
 
   // Spec 5 — offered only when the firm has an address to take over (street
   // or obec, like the prototype).
@@ -81,14 +100,30 @@ export function FacilityForm({
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) {
-      setNameError('Doplň názov prevádzky.');
+      setNameError(nouns.nameRequired);
       return;
+    }
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setEmailError('Zadaj platnú e-mailovú adresu.');
+      return;
+    }
+    let above: number | null = null;
+    let below: number | null = null;
+    if (bd) {
+      above = Number(floorsAbove);
+      below = Number(floorsBelow);
+      if (!Number.isInteger(above) || above < 1 || above > 40 || !Number.isInteger(below) || below < 0 || below > 5) {
+        setFloorError('Nadzemné podlažia sú 1–40, podzemné 0–5.');
+        return;
+      }
     }
     if (mode === 'create' && companyId === undefined) {
       setApiError('Najprv vyber firmu.');
       return;
     }
     setNameError(null);
+    setEmailError(null);
+    setFloorError(null);
     setApiError(null);
     setSubmitting(true);
     const payload: FacilityPayload = {
@@ -96,8 +131,15 @@ export function FacilityForm({
       street: street.trim() || undefined,
       postal_code: postalCode.trim() || undefined,
       city: city.trim() || undefined,
+      email: email.trim() || undefined,
       contact_person: contactPerson.trim() || undefined,
       notes: notes.trim() || undefined,
+      main_power_location: power.trim() || undefined,
+      main_gas_location: gas.trim() || undefined,
+      main_water_location: water.trim() || undefined,
+      description: description.trim() || undefined,
+      floors_above: bd ? above : null,
+      floors_below: bd ? below : null,
     };
     try {
       const optimistic = facilityCreateOptimistic({
@@ -108,12 +150,19 @@ export function FacilityForm({
         city: payload.city ?? null,
         contact_person: payload.contact_person ?? null,
         notes: payload.notes ?? null,
+        email: payload.email ?? null,
+        main_power_location: payload.main_power_location ?? null,
+        main_gas_location: payload.main_gas_location ?? null,
+        main_water_location: payload.main_water_location ?? null,
+        description: payload.description ?? null,
+        floors_above: payload.floors_above ?? null,
+        floors_below: payload.floors_below ?? null,
       });
       const res = mode === 'edit' && initial
         ? await Facilities.update(initial.id, payload, csrfToken)
         : await Facilities.createUnderCompany(companyId!, payload, csrfToken, optimistic);
       onSaved(res.facility);
-      toast.success(mode === 'edit' ? 'Prevádzka uložená' : 'Prevádzka vytvorená');
+      toast.success(mode === 'edit' ? nouns.savedToast : nouns.createdToast);
     } catch (err) {
       // Offline edit: queued + cache patched, navigate on as if saved.
       if (handleOfflineSave(err, toast)) {
@@ -130,7 +179,7 @@ export function FacilityForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-      <Field label="Názov prevádzky" required error={nameError}>
+      <Field label={nouns.nameLabel} required error={nameError}>
         {(p) => (
           <Input
             {...p}
@@ -138,7 +187,7 @@ export function FacilityForm({
             leftIcon={<Warehouse className="size-4" />}
             value={name}
             onChange={(e) => { setName(e.target.value); if (nameError) setNameError(null); }}
-            placeholder="Sklad A"
+            placeholder={nouns.namePlaceholder}
             autoFocus={mode === 'create'}
           />
         )}
@@ -199,6 +248,67 @@ export function FacilityForm({
         </Field>
       </div>
 
+      <Field
+        label="E-mail prevádzky"
+        hint="Protokoly a zápisy z tejto prevádzky sa posielajú sem. Má prednosť pred celofiremným e-mailom."
+        error={emailError}
+      >
+        {(p) => (
+          <Input
+            {...p}
+            type="email"
+            inputMode="email"
+            autoComplete="off"
+            leftIcon={<Mail className="size-4" />}
+            value={email}
+            onChange={(e) => { setEmail(e.target.value); if (emailError) setEmailError(null); }}
+            placeholder="hala@agrofruct.sk"
+          />
+        )}
+      </Field>
+
+      <div className="flex flex-col gap-3 rounded-2xl border border-firol-200 bg-firol-50/60 p-3">
+        <div>
+          <p className="text-xs font-medium text-ink-700">Hlavné vypínače a uzávery</p>
+          <p className="mt-1 text-xs leading-relaxed text-ink-500">
+            Kde sa nachádzajú. Tlačí sa do záznamu z prehliadky — § 20 ods. 1 písm. c) vyhl. 121/2002 žiada, aby to zamestnanci vedeli.
+          </p>
+        </div>
+        <Field label="Hlavný vypínač elektriny">
+          {(p) => (
+            <Input
+              {...p}
+              leftIcon={<Zap className="size-4" />}
+              value={power}
+              onChange={(e) => setPower(e.target.value)}
+              placeholder="v ERZ na 1. PP"
+            />
+          )}
+        </Field>
+        <Field label="Hlavný uzáver plynu">
+          {(p) => (
+            <Input
+              {...p}
+              leftIcon={<Flame className="size-4" />}
+              value={gas}
+              onChange={(e) => setGas(e.target.value)}
+              placeholder="v skrinke na fasáde pri vstupe"
+            />
+          )}
+        </Field>
+        <Field label="Hlavný uzáver vody">
+          {(p) => (
+            <Input
+              {...p}
+              leftIcon={<Droplets className="size-4" />}
+              value={water}
+              onChange={(e) => setWater(e.target.value)}
+              placeholder="na 1. PP pri výťahovej šachte"
+            />
+          )}
+        </Field>
+      </div>
+
       <Field label="Kontaktná osoba">
         {(p) => (
           <Input
@@ -230,6 +340,65 @@ export function FacilityForm({
         )}
       </Field>
 
+      <div id="popis-objektu" className="flex flex-col gap-3 rounded-2xl border border-ink-200 bg-white p-3">
+        <p className="text-xs font-medium text-ink-700">Pre preventívne prehliadky</p>
+        <Field label="Popis objektu" hint={descriptionHint(clientType)}>
+          {(p) => (
+            <textarea
+              id={p.id}
+              aria-invalid={p['aria-invalid']}
+              rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Počet podlaží, garáže, kotolňa, spôsob vykurovania…"
+              className="w-full rounded-xl border border-ink-200 bg-white px-3 py-2.5 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200"
+            />
+          )}
+        </Field>
+        {bd && (
+          <>
+            <Field label="Podlažia" error={floorError}>
+              {() => (
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Nadzemných">
+                    {(p) => (
+                      <Input
+                        {...p}
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={40}
+                        value={floorsAbove}
+                        onChange={(e) => { setFloorsAbove(e.target.value); if (floorError) setFloorError(null); }}
+                      />
+                    )}
+                  </Field>
+                  <Field label="Podzemných">
+                    {(p) => (
+                      <Input
+                        {...p}
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={5}
+                        value={floorsBelow}
+                        onChange={(e) => { setFloorsBelow(e.target.value); if (floorError) setFloorError(null); }}
+                      />
+                    )}
+                  </Field>
+                </div>
+              )}
+            </Field>
+            <p className="text-xs text-ink-500">
+              Podľa toho sa pri zápise nedostatku ponúknu podlažia. Osem nadzemných = osem možností, nie pevný zoznam.
+            </p>
+            <p className="rounded-xl bg-ink-50 px-3 py-2 text-xs leading-relaxed text-ink-600">
+              Vchody sa tu <span className="font-semibold">nenastavujú</span>. Koľko ich dom má, napíšete do popisu objektu vyššie; pri zápise nedostatku si vchod jednoducho napíšete a odvtedy sa ponúka sám.
+            </p>
+          </>
+        )}
+      </div>
+
       {apiError && (
         <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
           {apiError}
@@ -243,7 +412,7 @@ export function FacilityForm({
           </Button>
         )}
         <Button type="submit" loading={submitting}>
-          {submitLabel ?? (mode === 'edit' ? 'Uložiť zmeny' : 'Vytvoriť prevádzku')}
+          {submitLabel ?? (mode === 'edit' ? 'Uložiť zmeny' : nouns.createLabel)}
         </Button>
       </div>
     </form>

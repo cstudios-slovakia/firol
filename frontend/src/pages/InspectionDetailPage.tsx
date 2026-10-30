@@ -749,6 +749,7 @@ export function InspectionDetailPage() {
         visitId={i.visit_id}
         inspectionId={i.id}
         companyId={i.company_id}
+        facilityId={i.facility_id}
       />
       )}
 
@@ -1001,6 +1002,7 @@ function DocumentsBlock({
   visitId = null,
   inspectionId,
   companyId,
+  facilityId,
 }: {
   documents: InspectionDocument[];
   /** Set when the úkon belongs to a visit: the protocol may wait for its end. */
@@ -1008,6 +1010,7 @@ function DocumentsBlock({
   inspectionId: number;
   /** The client, whose recorded e-mail prefills the send form. */
   companyId: number;
+  facilityId?: number | null;
   canGenerate: boolean;
   generating: boolean;
   onGenerate: () => void;
@@ -1115,7 +1118,7 @@ function DocumentsBlock({
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
             <HandoverRow doc={doc} canSign={canSign} onSign={() => onSign(doc)} />
-            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} companyId={companyId} />
+            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} companyId={companyId} facilityId={facilityId} />
           </li>
         ))}
       </ul>

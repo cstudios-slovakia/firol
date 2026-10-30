@@ -151,6 +151,7 @@ $router->get('/api/companies/{id}/sendable-documents', [DocumentSendController::
 $router->get('/api/companies/{id}/sends',              [DocumentSendController::class, 'index']);
 $router->post('/api/companies/{id}/sends',             [DocumentSendController::class, 'store']);
 
+$router->get('/api/facilities/{id}/devices',        [FacilityController::class, 'devices']);
 $router->get('/api/facilities/{id}',                [FacilityController::class, 'show']);
 $router->patch('/api/facilities/{id}',              [FacilityController::class, 'update']);
 $router->post('/api/facilities/{id}/archive',       [FacilityController::class, 'archive']);

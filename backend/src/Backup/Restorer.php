@@ -233,13 +233,15 @@ final class Restorer
 
         $insertCompany = $this->pdo->prepare(
             'INSERT INTO companies
-                (account_id, name, ico, street, postal_code, city, contact, contact_email, approver, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                (account_id, name, client_type, ico, street, postal_code, city, contact, contact_email, approver, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insertFacility = $this->pdo->prepare(
             'INSERT INTO facilities
-                (account_id, company_id, name, street, postal_code, city, contact_person, notes, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                (account_id, company_id, name, street, postal_code, city, email, contact_person, notes,
+                 main_power_location, main_gas_location, main_water_location, description,
+                 floors_above, floors_below, entrances, places, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
 
         foreach ($companies as $company) {
@@ -258,9 +260,14 @@ final class Restorer
                 $newId = $existingCompanies[$key];
                 $this->skipped['companies']++;
             } else {
+                $clientType = $this->str($company, 'client_type');
+                if ($clientType !== 'firma' && $clientType !== 'bytove_druzstvo') {
+                    $clientType = 'firma';
+                }
                 $insertCompany->execute([
                     $this->accountId,
                     $name,
+                    $clientType,
                     $ico,
                     $addr['street'],
                     $addr['postal_code'],
@@ -298,8 +305,17 @@ final class Restorer
                     $facilityAddr['street'],
                     $facilityAddr['postal_code'],
                     $facilityAddr['city'],
+                    $this->str($facility, 'email'),
                     $this->str($facility, 'contact_person'),
                     $this->str($facility, 'notes'),
+                    $this->str($facility, 'main_power_location'),
+                    $this->str($facility, 'main_gas_location'),
+                    $this->str($facility, 'main_water_location'),
+                    $this->str($facility, 'description'),
+                    $this->floor($facility, 'floors_above', 1, 40),
+                    $this->floor($facility, 'floors_below', 0, 5),
+                    $this->jsonListEncoded($facility, 'entrances'),
+                    $this->jsonListEncoded($facility, 'places'),
                     $this->createdAt($facility),
                 ]);
                 $facilityId = (int) $this->pdo->lastInsertId();
@@ -1325,6 +1341,30 @@ final class Restorer
             $id,
             $this->accountId,
         ]);
+    }
+
+    /** A floor count from a backup, or null when missing or out of range. */
+    private function floor(array $row, string $key, int $min, int $max): ?int
+    {
+        $value = $row[$key] ?? null;
+        if (is_string($value) && ctype_digit($value)) {
+            $value = (int) $value;
+        }
+        if (!is_int($value) || $value < $min || $value > $max) {
+            return null;
+        }
+        return $value;
+    }
+
+    /** @param array<string, mixed> $row */
+    private function jsonListEncoded(array $row, string $key): string
+    {
+        $value = $row[$key] ?? [];
+        if (!is_array($value)) {
+            return '[]';
+        }
+        $encoded = json_encode(array_values($value), JSON_UNESCAPED_UNICODE);
+        return is_string($encoded) ? $encoded : '[]';
     }
 
     private function str(array $row, string $key): ?string

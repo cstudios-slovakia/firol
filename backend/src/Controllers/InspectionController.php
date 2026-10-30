@@ -1148,16 +1148,7 @@ final class InspectionController
         string $type,
         int $exceptId,
     ): ?int {
-        $stmt = Db::pdo()->prepare(
-            'SELECT id FROM inspections
-             WHERE  account_id = ? AND facility_id = ? AND type = ?
-                AND status = "finalized" AND archived_at IS NULL AND id <> ?
-             ORDER  BY COALESCE(executed_on, "1000-01-01") DESC, id DESC
-             LIMIT  1'
-        );
-        $stmt->execute([$accountId, $facilityId, $type, $exceptId]);
-        $id = $stmt->fetchColumn();
-        return $id === false ? null : (int) $id;
+        return CarryOver::latestSourceId($accountId, $facilityId, $type, $exceptId);
     }
 
     /**

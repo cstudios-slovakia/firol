@@ -131,6 +131,7 @@ export function ConfirmationActions({
           documentId={documentId}
           documentNumber={documentNumber}
           companyId={companyId}
+          facilityId={item.facility_id}
           heading="Odoslať potvrdenie e-mailom"
           sentNoun="Potvrdenie"
           sentVerb="odoslané"

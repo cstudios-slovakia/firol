@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Firol\Support;
 
+use Firol\Db;
+
 /**
  * Carrying items over from the previous inspection — block 1 / chapter 12.
  *
@@ -117,6 +119,32 @@ final class CarryOver
     public static function supports(string $type): bool
     {
         return isset(self::KEEP[$type]);
+    }
+
+    /**
+     * The latest finalized úkon of this type at this prevádzka — the source a
+     * repeat and the device list both draw from. `$exceptId` leaves the draft
+     * being filled out of the search.
+     */
+    public static function latestSourceId(
+        int $accountId,
+        int $facilityId,
+        string $type,
+        ?int $exceptId = null,
+    ): ?int {
+        $sql = 'SELECT id FROM inspections
+                WHERE  account_id = ? AND facility_id = ? AND type = ?
+                  AND  status = "finalized" AND archived_at IS NULL';
+        $params = [$accountId, $facilityId, $type];
+        if ($exceptId !== null) {
+            $sql .= ' AND id <> ?';
+            $params[] = $exceptId;
+        }
+        $sql .= ' ORDER BY COALESCE(executed_on, "1000-01-01") DESC, id DESC LIMIT 1';
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
+        $id = $stmt->fetchColumn();
+        return $id === false ? null : (int) $id;
     }
 
     /**

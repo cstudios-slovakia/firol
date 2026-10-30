@@ -231,6 +231,7 @@ export function trainingCreateOptimistic(args: {
 
 export function companyCreateOptimistic(args: {
   name: string;
+  client_type?: Company['client_type'];
   ico: string | null;
   street: string | null;
   postal_code: string | null;
@@ -246,6 +247,7 @@ export function companyCreateOptimistic(args: {
   const company: Company = {
     id,
     name: args.name,
+    client_type: args.client_type ?? 'firma',
     ico: args.ico,
     address,
     street: args.street,
@@ -261,6 +263,7 @@ export function companyCreateOptimistic(args: {
   const listRow: CompanyListItem = {
     id,
     name: args.name,
+    client_type: args.client_type ?? 'firma',
     ico: args.ico,
     address,
     street: args.street,
@@ -295,6 +298,13 @@ export function facilityCreateOptimistic(args: {
   city: string | null;
   contact_person: string | null;
   notes: string | null;
+  email?: string | null;
+  main_power_location?: string | null;
+  main_gas_location?: string | null;
+  main_water_location?: string | null;
+  description?: string | null;
+  floors_above?: number | null;
+  floors_below?: number | null;
 }): OptimisticSpec {
   const id = mintTempId();
   const address = formatAddress(args.street, args.postal_code, args.city);
@@ -305,8 +315,17 @@ export function facilityCreateOptimistic(args: {
     street: args.street,
     postal_code: args.postal_code,
     city: args.city,
+    email: args.email ?? null,
     contact_person: args.contact_person,
     notes: args.notes,
+    main_power_location: args.main_power_location ?? null,
+    main_gas_location: args.main_gas_location ?? null,
+    main_water_location: args.main_water_location ?? null,
+    description: args.description ?? null,
+    floors_above: args.floors_above ?? null,
+    floors_below: args.floors_below ?? null,
+    entrances: [],
+    places: [],
     company_id: args.companyId,
     company_name: args.companyName,
   };
@@ -414,7 +433,7 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
   const company = COMPANY_RE.exec(pathOnly);
   if (company) {
     const id = Number(company[1]);
-    const keys = ['name', 'ico', 'street', 'postal_code', 'city', 'contact', 'contact_email', 'approver', 'billing_mode'];
+    const keys = ['name', 'client_type', 'ico', 'street', 'postal_code', 'city', 'contact', 'contact_email', 'approver', 'billing_mode'];
     return {
       label: 'Úprava firmy',
       detail: typeof f.name === 'string' ? f.name : undefined,
@@ -438,7 +457,11 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
   const facility = FACILITY_RE.exec(pathOnly);
   if (facility) {
     const id = Number(facility[1]);
-    const keys = ['name', 'street', 'postal_code', 'city', 'contact_person', 'notes'];
+    const keys = [
+      'name', 'street', 'postal_code', 'city', 'email', 'contact_person', 'notes',
+      'main_power_location', 'main_gas_location', 'main_water_location', 'description',
+      'floors_above', 'floors_below',
+    ];
     return {
       label: 'Úprava prevádzky',
       detail: typeof f.name === 'string' ? f.name : undefined,

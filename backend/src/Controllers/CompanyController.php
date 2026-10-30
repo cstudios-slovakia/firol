@@ -13,6 +13,7 @@ use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Support\Address;
 use Firol\Support\ClientArchive;
+use Firol\Support\ClientKind;
 use Firol\Support\Periodicity;
 use PDO;
 
@@ -32,7 +33,7 @@ final class CompanyController
         // tenant via the account_id condition on the parent query.
         // Admins get all companies across all accounts (no tenant filter).
         if ($isAdmin) {
-            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver, c.billing_mode,
+            $sql = 'SELECT c.id, c.name, c.client_type, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver, c.billing_mode,
                            c.archived_at, c.archived_reason,
                            c.account_id,
                            a.invoice_company_name AS account_name,
@@ -49,7 +50,7 @@ final class CompanyController
                     WHERE  1 = 1';
             $params = [];
         } else {
-            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver, c.billing_mode,
+            $sql = 'SELECT c.id, c.name, c.client_type, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver, c.billing_mode,
                            c.archived_at, c.archived_reason,
                            (SELECT COUNT(*) FROM facilities f
                              WHERE f.company_id = c.id AND f.archived_at IS NULL) AS facilities_count,
@@ -201,12 +202,13 @@ final class CompanyController
         [$name, $ico, $addr, $contact, $contactEmail, $approver] = self::readBody($req);
         // Chapter 22 — validated up front so a bad value never half-saves the firm.
         $billingMode = self::readBillingMode($req);
+        $clientType = self::readClientType($req) ?? ClientKind::FIRMA;
 
         $stmt = Db::pdo()->prepare(
-            'INSERT INTO companies (account_id, name, ico, street, postal_code, city, contact, contact_email, approver)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO companies (account_id, name, client_type, ico, street, postal_code, city, contact, contact_email, approver)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        $stmt->execute([$accountId, $name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $contactEmail, $approver]);
+        $stmt->execute([$accountId, $name, $clientType, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $contactEmail, $approver]);
         $id = (int) Db::pdo()->lastInsertId();
 
         // Chapter 22 — absent means the column default (na faktúru).
@@ -231,12 +233,14 @@ final class CompanyController
         [$name, $ico, $addr, $contact, $contactEmail, $approver] = self::readBody($req, $existing['ico']);
         // Chapter 22 — validated up front so a bad value never half-saves the firm.
         $billingMode = self::readBillingMode($req);
+        // Absent keeps the current type (an older offline client replays the edit without it).
+        $clientType = self::readClientType($req) ?? (string) $existing['client_type'];
 
         $stmt = Db::pdo()->prepare(
-            'UPDATE companies SET name = ?, ico = ?, street = ?, postal_code = ?, city = ?, contact = ?, contact_email = ?, approver = ?
+            'UPDATE companies SET name = ?, client_type = ?, ico = ?, street = ?, postal_code = ?, city = ?, contact = ?, contact_email = ?, approver = ?
              WHERE  id = ? AND account_id = ?'
         );
-        $stmt->execute([$name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $contactEmail, $approver, $id, $scopeAccountId]);
+        $stmt->execute([$name, $clientType, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $contactEmail, $approver, $id, $scopeAccountId]);
 
         // Chapter 22 — absent keeps the current setting (older offline
         // clients replay the edit without it). Changing it affects only úkony
@@ -358,6 +362,21 @@ final class CompanyController
      * The firm's default režim fakturácie (chapter 22) — paušál or na faktúru;
      * null when the body does not carry it.
      */
+    /**
+     * Spec 3.1 — firma or bytové družstvo. Null when the body does not carry it.
+     */
+    private static function readClientType(Request $req): ?string
+    {
+        $type = $req->jsonString('client_type');
+        if ($type === null || $type === '') {
+            return null;
+        }
+        if (!ClientKind::isValid($type)) {
+            Response::error('Neplatný druh klienta.', 422);
+        }
+        return $type;
+    }
+
     private static function readBillingMode(Request $req): ?string
     {
         $mode = $req->jsonString('billing_mode');
@@ -378,7 +397,7 @@ final class CompanyController
      */
     private static function findOrFail(?int $accountId, int $id, bool $includeArchived = false): array
     {
-        $sql = 'SELECT id, account_id, name, ico, street, postal_code, city, contact, contact_email, approver, billing_mode,
+        $sql = 'SELECT id, account_id, name, client_type, ico, street, postal_code, city, contact, contact_email, approver, billing_mode,
                        archived_at, archived_reason, created_at
                 FROM   companies
                 WHERE  id = ?';

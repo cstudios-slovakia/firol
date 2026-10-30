@@ -123,20 +123,26 @@ final class Writer
     private static function companies(int $accountId, PDO $pdo): array
     {
         $stmt = $pdo->prepare(
-            'SELECT id, name, ico, street, postal_code, city, contact, contact_email, approver, billing_mode, created_at
+            'SELECT id, name, client_type, ico, street, postal_code, city, contact, contact_email, approver, billing_mode, created_at
              FROM   companies WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
         );
         $stmt->execute([$accountId]);
         $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $facStmt = $pdo->prepare(
-            'SELECT id, company_id, name, street, postal_code, city, contact_person, notes, created_at
+            'SELECT id, company_id, name, street, postal_code, city, email, contact_person, notes,
+                    main_power_location, main_gas_location, main_water_location, description,
+                    floors_above, floors_below, entrances, places, created_at
              FROM   facilities WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
         );
         $facStmt->execute([$accountId]);
         $byCompany = [];
         foreach ($facStmt->fetchAll(PDO::FETCH_ASSOC) as $facility) {
             $facility['id'] = (int) $facility['id'];
+            $facility['floors_above'] = $facility['floors_above'] !== null ? (int) $facility['floors_above'] : null;
+            $facility['floors_below'] = $facility['floors_below'] !== null ? (int) $facility['floors_below'] : null;
+            $facility['entrances'] = self::jsonList($facility['entrances'] ?? null);
+            $facility['places'] = self::jsonList($facility['places'] ?? null);
             $byCompany[(int) $facility['company_id']][] = self::withReadableAddress($facility);
         }
 
@@ -567,5 +573,18 @@ final class Writer
             isset($row['city']) ? (string) $row['city'] : null,
         );
         return $row;
+    }
+
+    /** @return list<mixed> */
+    private static function jsonList(mixed $raw): array
+    {
+        if (is_array($raw)) {
+            return array_values($raw);
+        }
+        if (!is_string($raw) || $raw === '') {
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? array_values($decoded) : [];
     }
 }

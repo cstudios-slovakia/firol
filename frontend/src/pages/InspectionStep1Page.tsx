@@ -25,6 +25,7 @@ import { isPersonListType } from '@/api/personList';
 import { ApiError } from '@/lib/api';
 import { todayIso } from '@/lib/dates';
 import { isSection, newInspectionPath } from '@/lib/sections';
+import { facilityNouns } from '@/lib/clientKind';
 import { inspectionCreateOptimistic } from '@/lib/offlineEntities';
 import { useToast } from '@/lib/toast';
 import { Card } from '@/components/ui/Card';
@@ -465,7 +466,7 @@ export function InspectionStep1Page() {
                       <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
                         <Plus className="size-3.5" />
                       </span>
-                      Pridať prevádzku
+                      {facilityNouns(companies?.find((c) => c.id === companyId)?.client_type).addLabel}
                     </button>
                   ) : undefined}
                 />
@@ -596,6 +597,7 @@ export function InspectionStep1Page() {
           companyId={companyId}
           companyName={companies?.find((c) => c.id === companyId)?.name ?? ''}
           companyAddress={companies?.find((c) => c.id === companyId)}
+          clientType={companies?.find((c) => c.id === companyId)?.client_type}
           onCreated={(f) => {
             // Splice the new row into the list (last_periodicities empty —
             // history kicks in only after the first inspection) and

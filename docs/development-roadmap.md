@@ -1312,7 +1312,7 @@ Points 11, 12 and 13 of the 2. 10. report (cancelled then for budget) are back i
 |---|---|---|
 | 0 | Branch (`poapp-oct-2026`), roadmap; questions to FIROL still to send | 🟨 |
 | 1 | Small fixes (rename, Paušál, IČO, after-create, address button, hints, O follow-up) | ✅ |
-| 2 | Client type (firma / bytové družstvo), prevádzka data, e-mail precedence, device list | ✅ built, not yet browser-tested |
+| 2 | Client type (firma / bytové družstvo), prevádzka data, e-mail precedence, device list | ✅ built; firma form checked at 360 px, BD save not re-checked |
 | 3 | Školenia (osobné číslo, bulk, edit, take-over, hliadky, platnosť override) | ✅ |
 | 4 | Defect catalogue (27 items + own items) | ✅ |
 | 5 | Požiarna kniha and kniha BOZP as ledgers; old book úkony retired | ⬜ |

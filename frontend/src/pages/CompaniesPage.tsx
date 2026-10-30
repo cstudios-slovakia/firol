@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMemberRights } from '@/auth/useMemberRights';
-import { Archive, ArchiveRestore, Building2, Edit2, Plus, Search, ShieldCheck } from 'lucide-react';
+import { Archive, ArchiveRestore, Building2, Edit2, Home, Plus, Search, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyListItem } from '@/api/companies';
@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/Card';
 import { Pagination } from '@/components/ui/Pagination';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import { ArchiveDialog, formatDay, useRestoreArchived } from '@/components/ClientArchive';
+import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 
 const PAGE_SIZE = 10;
 
@@ -249,6 +250,8 @@ function CompanyRow({
 }) {
   const { canDelete } = useMemberRights();
   const archived = Boolean(company.archived_at);
+  const nouns = facilityNouns(company.client_type);
+  const bytove = isBytoveDruzstvo(company.client_type);
   const lastDate = company.last_inspection_at;
   const formattedLast = lastDate
     ? new Date(lastDate).toLocaleDateString('sk-SK', { day: 'numeric', month: 'numeric', year: 'numeric' })
@@ -266,7 +269,7 @@ function CompanyRow({
               : 'bg-firol-500 text-white shadow-[var(--shadow-glow)] hover:bg-firol-600',
           )}
         >
-          {archived ? <Archive className="size-5" /> : <Building2 className="size-5" />}
+          {archived ? <Archive className="size-5" /> : bytove ? <Home className="size-5" /> : <Building2 className="size-5" />}
         </Link>
 
         <div className="min-w-0 flex-1">
@@ -299,8 +302,13 @@ function CompanyRow({
                 <span className="mx-1.5 text-ink-300">·</span>
               </>
             )}
-            {company.facilities_count}{' '}
-            {plural(company.facilities_count, 'prevádzka', 'prevádzky', 'prevádzok')}
+            {nouns.count(company.facilities_count)}
+            {bytove && (
+              <>
+                <span className="mx-1.5 text-ink-300">·</span>
+                bytové družstvo
+              </>
+            )}
           </p>
           <p className="mt-0.5 truncate text-[11px] text-ink-400">
             {company.archived_at && `archivovaná ${formatDay(company.archived_at)} · `}

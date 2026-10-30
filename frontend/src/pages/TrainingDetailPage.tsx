@@ -670,6 +670,7 @@ export function TrainingDetailPage() {
         visitId={t.visit_id}
         trainingId={t.id}
         companyId={t.company_id}
+        facilityId={t.facility_id}
       />
 
       {/* Chapter 29.2, step 5 — once the protocol exists, the visit goes on. */}
@@ -723,6 +724,7 @@ function DocumentsBlock({
   visitId = null,
   trainingId,
   companyId,
+  facilityId,
 }: {
   documents: TrainingDocument[];
   /** Set when the training belongs to a visit: the protocol may wait for its end. */
@@ -730,6 +732,7 @@ function DocumentsBlock({
   trainingId: number;
   /** The client, whose recorded e-mail prefills the send form. */
   companyId: number;
+  facilityId?: number | null;
   canGenerate: boolean;
   canGenerateHint: string | null;
   generating: boolean;
@@ -829,7 +832,7 @@ function DocumentsBlock({
               </div>
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
-            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} companyId={companyId} />
+            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} companyId={companyId} facilityId={facilityId} />
           </li>
         ))}
       </ul>

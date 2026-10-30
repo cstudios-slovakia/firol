@@ -9,6 +9,8 @@ import {
     ClipboardList,
     Edit2,
     GraduationCap,
+    Home,
+    Mail,
     MapPin,
     NotebookPen,
     Plus,
@@ -22,7 +24,7 @@ import {
 import { useAuth } from "@/auth/AuthContext";
 import { useIsReadOnly } from "@/auth/useIsReadOnly";
 import { useToast } from "@/lib/toast";
-import { Facilities, type Facility } from "@/api/facilities";
+import { Facilities, type Facility, type FacilityDeviceGroup } from "@/api/facilities";
 import {
     INSPECTION_TYPE_LABELS,
     Inspections,
@@ -49,6 +51,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { DetailHeaderSkeleton, SkeletonList } from "@/components/ui/Skeleton";
 import { PendingSyncBanner } from "@/components/PendingSyncBanner";
 import { useMemberRights } from "@/auth/useMemberRights";
+import { isBytoveDruzstvo } from "@/lib/clientKind";
 
 export function FacilityDetailPage() {
     const { id: idStr } = useParams<{ id: string }>();
@@ -71,7 +74,8 @@ export function FacilityDetailPage() {
     const [deletingTraining, setDeletingTraining] = useState(false);
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState<InspectionType | "">("");
-    const [activeTab, setActiveTab] = useState<"inspections" | "trainings">("inspections");
+    const [activeTab, setActiveTab] = useState<"inspections" | "trainings" | "objekt">("inspections");
+    const [devices, setDevices] = useState<FacilityDeviceGroup[] | null>(null);
     const [trainingQuery, setTrainingQuery] = useState("");
     const [trainingTypeFilter, setTrainingTypeFilter] = useState<TrainingType | "">("");
 
@@ -165,6 +169,7 @@ export function FacilityDetailPage() {
         // inspection/training lists are filtered queries that may not be cached
         // for a facility created offline, so fetch them best-effort — a failure
         // shouldn't blank out the whole page.
+        setDevices(null);
         Facilities.show(id)
             .then(async (f) => {
                 if (cancelled) return;
@@ -193,6 +198,21 @@ export function FacilityDetailPage() {
             cancelled = true;
         };
     }, [id]);
+
+    useEffect(() => {
+        if (activeTab !== "objekt" || devices !== null) return;
+        let cancelled = false;
+        Facilities.devices(id)
+            .then((res) => {
+                if (!cancelled) setDevices(res.groups);
+            })
+            .catch(() => {
+                if (!cancelled) setDevices([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [activeTab, devices, id]);
 
     if (error) {
         return (
@@ -275,7 +295,7 @@ export function FacilityDetailPage() {
                                     : "bg-firol-500 text-white shadow-[var(--shadow-glow)]",
                             )}
                         >
-                            {archived ? <Archive className="size-5" /> : <Warehouse className="size-5" />}
+                            {archived ? <Archive className="size-5" /> : isBytoveDruzstvo(facility.company_client_type) ? <Home className="size-5" /> : <Warehouse className="size-5" />}
                         </div>
                         <div className="min-w-0 flex-1">
                             <h1 className="truncate text-lg font-semibold tracking-tight text-ink-900">
@@ -324,6 +344,18 @@ export function FacilityDetailPage() {
                             value={facility.address}
                         />
                     )}
+                    <DetailRow
+                        icon={<Mail className="size-4" />}
+                        label="E-mail prevádzky"
+                        value={
+                            facility.email
+                                ? facility.email
+                                : facility.recipient_email
+                                  ? `nevyplnený — použije sa ${facility.recipient_email}`
+                                  : "nevyplnený ani na prevádzke, ani na firme — doplňte ho cez ✎"
+                        }
+                        muted={!facility.email}
+                    />
                     {facility.contact_person && (
                         <DetailRow
                             icon={<User className="size-4" />}
@@ -338,14 +370,11 @@ export function FacilityDetailPage() {
                             value={facility.notes}
                         />
                     )}
-                    {!facility.address &&
-                        !facility.contact_person &&
-                        !facility.notes && (
-                            <div className="py-2 text-ink-400">
-                                Žiadne ďalšie údaje. Doplň ich úpravou
-                                prevádzky.
-                            </div>
-                        )}
+                    {!facility.address && !facility.contact_person && !facility.notes && !facility.email && (
+                        <p className="py-2 text-xs text-ink-400">
+                            Adresu a kontakt doplníš úpravou.
+                        </p>
+                    )}
                 </dl>
             </Card>
 
@@ -417,6 +446,21 @@ export function FacilityDetailPage() {
                         <span className={cn(
                             "absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-firol-500 transition-[transform,opacity] duration-200 origin-left",
                             activeTab === "trainings" ? "opacity-100 scale-x-100" : "opacity-0 scale-x-0",
+                        )} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab("objekt")}
+                        className={cn(
+                            "relative flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium transition-all duration-150 whitespace-nowrap",
+                            activeTab === "objekt" ? "text-firol-600" : "text-ink-500 hover:text-ink-800",
+                        )}
+                    >
+                        <Building2 className={cn("size-4 transition-transform duration-150", activeTab === "objekt" && "scale-110")} />
+                        Objekt
+                        <span className={cn(
+                            "absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-firol-500 transition-[transform,opacity] duration-200 origin-left",
+                            activeTab === "objekt" ? "opacity-100 scale-x-100" : "opacity-0 scale-x-0",
                         )} />
                     </button>
                 </nav>
@@ -736,6 +780,10 @@ export function FacilityDetailPage() {
                 )}
             </section>}
 
+            {activeTab === "objekt" && facility && (
+                <ObjektPanel facility={facility} devices={devices} />
+            )}
+
             <Dialog
                 open={pendingDeleteId !== null}
                 onClose={() => { if (!deleting) setPendingDeleteId(null); }}
@@ -805,14 +853,85 @@ export function FacilityDetailPage() {
     );
 }
 
+const DEVICE_SHORT: Record<string, string> = {
+    php: "PHP",
+    hydranty: "Hydranty",
+    pu_akcieschopnost: "Uzávery",
+    pu_udrzba: "Údržba uzáverov",
+    nudzove_osvetlenie: "Osvetlenie",
+    rebriky: "Rebríky",
+    regale: "Regále",
+};
+
+function deviceCountLabel(n: number): string {
+    if (n === 1) return "1 zariadenie";
+    if (n >= 2 && n <= 4) return `${n} zariadenia`;
+    return `${n} zariadení`;
+}
+
+function ObjektPanel({
+    facility,
+    devices,
+}: {
+    facility: Facility;
+    devices: FacilityDeviceGroup[] | null;
+}) {
+    const total = (devices ?? []).reduce((sum, g) => sum + g.items.length, 0);
+    const meta = (devices ?? [])
+        .map((g) => `${DEVICE_SHORT[g.type] ?? g.type} ${g.items.length}`)
+        .join(" · ");
+    const place = isBytoveDruzstvo(facility.company_client_type) ? "tomto bytovom dome" : "tejto prevádzke";
+
+    return (
+        <section key="objekt" className="flex animate-fade-up flex-col gap-3">
+            <Card className="p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-400">Popis objektu</p>
+                <p className={cn("mt-1.5 text-sm leading-relaxed", facility.description ? "text-ink-800" : "text-ink-400")}>
+                    {facility.description || "Zatiaľ nevyplnený. Keď ho vyplníte, tlačí sa do záznamu z prehliadky."}
+                </p>
+                <Link
+                    to={`/facilities/${facility.id}/edit#popis-objektu`}
+                    className="mt-3 inline-flex h-8 items-center rounded-xl border border-ink-200 bg-white px-3 text-xs font-medium text-ink-700 transition-all duration-200 hover:border-ink-300 hover:bg-ink-50 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
+                >
+                    Upraviť popis
+                </Link>
+            </Card>
+
+            <Link
+                to={`/facilities/${facility.id}/devices`}
+                className="flex items-center gap-3 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-all duration-200 hover:bg-ink-50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
+            >
+                <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
+                    <Warehouse className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-ink-900">
+                        {devices === null ? "Zariadenia" : total === 0 ? "Zatiaľ žiadne zariadenia" : deviceCountLabel(total)}
+                    </span>
+                    <span className="mt-0.5 block truncate text-xs text-ink-500">
+                        {meta || "pribudnú, keď tu urobíte prvú kontrolu"}
+                    </span>
+                </span>
+                <ChevronRight className="size-4 shrink-0 text-ink-300" />
+            </Link>
+
+            <p className="rounded-2xl bg-ink-50 px-3 py-2.5 text-xs leading-relaxed text-ink-600">
+                Zoznam nie je samostatná evidencia — je to to, čo ste zapísali do posledných kontrol na {place}. Prístroj pribudne tak, že ho zapíšete pri kontrole, alebo ho nahráte importom z Excelu. Pri ďalšej kontrole aj pri preventívnej prehliadke sa potom ponúkne sám.
+            </p>
+        </section>
+    );
+}
+
 function DetailRow({
     icon,
     label,
     value,
+    muted = false,
 }: {
     icon: React.ReactNode;
     label: string;
     value: string;
+    muted?: boolean;
 }) {
     return (
         <div className="flex items-start gap-3 py-2.5">
@@ -823,7 +942,7 @@ function DetailRow({
                 <dt className="text-[10px] font-semibold uppercase tracking-wider text-ink-400">
                     {label}
                 </dt>
-                <dd className="text-sm text-ink-800 break-words whitespace-pre-wrap">
+                <dd className={cn("text-sm break-words whitespace-pre-wrap", muted ? "text-ink-400" : "text-ink-800")}>
                     {value}
                 </dd>
             </div>

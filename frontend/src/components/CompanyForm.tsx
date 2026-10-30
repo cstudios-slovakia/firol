@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Building2, Hash, MapPin, Phone, Mailbox, Map, Mail, UserCheck } from 'lucide-react';
+import { Building2, Hash, Home, MapPin, Phone, Mailbox, Map, Mail, UserCheck } from 'lucide-react';
 import { Companies, type Company, type CompanyPayload } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { companyCreateOptimistic } from '@/lib/offlineEntities';
@@ -16,6 +16,7 @@ import {
   type CompanyBillingMode,
 } from '@/api/invoicing';
 import { cn } from '@/lib/cn';
+import { CLIENT_TYPES, clientTypeHint, clientTypeOf, type ClientType } from '@/lib/clientKind';
 
 const ICO_PATTERN = /^\d{8}$/;
 const ICO_MESSAGE = 'IČO musí mať presne 8 číslic.';
@@ -57,6 +58,7 @@ export function CompanyForm({
   const { csrfToken } = useAuth();
   const toast = useToast();
 
+  const [clientType, setClientType] = useState<ClientType>(clientTypeOf(initial?.client_type));
   const [name, setName] = useState(initial?.name ?? '');
   const [ico, setIco] = useState(initial?.ico ?? '');
   const [street, setStreet] = useState(initial?.street ?? '');
@@ -100,6 +102,7 @@ export function CompanyForm({
     setSubmitting(true);
     const payload: CompanyPayload = {
       name: name.trim(),
+      client_type: clientType,
       ico: ico.replace(/\s+/g, '') || undefined,
       street: street.trim() || undefined,
       postal_code: postalCode.trim() || undefined,
@@ -112,6 +115,7 @@ export function CompanyForm({
     try {
       const optimistic = companyCreateOptimistic({
         name: payload.name,
+        client_type: clientType,
         ico: payload.ico ?? null,
         street: payload.street ?? null,
         postal_code: payload.postal_code ?? null,
@@ -150,6 +154,35 @@ export function CompanyForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
+      <div className="rounded-2xl border border-firol-200/80 bg-firol-50/50 px-3.5 py-3">
+        <p className="mb-2 text-xs font-medium text-ink-600">Druh klienta</p>
+        <div role="radiogroup" aria-label="Druh klienta" className="grid grid-cols-2 gap-1 rounded-2xl bg-ink-100/80 p-1">
+          {CLIENT_TYPES.map((t) => {
+            const active = clientType === t;
+            return (
+              <button
+                key={t}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setClientType(t)}
+                className={cn(
+                  'inline-flex h-10 items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-medium transition-all duration-200',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300 active:scale-[0.98]',
+                  active
+                    ? 'bg-white text-ink-900 shadow-sm'
+                    : 'text-ink-600 hover:bg-white/60 hover:text-ink-800',
+                )}
+              >
+                {t === 'bytove_druzstvo' ? <Home className="size-3.5" /> : <Building2 className="size-3.5" />}
+                {t === 'bytove_druzstvo' ? 'Bytové družstvo' : 'Firma'}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-ink-500">{clientTypeHint(clientType)}</p>
+      </div>
+
       <Field label="Názov firmy" required error={nameError}>
         {(p) => (
           <Input

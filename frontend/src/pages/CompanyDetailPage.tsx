@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMemberRights } from '@/auth/useMemberRights';
-import { Archive, ArchiveRestore, ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Mail, MapPin, Phone, Plus, Route, Send, UserCheck, Warehouse } from 'lucide-react';
+import { Archive, ArchiveRestore, ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Home, Mail, MapPin, Phone, Plus, Route, Send, UserCheck, Warehouse } from 'lucide-react';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyDetail } from '@/api/companies';
 import { ApiError } from '@/lib/api';
@@ -19,12 +19,13 @@ import { Documents, type DocumentSend, type SendableDocument } from '@/api/docum
 import { documentDownloadUrl, INSPECTION_TYPE_LABELS } from '@/api/inspections';
 import { cn } from '@/lib/cn';
 import { companyRecipientEmail } from '@/lib/companyEmail';
+import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 
 type CompanyTab = 'general' | 'facilities' | 'protocols';
 
 const TABS: { key: CompanyTab; label: string }[] = [
   { key: 'general', label: 'Všeobecné' },
-  { key: 'facilities', label: 'Prevádzky' },
+  { key: 'facilities', label: '' },
   { key: 'protocols', label: 'Protokoly' },
 ];
 
@@ -133,6 +134,8 @@ export function CompanyDetailPage() {
   }
 
   const { company, facilities } = data;
+  const nouns = facilityNouns(company.client_type);
+  const bytove = isBytoveDruzstvo(company.client_type);
   const archivedFacilities = data.archived_facilities ?? [];
   // An archived firm opens read-only: protocols can be opened and sent, but no
   // new úkon, edit or potvrdenie starts here until it is restored.
@@ -179,14 +182,15 @@ export function CompanyDetailPage() {
                 archived ? 'bg-ink-200 text-ink-500' : 'bg-firol-500 text-white shadow-[var(--shadow-glow)]',
               )}
             >
-              {archived ? <Archive className="size-5" /> : <Building2 className="size-5" />}
+              {archived ? <Archive className="size-5" /> : bytove ? <Home className="size-5" /> : <Building2 className="size-5" />}
             </div>
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-lg font-semibold tracking-tight text-ink-900">
                 {company.name}
               </h1>
               <p className="text-xs text-ink-500">
-                {facilities.length} {plural(facilities.length, 'prevádzka', 'prevádzky', 'prevádzok')}
+                {nouns.count(facilities.length)}
+                {bytove && ' · bytové družstvo'}
               </p>
             </div>
             {canEdit && (
@@ -217,7 +221,7 @@ export function CompanyDetailPage() {
               start buttons are missing instead of leaving the card bare. */}
           {canEdit && facilities.length === 0 && (
             <p className="mt-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-600">
-              Úkony sa robia na prevádzke — najprv pridaj prevádzku.
+              Úkony sa robia na {bytove ? 'bytovom dome' : 'prevádzke'} — najprv {nouns.addLabel.toLowerCase()}.
             </p>
           )}
 
@@ -273,7 +277,7 @@ export function CompanyDetailPage() {
                   : 'border-transparent text-ink-500 hover:text-ink-800',
               )}
             >
-              {t.label}
+              {t.key === 'facilities' ? nouns.tabLabel : t.label}
               {t.key === 'facilities' && (
                 <span
                   className={cn(
@@ -326,7 +330,7 @@ export function CompanyDetailPage() {
                     className="inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] transition-all duration-200 hover:bg-firol-600 active:scale-[0.98]"
                   >
                     <Plus className="size-3.5" />
-                    Pridať prevádzku
+                    {nouns.addLabel}
                   </button>
                 </div>
               )}
@@ -336,9 +340,13 @@ export function CompanyDetailPage() {
                   <div className="grid size-12 place-items-center rounded-2xl bg-firol-50 text-firol-500">
                     <Warehouse className="size-5" />
                   </div>
-                  <p className="text-sm text-ink-700">Firma zatiaľ nemá prevádzky.</p>
+                  <p className="text-sm text-ink-700">
+                    {bytove ? 'Bytové družstvo zatiaľ nemá bytové domy.' : 'Firma zatiaľ nemá prevádzky.'}
+                  </p>
                   <p className="max-w-xs text-xs text-ink-500">
-                    Pridaj prvú prevádzku — napríklad sklad, výrobnú halu alebo pobočku.
+                    {bytove
+                      ? 'Pridaj prvý bytový dom.'
+                      : 'Pridaj prvú prevádzku — napríklad sklad, výrobnú halu alebo pobočku.'}
                   </p>
                 </div>
               ) : (
@@ -393,7 +401,7 @@ export function CompanyDetailPage() {
               {archivedFacilities.length > 0 && (
                 <section className={cn(facilities.length > 0 && 'mt-5 border-t border-ink-100 pt-4')}>
                   <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-400">
-                    Archivované prevádzky
+                    Archivované {nouns.tabLabel.toLowerCase()}
                   </h3>
                   <ul className="flex flex-col divide-y divide-ink-100">
                     {archivedFacilities.map((f) => (
@@ -479,6 +487,7 @@ export function CompanyDetailPage() {
         companyId={company.id}
         companyName={company.name}
         companyAddress={company}
+        clientType={company.client_type}
         onCreated={(f) => navigate(`/facilities/${f.id}`)}
       />
 
@@ -666,10 +675,4 @@ function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: strin
 function todayIso(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function plural(n: number, one: string, few: string, many: string): string {
-  if (n === 1) return one;
-  if (n >= 2 && n <= 4) return few;
-  return many;
 }

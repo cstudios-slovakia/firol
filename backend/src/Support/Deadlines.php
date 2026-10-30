@@ -82,6 +82,7 @@ final class Deadlines
                        i.periodicity_value, i.periodicity_unit,
                        i.inspector_user_id,
                        i.company_id, c.name AS company_name, c.contact_email AS company_email,
+                       c.contact AS company_contact, f.email AS facility_email,
                        i.facility_id, f.name AS facility_name, f.city AS facility_city,
                        p.planned_date,
                        n.sent_at AS notice_sent_at,
@@ -134,6 +135,7 @@ final class Deadlines
                        t.valid_until_override,
                        t.trainer_id AS inspector_user_id,
                        t.company_id, c.name AS company_name, c.contact_email AS company_email,
+                       c.contact AS company_contact, f.email AS facility_email,
                        t.facility_id, f.name AS facility_name, f.city AS facility_city,
                        p.planned_date,
                        n.sent_at AS notice_sent_at,
@@ -303,15 +305,22 @@ final class Deadlines
             ];
         }
 
-        $email = $r['company_email'] ?? null;
         $city  = $r['facility_city'] ?? null;
+        // Spec 3.2 — prevádzka e-mail, then the firm's, then an address in Kontakt.
+        $email = ClientEmail::resolve(
+            isset($r['facility_email']) ? (string) $r['facility_email'] : null,
+            isset($r['company_email']) ? (string) $r['company_email'] : null,
+            isset($r['company_contact']) ? (string) $r['company_contact'] : null,
+        );
 
         return [
             'zdroj'              => 'kontrola',
             'company_id'         => (int) $r['company_id'],
             'company_name'       => (string) $r['company_name'],
-            // Recipient of the client notice (11.3); null when not filled in.
-            'company_email'      => $email !== null && $email !== '' ? (string) $email : null,
+            // Recipient of the client notice (11.3 / spec 3.2). The key stays
+            // `company_email` because the calendar and the daily job already
+            // send to it; the value is the resolved address, not only the firm's.
+            'company_email'      => $email,
             'facility_city'      => $city !== null && trim((string) $city) !== '' ? trim((string) $city) : null,
             'last_done_on'       => (string) $r['executed_on'],
             'due_date'           => $due,
