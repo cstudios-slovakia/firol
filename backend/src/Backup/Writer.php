@@ -51,6 +51,8 @@ final class Writer
             // Phase 4 — the account's own číselník nedostatkov items. Shipped
             // ones (account_id NULL) are the same everywhere and not backed up.
             'defect_catalog' => self::defectCatalog($accountId, $pdo),
+            // Phase 5 — the požiarna kniha and kniha BOZP entries with their additions.
+            'book_entries' => self::bookEntries($accountId, $pdo),
             // Chapter 11.3 — which deadlines already had their automatic
             // client notice, so a restore does not send it a second time.
             'deadline_notices' => self::deadlineNotices($accountId, $pdo),
@@ -64,6 +66,7 @@ final class Writer
             'documents'   => count($manifest['documents']),
             'tasks'       => count($manifest['tasks']),
             'defect_catalog' => count($manifest['defect_catalog']),
+            'book_entries' => count($manifest['book_entries']),
             'photos'      => count(array_filter(array_keys($files), static fn (string $e): bool => str_starts_with($e, 'photos/') && !str_ends_with($e, '_t.jpg'))),
         ];
 
@@ -123,7 +126,7 @@ final class Writer
     private static function companies(int $accountId, PDO $pdo): array
     {
         $stmt = $pdo->prepare(
-            'SELECT id, name, client_type, ico, street, postal_code, city, contact, contact_email, approver, billing_mode, created_at
+            'SELECT id, name, client_type, book_scope, ico, street, postal_code, city, contact, contact_email, approver, billing_mode, created_at
              FROM   companies WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
         );
         $stmt->execute([$accountId]);
@@ -444,6 +447,68 @@ final class Writer
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $row['id'] = (int) $row['id'];
             $out[] = $row;
+        }
+        return $out;
+    }
+
+    /**
+     * Phase 5 — the entries of both books, with their additions. Ids of the
+     * firm and prevádzka are the old ones (the restore remaps them); the
+     * inspections / trainings an entry points at are remapped the same way.
+     * Authors go by e-mail like the inspector of an úkon. Entries of an
+     * archived firm are left out with the firm.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function bookEntries(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT e.id, e.company_id, e.facility_id, e.book, e.seq, e.entry_date, e.`text`, e.source,
+                    e.protocol_numbers, e.inspection_ids, e.training_ids, e.no_defects_statement,
+                    e.signed_technician_at, e.signed_manager_at, e.signer_name, e.signer_role,
+                    e.created_at, u.email AS created_by_email
+             FROM   book_entries e
+             JOIN   companies c ON c.id = e.company_id AND c.archived_at IS NULL
+             LEFT   JOIN users u ON u.id = e.created_by_user_id
+             WHERE  e.account_id = ?
+             ORDER  BY e.company_id, e.scope_key, e.book, e.seq'
+        );
+        $stmt->execute([$accountId]);
+        $entries = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($entries === []) {
+            return [];
+        }
+
+        $addStmt = $pdo->prepare(
+            'SELECT a.entry_id, a.`text`, a.created_at, u.email AS created_by_email
+             FROM   book_entry_additions a
+             LEFT   JOIN users u ON u.id = a.created_by_user_id
+             WHERE  a.account_id = ?
+             ORDER  BY a.id'
+        );
+        $addStmt->execute([$accountId]);
+        $additions = [];
+        foreach ($addStmt->fetchAll(PDO::FETCH_ASSOC) as $a) {
+            $additions[(int) $a['entry_id']][] = [
+                'text'             => (string) $a['text'],
+                'created_at'       => (string) $a['created_at'],
+                'created_by_email' => $a['created_by_email'],
+            ];
+        }
+
+        $out = [];
+        foreach ($entries as $e) {
+            $id = (int) $e['id'];
+            $e['id']                   = $id;
+            $e['company_id']           = (int) $e['company_id'];
+            $e['facility_id']          = $e['facility_id'] !== null ? (int) $e['facility_id'] : null;
+            $e['seq']                  = (int) $e['seq'];
+            $e['no_defects_statement'] = (int) $e['no_defects_statement'];
+            $e['protocol_numbers']     = self::jsonList($e['protocol_numbers']);
+            $e['inspection_ids']       = self::jsonList($e['inspection_ids']);
+            $e['training_ids']         = self::jsonList($e['training_ids']);
+            $e['additions']            = $additions[$id] ?? [];
+            $out[] = $e;
         }
         return $out;
     }

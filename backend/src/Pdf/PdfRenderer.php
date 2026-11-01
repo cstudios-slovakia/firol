@@ -70,6 +70,19 @@ final class PdfRenderer
     }
 
     /**
+     * Book entries on one sheet (spec 9.5) — the unsigned ones, or a single
+     * entry. Rendered on the fly: an entry is a row of the book, not a
+     * numbered document, so nothing is stored.
+     *
+     * @param array<string, mixed> $payload
+     */
+    public static function renderBook(array $payload): string
+    {
+        $html = self::renderTemplate(__DIR__ . '/templates/kniha_zapisy.php', $payload);
+        return self::buildPdf($html, (string) ($payload['title'] ?? 'kniha'));
+    }
+
+    /**
      * Type-aware dispatcher. Adding a new inspection type means adding a
      * branch here + the corresponding template under templates/.
      *

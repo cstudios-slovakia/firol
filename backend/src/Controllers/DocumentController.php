@@ -1038,7 +1038,7 @@ final class DocumentController
         return $stats;
     }
 
-    private static function signatureToDataUri(?string $relativePath): ?string
+    public static function signatureToDataUri(?string $relativePath): ?string
     {
         if (!$relativePath) {
             return null;
@@ -1126,7 +1126,7 @@ final class DocumentController
      * @param array<string, mixed> $accRow Result of SELECT invoice_company_name, theme_color, logo_path
      * @return array{name: string, color: string, logo_data_uri: string|null}
      */
-    private static function buildBrand(array $accRow): array
+    public static function buildBrand(array $accRow): array
     {
         $logoUri = null;
         $logoRel = $accRow['logo_path'] ?? null;
@@ -1387,7 +1387,7 @@ final class DocumentController
     }
 
     /** Spec-locked Slovak labels for the 6 training types + the Pokyn. */
-    private const TRAINING_TYPE_LABELS = [
+    public const TRAINING_TYPE_LABELS = [
         'vstupne'      => 'Vstupné školenie vedúcich a ostatných zamestnancov',
         'opakovane'    => 'Opakované školenie vedúcich a ostatných zamestnancov',
         'opp_mimo'     => 'Školenie osôb zabezpečujúcich OPP v mimopracovnom čase',

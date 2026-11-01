@@ -11,6 +11,7 @@ import { TodayPage } from '@/pages/TodayPage';
 import { CompaniesPage } from '@/pages/CompaniesPage';
 import { CompanyDetailPage } from '@/pages/CompanyDetailPage';
 import { CompanyEditPage } from '@/pages/CompanyEditPage';
+import { BookPage } from '@/pages/BookPage';
 import { FacilityDetailPage } from '@/pages/FacilityDetailPage';
 import { FacilityDevicesPage } from '@/pages/FacilityDevicesPage';
 import { FacilityEditPage } from '@/pages/FacilityEditPage';
@@ -92,6 +93,8 @@ export default function App() {
         <Route path="/companies/:id" element={<CompanyDetailPage />} />
         <Route path="/companies/:id/edit" element={<CompanyEditPage />} />
         <Route path="/companies/:companyId/facilities/new" element={<FacilityEditPage />} />
+        {/* Phase 5 — požiarna kniha and kniha BOZP of a firm. */}
+        <Route path="/companies/:id/kniha" element={<BookPage />} />
 
         <Route path="/facilities/:id/devices" element={<FacilityDevicesPage />} />
         <Route path="/facilities/:id" element={<FacilityDetailPage />} />

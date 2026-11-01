@@ -23,6 +23,7 @@ import { periodicityShort } from "@/lib/periodicity";
 import {
     SECTION_INSPECTION_TYPES,
     SECTION_LABELS,
+    canRepeatInspection,
     type Section,
 } from "@/lib/sections";
 import { ApiError } from "@/lib/api";
@@ -641,7 +642,7 @@ function InspectionRow({
                     onDone={(next) => onInvoiced(it.id, next)}
                 />
             )}
-            {it.status === "finalized" && (
+            {it.status === "finalized" && canRepeatInspection(it.type) && (
                 <button
                     type="button"
                     title="Opakovať kontrolu"

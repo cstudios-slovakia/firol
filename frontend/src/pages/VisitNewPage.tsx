@@ -15,6 +15,7 @@ import { ApiError } from '@/lib/api';
 import { daysUntilNext, trainingChain } from '@/lib/periodicity';
 import {
   SECTIONS, SECTION_COLORS, SECTION_INSPECTION_TYPES, SECTION_LABELS, TRAINING_SECTION,
+  RETIRED_FOR_NEW_UKON, startableInspectionTypes,
   type Section,
 } from '@/lib/sections';
 import { visitTypeLabel } from '@/lib/visits';
@@ -193,7 +194,8 @@ export function VisitNewPage() {
   // which point the app stops second-guessing them.
   useEffect(() => {
     if (touchedTypes) return;
-    setTypes(new Set(dueTypes));
+    // A due old požiarna kniha is not ticked: it is no longer a planned úkon (D2).
+    setTypes(new Set([...dueTypes].filter((t) => !RETIRED_FOR_NEW_UKON.some((r) => r === t))));
   }, [dueTypes, touchedTypes]);
 
   function toggleType(type: VisitType) {
@@ -397,7 +399,8 @@ export function VisitNewPage() {
  * školenie PO, which is a training rather than an inspection type.
  */
 function typesOfSection(section: Section): VisitType[] {
-  const types: VisitType[] = [...SECTION_INSPECTION_TYPES[section]];
+  // The old „Zápis do požiarnej knihy" is no longer a planned úkon (D2): the book is a place now.
+  const types: VisitType[] = [...startableInspectionTypes(SECTION_INSPECTION_TYPES[section])];
   if (section === TRAINING_SECTION) types.push(SKOLENIE_PO);
   return types;
 }

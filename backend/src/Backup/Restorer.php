@@ -60,6 +60,7 @@ final class Restorer
         'stock_movements' => 0,
         'tasks'       => 0,
         'defect_catalog' => 0,
+        'book_entries' => 0,
     ];
 
     /** @var array<string, int> */
@@ -72,6 +73,7 @@ final class Restorer
         'stock_items' => 0,
         'tasks'       => 0,
         'defect_catalog' => 0,
+        'book_entries' => 0,
     ];
 
     /** @var list<string> */
@@ -198,6 +200,9 @@ final class Restorer
             // Chapter 21 — before the documents, which map výdajky onto it.
             $this->restoreStock(is_array($manifest['stock'] ?? null) ? $manifest['stock'] : []);
             $this->restoreDocuments($this->list($manifest, 'documents'));
+            // Phase 5 — the books, after the firms, prevádzky, úkony and trainings
+            // whose ids an entry is remapped onto.
+            $this->restoreBookEntries($this->list($manifest, 'book_entries'));
             $this->relinkFollowUps($this->list($manifest, 'inspections'));
             // Chapter 20 — last, because a task points at companies,
             // facilities and (for one born from a nedostatok) an inspection.
@@ -281,6 +286,7 @@ final class Restorer
                 $existingCompanies[$key] = $newId;
                 $this->restored['companies']++;
                 $this->restoreCompanyBillingMode($newId, $company);
+                $this->restoreCompanyBookScope($newId, $company);
             }
             $this->companyMap[$oldId] = $newId;
 
@@ -952,6 +958,181 @@ final class Restorer
             $existing[$key] = true;
             $this->restored['tasks']++;
         }
+    }
+
+    // ── Požiarna kniha and kniha BOZP (Phase 5) ──────────────────────────────
+
+    /**
+     * The firm's book scope. Archives written before the books existed have no
+     * key; the firm then keeps the column default (one book for the firm).
+     *
+     * @param array<string, mixed> $company
+     */
+    private function restoreCompanyBookScope(int $companyId, array $company): void
+    {
+        $scope = $company['book_scope'] ?? null;
+        if ($scope !== 'firma' && $scope !== 'prevadzka') {
+            return;
+        }
+        $this->pdo->prepare('UPDATE companies SET book_scope = ? WHERE id = ? AND account_id = ?')
+            ->execute([$scope, $companyId, $this->accountId]);
+    }
+
+    /**
+     * The entries of both books with their additions, remapped onto the
+     * restored firms, prevádzky, úkony and trainings. Merge key: ledger +
+     * created_at + text — an entry already here is left alone (an entry is
+     * never overwritten, and its additions come with it). The original poradové
+     * číslo is kept when it is free in the target ledger; otherwise the entry
+     * takes the next free one, so a merge never collides with numbers the
+     * account has written since.
+     *
+     * @param list<array<string, mixed>> $entries
+     */
+    private function restoreBookEntries(array $entries): void
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT company_id, facility_id, scope_key, book, seq, created_at, `text`
+             FROM   book_entries WHERE account_id = ?'
+        );
+        $stmt->execute([$this->accountId]);
+        $existing = [];
+        $usedSeq = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $existing[$this->bookEntryKey(
+                (int) $row['company_id'],
+                $row['facility_id'] !== null ? (int) $row['facility_id'] : null,
+                (string) $row['book'],
+                (string) $row['created_at'],
+                (string) $row['text'],
+            )] = true;
+            $usedSeq[$row['company_id'] . '|' . $row['scope_key'] . '|' . $row['book']][(int) $row['seq']] = true;
+        }
+
+        $insert = $this->pdo->prepare(
+            'INSERT INTO book_entries
+                (account_id, company_id, facility_id, book, seq, entry_date, `text`, source,
+                 protocol_numbers, inspection_ids, training_ids, no_defects_statement,
+                 signed_technician_at, signed_manager_at, signer_name, signer_role,
+                 created_by_user_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $insertAddition = $this->pdo->prepare(
+            'INSERT INTO book_entry_additions (account_id, entry_id, `text`, created_by_user_id, created_at)
+             VALUES (?, ?, ?, ?, ?)'
+        );
+
+        foreach ($entries as $entry) {
+            $companyId = $this->companyMap[(int) ($entry['company_id'] ?? 0)] ?? null;
+            $text = $this->str($entry, 'text');
+            $book = $this->str($entry, 'book');
+            $date = $this->date($entry, 'entry_date');
+            if ($companyId === null || $text === null || $date === null || ($book !== 'po' && $book !== 'bozp')) {
+                $this->warnings[] = 'Zápis do knihy sa nedal priradiť k firme — preskočený.';
+                continue;
+            }
+            $facilityId = null;
+            if (($entry['facility_id'] ?? null) !== null) {
+                $facilityId = $this->facilityMap[(int) $entry['facility_id']] ?? null;
+                if ($facilityId === null) {
+                    $this->warnings[] = 'Zápis do knihy prevádzky, ktorá sa neobnovila, bol preskočený.';
+                    continue;
+                }
+            }
+
+            $createdAt = $this->createdAt($entry);
+            $key = $this->bookEntryKey($companyId, $facilityId, $book, $createdAt, $text);
+            if (isset($existing[$key])) {
+                $this->skipped['book_entries']++;
+                continue;
+            }
+
+            $ledger = $companyId . '|' . ($facilityId ?? 0) . '|' . $book;
+            $seq = max(1, (int) ($entry['seq'] ?? 1));
+            if (isset($usedSeq[$ledger][$seq])) {
+                $seq = max(array_keys($usedSeq[$ledger])) + 1;
+            }
+            $usedSeq[$ledger][$seq] = true;
+
+            $source = $this->str($entry, 'source');
+            if (!in_array($source, ['ukon', 'cislo', 'vlastny', 'termin', 'revizia'], true)) {
+                $source = 'vlastny';
+            }
+            $inspectionIds = $this->remapIds($entry['inspection_ids'] ?? [], $this->inspectionMap);
+            $trainingIds = $this->remapIds($entry['training_ids'] ?? [], $this->trainingMap);
+            $numbers = array_values(array_filter(
+                array_map(
+                    static fn (mixed $n): string => trim((string) $n),
+                    is_array($entry['protocol_numbers'] ?? null) ? $entry['protocol_numbers'] : [],
+                ),
+                static fn (string $n): bool => $n !== '',
+            ));
+
+            $insert->execute([
+                $this->accountId,
+                $companyId,
+                $facilityId,
+                $book,
+                $seq,
+                $date,
+                $text,
+                $source,
+                $numbers === [] ? null : json_encode($numbers, JSON_UNESCAPED_UNICODE),
+                $inspectionIds === [] ? null : json_encode($inspectionIds),
+                $trainingIds === [] ? null : json_encode($trainingIds),
+                (int) ($entry['no_defects_statement'] ?? 0) === 1 && $book === 'po' ? 1 : 0,
+                $this->dateTime($entry, 'signed_technician_at'),
+                $this->dateTime($entry, 'signed_manager_at'),
+                $this->str($entry, 'signer_name'),
+                $this->str($entry, 'signer_role'),
+                $this->user($entry, 'created_by_email'),
+                $createdAt,
+            ]);
+            $entryId = (int) $this->pdo->lastInsertId();
+            $existing[$key] = true;
+            $this->restored['book_entries']++;
+
+            foreach ($this->list($entry, 'additions') as $addition) {
+                $additionText = $this->str($addition, 'text');
+                if ($additionText === null) {
+                    continue;
+                }
+                $insertAddition->execute([
+                    $this->accountId,
+                    $entryId,
+                    $additionText,
+                    $this->user($addition, 'created_by_email'),
+                    $this->createdAt($addition),
+                ]);
+            }
+        }
+    }
+
+    private function bookEntryKey(int $companyId, ?int $facilityId, string $book, string $createdAt, string $text): string
+    {
+        return $companyId . '|' . ($facilityId ?? 0) . '|' . $book . '|' . self::normalizeDateTime($createdAt) . '|' . $text;
+    }
+
+    /**
+     * Old ids of úkony / trainings an entry points at, mapped onto the restored
+     * rows; an id that was not restored is dropped (the entry keeps its
+     * protocol numbers, which is what pairs it with the úkon).
+     *
+     * @param array<int, int> $map
+     * @return list<int>
+     */
+    private function remapIds(mixed $ids, array $map): array
+    {
+        if (!is_array($ids)) {
+            return [];
+        }
+        $out = [];
+        foreach ($ids as $old) {
+            if (is_numeric($old) && isset($map[(int) $old])) {
+                $out[$map[(int) $old]] = $map[(int) $old];
+            }
+        }
+        return array_values($out);
     }
 
     // ── Sklad (chapter 21) ───────────────────────────────────────────────────

@@ -123,3 +123,20 @@ export function sectionPathForType(type: InspectionType): string {
 export function isSection(value: string | undefined): value is Section {
   return typeof value === 'string' && (SECTIONS as string[]).includes(value);
 }
+
+/**
+ * Types that are no longer started as an úkon (decision D2). „Zápis do požiarnej
+ * knihy" now opens the book instead of making a document; old records stay in
+ * SECTION_INSPECTION_TYPES so their lists, history and PDFs keep working.
+ */
+export const RETIRED_FOR_NEW_UKON: InspectionType[] = ['poziarna_kniha'];
+
+/** Types a picker or the visit planner may offer for starting a new úkon. */
+export function startableInspectionTypes(types: InspectionType[]): InspectionType[] {
+  return types.filter((t) => !RETIRED_FOR_NEW_UKON.includes(t));
+}
+
+/** „Opakovať" is hidden on an old požiarna kniha record (D2). */
+export function canRepeatInspection(type: InspectionType): boolean {
+  return !RETIRED_FOR_NEW_UKON.includes(type);
+}

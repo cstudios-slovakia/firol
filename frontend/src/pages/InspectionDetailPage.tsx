@@ -38,7 +38,7 @@ import { HandoverDialog } from '@/components/HandoverDialog';
 import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStatusBadge';
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { periodicityLabel, type Periodicity } from '@/lib/periodicity';
-import { sectionPathForType } from '@/lib/sections';
+import { canRepeatInspection, sectionPathForType } from '@/lib/sections';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { VisitContinueButton } from '@/components/VisitContinueButton';
 import { VisitNextUkon } from '@/components/VisitNextUkon';
@@ -431,15 +431,18 @@ export function InspectionDetailPage() {
                 Upraviť
               </Button>
             )}
-            <Button
-              type="button"
-              onClick={handleRepeat}
-              loading={repeating}
-              leftIcon={<Repeat className="size-4" />}
-              title="Vytvorí novú kontrolu s tými istými položkami a prázdnym dátumom"
-            >
-              Opakovať
-            </Button>
+            {/* An old požiarna kniha record is not repeated any more (D2). */}
+            {canRepeatInspection(i.type) && (
+              <Button
+                type="button"
+                onClick={handleRepeat}
+                loading={repeating}
+                leftIcon={<Repeat className="size-4" />}
+                title="Vytvorí novú kontrolu s tými istými položkami a prázdnym dátumom"
+              >
+                Opakovať
+              </Button>
+            )}
           </div>
         ) : null}
       </header>

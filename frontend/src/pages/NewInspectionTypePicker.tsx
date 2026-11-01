@@ -29,8 +29,10 @@ import {
   TRAINING_COLOR,
   TRAINING_SECTION,
   isSection,
+  startableInspectionTypes,
   type Section,
 } from '@/lib/sections';
+import { bookPath } from '@/api/book';
 
 type TypeMeta = {
   type: InspectionType;
@@ -69,14 +71,6 @@ const TYPES: TypeMeta[] = [
     description: 'Oprava, plnenie a tlaková skúška hasiacich prístrojov.',
     intervalLabel: '60 mes.',
     icon: <Wrench className="size-5" />,
-    enabled: true,
-  },
-  {
-    type: 'poziarna_kniha',
-    shortLabel: 'Požiarna kniha',
-    description: 'Periodický záznam o stave protipožiarnej ochrany.',
-    intervalLabel: '3 / 6 / 12 mes.',
-    icon: <BookOpen className="size-5" />,
     enabled: true,
   },
   {
@@ -279,7 +273,7 @@ export function NewInspectionTypePicker() {
   // kontroly and školenia on a second level.
   const groups = (section ? [section] : SECTIONS).map((s) => ({
     section: s,
-    types: TYPES.filter((m) => SECTION_INSPECTION_TYPES[s].includes(m.type)),
+    types: TYPES.filter((m) => startableInspectionTypes(SECTION_INSPECTION_TYPES[s]).includes(m.type)),
     trainings: !section && s === TRAINING_SECTION ? trainingTypes : [],
   }));
   const grouped = !section;
@@ -332,6 +326,15 @@ export function NewInspectionTypePicker() {
                 <TypeCard meta={meta} href={stepOnePathFor(meta.type)} />
               </div>
             ))}
+            {/* Phase 5 — „Zápis do požiarnej knihy" opens the book, it no longer starts an úkon. */}
+            {g.section === 'opp' && (
+              <div className="animate-fade-up" style={nextDelay()}>
+                <BookLinkCard
+                  href={companyId ? bookPath(Number(companyId), 'po', facilityId ? Number(facilityId) : null) : '/companies'}
+                  hasCompany={Boolean(companyId)}
+                />
+              </div>
+            )}
           </div>
 
           {g.trainings.length > 0 && (
@@ -349,6 +352,31 @@ export function NewInspectionTypePicker() {
         </section>
       ))}
     </div>
+  );
+}
+
+function BookLinkCard({ href, hasCompany }: { href: string; hasCompany: boolean }) {
+  return (
+    <Link
+      to={href}
+      className="group block rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
+      title="Zápis do požiarnej knihy"
+    >
+      <Card className="flex items-center gap-3 px-4 py-4 transition-[box-shadow,transform] duration-150 group-hover:-translate-y-px group-hover:shadow-md">
+        <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-500 text-white shadow-[var(--shadow-glow)]">
+          <BookOpen className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-sm font-semibold text-ink-900">Zápis do požiarnej knihy</h3>
+          <p className="mt-0.5 line-clamp-2 text-xs text-ink-500">
+            {hasCompany
+              ? 'Otvorí knihu firmy — zápisy sa pridávajú tam.'
+              : 'Kniha je pri firme — vyber firmu a otvor jej knihu.'}
+          </p>
+        </div>
+        <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-firol-500" />
+      </Card>
+    </Link>
   );
 }
 

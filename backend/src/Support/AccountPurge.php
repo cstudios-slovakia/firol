@@ -22,9 +22,10 @@ use PDO;
 final class AccountPurge
 {
     /**
-     * Companies + facilities (client type and the prevádzka objekt columns
-     * go with those rows) + everything hanging off them (inspections,
-     * items, photos, trainings, trainees, documents).
+     * Companies + facilities (client type, book scope and the prevádzka objekt
+     * columns go with those rows) + everything hanging off them (inspections,
+     * items, photos, trainings, trainees, documents, and the entries of the
+     * požiarna kniha and kniha BOZP with their additions — FK cascade).
      *
      * @return int number of companies removed
      */
