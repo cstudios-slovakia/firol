@@ -1315,9 +1315,9 @@ Points 11, 12 and 13 of the 2. 10. report (cancelled then for budget) are back i
 | 2 | Client type (firma / bytové družstvo), prevádzka data, e-mail precedence, device list | ✅ built; firma form checked at 360 px, BD save not re-checked |
 | 3 | Školenia (osobné číslo, bulk, edit, take-over, hliadky, platnosť override) | ✅ |
 | 4 | Defect catalogue (27 items + own items) | ✅ |
-| 5 | Požiarna kniha and kniha BOZP as ledgers; old book úkony retired | ⬜ |
+| 5 | Požiarna kniha and kniha BOZP as ledgers; old book úkony retired | 🟨 built, API + 360 px iframe checked; not accepted |
 | 6 | Termíny split by book, cudzie revízie | ⬜ |
-| 7a | Preventívna prehliadka: step 1, walk-through, defect entry | ⬜ |
+| 7a | Preventívna prehliadka: step 1, walk-through, defect entry | 🟨 built, API + 360 px iframe checked; not accepted |
 | 7b | Preventívna prehliadka: previous defects, step 3, uzavretie | ⬜ |
 | 8a | Closing: PP record, BOZP zápis, book entries | ⬜ |
 | 8b | Concept checks, visits, Dnes, backup | ⬜ |
@@ -1360,6 +1360,28 @@ passed; the throwaway account was removed. Migration 060 is applied on the local
   usage endpoint, backup/restore with `catalog_id` remap, `DefectPicker` component (not mounted anywhere
   until Phase 7a). Own items: delete rights follow `MemberRights` unless the user created the item;
   empty popis / opatrenie saved as "Doplní technik." (prototype).
+- **Phase 5** (built in parallel with 7a, 1. 11. 2026) — migrations 061–063 (`companies.book_scope`,
+  `book_entries`, `book_entry_additions`; 064–065 are gaps). `BookController` (7 routes, writes online-only),
+  `BookMapping` / `lib/bookMapping.ts`, offers ("Appka ponúka pridať", same type + date on several
+  prevádzky = one offer), manual entries, legal-sentence toggle, dopísanie, "bez nedostatkov" flag
+  (PO book only), signatures and on-the-fly print (`renderBook`, no `documents` row), scope switch,
+  route `/companies/:id/kniha`, company card + prevádzka tile + picker entry. `poziarna_kniha` is gone from
+  the picker, visit planner and Opakovať (frontend only; the API still accepts it). Backup/restore of
+  entries. Not done (Phase 6): termín / revízia offers. Decisions to confirm with FIROL: the BOZP
+  "Podľa čísla" kinds (the "oboznámenie zamestnancov v oblasti BOZP" kind is an extrapolation, not in the
+  spec); Q8 built as dopísanie only. Offline cache of the book screen not tested.
+- **Phase 7a** — no migration (`066`–`070` unused). Type `preventivna_prehliadka`, setup in
+  `inspections.details`, `PrehliadkaDefects` validator, `GET /api/facilities/{id}/prehliadka-context`,
+  entrance/place memory saved with the defect, deadlines computed server-side and recomputed on date change.
+  Screens: Krok 1 (with "Ako naposledy"), Krok 2 obchôdzka, defect form with `DefectPicker`, floor tiles,
+  device search over 8, "Uložiť a ďalšie zariadenie" (shared `group_key`). Entry points: prevádzka detail,
+  picker, visit planner; "Kniha kontrol BOZP" starts the BOZP preset (also from the visit planner). Offline: all
+  writes queue (simulated offline with 2 photos synced; real airplane mode and a physical camera not
+  tested). Cannot be closed or generated yet (Phase 8a). `poziarna_kniha` still in `InspectionsListPage`
+  `TYPE_CHIPS` and the `FacilityDetailPage` type filter.
+- **Open before 8a:** the number prefix `PP` is already used by `pracovne_prostriedky`
+  (`documents` has `UNIQUE (account_id, number)`), so D5's prefix for the prehliadka record must change. The
+  prefix is not registered in `NumberAllocator` yet. Also not run: migrations on a copy of the current DB.
 
 ---
 
