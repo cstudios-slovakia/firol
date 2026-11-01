@@ -10,6 +10,8 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Support\PrehliadkaDefects;
+use Firol\Support\PrehliadkaDetails;
 use PDO;
 
 /**
@@ -86,7 +88,7 @@ final class InspectionItemController
             }
         }
 
-        $fields = self::validateFields($inspection['type'], $req->json());
+        $fields = self::validateFields($inspection['type'], $req->json(), $inspection);
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
@@ -105,6 +107,7 @@ final class InspectionItemController
 
             $itemId = (int) $pdo->lastInsertId();
             self::syncPreventiveFlag($pdo, $inspection['type'], $inspectionId, $fields);
+            self::rememberWalkPlaces($inspection, $fields);
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
@@ -129,7 +132,7 @@ final class InspectionItemController
 
         self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
-        $fields = self::validateFields($inspection['type'], $req->json());
+        $fields = self::validateFields($inspection['type'], $req->json(), $inspection);
 
         Db::pdo()->prepare(
             'UPDATE inspection_items SET fields = ? WHERE id = ? AND inspection_id = ?'
@@ -140,6 +143,7 @@ final class InspectionItemController
         ]);
 
         self::syncPreventiveFlag(Db::pdo(), $inspection['type'], $inspectionId, $fields);
+        self::rememberWalkPlaces($inspection, $fields);
 
         Response::json(['item' => self::loadItem($itemId)]);
     }
@@ -188,14 +192,49 @@ final class InspectionItemController
     }
 
     /**
+     * A defect of a preventívna prehliadka teaches its prevádzka the entrance
+     * and the place it was written with, so both come back as tiles next time
+     * (spec 3.2, 6.3.4). Runs in the defect's own transaction on create.
+     *
+     * @param array<string, mixed> $inspection id, type, account_id, facility_id
+     * @param array<string, mixed> $fields validated defect fields
+     */
+    private static function rememberWalkPlaces(array $inspection, array $fields): void
+    {
+        if (($inspection['type'] ?? '') !== PrehliadkaDetails::TYPE) {
+            return;
+        }
+        $where = (array) ($fields['where'] ?? []);
+        \Firol\Support\FacilityWalkMemory::remember(
+            (int) $inspection['account_id'],
+            (int) $inspection['facility_id'],
+            isset($where['entrance']) ? (string) $where['entrance'] : null,
+            isset($where['place']) ? (string) $where['place'] : null,
+        );
+    }
+
+    /**
      * Dispatches per inspection type. Adding a new type means registering
      * a validator branch here that returns the canonical fields array.
      *
      * @param array<string, mixed> $body
+     * @param array<string, mixed> $inspection the parent row (type, executed_on), for the
+     *                                         types whose fields depend on it
      * @return array<string, mixed>
      */
-    private static function validateFields(string $type, array $body): array
+    private static function validateFields(string $type, array $body, array $inspection = []): array
     {
+        // POapp 26. 10. 2026 — a defect of a preventívna prehliadka.
+        if ($type === PrehliadkaDetails::TYPE) {
+            try {
+                return PrehliadkaDefects::validate(
+                    $body,
+                    isset($inspection['executed_on']) ? (string) $inspection['executed_on'] : null,
+                );
+            } catch (\InvalidArgumentException $e) {
+                self::failValidation($e->getMessage());
+            }
+        }
         // Block 2 — single-record BOZP úkony (kniha BOZP, pracovisko,
         // osamelé pracoviská, fajčenie): one record holds the whole úkon.
         if (\Firol\Support\BozpRecords::supports($type)) {
@@ -749,7 +788,7 @@ final class InspectionItemController
     /** @return array<string, mixed> */
     private static function loadInspectionOrFail(?int $accountId, int $inspectionId): array
     {
-        $sql = 'SELECT id, type, status FROM inspections
+        $sql = 'SELECT id, type, status, account_id, facility_id, executed_on FROM inspections
                 WHERE id = ? AND archived_at IS NULL';
         $params = [$inspectionId];
         if ($accountId !== null) {

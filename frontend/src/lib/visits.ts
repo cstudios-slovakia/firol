@@ -1,6 +1,7 @@
 import { INSPECTION_TYPE_LABELS, type InspectionType } from '@/api/inspections';
 import { SKOLENIE_PO, type Visit, type VisitInspection, type VisitTraining, type VisitType } from '@/api/visits';
 import type { Crumb } from '@/components/ui/Breadcrumb';
+import { PREHLIADKA_NEW_PATH, PREHLIADKA_TYPE, prehliadkaPath } from '@/lib/prehliadka';
 
 /** „1 položka", „2 položky", „5 položiek" — Slovak plural of a count. */
 function plural(n: number, one: string, few: string, many: string): string {
@@ -14,6 +15,8 @@ function plural(n: number, one: string, few: string, many: string): string {
 export function visitUkonTypes(visit: Visit): VisitType[] {
   const types: VisitType[] = [...visit.planned_types];
   for (const ins of visit.inspections) {
+    // A prehliadka begun for a planned „Kniha kontrol BOZP" is that úkon, not a second row.
+    if (ins.type === PREHLIADKA_TYPE && types.includes('kniha_bozp')) continue;
     if (!types.includes(ins.type)) types.push(ins.type);
   }
   // A training recorded under the visit counts as its školenie PO even if it
@@ -79,8 +82,16 @@ export function visitUkonState(
       documentId: issued ? training.document_id : null,
     };
   }
-  const inspection = visitInspectionOfType(visit, type);
+  // „Kniha kontrol BOZP" is carried out as a prehliadka preset to BOZP (D2): a
+  // prehliadka begun under the visit stands for it until its own record exists.
+  const inspection =
+    visitInspectionOfType(visit, type) ??
+    (type === 'kniha_bozp' ? visitInspectionOfType(visit, PREHLIADKA_TYPE) : undefined);
   if (!inspection) return { started: false, done: false, text: 'Zatiaľ nezačaté', documentId: null };
+  if (inspection.type === PREHLIADKA_TYPE) {
+    const defects = plural(inspection.item_count, 'nedostatok', 'nedostatky', 'nedostatkov');
+    return { started: true, done: false, text: `Rozpracované · ${defects}`, documentId: null };
+  }
   const items = plural(inspection.item_count, 'položka', 'položky', 'položiek');
   const done = inspection.status === 'finalized';
   if (!done && inspection.deferred) return { started: true, done: true, text: HELD_TEXT, documentId: null };
@@ -104,14 +115,25 @@ export function visitUkonPath(visit: Visit, type: VisitType): string {
     if (training) return `/trainings/${training.id}`;
     return `/trainings/new?${new URLSearchParams({ visit_id: String(visit.id) }).toString()}`;
   }
-  const existing = visitInspectionOfType(visit, type);
-  if (existing) return `/inspections/${existing.id}`;
   const params = new URLSearchParams({
     company_id: String(visit.company_id),
     facility_id: String(visit.facility_id),
     visit_id: String(visit.id),
     executed_on: visit.visit_date,
   });
+  // POapp 26. 10. 2026 (D2) — „Kniha kontrol BOZP" starts a preventívna
+  // prehliadka preset to BOZP; its record is the kniha BOZP entry. A prehliadka
+  // already begun under the visit is continued, whichever of the two was ticked.
+  if (type === PREHLIADKA_TYPE || type === 'kniha_bozp') {
+    const own = visitInspectionOfType(visit, type);
+    if (own) return type === PREHLIADKA_TYPE ? prehliadkaPath(own.id) : `/inspections/${own.id}`;
+    const begun = visitInspectionOfType(visit, PREHLIADKA_TYPE);
+    if (begun) return prehliadkaPath(begun.id);
+    if (type === 'kniha_bozp') params.set('preset', 'bozp');
+    return `${PREHLIADKA_NEW_PATH}?${params.toString()}`;
+  }
+  const existing = visitInspectionOfType(visit, type);
+  if (existing) return `/inspections/${existing.id}`;
   return `/inspections/new/${type}/step-1?${params.toString()}`;
 }
 

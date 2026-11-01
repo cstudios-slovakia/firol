@@ -4,6 +4,7 @@ import type { BozpItemFields } from '@/api/bozpItems';
 import type { BozpRecordFields } from '@/api/bozpRecords';
 import type { PersonFields } from '@/api/personList';
 import type { InvoicingFields } from '@/api/invoicing';
+import type { DefectFields } from '@/lib/prehliadka';
 
 /**
  * Inspection types — locked slugs from docs/Firol base document.
@@ -33,7 +34,9 @@ export type InspectionType =
   // Block 2 — the person-list úkony (api/personList.ts).
   | 'dychova_skuska'
   | 'omamne_latky'
-  | 'skolenie_bozp';
+  | 'skolenie_bozp'
+  // POapp 26. 10. 2026 — a walk-through with several records (lib/prehliadka.ts).
+  | 'preventivna_prehliadka';
 
 export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   php: 'Hasiace prístroje (PHP)',
@@ -58,6 +61,8 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   dychova_skuska: 'Dychová skúška na alkohol',
   omamne_latky: 'Kontrola omamných a psychotropných látok',
   skolenie_bozp: 'Oboznámenie zamestnancov v oblasti BOZP',
+  // Spelled out, never „PPP" (spec 2).
+  preventivna_prehliadka: 'Preventívna prehliadka',
 };
 
 export type InspectionStatus = 'draft' | 'finalized';
@@ -437,6 +442,8 @@ export type InspectionDraftPayload = {
   notes?: string;
   /** Set when the úkon is being recorded as part of a visit (chapter 9). */
   visit_id?: number;
+  /** Header data — required for a preventívna prehliadka (its setup). */
+  details?: Record<string, unknown>;
 };
 
 export type InspectionUpdatePayload = {
@@ -530,7 +537,8 @@ export const Inspections = {
       | VyradenieItemFields
       | BozpItemFields
       | BozpRecordFields
-      | PersonFields,
+      | PersonFields
+      | DefectFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items`, {
@@ -553,7 +561,8 @@ export const Inspections = {
       | VyradenieItemFields
       | BozpItemFields
       | BozpRecordFields
-      | PersonFields,
+      | PersonFields
+      | DefectFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items/${itemId}`, {

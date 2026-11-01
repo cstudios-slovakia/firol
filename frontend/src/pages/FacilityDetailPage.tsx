@@ -7,6 +7,7 @@ import {
     Building2,
     CalendarDays,
     ChevronRight,
+    ClipboardCheck,
     ClipboardList,
     Edit2,
     GraduationCap,
@@ -36,6 +37,8 @@ import {
 import { periodicityShort } from "@/lib/periodicity";
 import { bookPath } from "@/api/book";
 import { canRepeatInspection } from "@/lib/sections";
+import { Prehliadka } from "@/api/prehliadka";
+import { PREHLIADKA_TYPE, prehliadkaPath, startPrehliadkaPath } from "@/lib/prehliadka";
 import {
     TRAINING_TYPE_LABELS,
     TRAINING_TYPES,
@@ -79,6 +82,7 @@ export function FacilityDetailPage() {
     const [typeFilter, setTypeFilter] = useState<InspectionType | "">("");
     const [activeTab, setActiveTab] = useState<"inspections" | "trainings" | "objekt">("inspections");
     const [devices, setDevices] = useState<FacilityDeviceGroup[] | null>(null);
+    const [ppContextDraft, setPpContextDraft] = useState<number | null>(null);
     const [trainingQuery, setTrainingQuery] = useState("");
     const [trainingTypeFilter, setTrainingTypeFilter] = useState<TrainingType | "">("");
 
@@ -177,6 +181,15 @@ export function FacilityDetailPage() {
             .then(async (f) => {
                 if (cancelled) return;
                 setFacility(f.facility);
+                // Warms the caches step 1 of a prehliadka reads (device list,
+                // context) so it can be started offline from here, and tells
+                // whether one is already in progress.
+                void Facilities.devices(id).catch(() => undefined);
+                Prehliadka.context(id)
+                    .then((c) => {
+                        if (!cancelled) setPpContextDraft(c.draft_id);
+                    })
+                    .catch(() => undefined);
                 const [ins, trs] = await Promise.all([
                     Inspections.list({ facility_id: id }).catch(
                         () => ({ items: [] as InspectionListItem[] }),
@@ -254,6 +267,10 @@ export function FacilityDetailPage() {
     // protocols stay reachable, but nothing new starts here.
     const archived = Boolean(facility.archived_at || facility.company_archived_at);
     const canEdit = !isReadOnly && !archived;
+    // A prehliadka in progress here: the draft in the list (also one created
+    // offline), else what the server reported.
+    const ppDraftId =
+        (inspections ?? []).find((i) => i.type === PREHLIADKA_TYPE && i.status === "draft")?.id ?? ppContextDraft;
 
     return (
         <div className="flex flex-col gap-5">
@@ -382,6 +399,32 @@ export function FacilityDetailPage() {
             </Card>
 
             {/* Action card menu */}
+            {canEdit && (
+                <Link
+                    id="pp-start-link"
+                    to={
+                        ppDraftId !== null
+                            ? prehliadkaPath(ppDraftId)
+                            : startPrehliadkaPath({ companyId: facility.company_id, facilityId: facility.id })
+                    }
+                    className="flex items-center gap-3.5 rounded-2xl bg-firol-500 px-4 py-3.5 text-white shadow-[var(--shadow-glow)] transition-[background-color,transform] duration-200 hover:bg-firol-600 active:scale-[0.99]"
+                >
+                    <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white/20">
+                        <ClipboardCheck className="size-5 text-white" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold">
+                            {ppDraftId !== null ? "Prehliadka prebieha · pokračovať" : "Preventívna prehliadka"}
+                        </p>
+                        <p className="mt-0.5 text-xs text-white/80">
+                            {ppDraftId !== null
+                                ? "Rozpracované nedostatky ostali uložené"
+                                : "Obchôdzka — zapíšeš nedostatky, záznamy vzniknú z nich"}
+                        </p>
+                    </div>
+                    <ChevronRight className="size-4 shrink-0 text-white/70" />
+                </Link>
+            )}
             {canEdit && (
                 <Link
                     to={`/inspections/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
@@ -525,7 +568,7 @@ export function FacilityDetailPage() {
                             >
                                 Všetky
                             </button>
-                            {(["php", "hydranty", "oprava_ts_php", "poziarna_kniha", "pu_akcieschopnost", "pu_udrzba", "nudzove_osvetlenie", "ts_hadic", "vyradenie", "kniha_bozp", "pracovisko", "osamele_pracovisko", "fajcenie", "oopp", "pracovne_prostriedky", "rebriky", "regale", "oznacenie", "dychova_skuska", "omamne_latky", "skolenie_bozp"] as InspectionType[])
+                            {(["php", "hydranty", "oprava_ts_php", "preventivna_prehliadka", "poziarna_kniha", "pu_akcieschopnost", "pu_udrzba", "nudzove_osvetlenie", "ts_hadic", "vyradenie", "kniha_bozp", "pracovisko", "osamele_pracovisko", "fajcenie", "oopp", "pracovne_prostriedky", "rebriky", "regale", "oznacenie", "dychova_skuska", "omamne_latky", "skolenie_bozp"] as InspectionType[])
                                 .filter((t) => inspections.some((i) => i.type === t))
                                 .map((t) => (
                                     <button

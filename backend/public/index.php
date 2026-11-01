@@ -161,6 +161,8 @@ $router->get('/api/companies/{id}/sends',              [DocumentSendController::
 $router->post('/api/companies/{id}/sends',             [DocumentSendController::class, 'store']);
 
 $router->get('/api/facilities/{id}/devices',        [FacilityController::class, 'devices']);
+// POapp 26. 10. 2026, phase 7a — step 1 of a preventívna prehliadka.
+$router->get('/api/facilities/{id}/prehliadka-context', [FacilityController::class, 'prehliadkaContext']);
 $router->get('/api/facilities/{id}',                [FacilityController::class, 'show']);
 $router->patch('/api/facilities/{id}',              [FacilityController::class, 'update']);
 $router->post('/api/facilities/{id}/archive',       [FacilityController::class, 'archive']);

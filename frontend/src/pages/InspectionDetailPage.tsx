@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { PREHLIADKA_TYPE, prehliadkaPath } from '@/lib/prehliadka';
 import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, CopyPlus, Download,
   FileText, GitBranch, History, Images, Link2, Lock, LockOpen, NotebookPen, Pencil,
@@ -350,6 +351,12 @@ export function InspectionDetailPage() {
         <CardBlockSkeleton rows={4} />
       </div>
     );
+  }
+
+  // A preventívna prehliadka has screens of its own (lists and history still
+  // link here, so the redirect is the one place that knows).
+  if (data.inspection.type === PREHLIADKA_TYPE) {
+    return <Navigate to={prehliadkaPath(id)} replace />;
   }
 
   const { inspection: i, items } = data;

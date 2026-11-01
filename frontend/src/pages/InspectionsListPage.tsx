@@ -82,6 +82,7 @@ const TYPE_CHIPS: [InspectionType, string][] = [
     ["php", "PHP"],
     ["hydranty", "Hydranty"],
     ["oprava_ts_php", "Oprava & TS"],
+    ["preventivna_prehliadka", "Prehliadka"],
     ["poziarna_kniha", "Pož. kniha"],
     ["pu_akcieschopnost", "PU – akciesch."],
     ["pu_udrzba", "PU – údržba"],

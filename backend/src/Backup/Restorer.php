@@ -85,6 +85,10 @@ final class Restorer
     private array $facilityMap = [];
     /** @var array<int, int> old inspection id → new */
     private array $inspectionMap = [];
+    /** @var array<int, int> old inspection item id → new (only items this run inserted) */
+    private array $itemMap = [];
+    /** @var list<int> new ids of the preventívna prehliadka defects this run inserted */
+    private array $prehliadkaItemIds = [];
     /** @var array<int, int> old training id → new */
     private array $trainingMap = [];
     /** @var array<int, int> old own číselník item id → new (shipped ids are the same everywhere) */
@@ -196,6 +200,7 @@ final class Restorer
             // Before the inspections: a defect's fields.catalog_id is remapped onto it.
             $this->restoreDefectCatalog($this->list($manifest, 'defect_catalog'));
             $this->restoreInspections($this->list($manifest, 'inspections'));
+            $this->relinkPrehliadkaDevices();
             $this->restoreTrainings($this->list($manifest, 'trainings'));
             // Chapter 21 — before the documents, which map výdajky onto it.
             $this->restoreStock(is_array($manifest['stock'] ?? null) ? $manifest['stock'] : []);
@@ -444,6 +449,10 @@ final class Restorer
                 ]);
                 $itemId = (int) $this->pdo->lastInsertId();
                 $this->restored['items']++;
+                $this->itemMap[(int) ($item['id'] ?? 0)] = $itemId;
+                if ($type === 'preventivna_prehliadka') {
+                    $this->prehliadkaItemIds[] = $itemId;
+                }
 
                 foreach ($this->list($item, 'photos') as $photo) {
                     $entry = isset($photo['file']) ? (string) $photo['file'] : null;
@@ -478,6 +487,47 @@ final class Restorer
                     ]);
                     $this->restored['photos']++;
                 }
+            }
+        }
+    }
+
+    /**
+     * A defect of a preventívna prehliadka names the devices it concerns by the
+     * id of the item they were listed from (`devices[].source_item_id`) — an
+     * item of another úkon, which may only now have been inserted. Once every
+     * item id is known the references are pointed at the restored items. One
+     * that cannot be resolved (its úkon was already in the account, or is not
+     * in the archive) is dropped rather than left to name a stranger's item;
+     * the label / serial / location snapshot beside it still prints.
+     */
+    private function relinkPrehliadkaDevices(): void
+    {
+        if ($this->prehliadkaItemIds === []) {
+            return;
+        }
+        $select = $this->pdo->prepare('SELECT fields FROM inspection_items WHERE id = ?');
+        $update = $this->pdo->prepare('UPDATE inspection_items SET fields = ? WHERE id = ?');
+        foreach ($this->prehliadkaItemIds as $itemId) {
+            $select->execute([$itemId]);
+            $fields = json_decode((string) $select->fetchColumn(), true);
+            if (!is_array($fields) || !is_array($fields['devices'] ?? null)) {
+                continue;
+            }
+            $changed = false;
+            foreach ($fields['devices'] as $i => $device) {
+                if (!is_array($device) || !isset($device['source_item_id'])) {
+                    continue;
+                }
+                $old = (int) $device['source_item_id'];
+                if (isset($this->itemMap[$old])) {
+                    $fields['devices'][$i]['source_item_id'] = $this->itemMap[$old];
+                } else {
+                    unset($fields['devices'][$i]['source_item_id']);
+                }
+                $changed = true;
+            }
+            if ($changed) {
+                $update->execute([json_encode($fields, JSON_UNESCAPED_UNICODE), $itemId]);
             }
         }
     }

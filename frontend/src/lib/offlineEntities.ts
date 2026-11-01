@@ -143,6 +143,9 @@ export function inspectionCreateOptimistic(args: {
     carried_over_from_id: null,
     visit_id: args.payload.visit_id ?? null,
     ...newUkonInvoicing(args.company.billing_mode),
+    // The setup of a preventívna prehliadka rides along, so its screens work
+    // from the very first moment of an offline draft.
+    details: args.payload.details ?? null,
   };
   const detail: InspectionDetail = { inspection, items: [] };
   const listRow: InspectionListItem = { ...inspection };

@@ -16,6 +16,7 @@ use Firol\Support\ClientArchive;
 use Firol\Support\ClientEmail;
 use Firol\Support\ClientKind;
 use Firol\Support\FacilityDevices;
+use Firol\Support\PrehliadkaContext;
 
 final class FacilityController
 {
@@ -203,6 +204,22 @@ final class FacilityController
         $scopeAccountId = (int) $row['account_id'];
 
         Response::json(['groups' => FacilityDevices::forFacility($scopeAccountId, $id)]);
+    }
+
+    /**
+     * GET /api/facilities/{id}/prehliadka-context — what step 1 of a
+     * preventívna prehliadka needs besides the devices (see PrehliadkaContext).
+     * A read; the same tenant rules as devices().
+     */
+    public static function prehliadkaContext(Request $req, array $params): void
+    {
+        $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
+        $id        = (int) $params['id'];
+
+        $row = self::loadOrFail($isAdmin ? null : $accountId, $id, true);
+
+        Response::json(PrehliadkaContext::forFacility((int) $row['account_id'], $id));
     }
 
     /**

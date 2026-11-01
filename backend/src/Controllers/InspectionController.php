@@ -16,6 +16,8 @@ use Firol\Storage\Storage;
 use Firol\Support\CarryOver;
 use Firol\Support\InspectionDetails;
 use Firol\Support\Periodicity;
+use Firol\Support\PrehliadkaDefects;
+use Firol\Support\PrehliadkaDetails;
 
 final class InspectionController
 {
@@ -87,6 +89,9 @@ final class InspectionController
         // than a training-tree record: it carries a periodicity, joins a visit,
         // is signed „Za organizáciu" and shares its person list with the tests.
         'dychova_skuska', 'omamne_latky', 'skolenie_bozp',
+        // POapp 26. 10. 2026 — the walk-through that yields several records
+        // (Firol\Support\PrehliadkaDetails / PrehliadkaDefects).
+        'preventivna_prehliadka',
     ];
 
     /**
@@ -543,6 +548,11 @@ final class InspectionController
         if ($type === null || !in_array($type, self::TYPES, true)) {
             Response::error('Neplatný typ kontroly.', 422);
         }
+        // A prehliadka is nothing without its setup: which records it yields
+        // decides whose oprávnenie signs it and which defects are offered.
+        if ($type === PrehliadkaDetails::TYPE && $details === null) {
+            Response::error('Chýba nastavenie prehliadky.', 422);
+        }
         // Inside a visit (chapter 9) the company, prevádzka and date were chosen
         // once, when the visit started. They are the visit's, not the request's:
         // overriding them is friendlier offline than rejecting a draft that
@@ -616,7 +626,11 @@ final class InspectionController
         // no usable fallback. Admins are exempt (they manage other accounts'
         // data without their own profile).
         if (!$isAdmin) {
-            self::assertCanInspect($accountId, $inspectorUserId, $type);
+            if ($type === PrehliadkaDetails::TYPE) {
+                self::assertCanDoPrehliadka($accountId, $inspectorUserId, (array) $details);
+            } else {
+                self::assertCanInspect($accountId, $inspectorUserId, $type);
+            }
         }
 
         // A visit (chapter 9) collects several úkony under one trip; the
@@ -743,6 +757,11 @@ final class InspectionController
                     notes       = COALESCE(?, notes)
              WHERE  id = ? AND account_id = ?'
         )->execute([$executedOn, $notes, $id, $scopeAccountId]);
+
+        // A new prehliadka date moves every computed defect deadline with it.
+        if ($executedOn !== null && $row['type'] === PrehliadkaDetails::TYPE) {
+            PrehliadkaDefects::recomputeDeadlines($id, $executedOn);
+        }
 
         // Header data replaces the whole object — a cleared field has to be
         // expressible, so there is no field-by-field COALESCE here.
@@ -924,6 +943,10 @@ final class InspectionController
 
         if ($source['status'] !== 'finalized') {
             Response::error('Opakovať možno len ukončenú kontrolu (s vystaveným PDF).', 422);
+        }
+        // A prehliadka is started afresh; its setup is offered as „Ako naposledy".
+        if ($source['type'] === PrehliadkaDetails::TYPE) {
+            Response::error('Preventívnu prehliadku nemožno opakovať — začni novú, nastavenie sa predvyplní.', 422);
         }
 
         // Same cert guard as fresh creation — if the original inspector
@@ -1232,6 +1255,40 @@ final class InspectionController
             );
         } catch (\InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422);
+        }
+    }
+
+    /**
+     * A prehliadka is signed twice over: the PO record by a technik PO
+     * (cert_general), the BOZP record by a bezpečnostný technik (cert_bt).
+     * Only what the chosen scope needs is required. No borrowing, as for the
+     * single úkony of those sections.
+     *
+     * @param array<string, mixed> $details validated PrehliadkaDetails
+     */
+    private static function assertCanDoPrehliadka(int $accountId, int $inspectorUserId, array $details): void
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT cert_general, cert_bt FROM inspector_profiles WHERE user_id = ? AND account_id = ?'
+        );
+        $stmt->execute([$inspectorUserId, $accountId]);
+        $own = $stmt->fetch() ?: [];
+        $has = static fn ($v): bool => is_string($v) && trim($v) !== '';
+
+        $scope = (array) ($details['scope'] ?? []);
+        if (($scope['po'] ?? false) === true && !$has($own['cert_general'] ?? null)) {
+            Response::error(
+                'Protipožiarna prehliadka vyžaduje platné číslo oprávnenia Technik PO. Doplň ho v Profile technika.',
+                422,
+                ['code' => 'cert_missing', 'cert' => 'cert_general'],
+            );
+        }
+        if (($scope['bozp'] ?? false) === true && !$has($own['cert_bt'] ?? null)) {
+            Response::error(
+                'Prehliadka BOZP vyžaduje číslo oprávnenia bezpečnostného technika. Doplň ho v Profile technika.',
+                422,
+                ['code' => 'cert_missing', 'cert' => 'cert_bt'],
+            );
         }
     }
 

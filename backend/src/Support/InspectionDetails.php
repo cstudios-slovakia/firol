@@ -26,7 +26,9 @@ final class InspectionDetails
     {
         return PersonList::isPersonType($type)
             // Block 2 — the opatrenia / záver of the BOZP row types.
-            || BozpItems::supports($type);
+            || BozpItems::supports($type)
+            // POapp 26. 10. 2026 — the setup of a preventívna prehliadka.
+            || PrehliadkaDetails::supports($type);
     }
 
     /**
@@ -47,6 +49,9 @@ final class InspectionDetails
         }
         if (BozpItems::supports($type)) {
             return BozpItems::validateDetails($type, $raw);
+        }
+        if (PrehliadkaDetails::supports($type)) {
+            return PrehliadkaDetails::validate($raw);
         }
         return [];
     }

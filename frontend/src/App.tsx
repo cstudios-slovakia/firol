@@ -20,6 +20,9 @@ import { InspectionStep1Page } from '@/pages/InspectionStep1Page';
 import { InspectionStep2Page } from '@/pages/InspectionStep2Page';
 import { InspectionDetailPage } from '@/pages/InspectionDetailPage';
 import { InspectionsListPage } from '@/pages/InspectionsListPage';
+import { PrehliadkaSetupPage } from '@/pages/prehliadka/PrehliadkaSetupPage';
+import { PrehliadkaWalkPage } from '@/pages/prehliadka/PrehliadkaWalkPage';
+import { PrehliadkaDefectPage } from '@/pages/prehliadka/PrehliadkaDefectPage';
 import { SectionPage, TrainingsRedirect } from '@/pages/SectionPage';
 import { VisitNewPage } from '@/pages/VisitNewPage';
 import { PersonsFillPage } from '@/pages/PersonsFillPage';
@@ -127,6 +130,14 @@ export default function App() {
         <Route path="/inspections/:id/osoby" element={<PersonsFillPage />} />
         <Route path="/inspections/:id/items/new" element={<InspectionStep2Page />} />
         <Route path="/inspections/:id/items/:itemId" element={<InspectionStep2Page />} />
+
+        {/* POapp 26. 10. 2026 — preventívna prehliadka: setup, walk-through and
+            defect entry on pages of their own, not the generic Step 1 / 2. */}
+        <Route path="/prehliadky/new" element={<PrehliadkaSetupPage />} />
+        <Route path="/prehliadky/:id" element={<PrehliadkaWalkPage />} />
+        <Route path="/prehliadky/:id/nastavenie" element={<PrehliadkaSetupPage />} />
+        <Route path="/prehliadky/:id/nedostatok/new" element={<PrehliadkaDefectPage />} />
+        <Route path="/prehliadky/:id/nedostatok/:itemId" element={<PrehliadkaDefectPage />} />
 
         {/* The old Školenia section — its list is now the Školenia tab of OPP. */}
         <Route path="/trainings" element={<TrainingsRedirect />} />

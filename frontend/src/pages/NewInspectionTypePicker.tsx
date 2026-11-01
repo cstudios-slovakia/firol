@@ -5,7 +5,8 @@ import {
   TestTube, Users, Wind,
 } from 'lucide-react';
 // Block 2 — single-record BOZP úkony.
-import { BookCheck, CigaretteOff, Factory, PhoneCall } from 'lucide-react';
+import { BookCheck, CigaretteOff, ClipboardCheck, Factory, PhoneCall } from 'lucide-react';
+import { PREHLIADKA_NEW_PATH } from '@/lib/prehliadka';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import {
@@ -71,6 +72,15 @@ const TYPES: TypeMeta[] = [
     description: 'Oprava, plnenie a tlaková skúška hasiacich prístrojov.',
     intervalLabel: '60 mes.',
     icon: <Wrench className="size-5" />,
+    enabled: true,
+  },
+  // POapp 26. 10. 2026 — one walk-through that yields several records.
+  {
+    type: 'preventivna_prehliadka',
+    shortLabel: 'Preventívna prehliadka',
+    description: 'Obchôdzka objektu — zapíšeš nedostatky a z nich vzniknú záznamy.',
+    intervalLabel: '3 / 6 / 12 mes.',
+    icon: <ClipboardCheck className="size-5" />,
     enabled: true,
   },
   {
@@ -251,8 +261,17 @@ export function NewInspectionTypePicker() {
   if (section) passthrough.set('section', section);
 
   const passthroughQs = passthrough.toString();
-  const stepOnePathFor = (type: InspectionType) =>
-    `/inspections/new/${type}/step-1${passthroughQs ? `?${passthroughQs}` : ''}`;
+  const stepOnePathFor = (type: InspectionType) => {
+    // The prehliadka has screens of its own; „Kniha kontrol BOZP" starts the
+    // same one preset to BOZP (D2) — its record is the kniha BOZP entry.
+    if (type === 'preventivna_prehliadka' || type === 'kniha_bozp') {
+      const qs = new URLSearchParams(passthrough);
+      if (type === 'kniha_bozp') qs.set('preset', 'bozp');
+      const q = qs.toString();
+      return `${PREHLIADKA_NEW_PATH}${q ? `?${q}` : ''}`;
+    }
+    return `/inspections/new/${type}/step-1${passthroughQs ? `?${passthroughQs}` : ''}`;
+  };
 
   // A training has no section flow of its own: it goes to the training form
   // with the same company / prevádzka / visit context, and the picked type

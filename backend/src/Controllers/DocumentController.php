@@ -115,6 +115,16 @@ final class DocumentController
             ];
         }
 
+        // A prehliadka yields several records and is closed on its own screen
+        // (POapp 26. 10. 2026, phase 8a) — it has no protocol of its own to
+        // generate here, so a visit's „generovať všetky" reports it as skipped.
+        if ((string) $inspection['type'] === 'preventivna_prehliadka') {
+            return [
+                'error' => 'Preventívna prehliadka sa uzatvára samostatne — uzavretie ešte nie je dostupné.',
+                'status' => 422,
+            ];
+        }
+
         $items = self::loadItems($inspectionId);
         if (count($items) === 0) {
             return ['error' => 'Pridaj aspoň jednu položku pred generovaním PDF.', 'status' => 422];

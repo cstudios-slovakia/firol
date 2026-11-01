@@ -32,7 +32,11 @@ final class Sections
      */
     public const INSPECTION_TYPES = [
         self::REVIZIE => ['php', 'oprava_ts_php', 'vyradenie', 'hydranty', 'ts_hadic'],
-        self::OPP     => ['poziarna_kniha', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie'],
+        self::OPP     => [
+            'poziarna_kniha', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie',
+            // POapp 26. 10. 2026 — one walk-through, several records (PrehliadkaDetails).
+            'preventivna_prehliadka',
+        ],
         self::BOZP    => [
             // Block 2 — single-record úkony (Firol\Support\BozpRecords).
             'kniha_bozp', 'pracovisko', 'osamele_pracovisko', 'fajcenie',

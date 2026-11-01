@@ -41,6 +41,8 @@ final class Periodicity
         'hydranty'           => [12],
         'ts_hadic'           => [12],
         'poziarna_kniha'     => [12, 6, 3],
+        // Continues the poziarna_kniha term chain, so it offers the same period.
+        'preventivna_prehliadka' => [12, 6, 3],
         'pu_akcieschopnost'  => [3, 6, 12],
         'pu_udrzba'          => [12],
         'nudzove_osvetlenie' => [12],
