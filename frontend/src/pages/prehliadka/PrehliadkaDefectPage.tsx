@@ -969,7 +969,7 @@ function DevicesCard({
                   checked={selected[o.key] !== undefined}
                   onToggle={() => onToggle(o)}
                   title={[o.label, o.description].filter(Boolean).join(' · ')}
-                  sub={[o.location, o.serial ? `v. č. ${o.serial}` : null].filter(Boolean).join(' · ') || undefined}
+                  sub={[o.location, o.serial && o.serial !== o.label ? `v. č. ${o.serial}` : null].filter(Boolean).join(' · ') || undefined}
                 />
               </li>
             ))}

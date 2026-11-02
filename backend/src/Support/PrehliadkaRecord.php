@@ -107,6 +107,7 @@ final class PrehliadkaRecord
         $itemIds = array_map(static fn (array $r): int => $r['id'], $rows);
 
         $devices = [];
+        $serialsOnly = [];
         $anySerial = false;
         foreach ($rows as $r) {
             foreach ((array) ($r['f']['devices'] ?? []) as $d) {
@@ -115,6 +116,12 @@ final class PrehliadkaRecord
                 }
                 $serial = is_string($d['serial'] ?? null) && $d['serial'] !== '' ? $d['serial'] : null;
                 $anySerial = $anySerial || $serial !== null;
+                // A PHP's label *is* its serial — say it once, and join several as
+                // "v. č. A, B" rather than "X, v. č. X; Y, v. č. Y".
+                if ($serial === $d['label']) {
+                    $serialsOnly[$serial] = true;
+                    continue;
+                }
                 $text = $d['label'] . ($serial !== null ? ', v. č. ' . $serial : '');
                 $devices[$text] = true;
             }
@@ -122,6 +129,10 @@ final class PrehliadkaRecord
             if (is_string($manual) && trim($manual) !== '') {
                 $devices[trim($manual)] = true;
             }
+        }
+        if ($serialsOnly !== []) {
+            $anySerial = true;
+            $devices['v. č. ' . implode(', ', array_keys($serialsOnly))] = true;
         }
 
         $persistKeys = [];

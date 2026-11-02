@@ -104,10 +104,12 @@ export function PreviousDefectsSection({
     [data, details.scope],
   );
 
+  // Declared before the early return below — a hook after it changes the hook count
+  // between the render without data and the one with.
+  const [optimisticCarried, setOptimisticCarried] = useState<Set<string>>(() => new Set());
+
   if (!data || !data.source || defects.length === 0) return null;
   const source = data.source;
-
-  const [optimisticCarried, setOptimisticCarried] = useState<Set<string>>(() => new Set());
 
   const entryOf = (key: string): PreviousEntry | undefined => details.previous.find((e) => e.key === key);
   const carriedOf = (key: string): boolean => carried.some((c) => c.persistsKey === key) || optimisticCarried.has(key);

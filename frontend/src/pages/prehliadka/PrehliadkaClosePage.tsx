@@ -407,7 +407,7 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
                     {...p}
                     value={newRole}
                     maxLength={191}
-                    placeholder="predseda družstva"
+                    placeholder="vedúci zamestnanec, správca objektu"
                     onChange={(e) => setNewRole(e.target.value)}
                   />
                 )}
@@ -458,7 +458,7 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
               value={handed?.role ?? ''}
               disabled={!canEdit || !handed}
               maxLength={191}
-              placeholder="predseda družstva"
+              placeholder="vedúci zamestnanec, správca objektu"
               onChange={(e) => setHanded({ role: e.target.value })}
             />
           )}

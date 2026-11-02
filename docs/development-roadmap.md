@@ -1300,7 +1300,7 @@ client's protocols; this e-mail is the confirmation on its own.
 
 ---
 
-## POapp zadanie 26. 10. 2026 — preventívna prehliadka, kniha, školenia ⬜
+## POapp zadanie 26. 10. 2026 — preventívna prehliadka, kniha, školenia ✅ built and checked (2. 11. 2026); owner acceptance and FIROL's answers pending
 
 Package: `POapp_zadanie_26_10_2026/` (binding spec `5_Zadanie_pre_AI.md`). Full plan,
 owner decisions D1–D8 and the open questions for FIROL:
@@ -1321,7 +1321,7 @@ Points 11, 12 and 13 of the 2. 10. report (cancelled then for budget) are back i
 | 7b | Preventívna prehliadka: previous defects, step 3, uzavretie | 🟨 built, API + 360 px iframe checked; not accepted |
 | 8a | Closing: PP record, BOZP zápis, book entries | 🟨 built, API + PDF + 360 px verified; not accepted |
 | 8b | Concept checks, visits, Dnes, backup | 🟨 built, API + backup round trip + 360 px checked; not accepted |
-| 9 | Acceptance pass, manual | ⬜ |
+| 9 | Acceptance pass, manual | ✅ all 19 criteria checked; two bugs fixed; manual updated; see "Phase 9" below |
 
 **Phases 1, 3 and 4 accepted (30. 10. 2026).** Checked in the browser at 360 px and on the
 API: 7-digit IČO at the field, new firm opens Pridať prevádzku, seat-address button (hidden with
@@ -1450,10 +1450,59 @@ passed; the throwaway account was removed. Migration 060 is applied on the local
   re-close refresh / keep, visit skip + generate after confirm, Today dedupe, follow-up Oprava from the O concept, list/context/sendable
   fields, backup merge + replace round trip, UI banner / result page / no overflow at 360 px. Terms-of-use dialog of the test user was
   dismissed, not accepted.
+- **Phase 9** (2. 11. 2026) — acceptance pass, no migration. Throwaway account from `backend/bin/seed-acceptance.php`
+  (`--remove` deletes it): a firma with 50 PHP + 6 hydrants + 3 emergency lights, a second firma, a bytové družstvo
+  with 3 houses (8 nadzemných + 1 podzemné). Checked in a 360 px iframe on the dev server, the generated PDFs read with
+  `pdftotext` and rendered to PNG, and the API over HTTP.
+  **Criteria (spec 11):** 1 selector + Paušál + add-prevádzka dialog after create ✅ · 2 BD form asks floors, no entrances;
+  8 nadzemných offers exactly 1.–8. NP + 1. PP + strecha ✅ · 3 prevádzka e-mail wins (detail, single send prefilled,
+  other house keeps the firm's) ✅ · 4 own catalogue item shared across the account, edit/delete reflected, shipped items
+  read-only (API) ✅ · 5 activities printed as a list; "obidve" asks twice and each set lands in its own record; custom
+  activity not offered at another firma ✅ · 6 BD with 3 entrances = one `PPP-` document, entrance printed as place ✅ ·
+  7 PHP concept: 50 devices, the 2 named in defects status **O** with the defect text, 48 **A**; protocol refused before
+  confirm, issued after ✅ · 8 book offers every finished úkon, not again after adding ✅ · 9 entry by protocol number
+  (`KOLEGA-2026-77`) ✅ · 10 legal-sentence toggle off by default ✅ · 11 same úkon + day on 3 prevádzky = one offer
+  with 3 numbers ✅ · 12 two signature states, "Vytlačiť nepodpísané" = one sheet with one signature block, "Označiť ako
+  podpísané"; no signing round or reminder in code ✅ · 13 20 people pasted at once (`;` and TAB, preview "20 ľudí · 11
+  s osobným číslom"), osobné číslo column in the PDF, training term in the prehliadka terms, defaults 24 / 36 ✅ ·
+  14 serial search finds one of 50 ✅ · 15 defect without a routine control, device written by hand, printed ✅ ·
+  16 overridden term printed with "prepísané rukou" under the right row ✅ · 17 27 items, all "do 30 dní" ✅ ·
+  18 filled switches print, the empty one does not ✅ · 19 BD and firma records compared with the sample: section order and
+  fixed sentences match ✅ (visual differences below).
+  **Bugs found and fixed in this pass:** (a) `PreviousDefectsSection` called `useState` after its early return →
+  "Rendered more hooks than during the previous render" and a blank walk-through whenever a previous prehliadka existed
+  (a scan of the whole frontend for the same pattern found only the older `InspectionStep1Page`, which depends on a
+  route param and was left alone); (b) a PHP named in a defect printed twice ("LP1-0002, v. č. LP1-0002") on the PP record
+  and in the device list — now "v. č. A, B". Also: the closing screen's "Funkcia" placeholder no longer says "predseda družstva"
+  on a firma. **Gates:** `npm run build` passes, `php -l` clean on the whole backend, migrations `001`–`071` apply on a fresh DB
+  (64) and on a DB built at `055` with a company + prevádzka (the 10 new ones; the old company keeps `na_fakturu`, gets
+  `firma` / `firma`; schema identical to the fresh one). Whole-account backup → restore (replace) round trip: every count
+  identical, concept and previous-defect links point at the right (remapped) prehliadky, external term and custom activity
+  restored.
+  **Deviations from the plan / spec, all deliberate or unavoidable:**
+  1. PHP status **O** for a device named in a defect (D3), not the word "nevyhovuje" of criterion 7 — confirm with FIROL.
+  2. Printed "Vykonané činnosti" uses ✓ marks (same look as the kniha BOZP record); the sample uses plain bullets. PREDPIS is not
+     colour-accented as in the sample. Layout and sentences are otherwise the sample's.
+  3. Number prefix `PPP` (not the sample's `PP-`), decided 1. 11.
+  4. "Overiť odstránenie" task offer is not reused for prehliadka defects (8b).
+  5. Book: Q8 built as dopísanie only; the BOZP "Podľa čísla" kind "oboznámenie zamestnancov v oblasti BOZP" is an extrapolation;
+     `bozp_ob` dropped.
+  6. Q5 (overriding an automatic term): printed and in the record only. The book's "Termíny ďalších kontrol" offer still uses
+     the calendar term (seen: record prints 15. 4. 2027, offer says 2. 11. 2027) — decide whether it should follow the override.
+  7. "Doplniť školenie" from step 3 opens the external-term form (book PO), as planned; it does not create a training.
+  8. Not tested: real airplane mode and a physical camera (only simulated offline in 7a), the offline cache of the book screen,
+     BD save after a client-type change (Phase 2), the visit planner's pre-tick for the new type in this pass, e-mail delivery
+     (mailpit not opened). The offline cache can show a stale read after a change made outside the SPA (seen once on the
+     book screen; the SPA's own writes invalidate it).
+  **Still ⏸ (not implemented, needs FIROL):** Q2 (Stripe seats mid-year, block 5 parked), Q3 (§ 29 ods. 3 main book vs per-prevádzka
+  books). Built on the plan's proposed default, answer still wanted: Q1 offline, Q4/Q9/Q10/Q11, Q5–Q8 as above.
+  **Manual:** `docs/manual/Firol-manual.md` updated (client type, prevádzka data, e-mail precedence, preventívna prehliadka,
+  číselník, books, external terms, trainings, backup, prefixes; the stale "date never prefilled" note removed). The folder is
+  git-ignored (`docs/*`) and the PDF and screenshots were not regenerated.
 - **Decided 1. 11. 2026:** the prehliadka record's number prefix is `PPP` (`PP` belongs to
   `pracovne_prostriedky`; `documents` has `UNIQUE (account_id, number)`). Register it in `NumberAllocator` in
   Phase 8a. The BOZP "Podľa čísla" kind `bozp_ob` was dropped (not in the prototype's `KN_RUCNE`).
-  "Ako naposledy" keeps reading finalized prehliadky only. Still not run: migrations on a copy of the current DB.
+  "Ako naposledy" keeps reading finalized prehliadky only. (Migrations on a copy of the DB at `055` and on a fresh DB: run in phase 9.)
 
 ---
 
