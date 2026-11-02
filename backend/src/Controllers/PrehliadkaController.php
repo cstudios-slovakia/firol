@@ -17,6 +17,7 @@ use Firol\Support\InspectionDetails;
 use Firol\Support\PrehliadkaActivities;
 use Firol\Support\PrehliadkaConcepts;
 use Firol\Support\PrehliadkaCloser;
+use Firol\Support\PrehliadkaDefects;
 use Firol\Support\PrehliadkaDetails;
 use Firol\Support\PrehliadkaPrevious;
 use Firol\Support\PrehliadkaRecord;
@@ -161,8 +162,18 @@ final class PrehliadkaController
             Response::error('Kontrola už je uzamknutá a má vystavený protokol.', 409);
         }
         $confirmed = $req->jsonBool('confirmed') ?? true;
-        if ($confirmed && DocumentController::loadItems($id) === []) {
-            Response::error('Koncept nemá žiadne zariadenie — pridaj aspoň jedno.', 422);
+        if ($confirmed) {
+            $items = DocumentController::loadItems($id);
+            if ($items === []) {
+                Response::error('Koncept nemá žiadne zariadenie — pridaj aspoň jedno.', 422);
+            }
+            // A device the walk-through wrote down starts with the fields it did not
+            // ask for blank; a protocol must not carry them (spec 7.3). Taking the
+            // confirmation back is never restricted.
+            $incomplete = PrehliadkaConcepts::incompleteItems((string) $inspection['type'], $items);
+            if ($incomplete !== []) {
+                Response::error(PrehliadkaConcepts::incompleteMessage($incomplete), 422, ['incomplete' => $incomplete]);
+            }
         }
 
         $details[PrehliadkaConcepts::CONFIRMED_KEY] = $confirmed ? date('Y-m-d H:i:s') : null;
@@ -273,6 +284,8 @@ final class PrehliadkaController
             'offer' => $offer,
             // Koncepty riadnych kontrol (spec 7.3) — one draft úkon per ticked type.
             'concepts' => PrehliadkaConcepts::summary($accountId, $id),
+            // Defects the „Overiť odstránenie" task can be offered for (spec 20) — after closing only.
+            'task_defects' => PrehliadkaDefects::taskCandidates($accountId, $id, $inspection, $items),
         ];
     }
 

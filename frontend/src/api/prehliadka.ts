@@ -23,11 +23,15 @@
  * Phase 8b:
  *   POST  /api/inspections/{id}/confirm-concept     online-only (api/inspections.ts) — confirms a
  *                                                   concept before its protocol can be generated
+ * After 8b:
+ *   `prehliadka-result` also lists `task_defects` — the defects of a closed prehliadka the
+ *                                                   „Overiť odstránenie" task can be offered for
  * The entrance and the place a defect was written with are remembered by the
  * server inside the defect's own save — see FacilityWalkMemory — so there is no
  * endpoint of their own to queue.
  */
 import { api } from '@/lib/api';
+import type { PrehliadkaTaskDefect } from '@/components/DefectTaskOffer';
 import type { InspectionDocument, InspectionType } from '@/api/inspections';
 import type { PeriodicityUnit } from '@/lib/periodicity';
 import type {
@@ -107,6 +111,8 @@ export type PrehliadkaResult = {
   offer: { text: string; protocol_numbers: string[]; has_defects: boolean; legal_sentence: string } | null;
   /** One draft úkon per riadna kontrola ticked in step 1 (spec 7.3). Absent on an older answer. */
   concepts?: PrehliadkaConcept[];
+  /** Defects with a termín the „Overiť odstránenie" task can be offered for — closed prehliadka only. Absent on an older answer. */
+  task_defects?: PrehliadkaTaskDefect[];
 };
 
 /** A concept check a closed prehliadka prepared. */

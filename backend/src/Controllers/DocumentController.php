@@ -155,6 +155,14 @@ final class DocumentController
         if (count($items) === 0) {
             return ['error' => 'Pridaj aspoň jednu položku pred generovaním PDF.', 'status' => 422];
         }
+        // A concept confirmed before the completeness check existed may still hold
+        // an item with required fields blank — the same check as at confirmation.
+        if (\Firol\Support\PrehliadkaConcepts::isConcept(\Firol\Support\InspectionDetails::decode($inspection['details'] ?? null))) {
+            $incomplete = \Firol\Support\PrehliadkaConcepts::incompleteItems((string) $inspection['type'], $items);
+            if ($incomplete !== []) {
+                return ['error' => \Firol\Support\PrehliadkaConcepts::incompleteMessage($incomplete), 'status' => 422];
+            }
+        }
         if ($inspection['executed_on'] === null) {
             return ['error' => 'Doplň dátum vykonania pred generovaním PDF.', 'status' => 422];
         }

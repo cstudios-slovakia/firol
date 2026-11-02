@@ -60,6 +60,81 @@ final class InspectionItemController
     /** Fire closure kinds (dvere = door, okno = window, klapka = damper). */
     private const PU_KINDS = ['dvere', 'okno', 'klapka'];
 
+    /**
+     * Field keys collected while {@see self::missingFields()} runs; null the rest
+     * of the time, when a problem refuses the request on the spot.
+     *
+     * @var list<string>|null
+     */
+    private static ?array $problems = null;
+
+    /**
+     * Slovak names of the fields of the types a prehliadka can prepare a concept
+     * for — the labels of their Step 2 forms, so the technician finds the field
+     * by the name on screen. A key without a name is shown as its key.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private const FIELD_LABELS = [
+        'php' => [
+            'manufacturer' => 'Výrobca', 'type' => 'Typ', 'serial' => 'Výrobné číslo / séria',
+            'year' => 'Rok výroby', 'location' => 'Umiestnenie', 'status' => 'Stav',
+        ],
+        'hydranty' => [
+            'type' => 'Typ hydrantu', 'type_other' => 'Označenie typu', 'location' => 'Umiestnenie',
+            'hose_count' => 'Počet hadíc', 'hs' => 'HS', 'hd' => 'HD', 'q' => 'Q', 'result' => 'Výsledok kontroly',
+        ],
+        'pu_akcieschopnost' => [
+            'kind' => 'Druh uzáveru', 'identifier' => 'Číslo / označenie', 'manufacturer' => 'Výrobca',
+            'location' => 'Umiestnenie', 'result' => 'Výsledok kontroly',
+        ],
+        'pu_udrzba' => [
+            'kind' => 'Druh uzáveru', 'identifier' => 'Číslo / označenie', 'location' => 'Umiestnenie',
+            'maintenance_work' => 'Vykonané práce', 'result' => 'Výsledok',
+        ],
+        'nudzove_osvetlenie' => [
+            'luminaire_type' => 'Druh / typ', 'location' => 'Umiestnenie',
+            'duration_min' => 'Doba svietenia v núdzovom režime', 'result' => 'Výsledok testu',
+        ],
+    ];
+
+    /**
+     * The fields an existing item lacks to be a COMPLETE item of its type — the
+     * very rules {@see self::store()} and {@see self::update()} enforce, run in
+     * collect mode (no second copy of them). Used to hold back a concept from
+     * a prehliadka until it is complete (spec 7.3).
+     *
+     * @param array<string, mixed> $fields
+     * @return list<string> Slovak names of the missing / invalid fields, [] when complete
+     */
+    public static function missingFields(string $type, array $fields): array
+    {
+        if (\Firol\Support\BozpItems::supports($type)) {
+            return \Firol\Support\BozpItems::missingFields($type, $fields);
+        }
+        if (!isset(self::FIELD_LABELS[$type])) {
+            return []; // no rules to check for this type here
+        }
+        self::$problems = [];
+        try {
+            self::validateFields($type, $fields);
+            $keys = self::collectedProblems();
+        } finally {
+            self::$problems = null;
+        }
+        $names = [];
+        foreach ($keys as $k) {
+            $names[] = array_key_exists($k, self::FIELD_LABELS[$type]) ? self::FIELD_LABELS[$type][$k] : $k;
+        }
+        return array_values(array_unique($names));
+    }
+
+    /** @return list<string> */
+    private static function collectedProblems(): array
+    {
+        return self::$problems ?? [];
+    }
+
     public static function store(Request $req, array $params): void
     {
         Csrf::require($req);
@@ -304,12 +379,12 @@ final class InspectionItemController
             $year = (int) $year;
         }
         if (!is_int($year) || $year < 1900 || $year > 2200) {
-            self::failValidation('Field year must be an integer year (1900–2200).');
+            self::failValidation('Field year must be an integer year (1900–2200).', 'year');
         }
 
         $status = $body['status'] ?? null;
         if (!is_string($status) || !in_array($status, self::PHP_STATUSES, true)) {
-            self::failValidation('Field status must be one of: A, TS, O, V.');
+            self::failValidation('Field status must be one of: A, TS, O, V.', 'status');
         }
 
         return [
@@ -346,7 +421,7 @@ final class InspectionItemController
             $year = (int) $year;
         }
         if (!is_int($year) || $year < 1900 || $year > 2200) {
-            self::failValidation('Field year must be an integer year (1900–2200).');
+            self::failValidation('Field year must be an integer year (1900–2200).', 'year');
         }
 
         return [
@@ -381,7 +456,7 @@ final class InspectionItemController
             $year = (int) $year;
         }
         if (!is_int($year) || $year < 1900 || $year > 2200) {
-            self::failValidation('Field year must be an integer year (1900–2200).');
+            self::failValidation('Field year must be an integer year (1900–2200).', 'year');
         }
 
         return [
@@ -540,7 +615,7 @@ final class InspectionItemController
     {
         $kind = $body['kind'] ?? null;
         if (!is_string($kind) || !in_array($kind, self::PU_KINDS, true)) {
-            self::failValidation('Field kind must be one of: dvere, okno, klapka.');
+            self::failValidation('Field kind must be one of: dvere, okno, klapka.', 'kind');
         }
         $identifier   = self::stringField($body, 'identifier',   required: true,  max: 80);
         $manufacturer = self::stringField($body, 'manufacturer', required: true,  max: 80);
@@ -549,7 +624,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.');
+            self::failValidation('Field result must be vyhovuje or nevyhovuje.', 'result');
         }
 
         return [
@@ -578,7 +653,7 @@ final class InspectionItemController
     {
         $kind = $body['kind'] ?? null;
         if (!is_string($kind) || !in_array($kind, self::PU_KINDS, true)) {
-            self::failValidation('Field kind must be one of: dvere, okno, klapka.');
+            self::failValidation('Field kind must be one of: dvere, okno, klapka.', 'kind');
         }
         $identifier      = self::stringField($body, 'identifier',       required: true,  max: 80);
         $manufacturer    = self::stringField($body, 'manufacturer',     required: false, max: 80);
@@ -588,7 +663,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.');
+            self::failValidation('Field result must be vyhovuje or nevyhovuje.', 'result');
         }
 
         return [
@@ -623,7 +698,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.');
+            self::failValidation('Field result must be vyhovuje or nevyhovuje.', 'result');
         }
 
         return [
@@ -666,7 +741,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.');
+            self::failValidation('Field result must be vyhovuje or nevyhovuje.', 'result');
         }
 
         return [
@@ -695,12 +770,12 @@ final class InspectionItemController
     {
         $type      = $body['type'] ?? null;
         if (!is_string($type) || !in_array($type, self::HYDRANTY_TYPES, true)) {
-            self::failValidation('Field type must be one of: DN25, DN33, DN52, C52, other.');
+            self::failValidation('Field type must be one of: DN25, DN33, DN52, C52, other.', 'type');
         }
 
         $typeOther = self::stringField($body, 'type_other', required: false, max: 60);
         if ($type === 'other' && ($typeOther === null || $typeOther === '')) {
-            self::failValidation('Field type_other is required when type = other.');
+            self::failValidation('Field type_other is required when type = other.', 'type_other');
         }
         // Drop the free-text label when it's not relevant — keeps payload tidy.
         if ($type !== 'other') {
@@ -717,7 +792,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.');
+            self::failValidation('Field result must be vyhovuje or nevyhovuje.', 'result');
         }
 
         return [
@@ -741,7 +816,8 @@ final class InspectionItemController
             $raw = (int) $raw;
         }
         if (!is_int($raw) || $raw < 0 || $raw > $max) {
-            self::failValidation("Field $key must be an integer between 0 and $max.");
+            self::failValidation("Field $key must be an integer between 0 and $max.", $key);
+            return 0; // only reached while collecting missing fields
         }
         return $raw;
     }
@@ -757,7 +833,8 @@ final class InspectionItemController
             $raw = (float) $raw;
         }
         if (!is_float($raw) || $raw < $min || $raw > $max) {
-            self::failValidation("Field $key must be a number between $min and $max.");
+            self::failValidation("Field $key must be a number between $min and $max.", $key);
+            return 0.0; // only reached while collecting missing fields
         }
         return $raw;
     }
@@ -774,25 +851,34 @@ final class InspectionItemController
         $raw = $body[$key] ?? null;
         if (!is_string($raw)) {
             if ($required) {
-                self::failValidation("Field required: $key");
+                self::failValidation("Field required: $key", $key);
             }
             return null;
         }
         $value = trim($raw);
         if ($value === '') {
             if ($required) {
-                self::failValidation("Field required: $key");
+                self::failValidation("Field required: $key", $key);
             }
             return null;
         }
         if (mb_strlen($value) > $max) {
-            self::failValidation("Field too long: $key (max $max chars)");
+            self::failValidation("Field too long: $key (max $max chars)", $key);
         }
         return $value;
     }
 
-    private static function failValidation(string $message): never
+    /**
+     * Refuses the request with a 422 — or, while {@see self::missingFields()} is
+     * checking an item that already exists, records the field and carries on,
+     * so one pass names every field that is missing, not just the first.
+     */
+    private static function failValidation(string $message, ?string $key = null): void
     {
+        if (self::$problems !== null) {
+            self::$problems[] = $key ?? $message;
+            return;
+        }
         Response::error($message, 422);
     }
 

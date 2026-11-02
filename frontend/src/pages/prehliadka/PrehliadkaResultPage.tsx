@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Download,
   FileText,
+  ListTodo,
   PenLine,
   Plus,
   ShieldCheck,
@@ -34,6 +35,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { DEFECT_TASKS_CHANGED_EVENT, offerPrehliadkaDefectTasks } from '@/components/DefectTaskOffer';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { HandoverDialog } from '@/components/HandoverDialog';
 import { VisitNextUkon } from '@/components/VisitNextUkon';
@@ -74,6 +76,13 @@ export function PrehliadkaResultPage() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // The task dialog creates tasks outside this screen — refresh what it offers.
+  useEffect(() => {
+    const onChanged = () => void load();
+    window.addEventListener(DEFECT_TASKS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(DEFECT_TASKS_CHANGED_EVENT, onChanged);
   }, [load]);
 
   if (error) {
@@ -155,6 +164,9 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
       setUnlocking(false);
     }
   }
+
+  // Defects with a termín that have no „Overiť odstránenie" task yet.
+  const taskless = (result.task_defects ?? []).filter((d) => !d.task);
 
   const poDoc = result.po?.documents[0] ?? null;
   const bozpDoc = result.bozp?.documents[0] ?? null;
@@ -250,6 +262,29 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
               </span>
             </button>
           )}
+        </section>
+      )}
+
+      {/* Úlohy „Overiť odstránenie" — ponuka až po uzavretí, počas prehliadky by rušila (plán 8b) */}
+      {taskless.length > 0 && !isReadOnly && (
+        <section className="flex flex-col gap-2 animate-fade-up">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">Nedostatky</h2>
+          <button
+            type="button"
+            id="pp-offer-tasks"
+            onClick={() => offerPrehliadkaDefectTasks(id, taskless)}
+            className="flex items-center gap-3 rounded-2xl border border-ink-200 bg-white px-4 py-3.5 text-left transition-all duration-300 hover:border-ink-300 hover:shadow-sm active:scale-[0.99]"
+          >
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-firol-50 text-firol-600">
+              <ListTodo className="size-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-ink-900">Úlohy na overenie odstránenia</span>
+              <span className="block text-xs text-ink-500">
+                {nedostatkyLabel(taskless.length)} s termínom bez úlohy — vytvoriť úlohy „Overiť odstránenie nedostatku“.
+              </span>
+            </span>
+          </button>
         </section>
       )}
 

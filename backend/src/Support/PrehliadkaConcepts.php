@@ -564,6 +564,70 @@ final class PrehliadkaConcepts
     }
 
     /**
+     * The items of a concept that still lack a required field — what stands
+     * between it and a confirmation (spec 7.3: the app must not issue for a
+     * control something incomplete the technician never filled in). Which fields
+     * a COMPLETE item of the type needs is decided by the item validators of
+     * {@see \Firol\Controllers\InspectionItemController::missingFields()}, the
+     * same ones that refuse an incomplete item on save — nothing is repeated here.
+     *
+     * Devices the walk-through wrote down start with the fields it did not ask
+     * for blank (year, výrobca, druh uzáveru, …); a device carried over from the
+     * last úkon is complete in its identification but, like every concept item,
+     * has the measurements of the type blank (HS / HD / Q, trvanie svietenia, …)
+     * — those are required too, as for any úkon of that type. A row whose
+     * `fields` is not an object (odd legacy data) counts as having nothing filled in.
+     *
+     * @param list<array<string, mixed>> $items each with `id`, `position` and `fields`
+     * @return list<array{item_id: int, name: string, missing: list<string>}>
+     */
+    public static function incompleteItems(string $type, array $items): array
+    {
+        $out = [];
+        foreach ($items as $item) {
+            $fields = is_array($item['fields'] ?? null) ? $item['fields'] : [];
+            $missing = \Firol\Controllers\InspectionItemController::missingFields($type, $fields);
+            if ($missing === []) {
+                continue;
+            }
+            // The label alone does not tell devices apart (every DN52 hydrant reads „DN52"),
+            // so the place goes with it.
+            $shaped = FacilityDevices::shape($type, $fields);
+            $name = $shaped === null
+                ? 'Položka č. ' . (int) ($item['position'] ?? 0)
+                : $shaped['label'] . ($shaped['location'] !== null ? ' · ' . $shaped['location'] : '');
+            $out[] = [
+                'item_id' => (int) $item['id'],
+                'name'    => $name,
+                'missing' => $missing,
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * The Slovak refusal that names the devices and what each one lacks, e.g.
+     * „Koncept nie je úplný — doplň povinné údaje: LP1-0002 (Typ, Rok výroby)."
+     * A long list is cut after five devices.
+     *
+     * @param list<array{item_id: int, name: string, missing: list<string>}> $incomplete
+     */
+    public static function incompleteMessage(array $incomplete): string
+    {
+        $shown = array_slice($incomplete, 0, 5);
+        $parts = array_map(
+            static fn (array $r): string => $r['name'] . ' (' . implode(', ', $r['missing']) . ')',
+            $shown,
+        );
+        $message = 'Koncept nie je úplný — doplň povinné údaje: ' . implode('; ', $parts) . '.';
+        $rest = count($incomplete) - count($shown);
+        if ($rest > 0) {
+            $message .= ' Ešte ' . $rest . ' ' . ($rest === 1 ? 'zariadenie' : ($rest < 5 ? 'zariadenia' : 'zariadení')) . '.';
+        }
+        return $message;
+    }
+
+    /**
      * Has the technician worked on this concept since the app filled it:
      * confirmed it, edited, added or removed an item, or added a photo.
      *

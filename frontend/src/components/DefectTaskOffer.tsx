@@ -10,6 +10,10 @@
  * (DefectsEditor) and the Požiarna kniha's own defect rows alike, since both
  * store `fields.defects[] = { key, description, deadline }`.
  *
+ * A closed preventívna prehliadka keeps its defects apart (one item row each,
+ * `deadline_date`), so its result screen offers them on request with
+ * {@link offerPrehliadkaDefectTasks} — never during the walk-through.
+ *
  * The dialog itself lives in {@link DefectTaskOfferHost}, mounted once in the
  * app shell, so it survives the form navigating on to the next item or the
  * summary right after the save.
@@ -32,6 +36,8 @@ import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
 
 const OFFER_EVENT = 'firol:defect-task-offer';
+/** Fired after the dialog created (or queued) tasks, so a screen listing nedostatky can refresh. */
+export const DEFECT_TASKS_CHANGED_EVENT = 'firol:defect-tasks-changed';
 const STORAGE_KEY = 'firol.defectTaskOffers';
 /** Remembered decisions kept per device — oldest dropped beyond this. */
 const MAX_REMEMBERED = 2000;
@@ -107,6 +113,44 @@ export function offerDefectTasks(inspectionId: number, fields: Record<string, un
   }
   if (offers.length === 0) return;
   window.dispatchEvent(new CustomEvent<Offer[]>(OFFER_EVENT, { detail: offers }));
+}
+
+/** A defect of a closed preventívna prehliadka, as `prehliadka-result` lists it (`task_defects`). */
+export type PrehliadkaTaskDefect = {
+  /** `p<item id>` — the `source_defect_key` of its task. */
+  key: string;
+  title: string;
+  /** Null only for „bezodkladne", which carries no date. */
+  deadline_date: string | null;
+  /** `open` / `done` when a task already exists for it. */
+  task?: string | null;
+};
+
+/**
+ * The same offer for the defects of a closed prehliadka (plan 8b point 3). They
+ * are stored apart from `fields.defects` — one item row each, with
+ * `deadline_date` — and the task points at the prehliadka itself
+ * (`source_inspection_id`) with the item's `p<id>` key, the key Dnes reads.
+ *
+ * Only called from the result screen, on the technician's request, never during
+ * the walk-through. So the server's word about which defect has a task decides
+ * and a remembered „Nie" is not held against an explicit request; the dialog,
+ * its remembered decisions and the server-side duplicate check are unchanged.
+ * Defects without a date (bezodkladne) or with a task already are skipped.
+ *
+ * Returns how many tasks were offered.
+ */
+export function offerPrehliadkaDefectTasks(inspectionId: number, defects: PrehliadkaTaskDefect[]): number {
+  const offers: Offer[] = [];
+  for (const d of defects) {
+    const description = d.title.trim();
+    if (d.task || !d.key || !description || !d.deadline_date || !/^\d{4}-\d{2}-\d{2}$/.test(d.deadline_date)) continue;
+    offers.push({ inspectionId, key: d.key, description, deadline: d.deadline_date });
+  }
+  if (offers.length > 0) {
+    window.dispatchEvent(new CustomEvent<Offer[]>(OFFER_EVENT, { detail: offers }));
+  }
+  return offers.length;
 }
 
 /** Mount once, inside the auth + toast providers (the app shell). */
@@ -203,6 +247,7 @@ export function DefectTaskOfferHost() {
       }
     }
     setSaving(false);
+    if (created + queued > 0) window.dispatchEvent(new Event(DEFECT_TASKS_CHANGED_EVENT));
     if (failed > 0) {
       toast.error(failed === chosen.length ? 'Úlohu sa nepodarilo vytvoriť.' : `${failed} z ${chosen.length} úloh sa nepodarilo vytvoriť.`);
     } else if (queued > 0 && created === 0) {

@@ -83,7 +83,7 @@ final class FacilityDevices
      * @param array<string, mixed> $fields
      * @return array{label: string, serial: ?string, description: ?string, location: ?string}|null
      */
-    private static function shape(string $type, array $fields): ?array
+    public static function shape(string $type, array $fields): ?array
     {
         $label = null;
         $serial = null;

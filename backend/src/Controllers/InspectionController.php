@@ -313,11 +313,19 @@ final class InspectionController
             )
             : null;
 
+        // A concept from a prehliadka: the items that still lack a required field
+        // (what keeps it from being confirmed), so the list can mark them.
+        $conceptIncomplete = null;
+        if ($row['status'] === 'draft' && PrehliadkaConcepts::isConcept(InspectionDetails::decode($row['details'] ?? null))) {
+            $conceptIncomplete = PrehliadkaConcepts::incompleteItems((string) $row['type'], $items);
+        }
+
         Response::json([
             'inspection' => self::shapeRow($row),
             'items' => $items,
             'follow_ups' => $followUps,
             'carry_over' => $carryOver,
+            'concept_incomplete' => $conceptIncomplete,
         ]);
     }
 

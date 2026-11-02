@@ -12,6 +12,7 @@ use Firol\Support\Deadlines;
 use Firol\Support\Defects;
 use Firol\Support\Invoicing;
 use Firol\Support\PkDefects;
+use Firol\Support\PrehliadkaDefects;
 use Firol\Support\TeamIdentity;
 use PDO;
 
@@ -316,8 +317,10 @@ final class TodayController
      * open: the defect lives on. A newer finalized prehliadka replaces the
      * older one entirely, as it does for the other úkony.
      *
-     * Not offered here: the „Overiť odstránenie" task, which is bound to the
-     * generic `fields.defects` block of the other úkony.
+     * A defect whose „Overiť odstránenie" task is done (and none still open) is
+     * verified and drops out, as for the other úkony. The task is offered from
+     * the result screen of the closed prehliadka, never during the walk-through;
+     * its key is {@see PrehliadkaDefects::taskKey()}.
      *
      * @return list<array<string, mixed>>
      */
@@ -354,20 +357,9 @@ final class TodayController
         }
 
         // What an open prehliadka has already decided about earlier defects.
-        $closed = [];
-        $drafts = Db::pdo()->prepare(
-            "SELECT details FROM inspections
-             WHERE  account_id = ? AND type = 'preventivna_prehliadka' AND status = 'draft' AND archived_at IS NULL"
-        );
-        $drafts->execute([$accountId]);
-        foreach ($drafts->fetchAll(PDO::FETCH_COLUMN) as $raw) {
-            $d = json_decode((string) $raw, true);
-            foreach (is_array($d) ? (array) ($d['previous'] ?? []) : [] as $p) {
-                if (is_array($p) && in_array($p['status'] ?? null, ['ok', 'zanik'], true)) {
-                    $closed[(int) ($p['source_inspection_id'] ?? 0) . ':' . (int) ($p['source_item_id'] ?? 0)] = true;
-                }
-            }
-        }
+        $closed = PrehliadkaDefects::answeredInOpenDrafts($accountId);
+        // Defects whose „Overiť odstránenie" task is done (no such task still open).
+        $verified = Defects::verifiedKeys($accountId, array_map(static fn (array $r): int => (int) $r['inspection_id'], $records));
 
         $itemStmt = Db::pdo()->prepare(
             'SELECT id, fields FROM inspection_items WHERE inspection_id = ? ORDER BY position ASC, id ASC'
@@ -385,11 +377,15 @@ final class TodayController
                 if (isset($closed[$inspectionId . ':' . (int) $item['id']])) {
                     continue;
                 }
+                $key = PrehliadkaDefects::taskKey((int) $item['id']);
+                if (isset($verified[$inspectionId][$key])) {
+                    continue;
+                }
                 $title = trim((string) ($f['title'] ?? ''));
                 $out[] = [
-                    'key'           => 'nedostatok-' . $inspectionId . '-p' . (int) $item['id'],
+                    'key'           => 'nedostatok-' . $inspectionId . '-' . $key,
                     'inspection_id' => $inspectionId,
-                    'defect_key'    => null,
+                    'defect_key'    => $key,
                     'type'          => 'preventivna_prehliadka',
                     'executed_on'   => $r['executed_on'] !== null ? (string) $r['executed_on'] : null,
                     'description'   => $title !== '' ? $title : (string) ($f['description'] ?? ''),
@@ -474,24 +470,11 @@ final class TodayController
             return [];
         }
 
-        // Verification tasks per nedostatok: [inspection_id][defect_key] => [open, done].
-        $ids = array_values(array_unique(array_map(static fn (array $r): int => (int) $r['inspection_id'], $rows)));
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $tStmt = Db::pdo()->prepare(
-            "SELECT source_inspection_id, source_defect_key,
-                    SUM(done = 0) AS open_count, SUM(done = 1) AS done_count
-             FROM   tasks
-             WHERE  account_id = ? AND source_defect_key IS NOT NULL
-               AND  source_inspection_id IN ($placeholders)
-             GROUP  BY source_inspection_id, source_defect_key"
+        // Nedostatky whose „Overiť odstránenie" task is done: [inspection_id][defect_key].
+        $verified = Defects::verifiedKeys(
+            $accountId,
+            array_values(array_unique(array_map(static fn (array $r): int => (int) $r['inspection_id'], $rows))),
         );
-        $tStmt->execute([$accountId, ...$ids]);
-        $verified = [];
-        foreach ($tStmt->fetchAll(PDO::FETCH_ASSOC) as $t) {
-            if ((int) $t['done_count'] > 0 && (int) $t['open_count'] === 0) {
-                $verified[(int) $t['source_inspection_id']][(string) $t['source_defect_key']] = true;
-            }
-        }
 
         $out = [];
         foreach ($rows as $r) {

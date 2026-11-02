@@ -51,6 +51,114 @@ final class PrehliadkaDefects
     private const MAX_DEVICES = 60;
 
     /**
+     * The key a defect carries in a „Overiť odstránenie" task
+     * (`tasks.source_inspection_id` = the prehliadka, `tasks.source_defect_key` = this).
+     * A defect is an item row, so its id is the stable key — the same `p<id>` Dnes
+     * already puts in the row key of a prehliadka defect. Fits the task's key rule
+     * (`[A-Za-z0-9_-]{1,40}`).
+     */
+    public static function taskKey(int $itemId): string
+    {
+        return 'p' . $itemId;
+    }
+
+    /**
+     * Defects of earlier prehliadky that a prehliadka still open as a draft has
+     * already set to „odstránené" or „dôvod zanikol" (spec 6.5). „Trvá" is not
+     * here — that defect lives on.
+     *
+     * Keyed by "inspection id:item id".
+     *
+     * @return array<string, true>
+     */
+    public static function answeredInOpenDrafts(int $accountId): array
+    {
+        $stmt = Db::pdo()->prepare(
+            "SELECT details FROM inspections
+             WHERE  account_id = ? AND type = 'preventivna_prehliadka' AND status = 'draft' AND archived_at IS NULL"
+        );
+        $stmt->execute([$accountId]);
+        $answered = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $raw) {
+            $d = json_decode((string) $raw, true);
+            foreach (is_array($d) ? (array) ($d['previous'] ?? []) : [] as $p) {
+                if (is_array($p) && in_array($p['status'] ?? null, ['ok', 'zanik'], true)) {
+                    $answered[(int) ($p['source_inspection_id'] ?? 0) . ':' . (int) ($p['source_item_id'] ?? 0)] = true;
+                }
+            }
+        }
+        return $answered;
+    }
+
+    /**
+     * The defects of a CLOSED prehliadka for which the app can offer the task
+     * „Overiť odstránenie nedostatku" (spec 20, plan 8b point 3): those with a
+     * concrete deadline (`bezodkladne` carries none), not already answered as
+     * odstránené / dôvod zanikol by a later open prehliadka. Empty for a draft
+     * and for a prehliadka a newer finalized one has replaced at the prevádzka
+     * — the same "latest one counts" rule as Dnes.
+     *
+     * `task` is null while the defect has no task, else `open` / `done` — the
+     * client offers only the null ones.
+     *
+     * @param array{status: string, facility_id: int|string, executed_on: ?string} $inspection
+     * @param list<array{id: int, fields: array<string, mixed>}> $items
+     * @return list<array{key: string, title: string, deadline_date: string, task: ?string}>
+     */
+    public static function taskCandidates(int $accountId, int $inspectionId, array $inspection, array $items): array
+    {
+        if ((string) $inspection['status'] !== 'finalized') {
+            return [];
+        }
+        $newer = Db::pdo()->prepare(
+            "SELECT 1 FROM inspections s
+             WHERE  s.account_id = ? AND s.facility_id = ? AND s.type = 'preventivna_prehliadka'
+               AND  s.archived_at IS NULL AND s.status = 'finalized'
+               AND  (COALESCE(s.executed_on, '1000-01-01'), s.id) > (COALESCE(?, '1000-01-01'), ?)
+             LIMIT 1"
+        );
+        $newer->execute([$accountId, (int) $inspection['facility_id'], $inspection['executed_on'], $inspectionId]);
+        if ($newer->fetchColumn() !== false) {
+            return [];
+        }
+
+        $answered = self::answeredInOpenDrafts($accountId);
+        $tasks = Db::pdo()->prepare(
+            'SELECT source_defect_key, MAX(done = 0) AS has_open
+             FROM   tasks
+             WHERE  account_id = ? AND source_inspection_id = ? AND source_defect_key IS NOT NULL
+             GROUP  BY source_defect_key'
+        );
+        $tasks->execute([$accountId, $inspectionId]);
+        $taskState = [];
+        foreach ($tasks->fetchAll(\PDO::FETCH_ASSOC) as $t) {
+            $taskState[(string) $t['source_defect_key']] = (int) $t['has_open'] === 1 ? 'open' : 'done';
+        }
+
+        $out = [];
+        foreach ($items as $item) {
+            $f = $item['fields'];
+            $title = is_string($f['title'] ?? null) ? trim($f['title']) : '';
+            $deadline = $f['deadline_date'] ?? null;
+            if ($title === '' || !is_string($deadline) || !self::isDate($deadline)) {
+                continue;
+            }
+            $itemId = (int) $item['id'];
+            if (isset($answered[$inspectionId . ':' . $itemId])) {
+                continue;
+            }
+            $key = self::taskKey($itemId);
+            $out[] = [
+                'key'           => $key,
+                'title'         => $title,
+                'deadline_date' => $deadline,
+                'task'          => $taskState[$key] ?? null,
+            ];
+        }
+        return $out;
+    }
+
+    /**
      * @param array<string, mixed> $body
      * @param string|null $executedOn the prehliadka's date (Y-m-d)
      * @return array<string, mixed>

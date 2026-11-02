@@ -1443,9 +1443,15 @@ passed; the throwaway account was removed. Migration 060 is applied on the local
   twice. Lists: scope chip (PO / BOZP / PO + BOZP) in OPP lists, prevádzka history, company Protokoly and bulk send; concept tag on drafts;
   visit screen shows concepts and a closed prehliadka as done; result screen has „Koncepty kontrol"; Objekt tab tile „Posledná
   preventívna prehliadka" (date, N nedostatkov). Backup: concept `details` link remapped on restore (`Restorer`); photos are ordinary rows.
-  **Not done / decisions:** the per-defect „Overiť odstránenie" task offer is not reused — `DefectTaskOffer` is bound to the generic
-  `fields.defects` block, prehliadka defects use `deadline_date` (left out as the plan allows). A concept's *new* devices start with blank
-  required identification (year, výrobca/typ, kind of uzáver, …) — the technician fills it before confirming, nothing blocks the confirm.
+  **Follow-ups (2. 11. 2026, both built):** (1) „Overiť odstránenie" is offered from the **closed** prehliadka's result screen only
+  (`offerPrehliadkaDefectTasks`; key `p<item id>` = `source_defect_key`, `source_inspection_id` = the prehliadka, the same key Dnes already
+  uses). Skips bezodkladne, defects a later open prehliadka set to odstránené / dôvod zanikol, and defects that already have a task.
+  A done task with nothing still open drops the defect from „Otvorené nedostatky" (`Defects::verifiedKeys`, filtered by `account_id`).
+  (2) `confirmConcept` returns 422 naming the device and the missing fields when any item fails the type's existing validator
+  (`InspectionItemController::missingFields` / `BozpItems::missingFields` — no second copy of the rules). Owner decision: hydrant HS/HD/Q
+  and núdzové osvetlenie trvanie block confirmation too, including devices carried over. PDF generation of a concept repeats the same
+  check, so a concept confirmed before this check still cannot be issued incomplete. Un-confirm stays unrestricted. Editing an item
+  after confirmation does **not** clear `concept_confirmed_at` (unchanged). Check: `backend/bin/test-prehliadka-followups.php`.
   Verified (throwaway account, removed): close → 2 concepts with items/status/notes/photos, gate 422, confirm + generate over HTTP,
   re-close refresh / keep, visit skip + generate after confirm, Today dedupe, follow-up Oprava from the O concept, list/context/sendable
   fields, backup merge + replace round trip, UI banner / result page / no overflow at 360 px. Terms-of-use dialog of the test user was
@@ -1484,7 +1490,7 @@ passed; the throwaway account was removed. Migration 060 is applied on the local
   2. Printed "Vykonané činnosti" uses ✓ marks (same look as the kniha BOZP record); the sample uses plain bullets. PREDPIS is not
      colour-accented as in the sample. Layout and sentences are otherwise the sample's.
   3. Number prefix `PPP` (not the sample's `PP-`), decided 1. 11.
-  4. "Overiť odstránenie" task offer is not reused for prehliadka defects (8b).
+  4. "Overiť odstránenie" for prehliadka defects — **resolved 2. 11. 2026** (see Phase 8b follow-ups): offered after closing, key `p<item id>`.
   5. Book: Q8 built as dopísanie only; the BOZP "Podľa čísla" kind "oboznámenie zamestnancov v oblasti BOZP" is an extrapolation;
      `bozp_ob` dropped.
   6. Q5 (overriding an automatic term): printed and in the record; the calendar still follows the periodicity. The book's

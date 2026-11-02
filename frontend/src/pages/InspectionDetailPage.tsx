@@ -387,6 +387,11 @@ export function InspectionDetailPage() {
   // A concept from a preventívna prehliadka is not a protocol until confirmed (spec 7.3).
   const conceptState = i.concept_state ?? null;
   const conceptPending = isDraft && conceptState === 'pending';
+  // Devices of the concept that still lack a required field — marked in the list; the
+  // concept cannot be confirmed (or its protocol generated) until they are filled.
+  const incompleteItems = isDraft && conceptState !== null ? (data.concept_incomplete ?? []) : [];
+  const incompleteById = new Map(incompleteItems.map((c) => [c.item_id, c]));
+  const conceptIncomplete = incompleteItems.length > 0;
 
   return (
     <div className="flex flex-col gap-5">
@@ -497,7 +502,22 @@ export function InspectionDetailPage() {
               <p className="mt-0.5">
                 {conceptPending
                   ? 'Výsledky sú predvyplnené z prehliadky: zariadenia s nedostatkom nevyhovujú (aj s fotkami), ostatné vyhovujú. Prejdi si ich a doplň, čo chýba. Kým ich nepotvrdíš, protokol sa nedá vygenerovať.'
-                  : 'Protokol môžeš vygenerovať. Ak ešte niečo meníš, potvrdenie môžeš zrušiť.'}
+                  : conceptIncomplete
+                    ? 'Potvrdenie platí, ale niektoré povinné údaje stále chýbajú. Doplň ich, inak sa protokol nedá vygenerovať. Potvrdenie môžeš aj zrušiť.'
+                    : 'Protokol môžeš vygenerovať. Ak ešte niečo meníš, potvrdenie môžeš zrušiť.'}
+                {conceptIncomplete && (
+                  <>
+                    {' '}
+                    <b className="font-semibold text-status-bad">
+                      {incompleteItems.length === 1
+                        ? 'Jedno zariadenie nemá vyplnené povinné údaje'
+                        : incompleteItems.length < 5
+                          ? `${incompleteItems.length} zariadenia nemajú vyplnené povinné údaje`
+                          : `${incompleteItems.length} zariadení nemá vyplnené povinné údaje`}
+                    </b>
+                    {' — označené sú v zozname nižšie.'}
+                  </>
+                )}
                 {i.source_inspection_id !== null && (
                   <>
                     {' '}
@@ -518,7 +538,12 @@ export function InspectionDetailPage() {
                 type="button"
                 variant={conceptPending ? 'primary' : 'secondary'}
                 loading={confirmingConcept}
-                disabled={conceptPending && items.length === 0}
+                disabled={conceptPending && (items.length === 0 || conceptIncomplete)}
+                title={
+                  conceptPending && conceptIncomplete
+                    ? 'Najprv doplň povinné údaje označených zariadení'
+                    : undefined
+                }
                 onClick={() => handleConfirmConcept(conceptPending)}
                 leftIcon={<ShieldCheck className="size-4" />}
               >
@@ -750,6 +775,11 @@ export function InspectionDetailPage() {
                   {/* Chapter 12 — what this device scored last time, so the
                       technician can see at a glance which one was on tlaková
                       skúška a year ago. Display only. */}
+                  {incompleteById.has(it.id) && (
+                    <p className="px-4 pb-2 text-xs font-medium text-status-bad" data-incomplete-item={it.id}>
+                      Chýba: {incompleteById.get(it.id)?.missing.join(', ')}
+                    </p>
+                  )}
                   {previousStatusOf(it.fields) && (
                     <div className="px-4 pb-2">
                       <PreviousStatusBadge type={i.type} fields={it.fields} />
@@ -822,8 +852,14 @@ export function InspectionDetailPage() {
       {!(isPersons && documents.length === 0) && (
       <DocumentsBlock
         documents={documents}
-        canGenerate={isDraft && items.length > 0 && !!i.executed_on && !conceptPending}
-        blockedReason={conceptPending ? 'Najprv potvrď výsledky konceptu z prehliadky — až potom sa dá vygenerovať protokol.' : undefined}
+        canGenerate={isDraft && items.length > 0 && !!i.executed_on && !conceptPending && !conceptIncomplete}
+        blockedReason={
+          conceptPending
+            ? 'Najprv potvrď výsledky konceptu z prehliadky — až potom sa dá vygenerovať protokol.'
+            : conceptIncomplete
+              ? 'Koncept nie je úplný — doplň povinné údaje označených zariadení.'
+              : undefined
+        }
         generating={generating}
         onGenerate={handleGeneratePdf}
         pdfError={pdfError}

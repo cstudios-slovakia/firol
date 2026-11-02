@@ -397,9 +397,20 @@ export type CarryOverOffer = {
   disposed: number;
 };
 
+/** A device of a concept from a prehliadka that still lacks required fields (spec 7.3). */
+export type ConceptIncompleteItem = {
+  item_id: number;
+  /** The device as the technician knows it — label / serial / identifier. */
+  name: string;
+  /** Slovak names of the missing fields, as the item form labels them. */
+  missing: string[];
+};
+
 export type InspectionDetail = {
   inspection: Inspection;
   items: InspectionItem[];
+  /** Present on show() of a draft concept from a prehliadka; null for any other úkon. */
+  concept_incomplete?: ConceptIncompleteItem[] | null;
   /** Present on show(); follow-up drafts created from this inspection. */
   follow_ups?: FollowUpRef[];
   /** Present on show() and on create, when carrying over is possible. */
