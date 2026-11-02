@@ -90,10 +90,32 @@ export function visitUkonState(
   if (!inspection) return { started: false, done: false, text: 'Zatiaľ nezačaté', documentId: null };
   if (inspection.type === PREHLIADKA_TYPE) {
     const defects = plural(inspection.item_count, 'nedostatok', 'nedostatky', 'nedostatkov');
+    // A closed prehliadka is done; its records (and concepts) are listed as úkony of their own.
+    if (inspection.status === 'finalized') {
+      return {
+        started: true,
+        done: true,
+        text: `Uzavretá · ${defects}`,
+        documentId: inspection.document_id,
+      };
+    }
     return { started: true, done: false, text: `Rozpracované · ${defects}`, documentId: null };
   }
   const items = plural(inspection.item_count, 'položka', 'položky', 'položiek');
   const done = inspection.status === 'finalized';
+  // A concept from a prehliadka is not a protocol: it waits for the technician, and
+  // holding it for the end of the visit would only make „generovať všetky" skip it.
+  if (!done && inspection.concept_state === 'pending') {
+    return { started: true, done: false, text: `Koncept z prehliadky · ${items} · čaká na potvrdenie`, documentId: null };
+  }
+  if (!done && inspection.concept_state === 'confirmed') {
+    return {
+      started: true,
+      done: inspection.deferred,
+      text: inspection.deferred ? HELD_TEXT : `Koncept z prehliadky · ${items} · potvrdený`,
+      documentId: null,
+    };
+  }
   if (!done && inspection.deferred) return { started: true, done: true, text: HELD_TEXT, documentId: null };
   return {
     started: true,

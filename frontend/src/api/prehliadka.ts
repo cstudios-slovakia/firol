@@ -20,12 +20,15 @@
  * Phase 8a:
  *   POST  /api/inspections/{id}/prehliadka-close    online-only — it takes the numbers
  *   GET   /api/inspections/{id}/prehliadka-result   cached; what a closed prehliadka produced
+ * Phase 8b:
+ *   POST  /api/inspections/{id}/confirm-concept     online-only (api/inspections.ts) — confirms a
+ *                                                   concept before its protocol can be generated
  * The entrance and the place a defect was written with are remembered by the
  * server inside the defect's own save — see FacilityWalkMemory — so there is no
  * endpoint of their own to queue.
  */
 import { api } from '@/lib/api';
-import type { InspectionDocument } from '@/api/inspections';
+import type { InspectionDocument, InspectionType } from '@/api/inspections';
 import type { PeriodicityUnit } from '@/lib/periodicity';
 import type {
   DeviceType,
@@ -39,6 +42,8 @@ import type {
 export type PrehliadkaMemory = {
   inspection_id: number;
   executed_on: string | null;
+  /** How many defects it wrote down. Absent on a context cached before it existed. */
+  defects?: number;
   periodicity_value: number | null;
   periodicity_unit: PeriodicityUnit | null;
   scope: PrehliadkaScope;
@@ -100,6 +105,20 @@ export type PrehliadkaResult = {
   entries: { po: ResultEntry | null; bozp: ResultEntry | null };
   /** Set while the požiarna kniha has no entry for this prehliadka. */
   offer: { text: string; protocol_numbers: string[]; has_defects: boolean; legal_sentence: string } | null;
+  /** One draft úkon per riadna kontrola ticked in step 1 (spec 7.3). Absent on an older answer. */
+  concepts?: PrehliadkaConcept[];
+};
+
+/** A concept check a closed prehliadka prepared. */
+export type PrehliadkaConcept = {
+  inspection_id: number;
+  type: InspectionType;
+  status: 'draft' | 'finalized';
+  confirmed: boolean;
+  /** Devices in the concept. */
+  items: number;
+  /** Of those, how many „nevyhovuje" (status O for a hasiaci prístroj). */
+  failing: number;
 };
 
 export const Prehliadka = {

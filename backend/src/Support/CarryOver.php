@@ -115,6 +115,17 @@ final class CarryOver
         'fajcenie'           => ['rows' => ['area']],
     ];
 
+    /**
+     * The blank assessment fields of one type — what a device the app has not
+     * seen before starts with (a prehliadka's concept builds those, plan 8b).
+     *
+     * @return array<string, mixed>
+     */
+    public static function blank(string $type): array
+    {
+        return self::BLANK[$type] ?? [];
+    }
+
     /** True when the app can carry items over for this inspection type. */
     public static function supports(string $type): bool
     {

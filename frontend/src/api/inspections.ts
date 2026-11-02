@@ -119,6 +119,22 @@ export type InspectionListItem = InvoicingFields & {
   carried_over_from_id: number | null;
   /** The visit this úkon was recorded under, when it came out of one (chapter 9). */
   visit_id: number | null;
+  /**
+   * A concept the preventívna prehliadka prepared (spec 7.3): `pending` until
+   * the technician confirms the results, `confirmed` after. Null for every
+   * other úkon. Absent on rows cached before it existed.
+   */
+  concept_state?: ConceptState | null;
+  /** PO / BOZP / PO + BOZP — only for a preventívna prehliadka. */
+  prehliadka_scope?: PrehliadkaScopeLabel | null;
+};
+
+export type ConceptState = 'pending' | 'confirmed';
+export type PrehliadkaScopeLabel = 'po' | 'bozp' | 'po_bozp';
+export const PREHLIADKA_SCOPE_LABELS: Record<PrehliadkaScopeLabel, string> = {
+  po: 'PO',
+  bozp: 'BOZP',
+  po_bozp: 'PO + BOZP',
 };
 
 export type Inspection = InspectionListItem & {
@@ -639,6 +655,18 @@ export const Inspections = {
    * there is nothing sensible to replay from an outbox once the document is
    * gone.
    */
+  /**
+   * Confirm (or take back the confirmation of) the results a prehliadka
+   * prepared in a concept (spec 7.3) — the protocol cannot be generated
+   * before. Online only, like generating.
+   */
+  confirmConcept: (inspectionId: number, confirmed: boolean, csrfToken: string | null) =>
+    api<{ confirmed: boolean }>(`/api/inspections/${inspectionId}/confirm-concept`, {
+      method: 'POST',
+      body: { confirmed },
+      csrfToken,
+      requireOnline: true,
+    }),
   unlock: (inspectionId: number, csrfToken: string | null) =>
     api<{ inspection: Inspection }>(`/api/inspections/${inspectionId}/unlock`, {
       method: 'POST',

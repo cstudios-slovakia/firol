@@ -4,7 +4,7 @@ import { PREHLIADKA_TYPE, prehliadkaPath } from '@/lib/prehliadka';
 import {
   ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, CopyPlus, Download,
   FileText, GitBranch, History, Images, Link2, Lock, LockOpen, NotebookPen, Pencil,
-  PenLine, Plus, Repeat, Warehouse,
+  PenLine, Plus, Repeat, ShieldCheck, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
@@ -35,6 +35,7 @@ import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { ItemPhotoStrip } from '@/components/ItemPhotos';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { InspectionStatusBadge } from '@/components/InspectionStatusBadge';
+import { InspectionTags } from '@/components/InspectionTags';
 import { HandoverDialog } from '@/components/HandoverDialog';
 import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStatusBadge';
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
@@ -83,6 +84,8 @@ export function InspectionDetailPage() {
   const [unlockPrompt, setUnlockPrompt] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [creatingFollowUp, setCreatingFollowUp] = useState(false);
+  // Spec 7.3 — confirming the results a prehliadka prepared in this concept.
+  const [confirmingConcept, setConfirmingConcept] = useState(false);
   // Chapter 12 — pulling last time's devices into an empty draft.
   const [carryingOver, setCarryingOver] = useState(false);
   // Chapter 13 — the document currently being handed over for signature.
@@ -226,6 +229,21 @@ export function InspectionDetailPage() {
     }
   }
 
+  /** Confirm (or take back) the results of a concept from a prehliadka — online only. */
+  async function handleConfirmConcept(confirmed: boolean) {
+    setPdfError(null);
+    setConfirmingConcept(true);
+    try {
+      await Inspections.confirmConcept(id, confirmed, csrfToken);
+      setData(await Inspections.show(id));
+      toast.success(confirmed ? 'Výsledky potvrdené — protokol môžeš vygenerovať.' : 'Potvrdenie zrušené.');
+    } catch (err) {
+      setPdfError(offlineMessage(err, 'Koncept sa nepodarilo potvrdiť.'));
+    } finally {
+      setConfirmingConcept(false);
+    }
+  }
+
   async function handleGeneratePdf() {
     if (!data) return;
     setPdfError(null);
@@ -366,6 +384,9 @@ export function InspectionDetailPage() {
   // the blank-form choice of chapter 8.1 (PersonProtocolBlock).
   const isPersons = isPersonListType(i.type);
   const photoCount = items.reduce((n, it) => n + (it.photos?.length ?? 0), 0);
+  // A concept from a preventívna prehliadka is not a protocol until confirmed (spec 7.3).
+  const conceptState = i.concept_state ?? null;
+  const conceptPending = isDraft && conceptState === 'pending';
 
   return (
     <div className="flex flex-col gap-5">
@@ -414,6 +435,7 @@ export function InspectionDetailPage() {
             ) : (
               <InspectionStatusBadge inspection={i} />
             )}
+            <InspectionTags concept={isDraft ? conceptState : null} />
             {!isDraft && (
               <Badge tone="neutral">
                 <Lock className="size-3" />
@@ -453,6 +475,59 @@ export function InspectionDetailPage() {
           </div>
         ) : null}
       </header>
+
+      {isDraft && conceptState !== null && (
+        <Card
+          id="concept-banner"
+          className={cn(
+            'flex flex-col gap-3 px-4 py-3 transition-all duration-300',
+            conceptPending ? 'border-status-warn bg-status-warn-bg' : 'bg-ink-50',
+          )}
+        >
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white text-firol-600">
+              <ShieldCheck className="size-3.5" />
+            </span>
+            <div className="min-w-0 text-xs text-ink-600">
+              <p className="font-semibold text-ink-800">
+                {conceptPending
+                  ? 'Koncept z preventívnej prehliadky — skontroluj a potvrď'
+                  : 'Výsledky potvrdené'}
+              </p>
+              <p className="mt-0.5">
+                {conceptPending
+                  ? 'Výsledky sú predvyplnené z prehliadky: zariadenia s nedostatkom nevyhovujú (aj s fotkami), ostatné vyhovujú. Prejdi si ich a doplň, čo chýba. Kým ich nepotvrdíš, protokol sa nedá vygenerovať.'
+                  : 'Protokol môžeš vygenerovať. Ak ešte niečo meníš, potvrdenie môžeš zrušiť.'}
+                {i.source_inspection_id !== null && (
+                  <>
+                    {' '}
+                    <Link
+                      to={prehliadkaPath(i.source_inspection_id)}
+                      className="font-medium text-firol-600 hover:underline"
+                    >
+                      Otvoriť prehliadku
+                    </Link>
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+          {!isReadOnly && (
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant={conceptPending ? 'primary' : 'secondary'}
+                loading={confirmingConcept}
+                disabled={conceptPending && items.length === 0}
+                onClick={() => handleConfirmConcept(conceptPending)}
+                leftIcon={<ShieldCheck className="size-4" />}
+              >
+                {conceptPending ? 'Potvrdiť výsledky' : 'Zrušiť potvrdenie'}
+              </Button>
+            </div>
+          )}
+        </Card>
+      )}
 
       {!isDraft && !unlockPrompt && (
         <Card className="flex items-start gap-3 bg-ink-50 px-4 py-3">
@@ -747,7 +822,8 @@ export function InspectionDetailPage() {
       {!(isPersons && documents.length === 0) && (
       <DocumentsBlock
         documents={documents}
-        canGenerate={isDraft && items.length > 0 && !!i.executed_on}
+        canGenerate={isDraft && items.length > 0 && !!i.executed_on && !conceptPending}
+        blockedReason={conceptPending ? 'Najprv potvrď výsledky konceptu z prehliadky — až potom sa dá vygenerovať protokol.' : undefined}
         generating={generating}
         onGenerate={handleGeneratePdf}
         pdfError={pdfError}
@@ -1001,6 +1077,7 @@ function FollowUpBlock({
 function DocumentsBlock({
   documents,
   canGenerate,
+  blockedReason,
   generating,
   onGenerate,
   pdfError,
@@ -1022,6 +1099,8 @@ function DocumentsBlock({
   companyId: number;
   facilityId?: number | null;
   canGenerate: boolean;
+  /** Why the protocol cannot be generated yet, when it is not the missing items or date. */
+  blockedReason?: string;
   generating: boolean;
   onGenerate: () => void;
   pdfError?: string | null;
@@ -1046,7 +1125,7 @@ function DocumentsBlock({
         <p className="max-w-sm text-xs text-ink-500">
           {canGenerate
             ? 'Po vygenerovaní sa kontrola uzamkne a dostane svoje číslo protokolu.'
-            : 'Pre vygenerovanie pridaj aspoň jednu položku a skontroluj dátum kontroly.'}
+            : (blockedReason ?? 'Pre vygenerovanie pridaj aspoň jednu položku a skontroluj dátum kontroly.')}
         </p>
         {photoCount > 0 && (
           <IncludePhotosToggle

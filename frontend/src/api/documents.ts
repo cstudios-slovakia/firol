@@ -1,5 +1,5 @@
 import { api } from '@/lib/api';
-import type { InspectionType } from '@/api/inspections';
+import type { InspectionType, PrehliadkaScopeLabel } from '@/api/inspections';
 
 /** What the client signed for when they took the protocol over (chapter 13). */
 export type HandoverPayload = {
@@ -31,6 +31,8 @@ export type SendableDocument = {
   byte_size: number;
   /** Already went out to this company in a send with status `odoslane`. */
   already_sent: boolean;
+  /** PO / BOZP / PO + BOZP of the prehliadka this record belongs to (plan 8b). Optional on a cached row. */
+  prehliadka_scope?: PrehliadkaScopeLabel | null;
 };
 
 export type DocumentSendPayload = {

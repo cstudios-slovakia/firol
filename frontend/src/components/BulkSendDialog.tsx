@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
 import { cn } from '@/lib/cn';
 import { bulkRecipientEmail } from '@/lib/companyEmail';
+import { InspectionTags } from '@/components/InspectionTags';
 
 /**
  * Several protocols in one e-mail — block 1 / chapter 9.1.
@@ -227,7 +228,10 @@ export function BulkSendDialog({
                       className="size-4 shrink-0 accent-firol-500"
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="block font-mono text-sm text-ink-900">{doc.number}</span>
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-sm text-ink-900">
+                        {doc.number}
+                        <InspectionTags scope={doc.prehliadka_scope} className="font-sans" />
+                      </span>
                       <span className="block text-xs text-ink-500">
                         {doc.type === 'vydajka'
                           ? 'Výdajka materiálu'

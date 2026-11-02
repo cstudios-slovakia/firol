@@ -125,6 +125,17 @@ final class DocumentController
             ];
         }
 
+        // A concept prepared from a prehliadka is not a protocol (spec 7.3): the
+        // technician confirms the results first — the app does not issue for a
+        // control something nobody confirmed. A visit's „generovať všetky"
+        // reports it as skipped with this reason.
+        if (\Firol\Support\PrehliadkaConcepts::isPending(\Firol\Support\InspectionDetails::decode($inspection['details'] ?? null))) {
+            return [
+                'error' => 'Koncept z prehliadky — potvrď výsledky.',
+                'status' => 422,
+            ];
+        }
+
         // The kniha BOZP record of a prehliadka is issued together with it. While
         // the prehliadka is open again its BOZP record is a draft too, and issuing
         // it alone would put a number on content the prehliadka is about to change.

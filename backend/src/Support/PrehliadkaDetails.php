@@ -48,6 +48,25 @@ final class PrehliadkaDetails
     private const PREVIOUS_STATUSES = ['ok', 'trva', 'zanik'];
     private const PREVIOUS_KINDS = ['prehliadka', 'poziarna_kniha'];
 
+    /**
+     * The chip a list shows for a prehliadka: `po`, `bozp` or `po_bozp` — null
+     * when the details carry no scope (not a prehliadka, or nothing chosen).
+     *
+     * @param array<string, mixed>|null $details
+     */
+    public static function scopeLabel(?array $details): ?string
+    {
+        $scope = is_array($details['scope'] ?? null) ? $details['scope'] : [];
+        $po = ($scope['po'] ?? false) === true;
+        $bozp = ($scope['bozp'] ?? false) === true;
+        return match (true) {
+            $po && $bozp => 'po_bozp',
+            $po          => 'po',
+            $bozp        => 'bozp',
+            default      => null,
+        };
+    }
+
     public static function supports(string $type): bool
     {
         return $type === self::TYPE;

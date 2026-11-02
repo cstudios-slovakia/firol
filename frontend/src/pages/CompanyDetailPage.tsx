@@ -21,6 +21,7 @@ import { documentDownloadUrl, INSPECTION_TYPE_LABELS } from '@/api/inspections';
 import { cn } from '@/lib/cn';
 import { companyRecipientEmail } from '@/lib/companyEmail';
 import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
+import { InspectionTags } from '@/components/InspectionTags';
 
 type CompanyTab = 'general' | 'facilities' | 'protocols';
 
@@ -546,7 +547,10 @@ function IssuedProtocols({ companyId }: { companyId: number }) {
         {items.map((doc) => (
           <li key={doc.id} className="flex items-center gap-3 py-3">
             <div className="min-w-0 flex-1">
-              <p className="font-mono text-sm text-ink-900">{doc.number}</p>
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-sm text-ink-900">
+                {doc.number}
+                <InspectionTags scope={doc.prehliadka_scope} className="font-sans" />
+              </p>
               <p className="truncate text-xs text-ink-500">
                 {protocolKind(doc)}
                 {doc.facility_name && ` · ${doc.facility_name}`}

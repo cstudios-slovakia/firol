@@ -23,7 +23,9 @@ use Firol\Storage\Storage;
  *                there is no separate document — and a BOZP book entry, always;
  *   PO book      an entry in the požiarna kniha when `book_entry` is on, carrying
  *                the PO defects (`inspection_ids`) so its print has the table;
- *   BOZP only    no PP record: the prehliadka closes with no document of its own.
+ *   BOZP only    no PP record: the prehliadka closes with no document of its own;
+ *   routine      one concept (draft úkon) per riadna kontrola ticked in step 1,
+ *                see {@see PrehliadkaConcepts} (spec 7.3).
  *
  * Re-closing after „Upraviť" issues new numbers (the old ones are never reused),
  * refills the same BOZP child, and brings the entries written by the first close
@@ -37,7 +39,7 @@ use Firol\Storage\Storage;
 final class PrehliadkaCloser
 {
     /**
-     * @return array{ok: true, po_document_id: ?int, bozp_inspection_id: ?int, bozp_document_id: ?int}
+     * @return array{ok: true, po_document_id: ?int, bozp_inspection_id: ?int, bozp_document_id: ?int, concepts: list<array{inspection_id: int, type: string, state: string}>}
      *       | array{error: string, status: int}
      */
     public static function close(int $accountId, int $userId, int $inspectionId, bool $includePhotos): array
@@ -92,6 +94,8 @@ final class PrehliadkaCloser
         }
 
         $files = [];
+        $staleFiles = [];
+        $concepts = [];
         $pdo->beginTransaction();
         try {
             // Two closes at once (a double tap, a queued retry) must not both issue numbers.
@@ -196,6 +200,9 @@ final class PrehliadkaCloser
             $pdo->prepare('UPDATE inspections SET is_preventive_inspection = ? WHERE id = ? AND account_id = ?')
                 ->execute([$po ? 1 : 0, $inspectionId, $accountId]);
 
+            // ── Koncepty riadnych kontrol (spec 7.3) ─────────────────────────
+            $concepts = PrehliadkaConcepts::build($accountId, $userId, $inspection, $details, $items, $files, $staleFiles);
+
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -210,11 +217,19 @@ final class PrehliadkaCloser
             return ['error' => 'Prehliadku sa nepodarilo uzavrieť.', 'status' => 500];
         }
 
+        // Photos of a concept that this close replaced: the rows are gone with the commit.
+        foreach ($staleFiles as $abs) {
+            if (is_file($abs) && !@unlink($abs)) {
+                error_log('[close-prehliadka] stale concept photo cleanup failed: ' . $abs);
+            }
+        }
+
         return [
             'ok'                 => true,
             'po_document_id'     => $poDocumentId,
             'bozp_inspection_id' => $bozpInspectionId,
             'bozp_document_id'   => $bozpDocumentId,
+            'concepts'           => $concepts,
         ];
     }
 

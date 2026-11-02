@@ -34,6 +34,8 @@ export type VisitInspection = {
   document_number: string | null;
   /** Protocol held until the end of the visit (a draft the technician finished). */
   deferred: boolean;
+  /** A concept the visit's preventívna prehliadka prepared (spec 7.3); null for any other úkon. */
+  concept_state?: 'pending' | 'confirmed' | null;
 };
 
 /** The školenie PO recorded under a visit, as the visit screen needs it. */

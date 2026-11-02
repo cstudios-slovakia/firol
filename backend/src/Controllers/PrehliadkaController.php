@@ -15,6 +15,7 @@ use Firol\Support\BookMapping;
 use Firol\Support\BookSentences;
 use Firol\Support\InspectionDetails;
 use Firol\Support\PrehliadkaActivities;
+use Firol\Support\PrehliadkaConcepts;
 use Firol\Support\PrehliadkaCloser;
 use Firol\Support\PrehliadkaDetails;
 use Firol\Support\PrehliadkaPrevious;
@@ -30,6 +31,7 @@ use Firol\Support\PrehliadkaTerms;
  *   GET    /api/companies/{id}/activities
  *   POST   /api/companies/{id}/activities                 { kind, label }
  *   DELETE /api/companies/{id}/activities/{activity_id}   (archives)
+ *   POST   /api/inspections/{id}/confirm-concept          { confirmed? }
  *
  * Offline: the reads are cached like any GET; adding or removing a firm's own
  * activity is online-only (it changes a list shared by the firm's later
@@ -137,6 +139,46 @@ final class PrehliadkaController
         Response::json(self::resultFor($accountId, $id), 201);
     }
 
+    /**
+     * POST /api/inspections/{id}/confirm-concept   { confirmed?: bool = true }
+     *
+     * The technician confirms the results a prehliadka prepared in a concept
+     * (spec 7.3) — until then the protocol cannot be generated. `confirmed:
+     * false` takes the confirmation back. Online-only, like generating.
+     */
+    public static function confirmConcept(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $id = (int) $params['id'];
+
+        $inspection = DocumentController::loadInspectionForGenerate($accountId, $id);
+        $details = InspectionDetails::decode($inspection['details'] ?? null);
+        if (!PrehliadkaConcepts::isConcept($details)) {
+            Response::error('Toto nie je koncept z preventívnej prehliadky.', 422);
+        }
+        if ($inspection['status'] !== 'draft') {
+            Response::error('Kontrola už je uzamknutá a má vystavený protokol.', 409);
+        }
+        $confirmed = $req->jsonBool('confirmed') ?? true;
+        if ($confirmed && DocumentController::loadItems($id) === []) {
+            Response::error('Koncept nemá žiadne zariadenie — pridaj aspoň jedno.', 422);
+        }
+
+        $details[PrehliadkaConcepts::CONFIRMED_KEY] = $confirmed ? date('Y-m-d H:i:s') : null;
+        Db::pdo()->prepare('UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?')
+            ->execute([InspectionDetails::encode($details), $id, $accountId]);
+        AuditLog::record(
+            $confirmed ? 'concept.confirm' : 'concept.unconfirm',
+            'inspections',
+            $id,
+            null,
+            ['source_inspection_id' => $details[PrehliadkaConcepts::KEY]],
+        );
+
+        Response::json(['confirmed' => $confirmed, 'details' => $details]);
+    }
+
     /** GET /api/inspections/{id}/prehliadka-result — what a closed prehliadka produced. */
     public static function result(Request $req, array $params): void
     {
@@ -229,6 +271,8 @@ final class PrehliadkaController
                 'bozp' => $entry(BookMapping::BOZP, $childId),
             ],
             'offer' => $offer,
+            // Koncepty riadnych kontrol (spec 7.3) — one draft úkon per ticked type.
+            'concepts' => PrehliadkaConcepts::summary($accountId, $id),
         ];
     }
 

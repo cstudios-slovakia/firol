@@ -294,7 +294,118 @@ final class TodayController
     }
 
     /**
-     * „Otvorené nedostatky" — nedostatky waiting to be removed, with a termín.
+     * „Otvorené nedostatky": the nedostatky of the other úkony
+     * ({@see self::openUkonDefects()}) and of the preventívna prehliadka
+     * ({@see self::openPrehliadkaDefects()}), earliest termín first.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function openDefects(int $accountId, ?int $userId): array
+    {
+        $out = [...self::openUkonDefects($accountId, $userId), ...self::openPrehliadkaDefects($accountId, $userId)];
+        usort($out, static fn (array $a, array $b): int =>
+            strcmp($a['deadline'], $b['deadline']) ?: $a['inspection_id'] <=> $b['inspection_id']);
+        return $out;
+    }
+
+    /**
+     * The nedostatky of a preventívna prehliadka (POapp 26. 10. 2026, plan 8b):
+     * those of the LATEST finalized prehliadka at each prevádzka (any scope)
+     * that carry a deadline, minus the ones a later prehliadka — still open as
+     * a draft — has already set to „odstránené" or „dôvod zanikol". „Trvá" stays
+     * open: the defect lives on. A newer finalized prehliadka replaces the
+     * older one entirely, as it does for the other úkony.
+     *
+     * Not offered here: the „Overiť odstránenie" task, which is bound to the
+     * generic `fields.defects` block of the other úkony.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function openPrehliadkaDefects(int $accountId, ?int $userId): array
+    {
+        $sql = "SELECT i.id AS inspection_id, i.facility_id, i.executed_on,
+                       c.id AS company_id, c.name AS company_name, f.name AS facility_name,
+                       i.inspector_user_id AS tech_id, u.fullname AS tech_name,
+                       au.initials AS tech_initials, au.avatar_color AS tech_color
+                FROM   inspections i
+                JOIN   companies  c ON c.id = i.company_id  AND c.archived_at IS NULL
+                JOIN   facilities f ON f.id = i.facility_id AND f.archived_at IS NULL
+                LEFT   JOIN users u ON u.id = i.inspector_user_id
+                LEFT   JOIN account_users au ON au.account_id = i.account_id AND au.user_id = i.inspector_user_id
+                WHERE  i.account_id = ? AND i.type = 'preventivna_prehliadka'
+                  AND  i.archived_at IS NULL AND i.status = 'finalized'
+                  AND  NOT EXISTS (
+                           SELECT 1 FROM inspections s
+                           WHERE  s.account_id = i.account_id AND s.facility_id = i.facility_id
+                             AND  s.type = i.type AND s.archived_at IS NULL AND s.status = 'finalized'
+                             AND  (COALESCE(s.executed_on, '1000-01-01'), s.id)
+                                > (COALESCE(i.executed_on, '1000-01-01'), i.id)
+                       )";
+        $args = [$accountId];
+        if ($userId !== null) {
+            $sql .= ' AND i.inspector_user_id = ?';
+            $args[] = $userId;
+        }
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($args);
+        $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($records === []) {
+            return [];
+        }
+
+        // What an open prehliadka has already decided about earlier defects.
+        $closed = [];
+        $drafts = Db::pdo()->prepare(
+            "SELECT details FROM inspections
+             WHERE  account_id = ? AND type = 'preventivna_prehliadka' AND status = 'draft' AND archived_at IS NULL"
+        );
+        $drafts->execute([$accountId]);
+        foreach ($drafts->fetchAll(PDO::FETCH_COLUMN) as $raw) {
+            $d = json_decode((string) $raw, true);
+            foreach (is_array($d) ? (array) ($d['previous'] ?? []) : [] as $p) {
+                if (is_array($p) && in_array($p['status'] ?? null, ['ok', 'zanik'], true)) {
+                    $closed[(int) ($p['source_inspection_id'] ?? 0) . ':' . (int) ($p['source_item_id'] ?? 0)] = true;
+                }
+            }
+        }
+
+        $itemStmt = Db::pdo()->prepare(
+            'SELECT id, fields FROM inspection_items WHERE inspection_id = ? ORDER BY position ASC, id ASC'
+        );
+        $out = [];
+        foreach ($records as $r) {
+            $inspectionId = (int) $r['inspection_id'];
+            $itemStmt->execute([$inspectionId]);
+            foreach ($itemStmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
+                $f = json_decode((string) $item['fields'], true);
+                $deadline = is_array($f) ? ($f['deadline_date'] ?? null) : null;
+                if (!is_string($deadline) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deadline)) {
+                    continue; // „bezodkladne" carries no date; a finding, not a removal to wait for
+                }
+                if (isset($closed[$inspectionId . ':' . (int) $item['id']])) {
+                    continue;
+                }
+                $title = trim((string) ($f['title'] ?? ''));
+                $out[] = [
+                    'key'           => 'nedostatok-' . $inspectionId . '-p' . (int) $item['id'],
+                    'inspection_id' => $inspectionId,
+                    'defect_key'    => null,
+                    'type'          => 'preventivna_prehliadka',
+                    'executed_on'   => $r['executed_on'] !== null ? (string) $r['executed_on'] : null,
+                    'description'   => $title !== '' ? $title : (string) ($f['description'] ?? ''),
+                    'deadline'      => $deadline,
+                    'company_id'    => (int) $r['company_id'],
+                    'company_name'  => (string) $r['company_name'],
+                    'facility_name' => (string) $r['facility_name'],
+                    'technician'    => self::technician($r),
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * „Otvorené nedostatky" of the other úkony — nedostatky waiting to be removed, with a termín.
      *
      * The data model has no "removed" flag on a nedostatok, so "open" is read
      * from what it does record, conservatively:
@@ -316,7 +427,7 @@ final class TodayController
      *
      * @return list<array<string, mixed>>
      */
-    private static function openDefects(int $accountId, ?int $userId): array
+    private static function openUkonDefects(int $accountId, ?int $userId): array
     {
         $sql = "SELECT i.id AS inspection_id, i.type, i.executed_on,
                        c.id AS company_id, c.name AS company_name, f.name AS facility_name,
@@ -331,6 +442,12 @@ final class TodayController
                 LEFT   JOIN account_users au ON au.account_id = i.account_id AND au.user_id = i.inspector_user_id
                 WHERE  i.account_id = ? AND i.archived_at IS NULL AND i.status = 'finalized'
                   AND  (JSON_CONTAINS_PATH(ii.fields, 'one', '$.defects', '$.defect_deadline'))
+                  -- The kniha BOZP record of a prehliadka repeats the BOZP defects the
+                  -- prehliadka itself lists (openPrehliadkaDefects); count them once.
+                  AND  NOT (i.type = 'kniha_bozp' AND EXISTS (
+                           SELECT 1 FROM inspections pp
+                           WHERE  pp.id = i.source_inspection_id AND pp.type = 'preventivna_prehliadka'
+                       ))
                   AND  NOT EXISTS (
                            SELECT 1 FROM inspections s
                            WHERE  s.account_id  = i.account_id

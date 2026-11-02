@@ -37,7 +37,7 @@ import {
 import { periodicityShort } from "@/lib/periodicity";
 import { bookPath } from "@/api/book";
 import { canRepeatInspection } from "@/lib/sections";
-import { Prehliadka } from "@/api/prehliadka";
+import { Prehliadka, type PrehliadkaMemory } from "@/api/prehliadka";
 import { PREHLIADKA_TYPE, prehliadkaPath, startPrehliadkaPath } from "@/lib/prehliadka";
 import {
     TRAINING_TYPE_LABELS,
@@ -56,6 +56,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
 import { DetailHeaderSkeleton, SkeletonList } from "@/components/ui/Skeleton";
 import { PendingSyncBanner } from "@/components/PendingSyncBanner";
+import { InspectionTags } from "@/components/InspectionTags";
 import { useMemberRights } from "@/auth/useMemberRights";
 import { isBytoveDruzstvo } from "@/lib/clientKind";
 
@@ -83,6 +84,7 @@ export function FacilityDetailPage() {
     const [activeTab, setActiveTab] = useState<"inspections" | "trainings" | "objekt">("inspections");
     const [devices, setDevices] = useState<FacilityDeviceGroup[] | null>(null);
     const [ppContextDraft, setPpContextDraft] = useState<number | null>(null);
+    const [lastPrehliadka, setLastPrehliadka] = useState<PrehliadkaMemory | null>(null);
     const [trainingQuery, setTrainingQuery] = useState("");
     const [trainingTypeFilter, setTrainingTypeFilter] = useState<TrainingType | "">("");
 
@@ -187,7 +189,9 @@ export function FacilityDetailPage() {
                 void Facilities.devices(id).catch(() => undefined);
                 Prehliadka.context(id)
                     .then((c) => {
-                        if (!cancelled) setPpContextDraft(c.draft_id);
+                        if (cancelled) return;
+                        setPpContextDraft(c.draft_id);
+                        setLastPrehliadka(c.last);
                     })
                     .catch(() => undefined);
                 const [ins, trs] = await Promise.all([
@@ -635,6 +639,10 @@ export function FacilityDetailPage() {
                                                     <Badge tone={finalized ? "ok" : "warn"}>
                                                         {finalized ? "Hotová" : "Koncept"}
                                                     </Badge>
+                                                    <InspectionTags
+                                                        scope={ins.prehliadka_scope}
+                                                        concept={finalized ? null : ins.concept_state}
+                                                    />
                                                 </div>
                                                 <p className="mt-0.5 text-xs text-ink-500">
                                                     <CalendarDays className="-mt-0.5 mr-1 inline size-3" />
@@ -844,7 +852,7 @@ export function FacilityDetailPage() {
             </section>}
 
             {activeTab === "objekt" && facility && (
-                <ObjektPanel facility={facility} devices={devices} />
+                <ObjektPanel facility={facility} devices={devices} lastPrehliadka={lastPrehliadka} />
             )}
 
             <Dialog
@@ -932,12 +940,20 @@ function deviceCountLabel(n: number): string {
     return `${n} zariadení`;
 }
 
+function defectCountLabel(n: number): string {
+    if (n === 1) return "1 nedostatok";
+    if (n >= 2 && n <= 4) return `${n} nedostatky`;
+    return `${n} nedostatkov`;
+}
+
 function ObjektPanel({
     facility,
     devices,
+    lastPrehliadka,
 }: {
     facility: Facility;
     devices: FacilityDeviceGroup[] | null;
+    lastPrehliadka: PrehliadkaMemory | null;
 }) {
     const total = (devices ?? []).reduce((sum, g) => sum + g.items.length, 0);
     const meta = (devices ?? [])
@@ -977,6 +993,29 @@ function ObjektPanel({
                 </span>
                 <ChevronRight className="size-4 shrink-0 text-ink-300" />
             </Link>
+
+            {lastPrehliadka && (
+                <Link
+                    to={prehliadkaPath(lastPrehliadka.inspection_id)}
+                    id="objekt-last-prehliadka"
+                    className="flex items-center gap-3 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-all duration-200 hover:bg-ink-50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
+                >
+                    <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-600">
+                        <ClipboardList className="size-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-ink-900">Posledná preventívna prehliadka</span>
+                        <span className="mt-0.5 block truncate text-xs text-ink-500">
+                            {lastPrehliadka.executed_on
+                                ? new Date(lastPrehliadka.executed_on + "T00:00:00").toLocaleDateString("sk-SK")
+                                : "bez dátumu"}
+                            {typeof lastPrehliadka.defects === "number" &&
+                                ` · ${lastPrehliadka.defects === 0 ? "bez nedostatkov" : defectCountLabel(lastPrehliadka.defects)}`}
+                        </span>
+                    </span>
+                    <ChevronRight className="size-4 shrink-0 text-ink-300" />
+                </Link>
+            )}
 
             <p className="rounded-2xl bg-ink-50 px-3 py-2.5 text-xs leading-relaxed text-ink-600">
                 Zoznam nie je samostatná evidencia — je to to, čo ste zapísali do posledných kontrol na {place}. Prístroj pribudne tak, že ho zapíšete pri kontrole, alebo ho nahráte importom z Excelu. Pri ďalšej kontrole aj pri preventívnej prehliadke sa potom ponúkne sám.

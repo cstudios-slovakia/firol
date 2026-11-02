@@ -16,6 +16,7 @@ use Firol\Storage\Storage;
 use Firol\Support\CarryOver;
 use Firol\Support\InspectionDetails;
 use Firol\Support\Periodicity;
+use Firol\Support\PrehliadkaConcepts;
 use Firol\Support\PrehliadkaDefects;
 use Firol\Support\PrehliadkaDetails;
 
@@ -138,6 +139,10 @@ final class InspectionController
                        eu.fullname AS effective_inspector_name,
                        i.effective_cert_number,
                        i.billing_mode, i.invoiced, i.invoiced_at, i.billing_note,
+                       CASE WHEN JSON_VALUE(i.details, "$.concept_from_prehliadka") IS NULL THEN NULL
+                            WHEN JSON_VALUE(i.details, "$.concept_confirmed_at") IS NULL THEN "pending"
+                            ELSE "confirmed" END AS concept_state,
+                       i.details AS scope_details,
                        ' . self::SUPERSEDED_EXPR . '
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
@@ -1491,6 +1496,20 @@ final class InspectionController
         $row['source_inspection_id'] = isset($row['source_inspection_id'])
             ? (int) $row['source_inspection_id']
             : null;
+        // Plan 8b — the scope chip of a prehliadka and the state of a concept. The
+        // list selects them without the whole header; the detail endpoint derives
+        // them from the header it returns anyway.
+        $rawScope = $row['scope_details'] ?? ($row['details'] ?? null);
+        unset($row['scope_details']);
+        $row['prehliadka_scope'] = ($row['type'] ?? null) === PrehliadkaDetails::TYPE
+            ? PrehliadkaDetails::scopeLabel(InspectionDetails::decode($rawScope))
+            : null;
+        if (!array_key_exists('concept_state', $row)) {
+            $conceptDetails = InspectionDetails::decode($row['details'] ?? null);
+            $row['concept_state'] = !PrehliadkaConcepts::isConcept($conceptDetails)
+                ? null
+                : (PrehliadkaConcepts::isPending($conceptDetails) ? 'pending' : 'confirmed');
+        }
         // Header data (block 2). Only the detail endpoints select it; the list
         // leaves it out, and the key is then absent rather than null.
         if (array_key_exists('details', $row)) {

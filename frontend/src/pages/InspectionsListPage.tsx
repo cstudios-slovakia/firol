@@ -30,6 +30,7 @@ import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { daysUntilNext, getInspectionStatus } from "@/lib/inspectionStatus";
 import { InspectionStatusBadge } from "@/components/InspectionStatusBadge";
+import { InspectionTags } from "@/components/InspectionTags";
 import { useAuth } from "@/auth/AuthContext";
 import { useIsReadOnly } from "@/auth/useIsReadOnly";
 import { useToast } from "@/lib/toast";
@@ -700,6 +701,11 @@ function InspectionRow({
                         ) : (
                             <InspectionStatusBadge inspection={it} className="shrink-0" />
                         )}
+                        <InspectionTags
+                            scope={it.prehliadka_scope}
+                            concept={it.status === "draft" ? it.concept_state : null}
+                            className="shrink-0"
+                        />
                     </div>
                     <p className="mt-0.5 truncate text-xs text-ink-500">
                         <Building2 className="-mt-0.5 mr-1 inline size-3" />

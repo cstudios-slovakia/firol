@@ -364,6 +364,9 @@ final class VisitController
             'SELECT i.id, i.type, i.status, i.executed_on,
                     i.periodicity_value, i.periodicity_unit, i.protocol_deferred_at,
                     (SELECT COUNT(*) FROM inspection_items it WHERE it.inspection_id = i.id) AS item_count,
+                    CASE WHEN JSON_VALUE(i.details, "$.concept_from_prehliadka") IS NULL THEN NULL
+                         WHEN JSON_VALUE(i.details, "$.concept_confirmed_at") IS NULL THEN "pending"
+                         ELSE "confirmed" END AS concept_state,
                     d.id AS document_id, d.number AS document_number
              FROM   inspections i
              LEFT   JOIN documents d
@@ -388,6 +391,8 @@ final class VisitController
                 'document_id'     => $r['document_id'] !== null ? (int) $r['document_id'] : null,
                 'document_number' => $r['document_number'],
                 'deferred'        => $r['protocol_deferred_at'] !== null,
+                // A concept a preventívna prehliadka of this visit prepared (spec 7.3).
+                'concept_state'   => $r['concept_state'],
             ];
         }, $stmt->fetchAll());
     }

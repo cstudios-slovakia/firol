@@ -25,7 +25,7 @@ final class PrehliadkaContext
     /**
      * @return array{
      *   draft_id: ?int,
-     *   last: ?array{inspection_id: int, executed_on: ?string, periodicity_value: ?int, periodicity_unit: ?string, scope: array{po: bool, bozp: bool}, routine: list<string>, book_entry: bool},
+     *   last: ?array{inspection_id: int, executed_on: ?string, defects: int, periodicity_value: ?int, periodicity_unit: ?string, scope: array{po: bool, bozp: bool}, routine: list<string>, book_entry: bool},
      *   open_drafts: array<string, int>|stdClass
      * }
      */
@@ -56,9 +56,13 @@ final class PrehliadkaContext
         if ($lastRow) {
             $details = InspectionDetails::decode($lastRow['details']) ?? [];
             $scope = (array) ($details['scope'] ?? []);
+            $count = $pdo->prepare('SELECT COUNT(*) FROM inspection_items WHERE inspection_id = ?');
+            $count->execute([(int) $lastRow['id']]);
             $lastSetup = [
                 'inspection_id'     => (int) $lastRow['id'],
                 'executed_on'       => $lastRow['executed_on'] !== null ? (string) $lastRow['executed_on'] : null,
+                // „Posledná preventívna prehliadka · N nedostatkov" on the Objekt tab (plan 8b).
+                'defects'           => (int) $count->fetchColumn(),
                 'periodicity_value' => $lastRow['periodicity_value'] !== null ? (int) $lastRow['periodicity_value'] : null,
                 'periodicity_unit'  => $lastRow['periodicity_unit'] !== null ? (string) $lastRow['periodicity_unit'] : null,
                 'scope'             => [

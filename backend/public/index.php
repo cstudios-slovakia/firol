@@ -178,6 +178,7 @@ $router->delete('/api/companies/{id}/activities/{activity_id}', [\Firol\Controll
 // Phase 8a — closing a prehliadka and what it produced.
 $router->post('/api/inspections/{id}/prehliadka-close',  [\Firol\Controllers\PrehliadkaController::class, 'close']);
 $router->get('/api/inspections/{id}/prehliadka-result',  [\Firol\Controllers\PrehliadkaController::class, 'result']);
+$router->post('/api/inspections/{id}/confirm-concept',   [\Firol\Controllers\PrehliadkaController::class, 'confirmConcept']);
 $router->get('/api/facilities/{id}',                [FacilityController::class, 'show']);
 $router->patch('/api/facilities/{id}',              [FacilityController::class, 'update']);
 $router->post('/api/facilities/{id}/archive',       [FacilityController::class, 'archive']);

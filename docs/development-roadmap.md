@@ -1320,7 +1320,7 @@ Points 11, 12 and 13 of the 2. 10. report (cancelled then for budget) are back i
 | 7a | Preventívna prehliadka: step 1, walk-through, defect entry | 🟨 built, API + 360 px iframe checked; not accepted |
 | 7b | Preventívna prehliadka: previous defects, step 3, uzavretie | 🟨 built, API + 360 px iframe checked; not accepted |
 | 8a | Closing: PP record, BOZP zápis, book entries | 🟨 built, API + PDF + 360 px verified; not accepted |
-| 8b | Concept checks, visits, Dnes, backup | ⬜ |
+| 8b | Concept checks, visits, Dnes, backup | 🟨 built, API + backup round trip + 360 px checked; not accepted |
 | 9 | Acceptance pass, manual | ⬜ |
 
 **Phases 1, 3 and 4 accepted (30. 10. 2026).** Checked in the browser at 360 px and on the
@@ -1428,6 +1428,28 @@ passed; the throwaway account was removed. Migration 060 is applied on the local
   - **Handover signature**: `HandoverDialog` re-renders document into version 2 while preserving frozen snapshot data.
   - **Frontend**: `PrehliadkaClosePage.tsx`, `PrehliadkaResultPage.tsx`, `api/prehliadka.ts`, `lib/prehliadka.ts`, responsive at 360 px width.
   - **Verification**: 22 automated end-to-end backend tests covering guards, BD close, Firma close, BOZP-only close, zero-defect book entries, unlock and re-closing, and handover signatures passed cleanly. Clean build (`npm run build` and `php -l`).
+- **Phase 8b** (2. 11. 2026) — no migration (`072`–`075` unused). `Support/PrehliadkaConcepts`: on closing, one **draft úkon per
+  ticked riadna kontrola**, inside the close transaction. Devices = the latest finalized úkon of that type via `CarryOver` (disposed stay
+  behind, `previous_status` kept) + `details.new_devices`; a device named in a defect gets the failing result (`php` → status **O**, D3;
+  others `nevyhovuje`) with the defect text in `notes` / `defects` / `faults` and the defects' **photos copied** (own files); every other
+  device passes (`A` / `vyhovuje`). Draft date = prehliadka date, periodicity = last used, `visit_id` and `source_inspection_id` = the
+  prehliadka. Marked in `details`: `concept_from_prehliadka`, `concept_built_at`, `concept_item_count`, `concept_confirmed_at`.
+  **A concept cannot generate its PDF until confirmed** (`POST /api/inspections/{id}/confirm-concept`, online-only, `confirmed:false`
+  takes it back); `generateForInspectionInternal` refuses with „Koncept z prehliadky — potvrď výsledky", so a visit's „generovať všetky"
+  reports it as skipped. Idempotent per prehliadka + type: re-closing refreshes a concept nobody touched since it was built (items, edits,
+  photos compared with `concept_built_at`), keeps a confirmed / edited / issued one, archives an untouched one whose type was unticked.
+  Dnes „Otvorené nedostatky" now lists the defects of the latest finalized prehliadka per prevádzka that carry a deadline, minus those
+  an open prehliadka set to odstránené / dôvod zanikol (`openPrehliadkaDefects`); the BOZP child's copy is excluded so nothing counts
+  twice. Lists: scope chip (PO / BOZP / PO + BOZP) in OPP lists, prevádzka history, company Protokoly and bulk send; concept tag on drafts;
+  visit screen shows concepts and a closed prehliadka as done; result screen has „Koncepty kontrol"; Objekt tab tile „Posledná
+  preventívna prehliadka" (date, N nedostatkov). Backup: concept `details` link remapped on restore (`Restorer`); photos are ordinary rows.
+  **Not done / decisions:** the per-defect „Overiť odstránenie" task offer is not reused — `DefectTaskOffer` is bound to the generic
+  `fields.defects` block, prehliadka defects use `deadline_date` (left out as the plan allows). A concept's *new* devices start with blank
+  required identification (year, výrobca/typ, kind of uzáver, …) — the technician fills it before confirming, nothing blocks the confirm.
+  Verified (throwaway account, removed): close → 2 concepts with items/status/notes/photos, gate 422, confirm + generate over HTTP,
+  re-close refresh / keep, visit skip + generate after confirm, Today dedupe, follow-up Oprava from the O concept, list/context/sendable
+  fields, backup merge + replace round trip, UI banner / result page / no overflow at 360 px. Terms-of-use dialog of the test user was
+  dismissed, not accepted.
 - **Decided 1. 11. 2026:** the prehliadka record's number prefix is `PPP` (`PP` belongs to
   `pracovne_prostriedky`; `documents` has `UNIQUE (account_id, number)`). Register it in `NumberAllocator` in
   Phase 8a. The BOZP "Podľa čísla" kind `bozp_ob` was dropped (not in the prototype's `KN_RUCNE`).

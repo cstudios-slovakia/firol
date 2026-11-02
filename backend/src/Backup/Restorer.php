@@ -95,6 +95,8 @@ final class Restorer
     private array $prehliadkaItemIds = [];
     /** @var list<int> new ids of the preventívna prehliadka inspections this run inserted */
     private array $prehliadkaInspectionIds = [];
+    /** @var list<int> new ids of the concepts (plan 8b) this run inserted — each points at its prehliadka */
+    private array $conceptInspectionIds = [];
     /** @var array<int, int> old training id → new */
     private array $trainingMap = [];
     /** @var array<int, int> old own číselník item id → new (shipped ids are the same everywhere) */
@@ -453,6 +455,9 @@ final class Restorer
             if ($type === 'preventivna_prehliadka') {
                 $this->prehliadkaInspectionIds[] = $inspectionId;
             }
+            if (str_contains((string) self::details($inspection['details'] ?? null), '"concept_from_prehliadka"')) {
+                $this->conceptInspectionIds[] = $inspectionId;
+            }
 
             foreach ($this->list($inspection, 'items') as $item) {
                 $insertItem->execute([
@@ -550,10 +555,27 @@ final class Restorer
      * Remaps defect references of a preventívna prehliadka:
      *   - `inspection_items.fields.persists_from`: remaps inspection_id, item_id and key
      *   - `inspections.details.previous`: remaps source_inspection_id, source_item_id and key
+     *   - `inspections.details.concept_from_prehliadka` of a concept (plan 8b)
      * so carried-over defects and previous-defect answers point to the restored rows.
      */
     private function relinkPrehliadkaPrevious(): void
     {
+        // A concept names the prehliadka it came from in its header (`details`) as
+        // well as in `source_inspection_id`; the header is remapped here.
+        if ($this->conceptInspectionIds !== []) {
+            $select = $this->pdo->prepare('SELECT details FROM inspections WHERE id = ?');
+            $update = $this->pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?');
+            foreach ($this->conceptInspectionIds as $inspId) {
+                $select->execute([$inspId]);
+                $details = json_decode((string) $select->fetchColumn(), true);
+                $old = is_array($details) ? (int) ($details['concept_from_prehliadka'] ?? 0) : 0;
+                if ($old > 0 && isset($this->inspectionMap[$old])) {
+                    $details['concept_from_prehliadka'] = $this->inspectionMap[$old];
+                    $update->execute([json_encode($details, JSON_UNESCAPED_UNICODE), $inspId]);
+                }
+            }
+        }
+
         if ($this->prehliadkaItemIds !== []) {
             $select = $this->pdo->prepare('SELECT fields FROM inspection_items WHERE id = ?');
             $update = $this->pdo->prepare('UPDATE inspection_items SET fields = ? WHERE id = ?');
