@@ -1487,8 +1487,9 @@ passed; the throwaway account was removed. Migration 060 is applied on the local
   4. "Overiť odstránenie" task offer is not reused for prehliadka defects (8b).
   5. Book: Q8 built as dopísanie only; the BOZP "Podľa čísla" kind "oboznámenie zamestnancov v oblasti BOZP" is an extrapolation;
      `bozp_ob` dropped.
-  6. Q5 (overriding an automatic term): printed and in the record only. The book's "Termíny ďalších kontrol" offer still uses
-     the calendar term (seen: record prints 15. 4. 2027, offer says 2. 11. 2027) — decide whether it should follow the override.
+  6. Q5 (overriding an automatic term): printed and in the record; the calendar still follows the periodicity. The book's
+     "Termíny ďalších kontrol" offer first used the calendar term (seen: record prints 15. 4. 2027, offer says 2. 11. 2027) —
+     **resolved 2. 11. 2026, see "Phase 9 follow-ups" below: the offer now follows the override.**
   7. "Doplniť školenie" from step 3 opens the external-term form (book PO), as planned; it does not create a training.
   8. Not tested: real airplane mode and a physical camera (only simulated offline in 7a), the offline cache of the book screen,
      BD save after a client-type change (Phase 2), the visit planner's pre-tick for the new type in this pass, e-mail delivery
@@ -1499,6 +1500,26 @@ passed; the throwaway account was removed. Migration 060 is applied on the local
   **Manual:** `docs/manual/Firol-manual.md` updated (client type, prevádzka data, e-mail precedence, preventívna prehliadka,
   číselník, books, external terms, trainings, backup, prefixes; the stale "date never prefilled" note removed). The folder is
   git-ignored (`docs/*`) and the PDF and screenshots were not regenerated.
+- **Phase 9 follow-ups** (2. 11. 2026, `docs/handoff-2026-11-02-phase9-followups.md`):
+  - **Overridden terms in the book offer — built** (owner decision: the offer follows the override, for that one offer only).
+    `ClientTerms::upcoming()` now reads `details.term_overrides` of the closed PO prehliadky (`prehliadkaOverrides()`, new
+    `$followOverrides` flag of `ownRaw()`; no migration, nothing is written). The override is used for `prehliadka_po` and for
+    each riadna kontrola the prehliadka ticked (`routine:<type>`), per prevádzka, and only while it is the last word: a newer
+    úkon of the same kind brings its own date + periodicity back, and a newer prehliadka that ticks the control without an override
+    clears it. A BOZP-only prehliadka governs nothing of the požiarna kniha; a malformed date is ignored. The úkon's periodicity,
+    the calendar, the printed "Termíny" tables and the frozen record snapshots are untouched, so later inspections start from
+    the plain interval. Check: `backend/bin/test-term-override-offer.php` (run in the php container; one rolled-back
+    transaction; fails 3 checks on the old code, passes on the new one).
+  - **Stale reads on open screens — built.** Cause: screens fetch once on mount and the IndexedDB cache is network-first (read
+    only when `fetch` rejects), so an open screen never saw changes made by another technician, device, cron or directly in the DB.
+    New `lib/useRevalidateOnReturn.ts`: runs a silent reload when the page returns to the foreground (throttled to 30 s) and on
+    `online` (not throttled), never while hidden or offline. Wired into Dnes (`TodayPage`, replaces its own `online` listener),
+    the book (`BookPage`, ignores failures and a late answer for a book the user switched away from) and the visit screen
+    (`VisitDetailPage`, paused while "generovať všetky" runs). Other screens are unchanged; add the hook where needed.
+    `npm run build` passes; not clicked through in a browser.
+  - **D3 (PHP status `O`):** kept. `O` creates the Oprava/plnenie/TS follow-up like `TS` (`mapPhpToOprava`). Still wants FIROL's
+    confirmation; PHP has no "nevyhovuje" status, adding one would touch validation, form, PDF, import, backup, carry-over and
+    the concept mapping.
 - **Decided 1. 11. 2026:** the prehliadka record's number prefix is `PPP` (`PP` belongs to
   `pracovne_prostriedky`; `documents` has `UNIQUE (account_id, number)`). Register it in `NumberAllocator` in
   Phase 8a. The BOZP "Podľa čísla" kind `bozp_ob` was dropped (not in the prototype's `KN_RUCNE`).

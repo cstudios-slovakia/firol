@@ -54,6 +54,7 @@ import {
 import { daysUntil } from '@/lib/calendarGrouping';
 import { todayIso } from '@/lib/dates';
 import { cn } from '@/lib/cn';
+import { useRevalidateOnReturn } from '@/lib/useRevalidateOnReturn';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { TechnicianAvatar } from '@/components/team/TechnicianAvatar';
@@ -164,13 +165,13 @@ export function TodayPage() {
 
   useEffect(() => {
     const bump = () => setTick((t) => t + 1);
-    window.addEventListener('online', bump);
     window.addEventListener('firol:remap', bump);
     return () => {
-      window.removeEventListener('online', bump);
       window.removeEventListener('firol:remap', bump);
     };
   }, []);
+  // Back online or back in the foreground: refetch quietly (`data` stays shown).
+  useRevalidateOnReturn(() => setTick((t) => t + 1));
 
   useEffect(() => {
     let cancelled = false;

@@ -11,6 +11,7 @@ import { Companies } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { useRevalidateOnReturn } from '@/lib/useRevalidateOnReturn';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -77,6 +78,10 @@ export function VisitDetailPage() {
       cancelled = true;
     };
   }, [load]);
+
+  // Another technician may have started or finished an úkon of this visit.
+  // Not while "generovať všetky" runs — its own response sets the visit.
+  useRevalidateOnReturn(() => (generating ? undefined : load()));
 
   /**
    * Open the úkon for a planned type: continue the one already started, or

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, BookPlus, CalendarClock, ChevronDown, FileText, Hash, Pencil, PenLine, Plus, Printer, Signature, Trash2,
@@ -17,6 +17,7 @@ import { todayIso } from '@/lib/dates';
 import { useConfirm } from '@/lib/confirm';
 import { offlineMessage } from '@/lib/offline';
 import { cn } from '@/lib/cn';
+import { useRevalidateOnReturn } from '@/lib/useRevalidateOnReturn';
 import { useToast } from '@/lib/toast';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -89,6 +90,22 @@ export function BookPage() {
     setView(null);
     void load();
   }, [load]);
+
+  // Entries and offers change when someone else books an úkon: refresh quietly.
+  // `load` only sets the view (the loader is reset by the effect above), so the
+  // book stays on screen while it runs.
+  // A failed or late refresh must not replace the book with an error, nor
+  // overwrite the view of a book the user has switched to meanwhile.
+  const shownKey = useRef('');
+  shownKey.current = `${companyId}|${book}|${facilityParam ?? ''}`;
+  useRevalidateOnReturn(() => {
+    const key = shownKey.current;
+    return Book.show(companyId, book, facilityParam)
+      .then((res) => {
+        if (shownKey.current === key) setView(res);
+      })
+      .catch(() => undefined);
+  });
 
   // The firm's termíny cudzích revízií for the book on screen. A failed read
   // (e.g. offline with nothing cached) just leaves the section empty.
