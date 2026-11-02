@@ -61,6 +61,8 @@ final class Restorer
         'tasks'       => 0,
         'defect_catalog' => 0,
         'book_entries' => 0,
+        'external_terms' => 0,
+        'company_activities' => 0,
     ];
 
     /** @var array<string, int> */
@@ -74,6 +76,8 @@ final class Restorer
         'tasks'       => 0,
         'defect_catalog' => 0,
         'book_entries' => 0,
+        'external_terms' => 0,
+        'company_activities' => 0,
     ];
 
     /** @var list<string> */
@@ -89,6 +93,8 @@ final class Restorer
     private array $itemMap = [];
     /** @var list<int> new ids of the preventívna prehliadka defects this run inserted */
     private array $prehliadkaItemIds = [];
+    /** @var list<int> new ids of the preventívna prehliadka inspections this run inserted */
+    private array $prehliadkaInspectionIds = [];
     /** @var array<int, int> old training id → new */
     private array $trainingMap = [];
     /** @var array<int, int> old own číselník item id → new (shipped ids are the same everywhere) */
@@ -201,6 +207,7 @@ final class Restorer
             $this->restoreDefectCatalog($this->list($manifest, 'defect_catalog'));
             $this->restoreInspections($this->list($manifest, 'inspections'));
             $this->relinkPrehliadkaDevices();
+            $this->relinkPrehliadkaPrevious();
             $this->restoreTrainings($this->list($manifest, 'trainings'));
             // Chapter 21 — before the documents, which map výdajky onto it.
             $this->restoreStock(is_array($manifest['stock'] ?? null) ? $manifest['stock'] : []);
@@ -208,6 +215,10 @@ final class Restorer
             // Phase 5 — the books, after the firms, prevádzky, úkony and trainings
             // whose ids an entry is remapped onto.
             $this->restoreBookEntries($this->list($manifest, 'book_entries'));
+            // Phase 6 — termíny cudzích revízií, onto the restored firms and prevádzky.
+            $this->restoreExternalTerms($this->list($manifest, 'external_terms'));
+            // Phase 7b — the firms' own „vykonané činnosti".
+            $this->restoreCompanyActivities($this->list($manifest, 'company_activities'));
             $this->relinkFollowUps($this->list($manifest, 'inspections'));
             // Chapter 20 — last, because a task points at companies,
             // facilities and (for one born from a nedostatok) an inspection.
@@ -439,6 +450,9 @@ final class Restorer
             $this->inspectionMap[$oldId] = $inspectionId;
             $existing[$key] = $inspectionId;
             $this->restored['inspections']++;
+            if ($type === 'preventivna_prehliadka') {
+                $this->prehliadkaInspectionIds[] = $inspectionId;
+            }
 
             foreach ($this->list($inspection, 'items') as $item) {
                 $insertItem->execute([
@@ -528,6 +542,105 @@ final class Restorer
             }
             if ($changed) {
                 $update->execute([json_encode($fields, JSON_UNESCAPED_UNICODE), $itemId]);
+            }
+        }
+    }
+
+    /**
+     * Remaps defect references of a preventívna prehliadka:
+     *   - `inspection_items.fields.persists_from`: remaps inspection_id, item_id and key
+     *   - `inspections.details.previous`: remaps source_inspection_id, source_item_id and key
+     * so carried-over defects and previous-defect answers point to the restored rows.
+     */
+    private function relinkPrehliadkaPrevious(): void
+    {
+        if ($this->prehliadkaItemIds !== []) {
+            $select = $this->pdo->prepare('SELECT fields FROM inspection_items WHERE id = ?');
+            $update = $this->pdo->prepare('UPDATE inspection_items SET fields = ? WHERE id = ?');
+            foreach ($this->prehliadkaItemIds as $itemId) {
+                $select->execute([$itemId]);
+                $fields = json_decode((string) $select->fetchColumn(), true);
+                if (!is_array($fields) || !is_array($fields['persists_from'] ?? null)) {
+                    continue;
+                }
+                $changed = false;
+                $oldInsp = (int) ($fields['persists_from']['inspection_id'] ?? 0);
+                if ($oldInsp > 0 && isset($this->inspectionMap[$oldInsp])) {
+                    $fields['persists_from']['inspection_id'] = $this->inspectionMap[$oldInsp];
+                    $changed = true;
+                }
+                $oldKey = (string) ($fields['persists_from']['key'] ?? '');
+                if (preg_match('/^p(\d+)-(\d+)$/', $oldKey, $m)) {
+                    $kOldInsp = (int) $m[1];
+                    $kOldItem = (int) $m[2];
+                    $kNewInsp = $this->inspectionMap[$kOldInsp] ?? null;
+                    $kNewItem = $this->itemMap[$kOldItem] ?? null;
+                    if ($kNewInsp !== null && $kNewItem !== null) {
+                        $fields['persists_from']['key'] = "p{$kNewInsp}-{$kNewItem}";
+                        $changed = true;
+                    }
+                } elseif (preg_match('/^pk(\d+)-(\d+)$/', $oldKey, $m)) {
+                    $kOldInsp = (int) $m[1];
+                    $kIdx = $m[2];
+                    $kNewInsp = $this->inspectionMap[$kOldInsp] ?? null;
+                    if ($kNewInsp !== null) {
+                        $fields['persists_from']['key'] = "pk{$kNewInsp}-{$kIdx}";
+                        $changed = true;
+                    }
+                }
+                if ($changed) {
+                    $update->execute([json_encode($fields, JSON_UNESCAPED_UNICODE), $itemId]);
+                }
+            }
+        }
+
+        if ($this->prehliadkaInspectionIds !== []) {
+            $select = $this->pdo->prepare('SELECT details FROM inspections WHERE id = ?');
+            $update = $this->pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?');
+            foreach ($this->prehliadkaInspectionIds as $inspId) {
+                $select->execute([$inspId]);
+                $details = json_decode((string) $select->fetchColumn(), true);
+                if (!is_array($details) || !is_array($details['previous'] ?? null)) {
+                    continue;
+                }
+                $changed = false;
+                foreach ($details['previous'] as $idx => $prev) {
+                    if (!is_array($prev)) {
+                        continue;
+                    }
+                    $oldSourceInsp = (int) ($prev['source_inspection_id'] ?? 0);
+                    if ($oldSourceInsp > 0 && isset($this->inspectionMap[$oldSourceInsp])) {
+                        $details['previous'][$idx]['source_inspection_id'] = $this->inspectionMap[$oldSourceInsp];
+                        $changed = true;
+                    }
+                    $oldSourceItem = isset($prev['source_item_id']) ? (int) $prev['source_item_id'] : null;
+                    if ($oldSourceItem !== null && isset($this->itemMap[$oldSourceItem])) {
+                        $details['previous'][$idx]['source_item_id'] = $this->itemMap[$oldSourceItem];
+                        $changed = true;
+                    }
+                    $oldKey = (string) ($prev['key'] ?? '');
+                    if (preg_match('/^p(\d+)-(\d+)$/', $oldKey, $m)) {
+                        $kOldInsp = (int) $m[1];
+                        $kOldItem = (int) $m[2];
+                        $kNewInsp = $this->inspectionMap[$kOldInsp] ?? null;
+                        $kNewItem = $this->itemMap[$kOldItem] ?? null;
+                        if ($kNewInsp !== null && $kNewItem !== null) {
+                            $details['previous'][$idx]['key'] = "p{$kNewInsp}-{$kNewItem}";
+                            $changed = true;
+                        }
+                    } elseif (preg_match('/^pk(\d+)-(\d+)$/', $oldKey, $m)) {
+                        $kOldInsp = (int) $m[1];
+                        $kIdx = $m[2];
+                        $kNewInsp = $this->inspectionMap[$kOldInsp] ?? null;
+                        if ($kNewInsp !== null) {
+                            $details['previous'][$idx]['key'] = "pk{$kNewInsp}-{$kIdx}";
+                            $changed = true;
+                        }
+                    }
+                }
+                if ($changed) {
+                    $update->execute([json_encode($details, JSON_UNESCAPED_UNICODE), $inspId]);
+                }
             }
         }
     }
@@ -1156,6 +1269,131 @@ final class Restorer
                 ]);
             }
         }
+    }
+
+    /**
+     * Termíny cudzích revízií (phase 6), remapped onto the restored firms and
+     * prevádzky. Merge key: firm + prevádzka + book + name + both dates — a term
+     * already here is left alone, so a second restore does not double the list.
+     *
+     * @param list<array<string, mixed>> $terms
+     */
+    private function restoreExternalTerms(array $terms): void
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT company_id, facility_id, book, name, done_on, valid_until
+             FROM   company_external_terms WHERE account_id = ? AND archived_at IS NULL'
+        );
+        $stmt->execute([$this->accountId]);
+        $existing = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $existing[$this->externalTermKey(
+                (int) $row['company_id'],
+                $row['facility_id'] !== null ? (int) $row['facility_id'] : null,
+                (string) $row['book'],
+                (string) $row['name'],
+                $row['done_on'] !== null ? (string) $row['done_on'] : null,
+                $row['valid_until'] !== null ? (string) $row['valid_until'] : null,
+            )] = true;
+        }
+
+        $insert = $this->pdo->prepare(
+            'INSERT INTO company_external_terms
+                (account_id, company_id, facility_id, book, name, performed_by, done_on, valid_until, note,
+                 created_by_user_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+
+        foreach ($terms as $term) {
+            $companyId = $this->companyMap[(int) ($term['company_id'] ?? 0)] ?? null;
+            $name = $this->str($term, 'name');
+            $book = $this->str($term, 'book');
+            if ($companyId === null || $name === null || ($book !== 'po' && $book !== 'bozp')) {
+                $this->warnings[] = 'Termín cudzej revízie sa nedal priradiť k firme — preskočený.';
+                continue;
+            }
+            $facilityId = null;
+            if (($term['facility_id'] ?? null) !== null) {
+                $facilityId = $this->facilityMap[(int) $term['facility_id']] ?? null;
+                if ($facilityId === null) {
+                    $this->warnings[] = 'Termín cudzej revízie prevádzky, ktorá sa neobnovila, bol preskočený.';
+                    continue;
+                }
+            }
+            $doneOn = $this->date($term, 'done_on');
+            $validUntil = $this->date($term, 'valid_until');
+
+            $key = $this->externalTermKey($companyId, $facilityId, $book, $name, $doneOn, $validUntil);
+            if (isset($existing[$key])) {
+                $this->skipped['external_terms']++;
+                continue;
+            }
+            $insert->execute([
+                $this->accountId,
+                $companyId,
+                $facilityId,
+                $book,
+                mb_substr($name, 0, 191),
+                ($p = $this->str($term, 'performed_by')) !== null ? mb_substr($p, 0, 191) : null,
+                $doneOn,
+                $validUntil,
+                ($n = $this->str($term, 'note')) !== null ? mb_substr($n, 0, 500) : null,
+                $this->user($term, 'created_by_email'),
+                $this->createdAt($term),
+            ]);
+            $existing[$key] = true;
+            $this->restored['external_terms']++;
+        }
+    }
+
+    /**
+     * The firms' own „vykonané činnosti" (phase 7b), onto the restored firms.
+     * Merge key: firm + set + text — one already on the list is left alone.
+     *
+     * @param list<array<string, mixed>> $activities
+     */
+    private function restoreCompanyActivities(array $activities): void
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT company_id, kind, label FROM company_activities
+             WHERE  account_id = ? AND archived_at IS NULL'
+        );
+        $stmt->execute([$this->accountId]);
+        $existing = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $existing[(int) $row['company_id'] . '|' . $row['kind'] . '|' . mb_strtolower((string) $row['label'])] = true;
+        }
+
+        $insert = $this->pdo->prepare(
+            'INSERT INTO company_activities (account_id, company_id, kind, label, created_by_user_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($activities as $activity) {
+            $companyId = $this->companyMap[(int) ($activity['company_id'] ?? 0)] ?? null;
+            $kind = $this->str($activity, 'kind');
+            $label = $this->str($activity, 'label');
+            if ($companyId === null || $label === null || ($kind !== 'po' && $kind !== 'bozp')) {
+                $this->warnings[] = 'Vlastná činnosť sa nedala priradiť k firme — preskočená.';
+                continue;
+            }
+            $label = mb_substr($label, 0, 191);
+            $key = $companyId . '|' . $kind . '|' . mb_strtolower($label);
+            if (isset($existing[$key])) {
+                $this->skipped['company_activities'] = ($this->skipped['company_activities'] ?? 0) + 1;
+                continue;
+            }
+            $insert->execute([
+                $this->accountId, $companyId, $kind, $label,
+                $this->user($activity, 'created_by_email'), $this->createdAt($activity),
+            ]);
+            $existing[$key] = true;
+            $this->restored['company_activities']++;
+        }
+    }
+
+    private function externalTermKey(int $companyId, ?int $facilityId, string $book, string $name, ?string $doneOn, ?string $validUntil): string
+    {
+        return $companyId . '|' . ($facilityId ?? 0) . '|' . $book . '|' . mb_strtolower($name) . '|' . ($doneOn ?? '') . '|' . ($validUntil ?? '');
     }
 
     private function bookEntryKey(int $companyId, ?int $facilityId, string $book, string $createdAt, string $text): string

@@ -55,7 +55,9 @@ final class InspectionController
                            WHERE  i.status      = 'finalized'
                              AND  s.account_id  = i.account_id
                              AND  s.facility_id = i.facility_id
-                             AND  s.type        = i.type
+                             AND  (s.type = i.type
+                                   OR (s.type IN ('poziarna_kniha', 'preventivna_prehliadka')
+                                       AND i.type IN ('poziarna_kniha', 'preventivna_prehliadka')))
                              AND  s.archived_at IS NULL
                              AND  s.status      = 'finalized'
                              AND  s.is_preventive_inspection = 1
@@ -767,6 +769,17 @@ final class InspectionController
         // expressible, so there is no field-by-field COALESCE here.
         if (array_key_exists('details', $body)) {
             $details = self::readDetails($req, (string) $row['type']);
+            if ($row['type'] === PrehliadkaDetails::TYPE && is_array($details) && !empty($details['previous'])) {
+                $validSourceIds = Db::pdo()->prepare(
+                    'SELECT id FROM inspections WHERE account_id = ? AND facility_id = ? AND archived_at IS NULL'
+                );
+                $validSourceIds->execute([$scopeAccountId, (int) $row['facility_id']]);
+                $allowed = array_fill_keys($validSourceIds->fetchAll(\PDO::FETCH_COLUMN), true);
+                $details['previous'] = array_values(array_filter(
+                    $details['previous'],
+                    static fn (array $p): bool => isset($allowed[(int) ($p['source_inspection_id'] ?? 0)]),
+                ));
+            }
             Db::pdo()->prepare(
                 'UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?'
             )->execute([InspectionDetails::encode($details), $id, $scopeAccountId]);
@@ -831,41 +844,70 @@ final class InspectionController
         MemberRights::requireDelete($accountId);
 
         $pdo = Db::pdo();
+
+        // The kniha BOZP record of a prehliadka (phase 8a) is issued with it and
+        // opened with it — on its own it would drift from the walk-through.
+        if ($row['type'] === 'kniha_bozp' && $row['source_inspection_id'] !== null) {
+            $srcType = $pdo->prepare('SELECT type FROM inspections WHERE id = ? AND account_id = ?');
+            $srcType->execute([(int) $row['source_inspection_id'], $accountId]);
+            if ($srcType->fetchColumn() === PrehliadkaDetails::TYPE) {
+                Response::error(
+                    'Tento zápis vznikol z preventívnej prehliadky — otvor prehliadku a použi „Upraviť".',
+                    422,
+                );
+            }
+        }
+
+        // Unlocking a prehliadka discards everything it issued: its own PP
+        // record and the BOZP record that grew out of it.
+        $ids = [$id];
+        if ($row['type'] === PrehliadkaDetails::TYPE) {
+            $kids = $pdo->prepare(
+                'SELECT id FROM inspections
+                 WHERE  account_id = ? AND source_inspection_id = ? AND type = "kniha_bozp" AND archived_at IS NULL'
+            );
+            $kids->execute([$accountId, $id]);
+            foreach ($kids->fetchAll(\PDO::FETCH_COLUMN) as $kid) {
+                $ids[] = (int) $kid;
+            }
+        }
+        $in = implode(',', array_fill(0, count($ids), '?'));
+
         $docsStmt = $pdo->prepare(
-            'SELECT number, file_path FROM documents
-             WHERE  account_id = ? AND parent_type = "inspection" AND parent_id = ?'
+            "SELECT number, file_path FROM documents
+             WHERE  account_id = ? AND parent_type = 'inspection' AND parent_id IN ($in)"
         );
-        $docsStmt->execute([$accountId, $id]);
+        $docsStmt->execute([$accountId, ...$ids]);
         $docs = $docsStmt->fetchAll();
 
         // A protocol signed on the screen was re-rendered into further
         // versions (chapter 13); every one of those files has to go too, or
         // the discarded protocol stays readable under its old version path.
         $versionsStmt = $pdo->prepare(
-            'SELECT v.file_path FROM document_versions v
+            "SELECT v.file_path FROM document_versions v
              JOIN   documents d ON d.id = v.document_id
-             WHERE  d.account_id = ? AND d.parent_type = "inspection" AND d.parent_id = ?'
+             WHERE  d.account_id = ? AND d.parent_type = 'inspection' AND d.parent_id IN ($in)"
         );
-        $versionsStmt->execute([$accountId, $id]);
+        $versionsStmt->execute([$accountId, ...$ids]);
         $versionFiles = $versionsStmt->fetchAll(\PDO::FETCH_COLUMN);
 
         $pdo->beginTransaction();
         try {
             $pdo->prepare(
-                'DELETE FROM documents
-                 WHERE  account_id = ? AND parent_type = "inspection" AND parent_id = ?'
-            )->execute([$accountId, $id]);
+                "DELETE FROM documents
+                 WHERE  account_id = ? AND parent_type = 'inspection' AND parent_id IN ($in)"
+            )->execute([$accountId, ...$ids]);
 
             $pdo->prepare(
-                'UPDATE inspections
-                 SET    status = "draft",
+                "UPDATE inspections
+                 SET    status = 'draft',
                         protocol_deferred_at        = NULL,
                         effective_inspector_user_id = NULL,
                         effective_cert_number       = NULL,
                         effective_cert_valid_from   = NULL,
                         effective_cert_valid_to     = NULL
-                 WHERE  id = ? AND account_id = ?'
-            )->execute([$id, $accountId]);
+                 WHERE  id IN ($in) AND account_id = ?"
+            )->execute([...$ids, $accountId]);
 
             $pdo->commit();
         } catch (\Throwable $e) {

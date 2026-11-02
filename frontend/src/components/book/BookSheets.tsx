@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Printer } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Book, bookPrintUrl, type BookEntry, type BookOffer, type BookView } from '@/api/book';
+import type { ExternalTerm } from '@/api/externalTerms';
 import { todayIso } from '@/lib/dates';
 import { offlineMessage } from '@/lib/offline';
 import { cn } from '@/lib/cn';
@@ -24,6 +25,8 @@ const TEXTAREA_CLASS =
 
 export type EntrySheetMode =
   | { kind: 'offer'; offer: BookOffer }
+  /** „Do knihy" from a termín cudzej revízie (phase 6). */
+  | { kind: 'term'; term: ExternalTerm }
   | { kind: 'own' }
   | { kind: 'number' };
 
@@ -78,7 +81,9 @@ export function EntrySheet({
   const toast = useToast();
   const isPo = view.book === 'po';
 
-  const [text, setText] = useState(mode.kind === 'offer' ? mode.offer.text : '');
+  const [text, setText] = useState(
+    mode.kind === 'offer' ? mode.offer.text : mode.kind === 'term' ? mode.term.book_sentence : '',
+  );
   const [kind, setKind] = useState(view.manual_kinds[0]?.kind ?? '');
   const [number, setNumber] = useState('');
   const [date, setDate] = useState(todayIso());
@@ -89,10 +94,16 @@ export function EntrySheet({
   const [saving, setSaving] = useState(false);
 
   const carriesDefects = mode.kind === 'offer' && mode.offer.has_defects;
+  // A term note is no kontrola, so „bez nedostatkov" never applies to it.
+  const isTermNote = mode.kind === 'term' || (mode.kind === 'offer' && mode.offer.kind === 'termin');
   const title =
-    mode.kind === 'offer' ? 'Zápis do knihy' : mode.kind === 'number' ? 'Zápis podľa čísla protokolu' : 'Vlastný zápis';
+    mode.kind === 'offer' || mode.kind === 'term'
+      ? 'Zápis do knihy'
+      : mode.kind === 'number'
+        ? 'Zápis podľa čísla protokolu'
+        : 'Vlastný zápis';
   const description =
-    mode.kind === 'offer'
+    mode.kind === 'offer' || mode.kind === 'term'
       ? 'Text sa dá prepísať — do knihy ide to, čo tu zostane.'
       : mode.kind === 'number'
         ? 'Funguje aj pre úkon, ktorý v appke vôbec nie je — školenie od niekoho iného, kontrola kolegu, starší protokol z papiera.'
@@ -113,15 +124,21 @@ export function EntrySheet({
         book: view.book,
         facility_id: view.facility_id,
         legal_sentence: legal,
-        no_defects_statement: isPo && noDefects && !carriesDefects,
+        no_defects_statement: isPo && !isTermNote && noDefects && !carriesDefects,
       };
       const res =
-        mode.kind === 'offer'
+        mode.kind === 'term'
+          ? await Book.createEntry(
+              view.company.id,
+              { ...common, source: 'revizia', text: text.trim(), date },
+              csrfToken,
+            )
+          : mode.kind === 'offer'
           ? await Book.createEntry(
               view.company.id,
               {
                 ...common,
-                source: 'ukon',
+                source: mode.offer.kind === 'termin' ? 'termin' : 'ukon',
                 date: mode.offer.date,
                 text: text.trim(),
                 protocol_numbers: mode.offer.protocol_numbers,
@@ -195,7 +212,7 @@ export function EntrySheet({
 
         {mode.kind !== 'number' && (
           <>
-            {mode.kind === 'own' && (
+            {(mode.kind === 'own' || mode.kind === 'term') && (
               <Field label="Dátum zápisu">
                 {(p) => <Input {...p} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}
               </Field>
@@ -204,7 +221,7 @@ export function EntrySheet({
               {(p) => (
                 <textarea
                   {...p}
-                  rows={mode.kind === 'offer' ? 6 : 5}
+                  rows={mode.kind === 'offer' || mode.kind === 'term' ? 6 : 5}
                   value={text}
                   autoFocus
                   placeholder={mode.kind === 'own' ? 'Vykonaný cvičný požiarny poplach…' : undefined}
@@ -227,7 +244,7 @@ export function EntrySheet({
           }
         />
 
-        {isPo && (
+        {isPo && !isTermNote && (
           <Check
             checked={noDefects && !carriesDefects}
             onChange={setNoDefects}

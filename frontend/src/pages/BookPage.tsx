@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, ChevronDown, FileText, Hash, PenLine, Plus, Printer, Signature,
+  ArrowLeft, BookPlus, CalendarClock, ChevronDown, FileText, Hash, Pencil, PenLine, Plus, Printer, Signature, Trash2,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import {
   Book, bookPrintUrl, type BookEntry, type BookOffer, type BookScope, type BookView,
 } from '@/api/book';
+import {
+  ExternalTerms, termState, type ExternalTerm, type ExternalTermSuggestion,
+} from '@/api/externalTerms';
 import { ApiError } from '@/lib/api';
 import { BOOKS, BOOK_LABELS, isBook, type BookKey } from '@/lib/bookMapping';
+import { todayIso } from '@/lib/dates';
+import { useConfirm } from '@/lib/confirm';
 import { offlineMessage } from '@/lib/offline';
 import { cn } from '@/lib/cn';
 import { useToast } from '@/lib/toast';
@@ -21,6 +26,7 @@ import { formatDay } from '@/components/ClientArchive';
 import {
   AdditionSheet, EntrySheet, SignSheet, type EntrySheetMode,
 } from '@/components/book/BookSheets';
+import { ExternalTermSheet } from '@/components/book/ExternalTermSheet';
 
 /** Offers older than this fold into one row, so a firm with years of history is not buried. */
 const FOLD_OFFERS_AFTER_MONTHS = 12;
@@ -38,6 +44,7 @@ function olderThanCutoff(iso: string): boolean {
 type Sheet =
   | { type: 'entry'; mode: EntrySheetMode }
   | { type: 'addition'; entry: BookEntry }
+  | { type: 'term'; term?: ExternalTerm }
   | { type: 'sign' };
 
 /**
@@ -56,6 +63,9 @@ export function BookPage() {
   const { csrfToken } = useAuth();
   const isReadOnly = useIsReadOnly();
   const toast = useToast();
+  const confirm = useConfirm();
+  const [terms, setTerms] = useState<ExternalTerm[]>([]);
+  const [termSuggestions, setTermSuggestions] = useState<ExternalTermSuggestion[]>([]);
   const [view, setView] = useState<BookView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<Sheet | null>(null);
@@ -79,6 +89,38 @@ export function BookPage() {
     setView(null);
     void load();
   }, [load]);
+
+  // The firm's termíny cudzích revízií for the book on screen. A failed read
+  // (e.g. offline with nothing cached) just leaves the section empty.
+  const loadTerms = useCallback(() => {
+    return ExternalTerms.list(companyId, book)
+      .then((res) => {
+        setTerms(res.items);
+        setTermSuggestions(res.suggestions);
+      })
+      .catch(() => undefined);
+  }, [companyId, book]);
+
+  useEffect(() => {
+    setTerms([]);
+    void loadTerms();
+  }, [loadTerms]);
+
+  async function removeTerm(term: ExternalTerm) {
+    const ok = await confirm({
+      title: 'Odstrániť termín?',
+      description: `„${term.name}“ sa prestane tlačiť v prehľade termínov. Už vydané záznamy zostávajú nedotknuté.`,
+      confirmLabel: 'Odstrániť',
+    });
+    if (!ok) return;
+    try {
+      await ExternalTerms.remove(companyId, term.id, csrfToken);
+      toast.success('Termín odstránený.');
+      await loadTerms();
+    } catch (err) {
+      toast.error(offlineMessage(err, 'Termín sa nepodarilo odstrániť.'));
+    }
+  }
 
   const recentOffers = useMemo(() => (view?.offers ?? []).filter((o) => !olderThanCutoff(o.date)), [view]);
   const oldOffers = useMemo(() => (view?.offers ?? []).filter((o) => olderThanCutoff(o.date)), [view]);
@@ -118,7 +160,7 @@ export function BookPage() {
         {
           book: view.book,
           facility_id: view.facility_id,
-          source: 'ukon',
+          source: offer.kind === 'termin' ? 'termin' : 'ukon',
           date: offer.date,
           text: offer.text,
           protocol_numbers: offer.protocol_numbers,
@@ -383,6 +425,43 @@ export function BookPage() {
             </section>
           )}
 
+          {/* Termíny cudzích revízií */}
+          <section className="flex animate-fade-up flex-col gap-2.5">
+            <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-ink-400">
+              Termíny cudzích revízií
+              {terms.length > 0 && <Badge tone="neutral">{terms.length}</Badge>}
+            </h2>
+            <p className="text-xs leading-relaxed text-ink-500">
+              Revízie, ktoré u klienta nerobíte vy. Appka si ich pamätá pri firme a vytlačí ich v prehľade termínov
+              v zázname — {view.book === 'bozp' ? 'z knihy BOZP' : 'z požiarnej knihy'}.
+            </p>
+            {terms.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-ink-200 bg-white px-3.5 py-3 text-xs leading-relaxed text-ink-500">
+                Zatiaľ žiadny termín pre túto knihu.
+              </p>
+            ) : (
+              terms.map((t) => (
+                <TermCard
+                  key={t.id}
+                  term={t}
+                  canWrite={canWrite}
+                  onToBook={() => setSheet({ type: 'entry', mode: { kind: 'term', term: t } })}
+                  onEdit={() => setSheet({ type: 'term', term: t })}
+                  onRemove={() => void removeTerm(t)}
+                />
+              ))
+            )}
+            {canWrite && (
+              <Button
+                variant="secondary"
+                leftIcon={<CalendarClock className="size-4" />}
+                onClick={() => setSheet({ type: 'term' })}
+              >
+                Pridať termín cudzej revízie
+              </Button>
+            )}
+          </section>
+
           {/* Podpisy */}
           <section className="flex animate-fade-up flex-col gap-2.5">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-400">Podpisy</h2>
@@ -477,6 +556,20 @@ export function BookPage() {
           }}
         />
       )}
+      {sheet?.type === 'term' && (
+        <ExternalTermSheet
+          companyId={view.company.id}
+          term={sheet.term}
+          currentBook={view.book}
+          suggestions={termSuggestions}
+          facilities={view.facilities}
+          onClose={() => setSheet(null)}
+          onSaved={() => {
+            setSheet(null);
+            void loadTerms();
+          }}
+        />
+      )}
       {sheet?.type === 'addition' && (
         <AdditionSheet
           entry={sheet.entry}
@@ -538,6 +631,52 @@ function OfferCard({
           </Button>
           <Button size="sm" loading={busy} onClick={onAdd}>
             Pridať do knihy
+          </Button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function TermCard({
+  term,
+  canWrite,
+  onToBook,
+  onEdit,
+  onRemove,
+}: {
+  term: ExternalTerm;
+  canWrite: boolean;
+  onToBook: () => void;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const state = termState(term.valid_until, todayIso());
+  return (
+    <Card className="flex flex-col gap-3 px-4 py-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-ink-900">{term.name}</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
+            {term.valid_until ? `platnosť do ${formatDay(term.valid_until)}` : 'platnosť nedoložená'}
+            {term.done_on && ` · vykonaná ${formatDay(term.done_on)}`}
+            {term.performed_by && ` · ${term.performed_by}`}
+            {term.facility_name && ` · ${term.facility_name}`}
+          </p>
+          {term.note && <p className="mt-1 text-xs leading-relaxed text-ink-600">{term.note}</p>}
+        </div>
+        <Badge tone={state.tone}>{state.label}</Badge>
+      </div>
+      {canWrite && (
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" size="sm" leftIcon={<Trash2 className="size-3.5" />} onClick={onRemove}>
+            Odstrániť
+          </Button>
+          <Button variant="secondary" size="sm" leftIcon={<Pencil className="size-3.5" />} onClick={onEdit}>
+            Upraviť
+          </Button>
+          <Button variant="secondary" size="sm" leftIcon={<BookPlus className="size-3.5" />} onClick={onToBook}>
+            Do knihy
           </Button>
         </div>
       )}

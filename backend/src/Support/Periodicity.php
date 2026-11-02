@@ -86,6 +86,17 @@ final class Periodicity
     ];
 
     /**
+     * Key of the term chain an inspection type belongs to. The preventívna
+     * prehliadka continues the chain of the retired požiarna kniha, so a client
+     * whose last term came from an old record has it fulfilled by the first
+     * prehliadka (POapp 26. 10. 2026, phase 8a). Every other type is its own chain.
+     */
+    public static function inspectionChain(string $type): string
+    {
+        return $type === 'poziarna_kniha' ? 'preventivna_prehliadka' : $type;
+    }
+
+    /**
      * Key of the term chain a training belongs to. Vstupné and Opakované are
      * one chain — the next training of either kind at the same firma /
      * prevádzka fulfils the open term — every other subtype is its own chain

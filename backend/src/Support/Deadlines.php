@@ -107,7 +107,8 @@ final class Deadlines
 
         $chains = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $chains[$row['account_id'] . '|' . $row['facility_id'] . '|' . $row['type']][] = $row;
+            // The prehliadka continues the term chain of the retired požiarna kniha.
+            $chains[$row['account_id'] . '|' . $row['facility_id'] . '|' . Periodicity::inspectionChain((string) $row['type'])][] = $row;
         }
 
         $out = [];

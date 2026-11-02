@@ -44,6 +44,7 @@ import {
   type DeviceType,
   type NewDevice,
   type PrehliadkaDetails,
+  type PersistsFrom,
 } from '@/lib/prehliadka';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { Button } from '@/components/ui/Button';
@@ -54,12 +55,8 @@ import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ItemPhotoField, usePhotoStaging } from '@/components/ItemPhotos';
 import { DefectPicker } from '@/components/DefectPicker';
-import { Chip, CheckRow, Segmented } from '@/components/prehliadka/ui';
+import { Chip, CheckRow, Segmented, TEXTAREA_CLASS } from '@/components/prehliadka/ui';
 import { saveItemMessage, saveItemWithPhotos } from '@/inspection-types/saveItem';
-
-const TEXTAREA_CLASS =
-  'w-full rounded-xl border border-ink-200 bg-white px-3 py-2.5 text-sm text-ink-800 placeholder:text-ink-400 ' +
-  'transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200';
 
 /** What the form edits; becomes the defect's `fields` on save. */
 type FormState = {
@@ -81,6 +78,8 @@ type FormState = {
   customDate: string;
   responsible: string;
   groupKey: string | null;
+  /** Kept as it is when a defect carried over with „Trvá" is edited. */
+  persistsFrom: PersistsFrom | null;
 };
 
 type Loaded = {
@@ -385,7 +384,7 @@ function DefectForm({
       deadline_date: state.choice === 'bezodkladne' ? null : deadlineDate,
       responsible: state.responsible.trim() || null,
       group_key: groupKey,
-      persists_from: null,
+      persists_from: state.persistsFrom,
     };
   }
 
@@ -422,7 +421,8 @@ function DefectForm({
         toast.success('Zapísané. Vyber ďalšie zariadenie.');
         // The prototype's reset: the device, the entrance and the free text go, the photos too (new form);
         // the floor and the place stay.
-        onNext({ ...state, groupKey, selected: {}, deviceManual: '', entrance: '', detail: '' });
+        // The next piece of equipment is a defect of its own — it is no longer the carried-over one.
+        onNext({ ...state, groupKey, selected: {}, deviceManual: '', entrance: '', detail: '', persistsFrom: null });
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
       }
@@ -1187,6 +1187,7 @@ function initialState(
       customDate: '',
       responsible: loaded.responsibleDefault,
       groupKey: null,
+      persistsFrom: null,
     };
   }
 
@@ -1249,6 +1250,7 @@ function initialState(
     customDate: defect.deadline_choice === 'custom' ? (defect.deadline_date ?? '') : '',
     responsible: defect.responsible ?? '',
     groupKey: defect.group_key,
+    persistsFrom: defect.persists_from,
   };
 }
 

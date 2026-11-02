@@ -95,6 +95,16 @@ export function trainingChain(type: string): string {
   return type === 'vstupne' || type === 'opakovane' ? 'zamestnanci' : type;
 }
 
+/**
+ * Key of the term chain an inspection type belongs to. The preventívna
+ * prehliadka continues the chain of the retired požiarna kniha, so the first
+ * prehliadka fulfils a term an old record left open. Mirrors
+ * `Periodicity::inspectionChain`.
+ */
+export function inspectionChain(type: string): string {
+  return type === 'poziarna_kniha' ? 'preventivna_prehliadka' : type;
+}
+
 /** The period the app offers first for a type, before any history is known. */
 export function defaultPeriodicity(type: string): Periodicity {
   const months = RECOMMENDED_MONTHS[type] ?? [];

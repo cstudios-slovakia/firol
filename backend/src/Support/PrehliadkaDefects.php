@@ -30,7 +30,11 @@ use Firol\Db;
  *     deadline_date     Y-m-d|null   a concrete date; null only for bezodkladne
  *     responsible       string|null
  *     group_key         string|null  shared by the rows saved with „Uložiť a ďalšie zariadenie"
- *     persists_from     null         reserved for phase 7b („Trvá")
+ *     persists_from     null | { key, inspection_id, executed_on }
+ *                                  set when the defect was carried over from the
+ *                                  last prehliadka with „Trvá" (spec 6.5); `key`
+ *                                  is the entry of `details.previous` it answers,
+ *                                  `executed_on` the date of the record it came from
  *
  * `deadline_date` is computed from the prehliadka date: here when a defect is
  * saved, and again by {@see recomputeDeadlines()} when that date changes.
@@ -88,7 +92,7 @@ final class PrehliadkaDefects
             'deadline_date' => $deadline,
             'responsible'   => self::text($body['responsible'] ?? null, 191),
             'group_key'     => self::key($body['group_key'] ?? null),
-            'persists_from' => null,
+            'persists_from' => self::persistsFrom($body['persists_from'] ?? null),
         ];
     }
 
@@ -252,6 +256,27 @@ final class PrehliadkaDefects
             $out[] = $entry;
         }
         return $out;
+    }
+
+    /**
+     * @return array{key: string, inspection_id: int, executed_on: ?string}|null
+     */
+    private static function persistsFrom(mixed $raw): ?array
+    {
+        if (!is_array($raw)) {
+            return null;
+        }
+        $key = self::key($raw['key'] ?? null);
+        $inspectionId = $raw['inspection_id'] ?? null;
+        if ($key === null || !is_int($inspectionId) || $inspectionId <= 0) {
+            throw new \InvalidArgumentException('Nedostatok, ktorý trvá z minulej prehliadky, má neplatný pôvod.');
+        }
+        $date = $raw['executed_on'] ?? null;
+        return [
+            'key'           => $key,
+            'inspection_id' => $inspectionId,
+            'executed_on'   => is_string($date) && self::isDate($date) ? $date : null,
+        ];
     }
 
     private static function catalogId(mixed $raw): ?int

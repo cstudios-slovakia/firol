@@ -582,7 +582,8 @@ export function FacilityDetailPage() {
                                                 : "bg-ink-100 text-ink-600 hover:bg-ink-200",
                                         )}
                                     >
-                                        {INSPECTION_TYPE_LABELS[t]}
+                                        {/* Retired úkon (phase 5): only old records remain, so say so. */}
+                                        {t === "poziarna_kniha" ? "Pož. kniha (archív)" : INSPECTION_TYPE_LABELS[t]}
                                     </button>
                                 ))}
                         </div>

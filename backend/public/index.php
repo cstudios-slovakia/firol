@@ -155,6 +155,12 @@ $router->post('/api/companies/{id}/book/entries',            [\Firol\Controllers
 $router->post('/api/companies/{id}/book/mark-signed',        [\Firol\Controllers\BookController::class, 'markSigned']);
 $router->post('/api/book-entries/{id}/additions',            [\Firol\Controllers\BookController::class, 'addAddition']);
 
+// Phase 6 — termíny cudzích revízií (spec 6.6). Writes are online-only.
+$router->get('/api/companies/{id}/external-terms',                 [\Firol\Controllers\ExternalTermController::class, 'index']);
+$router->post('/api/companies/{id}/external-terms',                [\Firol\Controllers\ExternalTermController::class, 'store']);
+$router->patch('/api/companies/{id}/external-terms/{term_id}',     [\Firol\Controllers\ExternalTermController::class, 'update']);
+$router->delete('/api/companies/{id}/external-terms/{term_id}',    [\Firol\Controllers\ExternalTermController::class, 'destroy']);
+
 // Chapter 9.1 — several protocols in one e-mail, from a visit or from history.
 $router->get('/api/companies/{id}/sendable-documents', [DocumentSendController::class, 'available']);
 $router->get('/api/companies/{id}/sends',              [DocumentSendController::class, 'index']);
@@ -163,6 +169,15 @@ $router->post('/api/companies/{id}/sends',             [DocumentSendController::
 $router->get('/api/facilities/{id}/devices',        [FacilityController::class, 'devices']);
 // POapp 26. 10. 2026, phase 7a — step 1 of a preventívna prehliadka.
 $router->get('/api/facilities/{id}/prehliadka-context', [FacilityController::class, 'prehliadkaContext']);
+// Phase 7b — previous defects, terms of the visit and the firm's own „vykonané činnosti".
+$router->get('/api/facilities/{id}/prehliadka-previous', [\Firol\Controllers\PrehliadkaController::class, 'previous']);
+$router->get('/api/facilities/{id}/prehliadka-terms',    [\Firol\Controllers\PrehliadkaController::class, 'terms']);
+$router->get('/api/companies/{id}/activities',                  [\Firol\Controllers\PrehliadkaController::class, 'activities']);
+$router->post('/api/companies/{id}/activities',                 [\Firol\Controllers\PrehliadkaController::class, 'addActivity']);
+$router->delete('/api/companies/{id}/activities/{activity_id}', [\Firol\Controllers\PrehliadkaController::class, 'removeActivity']);
+// Phase 8a — closing a prehliadka and what it produced.
+$router->post('/api/inspections/{id}/prehliadka-close',  [\Firol\Controllers\PrehliadkaController::class, 'close']);
+$router->get('/api/inspections/{id}/prehliadka-result',  [\Firol\Controllers\PrehliadkaController::class, 'result']);
 $router->get('/api/facilities/{id}',                [FacilityController::class, 'show']);
 $router->patch('/api/facilities/{id}',              [FacilityController::class, 'update']);
 $router->post('/api/facilities/{id}/archive',       [FacilityController::class, 'archive']);

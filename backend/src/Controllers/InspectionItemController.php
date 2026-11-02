@@ -227,10 +227,21 @@ final class InspectionItemController
         // POapp 26. 10. 2026 — a defect of a preventívna prehliadka.
         if ($type === PrehliadkaDetails::TYPE) {
             try {
-                return PrehliadkaDefects::validate(
+                $fields = PrehliadkaDefects::validate(
                     $body,
                     isset($inspection['executed_on']) ? (string) $inspection['executed_on'] : null,
                 );
+                if (isset($fields['persists_from']) && is_array($fields['persists_from'])) {
+                    $srcInspId = (int) ($fields['persists_from']['inspection_id'] ?? 0);
+                    $check = Db::pdo()->prepare(
+                        'SELECT id FROM inspections WHERE id = ? AND account_id = ? AND facility_id = ? AND archived_at IS NULL'
+                    );
+                    $check->execute([$srcInspId, (int) $inspection['account_id'], (int) $inspection['facility_id']]);
+                    if (!$check->fetchColumn()) {
+                        $fields['persists_from'] = null;
+                    }
+                }
+                return $fields;
             } catch (\InvalidArgumentException $e) {
                 self::failValidation($e->getMessage());
             }

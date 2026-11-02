@@ -335,7 +335,9 @@ final class TodayController
                            SELECT 1 FROM inspections s
                            WHERE  s.account_id  = i.account_id
                              AND  s.facility_id = i.facility_id
-                             AND  s.type        = i.type
+                             AND  (s.type = i.type
+                                   OR (s.type IN ('poziarna_kniha', 'preventivna_prehliadka')
+                                       AND i.type IN ('poziarna_kniha', 'preventivna_prehliadka')))
                              AND  s.archived_at IS NULL
                              AND  s.status      = 'finalized'
                              AND  s.is_preventive_inspection = 1

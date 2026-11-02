@@ -83,7 +83,8 @@ const TYPE_CHIPS: [InspectionType, string][] = [
     ["hydranty", "Hydranty"],
     ["oprava_ts_php", "Oprava & TS"],
     ["preventivna_prehliadka", "Prehliadka"],
-    ["poziarna_kniha", "Pož. kniha"],
+    // Retired úkon (the book is a ledger now, phase 5) — only old records remain.
+    ["poziarna_kniha", "Pož. kniha (archív)"],
     ["pu_akcieschopnost", "PU – akciesch."],
     ["pu_udrzba", "PU – údržba"],
     ["nudzove_osvetlenie", "Nú. osvetlenie"],

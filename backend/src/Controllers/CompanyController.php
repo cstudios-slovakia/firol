@@ -132,9 +132,11 @@ final class CompanyController
         $defStmt = Db::pdo()->prepare(
             'SELECT facility_id, type, periodicity_value, periodicity_unit
              FROM (
-                 SELECT i.facility_id, i.type, i.periodicity_value, i.periodicity_unit,
+                 SELECT i.facility_id,
+                        IF(i.type = "poziarna_kniha", "preventivna_prehliadka", i.type) AS type,
+                        i.periodicity_value, i.periodicity_unit,
                         ROW_NUMBER() OVER (
-                            PARTITION BY i.facility_id, i.type
+                            PARTITION BY i.facility_id, IF(i.type = "poziarna_kniha", "preventivna_prehliadka", i.type)
                             ORDER BY i.executed_on DESC, i.id DESC
                         ) AS rn
                  FROM   inspections i

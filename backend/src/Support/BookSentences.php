@@ -99,14 +99,13 @@ final class BookSentences
         'dok'     => ['kontrola dokumentácie ochrany pred požiarmi', self::FEMININE],
         'poplach' => ['cvičný požiarny poplach', self::MASCULINE],
         'prac'    => ['kontrola pracoviska', self::FEMININE],
-        'bozp_ob' => ['oboznámenie zamestnancov v oblasti BOZP', self::NEUTER],
         'ine'     => ['iný úkon', self::MASCULINE],
     ];
 
     /** @var array<string, list<string>> */
     private const MANUAL_BY_BOOK = [
         BookMapping::PO   => ['ppp', 'php', 'hyd', 'osv', 'uzv', 'unik', 'sko', 'dok', 'poplach', 'ine'],
-        BookMapping::BOZP => ['prac', 'bozp_ob', 'ine'],
+        BookMapping::BOZP => ['prac', 'ine'],
     ];
 
     /**
@@ -191,6 +190,20 @@ final class BookSentences
             $tail = '';
         }
         return $date . $verb . ' ' . $label . $where . $who . '.' . $tail;
+    }
+
+    /**
+     * The entry a closed preventívna prehliadka writes into a book (prototype
+     * `dokonci`): „Dňa 13. 10. 2026 bola vykonaná preventívna protipožiarna
+     * prehliadka v objekte X. Záznam č. PPP-2026-004. Zistených nedostatkov: 2."
+     * The BOZP side reads „preventívna prehliadka BOZP" and carries the number
+     * of the kniha BOZP record, which is its own record (spec 9.5a).
+     */
+    public static function prehliadka(string $book, string $dateIso, string $facilityName, string $number, int $defects): string
+    {
+        $what = $book === BookMapping::BOZP ? 'preventívna prehliadka BOZP' : 'preventívna protipožiarna prehliadka';
+        return 'Dňa ' . self::dateSk($dateIso) . ' bola vykonaná ' . $what . self::where([$facilityName]) . '.'
+            . ' Záznam č. ' . trim($number) . '. Zistených nedostatkov: ' . $defects . '.';
     }
 
     /** Entry by protocol number (spec 9.3b). */

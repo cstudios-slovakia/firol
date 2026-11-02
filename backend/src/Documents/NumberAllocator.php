@@ -26,6 +26,10 @@ final class NumberAllocator
         'hydranty'           => 'HYD',
         'oprava_ts_php'      => 'OPR-PHP',
         'poziarna_kniha'     => 'PK',
+        // POapp 26. 10. 2026 — záznam z preventívnej prehliadky. `PP` is taken
+        // by pracovne_prostriedky and documents has UNIQUE (account_id, number),
+        // so the record is PPP-RRRR-NNN (owner decision 1. 11. 2026).
+        'preventivna_prehliadka' => 'PPP',
         'pu_akcieschopnost'  => 'PU-AK',
         'pu_udrzba'          => 'PU-UD',
         'nudzove_osvetlenie' => 'NO',

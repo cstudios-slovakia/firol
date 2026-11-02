@@ -9,6 +9,11 @@ import { cn } from '@/lib/cn';
 import { scopeLabel, type DefectScope, type PrehliadkaScope } from '@/lib/prehliadka';
 import { Badge } from '@/components/ui/Badge';
 
+/** A multi-line text field, styled like `Input`. */
+export const TEXTAREA_CLASS =
+  'w-full rounded-xl border border-ink-200 bg-white px-3 py-2.5 text-sm text-ink-800 placeholder:text-ink-400 ' +
+  'transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200';
+
 /** A tile the technician taps instead of typing (entrance, floor, place, deadline). */
 export function Chip({
   active,
@@ -141,7 +146,7 @@ export function Segmented<T extends string>({
   );
 }
 
-/** „Krok N z 3" bars. Step 3 (Termíny) arrives with phase 7b. */
+/** „Krok N z 3" bars. */
 export function StepBars({ step }: { step: 1 | 2 | 3 }) {
   return (
     <div className="mt-2 flex gap-1.5" role="img" aria-label={`Krok ${step} z 3`}>

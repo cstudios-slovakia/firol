@@ -1316,10 +1316,10 @@ Points 11, 12 and 13 of the 2. 10. report (cancelled then for budget) are back i
 | 3 | Školenia (osobné číslo, bulk, edit, take-over, hliadky, platnosť override) | ✅ |
 | 4 | Defect catalogue (27 items + own items) | ✅ |
 | 5 | Požiarna kniha and kniha BOZP as ledgers; old book úkony retired | 🟨 built, API + 360 px iframe checked; not accepted |
-| 6 | Termíny split by book, cudzie revízie | ⬜ |
+| 6 | Termíny split by book, cudzie revízie | 🟨 built; HTTP routes, 360 px, PDF, backup/restore, migration 071 verified; not accepted |
 | 7a | Preventívna prehliadka: step 1, walk-through, defect entry | 🟨 built, API + 360 px iframe checked; not accepted |
-| 7b | Preventívna prehliadka: previous defects, step 3, uzavretie | ⬜ |
-| 8a | Closing: PP record, BOZP zápis, book entries | ⬜ |
+| 7b | Preventívna prehliadka: previous defects, step 3, uzavretie | 🟨 built, API + 360 px iframe checked; not accepted |
+| 8a | Closing: PP record, BOZP zápis, book entries | 🟨 built, API + PDF + 360 px verified; not accepted |
 | 8b | Concept checks, visits, Dnes, backup | ⬜ |
 | 9 | Acceptance pass, manual | ⬜ |
 
@@ -1377,11 +1377,61 @@ passed; the throwaway account was removed. Migration 060 is applied on the local
   device search over 8, "Uložiť a ďalšie zariadenie" (shared `group_key`). Entry points: prevádzka detail,
   picker, visit planner; "Kniha kontrol BOZP" starts the BOZP preset (also from the visit planner). Offline: all
   writes queue (simulated offline with 2 photos synced; real airplane mode and a physical camera not
-  tested). Cannot be closed or generated yet (Phase 8a). `poziarna_kniha` still in `InspectionsListPage`
-  `TYPE_CHIPS` and the `FacilityDetailPage` type filter.
-- **Open before 8a:** the number prefix `PP` is already used by `pracovne_prostriedky`
-  (`documents` has `UNIQUE (account_id, number)`), so D5's prefix for the prehliadka record must change. The
-  prefix is not registered in `NumberAllocator` yet. Also not run: migrations on a copy of the current DB.
+  tested). Cannot be closed or generated yet (Phase 8a).
+- **Phase 6** (1. 11. 2026) — migration `071` (`company_external_terms`; `072`–`075` unused). Per firma with an
+  optional `facility_id` (Q7); the book is an explicit field of the term, never derived from the name.
+  `ExternalTermController` (4 routes, writes online-only, delete = archive), `Support/ExternalTerms`.
+  `ClientTerms::forProtocol(…, book)`: only the record's own book (trainings are PO), external terms merged in,
+  everything sorted by validity (no date last), external rows print the full date and "nedoložené" without a
+  valid-until, own úkony month/year. `kniha_bozp` passes `bozp`; already issued records keep their frozen
+  snapshot. `BookOffers` adds the PO-only "Termíny ďalších kontrol" offer (`source = termin`, own úkony only,
+  due date = last úkon + its real periodicity, not offered again while an entry has the same sentence).
+  "Do knihy" from a term writes `source = revizia` with an editable "Klient bol upozornený na termín: …"
+  (the prototype's trailing sentence was left out). Backup: `Writer` / `Restorer` carry `external_terms`
+  (merge key firma + prevádzka + book + name + dates); `AccountPurge` cascades by FK. External terms do not
+  appear in the calendar, Dnes or client notices (spec silent). Verified across Steps 1–6: all 4 external-term
+  endpoints over HTTP and book entries (`source=revizia`, `source=termin`), validation errors (empty name,
+  invalid book, invalid date -> 422, foreign `facility_id` -> 404), tenant isolation (other tenant company -> 404),
+  archived company mutations (409), DELETE archiving the term; 360 px mobile layout (no overflow, state badges,
+  add/edit/delete flows, preselection from `REVIZIE` suggestions, editable proposal sentence on "Do knihy" without
+  "bez nedostatkov" checkbox, PO-only "Termíny ďalších kontrol" offer adding once and not reappearing while sentence
+  is unchanged); rendered `kniha_bozp` PDF (only BOZP terms/úkony print, sorted by validity, full date on external
+  rows, month/year on own úkony, "nedoložené" on missing valid_until, frozen `_client_terms` snapshot preserved on
+  re-render); backup → restore round trip and `AccountPurge` FK cascade; migration `071` verified on a scratch DB copy
+  (alongside 061–063, 066); code review verified including the `earliestDue` rule for `upcoming()` showing the
+  earliest due date per type across prevádzky. Migrations 061–063 had not been applied to the dev DB before this
+  session (the earlier agent used a scratch DB); `migrate.php` applied 061–063 + 071.
+- **Phase 7b** (1. 11. 2026) — migration `066` (`company_activities`: the firm's own „vykonané činnosti", per firma and
+  set `po` / `bozp`, removal = archive). `details` gains `activities_po`, `activities_bozp`, `previous`, `term_overrides`,
+  `present`, `handed_over` (validated in `PrehliadkaDetails`; a PATCH still replaces the whole object, so every writer
+  sends all keys — `useDetailsSaver` coalesces the writes). `persists_from` on a defect is now
+  `{key, inspection_id, executed_on}`. New `PrehliadkaController`: `GET /api/facilities/{id}/prehliadka-previous`
+  (defects of the last finalized prehliadka, else of the last old `poziarna_kniha` record — text and deadline only),
+  `GET …/prehliadka-terms` (trainings + last periodicity per riadna kontrola), `GET/POST/DELETE /api/companies/{id}/activities`
+  (writes online-only). Screens: Krok 2 shows „Nedostatky z minulej prehliadky" with the three states; **Trvá**
+  copies the defect into this prehliadka (own deadline chosen from today's date, `persists_from` set) and is only
+  real while that defect exists, **Dôvod zanikol** is refused without its sentence (client and server);
+  Krok 3 `/prehliadky/:id/terminy` (Vykonané činnosti per chosen record — asked twice for „obidve"; „Doplnené samy" with
+  „Prepísať"; the firm's external terms with the Phase 6 form; „Doplniť školenie" when no PO training exists);
+  `/prehliadky/:id/uzavretie` (summary, Prítomní, Prevzal za organizáciu prefilled by the Phase 2 resolver; both
+  required). The close button is disabled — closing is Phase 8a. Backup/restore of `company_activities` checked
+  (merge skips, replace restores). Decisions taken: a previous defect is offered only when the record it belongs to is
+  done today (`ob` fits either; a BOZP-only defect is not shown in a PO-only prehliadka); BOZP „Preventívna prehliadka BOZP"
+  gets its own automatic-term row next to the PO one; the oboznámenie BOZP is the only BOZP training listed.
+  **Notes fixed in 8a:** Foreign inspection IDs in `details.previous` and `persists_from` scoped to active account and facility; `Restorer` now remaps both `inspection_items.fields.persists_from` and `inspections.details.previous` on backup restore; "Nové nedostatky" count on `PrehliadkaClosePage` excludes carried-over defects; offline "Trvá" maintains optimistic state so defects do not revert to waiting; `useDetailsSaver` flushes writes and syncs cache before step navigation.
+- **Phase 8a** (1.–2. 11. 2026) — transactional close, PDF rendering, book entries, and result screen (`PrehliadkaCloser`, `PrehliadkaRecord`, `PrehliadkaDefectsBlock`, `preventivna_prehliadka.php`).
+  - **Closing & Numbers**: Allocates prefix `PPP-RRRR-NNN` for PO (`NumberAllocator::PREVENTIVNA_PREHLIADKA`), child `kniha_bozp` `BOZP-RRRR-NNN` for BOZP. Transactional commit; failure unlinks any generated PDF files from storage. Missing present (422), missing handed over (422), missing certificate (PO requires `cert_general`, BOZP requires `cert_bt` -> 422), archived company (409), double close (409).
+  - **Book entries**: BOZP writes entry automatically. PO writes entry when `book_entry = true`. When 0 PO defects, writes zero-defect statement (`no_defects_statement = 1`) and prints `ZISTENIA` on book sheet. When `book_entry = false`, offers "Pridať do požiarnej knihy" on the result screen. `PrehliadkaRecord::bookLines()` formats numbered defect lines for PO book entries.
+  - **BOZP-only close**: Issues no PP document, issues child `BOZP-RRRR-NNN` document and entry, finalizes parent prehliadka with `is_preventive_inspection = 0` (does not advance PO calendar).
+  - **PDF layout (AC 19 & 2_Vzor_hotoveho_zaznamu.pdf)**: Layout order: title (`bytového domu` suffix for BD), Správca (with seat address) vs Právnická osoba (with IČO), Adresa, Dátum PPP, Zhotoviteľ, Popis objektu (`SCOPE_DOM` vs `SCOPE_FIRMA`), Hlavné vypínače a uzávery (only filled rows), Vykonané činnosti (custom tagged `(vlastná činnosť)`, trailing `CHECKED` + `CHECKED_DOM` sentence), Zistené nedostatky (grouped by `group_key`, places merged as `"Vchod 2 · 4. NP, 3. NP a 2. NP · chodba"`, `NEDOSTATOK PRETRVÁVA` tag, `N fotografie v prílohe`), Nedostatky z predchádzajúcej prehliadky (`odstránené`, `trvá — prechádza do bodu N`, `dôvod zanikol — ...`), Termíny (PO book terms + automatic terms + `term_overrides` marked `"prepísané rukou"` with full date), Záver box (prekonzultované s prítomnými, zodpovedá správca/prevádzkovateľ, book seq sentence when written), Signatures (`Za vlastníka / správcu prevzal` vs `Za právnickú osobu prevzal`), Photo appendix captions matching point numbers.
+  - **Re-opening & Re-closing**: `InspectionController::unlock` unlocks both parent PPP and child BOZP, unlinking both PDFs; standalone unlock of child kniha_bozp throws 422. Re-closing while book entry is unsigned updates entry in place with new protocol number. Re-closing after entry is signed by manager preserves signed text, appends new protocol number to `protocol_numbers`, and inserts reissue entry into `book_entry_additions`.
+  - **Handover signature**: `HandoverDialog` re-renders document into version 2 while preserving frozen snapshot data.
+  - **Frontend**: `PrehliadkaClosePage.tsx`, `PrehliadkaResultPage.tsx`, `api/prehliadka.ts`, `lib/prehliadka.ts`, responsive at 360 px width.
+  - **Verification**: 22 automated end-to-end backend tests covering guards, BD close, Firma close, BOZP-only close, zero-defect book entries, unlock and re-closing, and handover signatures passed cleanly. Clean build (`npm run build` and `php -l`).
+- **Decided 1. 11. 2026:** the prehliadka record's number prefix is `PPP` (`PP` belongs to
+  `pracovne_prostriedky`; `documents` has `UNIQUE (account_id, number)`). Register it in `NumberAllocator` in
+  Phase 8a. The BOZP "Podľa čísla" kind `bozp_ob` was dropped (not in the prototype's `KN_RUCNE`).
+  "Ako naposledy" keeps reading finalized prehliadky only. Still not run: migrations on a copy of the current DB.
 
 ---
 

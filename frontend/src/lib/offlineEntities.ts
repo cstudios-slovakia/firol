@@ -679,6 +679,13 @@ export function autoOptimistic(
     if (method === 'POST') {
       const newId = mintTempId();
       const ts = nowIso();
+      const itemPlaceholder: InspectionItem = {
+        id: newId,
+        position: 1,
+        fields: (body as Record<string, unknown>) ?? {},
+        created_at: ts,
+        updated_at: ts,
+      };
       const patch: CachePatch = {
         path: detailPath,
         apply: (current) => {
@@ -696,6 +703,7 @@ export function autoOptimistic(
       };
       return {
         patches: [patch],
+        returns: { item: itemPlaceholder },
         create: { clientId: newId, idPath: 'item.id' },
         label: 'Nová položka',
       };

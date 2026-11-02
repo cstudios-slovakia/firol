@@ -120,9 +120,24 @@ final class DocumentController
         // generate here, so a visit's „generovať všetky" reports it as skipped.
         if ((string) $inspection['type'] === 'preventivna_prehliadka') {
             return [
-                'error' => 'Preventívna prehliadka sa uzatvára samostatne — uzavretie ešte nie je dostupné.',
+                'error' => 'Preventívna prehliadka sa uzatvára samostatne — otvor ju a použi „Uzavrieť".',
                 'status' => 422,
             ];
+        }
+
+        // The kniha BOZP record of a prehliadka is issued together with it. While
+        // the prehliadka is open again its BOZP record is a draft too, and issuing
+        // it alone would put a number on content the prehliadka is about to change.
+        if ((string) $inspection['type'] === 'kniha_bozp' && !empty($inspection['source_inspection_id'])) {
+            $src = Db::pdo()->prepare('SELECT type, status FROM inspections WHERE id = ? AND account_id = ?');
+            $src->execute([(int) $inspection['source_inspection_id'], $accountId]);
+            $source = $src->fetch();
+            if ($source && $source['type'] === 'preventivna_prehliadka' && $source['status'] !== 'finalized') {
+                return [
+                    'error' => 'Zápis do knihy BOZP vzniká z preventívnej prehliadky — uzavri prehliadku.',
+                    'status' => 422,
+                ];
+            }
         }
 
         $items = self::loadItems($inspectionId);
@@ -211,6 +226,7 @@ final class DocumentController
                 (int) $inspection['facility_id'],
                 (string) $inspection['executed_on'],
                 $insType,
+                \Firol\Support\BookMapping::BOZP,
             );
             $frozen = (array) ($items[0]['fields'] ?? []);
             $frozen[\Firol\Support\ClientTerms::SNAPSHOT_KEY] = $payload['client_terms'];
@@ -646,7 +662,7 @@ final class DocumentController
     /**
      * @return array<string, mixed>
      */
-    private static function loadInspectionForGenerate(?int $accountId, int $inspectionId): array
+    public static function loadInspectionForGenerate(?int $accountId, int $inspectionId): array
     {
         // `source_number` is the protocol number of the inspection this one grew
         // out of (change request 2.1) — printed as "Nadväzuje na kontrolu" on the
@@ -684,7 +700,7 @@ final class DocumentController
     }
 
     /** @return list<array<string, mixed>> */
-    private static function loadItems(int $inspectionId): array
+    public static function loadItems(int $inspectionId): array
     {
         $stmt = Db::pdo()->prepare(
             'SELECT id, position, fields FROM inspection_items
@@ -712,6 +728,26 @@ final class DocumentController
      */
     private static function buildPhotoAppendix(int $inspectionId, string $type, array $items): array
     {
+        // A preventívna prehliadka's defects are items with photos of their own;
+        // both of its records caption them with the number the point has there.
+        if ($type === 'preventivna_prehliadka') {
+            return \Firol\Support\PrehliadkaRecord::photoAppendix(
+                $inspectionId,
+                \Firol\Support\PrehliadkaRecord::PO,
+                $items,
+            );
+        }
+        $fromPrehliadka = $type === 'kniha_bozp' && is_array($items[0]['fields']['prehliadka'] ?? null)
+            ? (int) ($items[0]['fields']['prehliadka']['source_inspection_id'] ?? 0)
+            : 0;
+        if ($fromPrehliadka > 0) {
+            return \Firol\Support\PrehliadkaRecord::photoAppendix(
+                $fromPrehliadka,
+                \Firol\Support\PrehliadkaRecord::BOZP,
+                self::loadItems($fromPrehliadka),
+            );
+        }
+
         $pathsByItem = InspectionPhotoController::fullSizePathsByItem($inspectionId);
         if ($pathsByItem === []) {
             return [];
@@ -812,7 +848,7 @@ final class DocumentController
      * @param list<array<string, mixed>> $items
      * @return array<string, mixed>
      */
-    private static function buildPayload(
+    public static function buildPayload(
         int $accountId,
         int $userId,
         array $inspection,
@@ -1344,6 +1380,27 @@ final class DocumentController
                 $payload['photos'] = [];
             }
         }
+        // The PO record of a prehliadka (phase 8a): the same document again, with
+        // the Termíny / previous-defect tables and the facility text as issued.
+        if ((string) $inspection['type'] === 'preventivna_prehliadka') {
+            $rawDetails = \Firol\Support\InspectionDetails::decode($inspection['details'] ?? null) ?? [];
+            try {
+                $details = \Firol\Support\PrehliadkaDetails::validate($rawDetails);
+            } catch (\InvalidArgumentException) {
+                $details = $rawDetails;
+            }
+            $block = \Firol\Support\PrehliadkaRecord::poBlock(
+                $accountId,
+                $inspection,
+                $items,
+                $details,
+                $includePhotos,
+                \Firol\Support\PrehliadkaRecord::frozen($rawDetails),
+                null,
+            );
+            unset($block['_issued']);
+            $payload['prehliadka'] = $block;
+        }
         if ((string) $inspection['type'] === 'kniha_bozp') {
             $frozen = $items[0]['fields'][\Firol\Support\ClientTerms::SNAPSHOT_KEY] ?? null;
             $payload['client_terms'] = is_array($frozen)
@@ -1354,7 +1411,14 @@ final class DocumentController
                     (int) $inspection['facility_id'],
                     (string) $inspection['executed_on'],
                     'kniha_bozp',
+                    \Firol\Support\BookMapping::BOZP,
                 );
+            // The person who took the prehliadka over for the organisation signs
+            // the BOZP record's client column (its „Za organizáciu" cell).
+            $handed = $items[0]['fields']['prehliadka']['handed_over'] ?? null;
+            if (is_array($handed) && !empty($handed['name'])) {
+                $payload['company']['approver'] = \Firol\Support\PrehliadkaRecord::signerName($handed);
+            }
         }
         return $payload;
     }

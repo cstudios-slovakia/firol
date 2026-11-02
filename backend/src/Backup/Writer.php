@@ -53,6 +53,10 @@ final class Writer
             'defect_catalog' => self::defectCatalog($accountId, $pdo),
             // Phase 5 — the požiarna kniha and kniha BOZP entries with their additions.
             'book_entries' => self::bookEntries($accountId, $pdo),
+            // Phase 6 — termíny cudzích revízií of each firm.
+            'external_terms' => self::externalTerms($accountId, $pdo),
+            // Phase 7b — the firms' own „vykonané činnosti" of the preventívna prehliadka.
+            'company_activities' => self::companyActivities($accountId, $pdo),
             // Chapter 11.3 — which deadlines already had their automatic
             // client notice, so a restore does not send it a second time.
             'deadline_notices' => self::deadlineNotices($accountId, $pdo),
@@ -67,6 +71,8 @@ final class Writer
             'tasks'       => count($manifest['tasks']),
             'defect_catalog' => count($manifest['defect_catalog']),
             'book_entries' => count($manifest['book_entries']),
+            'external_terms' => count($manifest['external_terms']),
+            'company_activities' => count($manifest['company_activities']),
             'photos'      => count(array_filter(array_keys($files), static fn (string $e): bool => str_starts_with($e, 'photos/') && !str_ends_with($e, '_t.jpg'))),
         ];
 
@@ -511,6 +517,54 @@ final class Writer
             $out[] = $e;
         }
         return $out;
+    }
+
+    /**
+     * Termíny cudzích revízií (phase 6) of the active firms. Archived terms are
+     * left out, so a restore never brings a removed term back.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function externalTerms(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT t.company_id, t.facility_id, t.book, t.name, t.performed_by,
+                    t.done_on, t.valid_until, t.note, t.created_at, u.email AS created_by_email
+             FROM   company_external_terms t
+             JOIN   companies c ON c.id = t.company_id AND c.archived_at IS NULL
+             LEFT   JOIN users u ON u.id = t.created_by_user_id
+             WHERE  t.account_id = ? AND t.archived_at IS NULL
+             ORDER  BY t.company_id, t.id'
+        );
+        $stmt->execute([$accountId]);
+        return array_map(static function (array $r): array {
+            $r['company_id']  = (int) $r['company_id'];
+            $r['facility_id'] = $r['facility_id'] !== null ? (int) $r['facility_id'] : null;
+            return $r;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * The firms' own „vykonané činnosti" (phase 7b) of the active firms.
+     * Removed ones are left out, so a restore never brings them back.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function companyActivities(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT a.company_id, a.kind, a.label, a.created_at, u.email AS created_by_email
+             FROM   company_activities a
+             JOIN   companies c ON c.id = a.company_id AND c.archived_at IS NULL
+             LEFT   JOIN users u ON u.id = a.created_by_user_id
+             WHERE  a.account_id = ? AND a.archived_at IS NULL
+             ORDER  BY a.company_id, a.id'
+        );
+        $stmt->execute([$accountId]);
+        return array_map(static function (array $r): array {
+            $r['company_id'] = (int) $r['company_id'];
+            return $r;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     /**

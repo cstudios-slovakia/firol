@@ -16,6 +16,7 @@
  * @var array  $photos
  */
 use Firol\Pdf\DefectsTable;
+use Firol\Pdf\PrehliadkaDefectsBlock;
 use Firol\Pdf\ProtocolLayout;
 use Firol\Support\BozpRecords;
 use Firol\Support\Defects;
@@ -30,6 +31,11 @@ $activities = array_merge(
     array_values(array_filter((array) ($f['custom_activities'] ?? []), 'is_string')),
 );
 $defects = Defects::collect($items);
+// A record that grew out of a preventívna prehliadka (spec 9.5a) carries its
+// structured defects and the previous-defect table; they print in the same
+// block as on the PO record. `$defects` stays the plain list for the counts.
+$fromPrehliadka = is_array($f['prehliadka'] ?? null) ? $f['prehliadka'] : null;
+$prehliadkaPoints = $fromPrehliadka !== null ? (array) ($fromPrehliadka['points'] ?? []) : [];
 $result = (string) ($f['result'] ?? '');
 $terms = isset($client_terms) && is_array($client_terms) ? $client_terms : [];
 ?>
@@ -41,12 +47,15 @@ $terms = isset($client_terms) && is_array($client_terms) ? $client_terms : [];
 <?= $doc->band('Prehliadnuté pracoviská') ?>
 <?= $doc->textBox(implode(', ', $workspaces)) ?>
 
+<?php // Nothing ticked on a prehliadka → the section is left out (spec 6.4). ?>
+<?php if ($activities !== [] || $fromPrehliadka === null): ?>
 <?= $doc->band('Vykonané činnosti') ?>
 <table class="grid">
   <?php foreach ($activities as $activity): ?>
     <tr><td style="width:5%" class="check">✓</td><td><?= $e($activity) ?></td></tr>
   <?php endforeach ?>
 </table>
+<?php endif ?>
 
 <?php if ($terms !== []): ?>
   <?= $doc->band('Termíny a kontroly') ?>
@@ -62,7 +71,7 @@ $terms = isset($client_terms) && is_array($client_terms) ? $client_terms : [];
     <tbody>
       <?php foreach ($terms as $t): ?>
         <tr>
-          <td><?= $e($t['label']) ?></td>
+          <td><?= $e($t['label']) ?><?= !empty($t['overridden']) ? '<br><span class="muted" style="font-size:7.5pt;">prepísané rukou</span>' : '' ?></td>
           <td><?= $e($t['done']) ?></td>
           <td><?= $e($t['valid_until']) ?></td>
           <td class="<?= $e((string) ($t['state_tone'] ?? '')) ?>"><?= $e($t['state'] ?? '—') ?></td>
@@ -72,7 +81,12 @@ $terms = isset($client_terms) && is_array($client_terms) ? $client_terms : [];
   </table>
 <?php endif ?>
 
-<?= DefectsTable::render($defects, ['photo_note' => !empty($photos)]) ?>
+<?php if ($fromPrehliadka !== null): ?>
+  <?= PrehliadkaDefectsBlock::render($prehliadkaPoints, ['photos' => !empty($photos)]) ?>
+  <?= PrehliadkaDefectsBlock::previous((array) ($fromPrehliadka['previous'] ?? [])) ?>
+<?php else: ?>
+  <?= DefectsTable::render($defects, ['photo_note' => !empty($photos)]) ?>
+<?php endif ?>
 
 <?= $doc->band('Výsledok') ?>
 <table class="verdict">

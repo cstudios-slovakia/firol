@@ -12,7 +12,7 @@ import {
 import { Trainings, type TrainingListItem } from '@/api/trainings';
 import { SKOLENIE_PO, Visits, type VisitType } from '@/api/visits';
 import { ApiError } from '@/lib/api';
-import { daysUntilNext, trainingChain } from '@/lib/periodicity';
+import { daysUntilNext, inspectionChain, trainingChain } from '@/lib/periodicity';
 import {
   SECTIONS, SECTION_COLORS, SECTION_INSPECTION_TYPES, SECTION_LABELS, TRAINING_SECTION,
   RETIRED_FOR_NEW_UKON, startableInspectionTypes,
@@ -160,8 +160,12 @@ export function VisitNewPage() {
     const latest = new Map<InspectionType, InspectionListItem>();
     for (const it of history) {
       if (it.status !== 'finalized' || !it.executed_on) continue;
-      const current = latest.get(it.type);
-      if (!current || (current.executed_on ?? '') < it.executed_on) latest.set(it.type, it);
+      // A BOZP-only prehliadka advances no fire-protection term (phase 8a).
+      if (!it.is_preventive_inspection) continue;
+      // The prehliadka continues the chain of the retired požiarna kniha.
+      const chain = inspectionChain(it.type) as InspectionType;
+      const current = latest.get(chain);
+      if (!current || (current.executed_on ?? '') < it.executed_on) latest.set(chain, it);
     }
     for (const [type, it] of latest) {
       const days = daysUntilNext(it.executed_on, periodicityOf(it));

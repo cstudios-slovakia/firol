@@ -73,6 +73,17 @@ final class BookOffers
                 $attendees = array_sum(array_map(static fn (array $r): int => (int) $r['count'], $rows));
                 $text = BookSentences::training($first['type'], $first['date'], $facilities, $numbers, $attendees);
                 $title = DocumentController::TRAINING_TYPE_LABELS[$first['type']] ?? $first['type'];
+            } elseif ($first['type'] === 'preventivna_prehliadka' && count($rows) === 1 && count($numbers) === 1) {
+                // A prehliadka that was not written into the book on close: the same
+                // sentence the automatic entry would have carried.
+                $text = BookSentences::prehliadka(
+                    BookMapping::PO,
+                    $first['date'],
+                    (string) ($facilities[0] ?? ''),
+                    $numbers[0],
+                    PrehliadkaRecord::pointCount((int) $first['id'], PrehliadkaRecord::PO),
+                );
+                $title = BookSentences::ukonTitle($first['type']);
             } else {
                 $count = count($rows) === 1 ? (int) $first['count'] : null;
                 $text = BookSentences::ukon($first['type'], $first['date'], $facilities, $numbers, $count);
@@ -99,7 +110,65 @@ final class BookOffers
         }
 
         usort($offers, static fn (array $a, array $b): int => [$b['date'], $a['title']] <=> [$a['date'], $b['title']]);
+
+        // Phase 6 — „Termíny ďalších kontrol", requested for the požiarna kniha only.
+        $terms = self::termsOffer($accountId, $companyId, $book, $facilityId);
+        if ($terms !== null) {
+            array_unshift($offers, $terms);
+        }
         return $offers;
+    }
+
+    /**
+     * The next due dates of the firm's own kontroly as one proposed sentence
+     * (prototype `knihaTerminy`, `source = termin`). Offered only while no entry
+     * of this book carries exactly that sentence — an unchanged sentence is not
+     * offered again, a new úkon changes it and so brings the offer back.
+     *
+     * @return array<string, mixed>|null
+     */
+    private static function termsOffer(int $accountId, int $companyId, string $book, ?int $facilityId): ?array
+    {
+        if ($book !== BookMapping::PO) {
+            return null;
+        }
+        $today = date('Y-m-d');
+        $upcoming = ClientTerms::upcoming($accountId, $companyId, $facilityId, $today, $book);
+        if ($upcoming === []) {
+            return null;
+        }
+
+        $parts = array_map(
+            static fn (array $t): string => mb_strtolower($t['label']) . ' do ' . ExternalTerms::skDate($t['valid']),
+            $upcoming,
+        );
+        $text = 'Termíny ďalších kontrol: ' . implode(', ', $parts) . '.';
+
+        // Any scope of this firm's book, like the protocol numbers.
+        $seen = Db::pdo()->prepare(
+            'SELECT 1 FROM book_entries
+             WHERE  account_id = ? AND company_id = ? AND book = ? AND source = "termin" AND `text` = ?
+             LIMIT  1'
+        );
+        $seen->execute([$accountId, $companyId, $book, $text]);
+        if ($seen->fetchColumn() !== false) {
+            return null;
+        }
+
+        return [
+            'key'              => 'termin|' . md5($text),
+            'kind'             => 'termin',
+            'type'             => 'termin',
+            'title'            => 'Termíny ďalších kontrol',
+            'date'             => $today,
+            'facilities'       => [],
+            'merged'           => 0,
+            'protocol_numbers' => [],
+            'inspection_ids'   => [],
+            'training_ids'     => [],
+            'text'             => $text,
+            'has_defects'      => false,
+        ];
     }
 
     /**

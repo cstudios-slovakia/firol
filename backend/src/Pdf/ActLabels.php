@@ -19,6 +19,7 @@ final class ActLabels
         'hydranty'           => 'Kontrola požiarnych hydrantov',
         'ts_hadic'           => 'Tlaková skúška hadíc',
         'poziarna_kniha'     => 'Zápis do požiarnej knihy',
+        'preventivna_prehliadka' => 'Preventívna protipožiarna prehliadka',
         'pu_akcieschopnost'  => 'Kontrola akcieschopnosti požiarnych uzáverov',
         'pu_udrzba'          => 'Prevádzková údržba požiarnych uzáverov',
         'nudzove_osvetlenie' => 'Kontrola núdzového osvetlenia',

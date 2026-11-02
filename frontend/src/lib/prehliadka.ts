@@ -18,6 +18,12 @@ export const prehliadkaPath = (id: number): string => `/prehliadky/${id}`;
 export const prehliadkaSetupPath = (id: number): string => `/prehliadky/${id}/nastavenie`;
 export const defectNewPath = (id: number): string => `/prehliadky/${id}/nedostatok/new`;
 export const defectPath = (id: number, itemId: number): string => `/prehliadky/${id}/nedostatok/${itemId}`;
+/** Krok 3 — Termíny a činnosti. */
+export const prehliadkaTermsPath = (id: number): string => `/prehliadky/${id}/terminy`;
+/** Uzavretie — the summary before the prehliadka is closed. */
+export const prehliadkaClosePath = (id: number): string => `/prehliadky/${id}/uzavretie`;
+/** What a closed prehliadka produced — documents, book entries (phase 8a). */
+export const prehliadkaResultPath = (id: number): string => `/prehliadky/${id}/vysledok`;
 
 /** Start of a prehliadka at a prevádzka; `preset=bozp` is „Kniha kontrol BOZP" (D2). */
 export function startPrehliadkaPath(args: {
@@ -92,11 +98,41 @@ export type NewDevice = {
   location: string | null;
 };
 
+/** What became of a defect of the last prehliadka (spec 6.5). */
+export type PreviousStatus = 'ok' | 'trva' | 'zanik';
+
+export const PREVIOUS_STATUS_LABELS: Record<PreviousStatus, string> = {
+  ok: 'Odstránené',
+  trva: 'Trvá',
+  zanik: 'Dôvod zanikol',
+};
+
+/** One defect of the last prehliadka and the technician's answer; `status` null = čaká na overenie. */
+export type PreviousEntry = {
+  key: string;
+  kind: 'prehliadka' | 'poziarna_kniha';
+  source_inspection_id: number;
+  source_item_id: number | null;
+  status: PreviousStatus | null;
+  reason: string | null;
+};
+
+/** A person written on the record: who was present, who took it over. */
+export type PrehliadkaPerson = { name: string; role: string | null };
+
 export type PrehliadkaDetails = {
   scope: PrehliadkaScope;
   routine: DeviceType[];
   book_entry: boolean;
   new_devices: NewDevice[];
+  /** „Vykonané činnosti" ticked for the PO record / the BOZP record (spec 6.4) — never mixed. */
+  activities_po: string[];
+  activities_bozp: string[];
+  previous: PreviousEntry[];
+  /** Hand-written validity over an automatic term, by term key (spec 6.6). */
+  term_overrides: Record<string, string>;
+  present: PrehliadkaPerson[];
+  handed_over: PrehliadkaPerson | null;
 };
 
 /** Reads `inspection.details` defensively — it is JSON of whichever version wrote it. */
@@ -106,11 +142,53 @@ export function parseDetails(raw: Record<string, unknown> | null | undefined): P
     ? (raw!.routine as unknown[]).filter((t): t is DeviceType => DEVICE_TYPES.includes(t as DeviceType))
     : [];
   const newDevices = Array.isArray(raw?.new_devices) ? (raw!.new_devices as NewDevice[]) : [];
+  const strings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+  const person = (v: unknown): PrehliadkaPerson | null => {
+    if (!v || typeof v !== 'object') return null;
+    const p = v as { name?: unknown; role?: unknown };
+    return typeof p.name === 'string' && p.name.trim() !== ''
+      ? { name: p.name, role: typeof p.role === 'string' && p.role.trim() !== '' ? p.role : null }
+      : null;
+  };
+  const previous = Array.isArray(raw?.previous)
+    ? (raw!.previous as Partial<PreviousEntry>[]).flatMap((e): PreviousEntry[] =>
+        typeof e?.key === 'string' && typeof e.source_inspection_id === 'number'
+          ? [
+              {
+                key: e.key,
+                kind: e.kind === 'poziarna_kniha' ? 'poziarna_kniha' : 'prehliadka',
+                source_inspection_id: e.source_inspection_id,
+                source_item_id: typeof e.source_item_id === 'number' ? e.source_item_id : null,
+                status: e.status === 'ok' || e.status === 'trva' || e.status === 'zanik' ? e.status : null,
+                reason: typeof e.reason === 'string' ? e.reason : null,
+              },
+            ]
+          : [],
+      )
+    : [];
+  // An empty map arrives as `[]` from PHP; anything but a plain object reads as none.
+  const rawOverrides = raw?.term_overrides;
+  const overrides: Record<string, string> = {};
+  if (rawOverrides && typeof rawOverrides === 'object' && !Array.isArray(rawOverrides)) {
+    for (const [k, v] of Object.entries(rawOverrides)) if (typeof v === 'string') overrides[k] = v;
+  }
   return {
     scope: { po: scope.po === true, bozp: scope.bozp === true },
     routine,
     book_entry: raw?.book_entry === true,
     new_devices: newDevices,
+    activities_po: strings(raw?.activities_po),
+    activities_bozp: strings(raw?.activities_bozp),
+    previous,
+    term_overrides: overrides,
+    present: Array.isArray(raw?.present)
+      ? (raw!.present as unknown[]).flatMap((p) => {
+          const parsed = person(p);
+          return parsed ? [parsed] : [];
+        })
+      : [],
+    handed_over: person(raw?.handed_over),
   };
 }
 
@@ -122,6 +200,12 @@ export function detailsPayload(d: PrehliadkaDetails): Record<string, unknown> {
     // The checkbox is about the požiarna kniha only (spec 9.5a).
     book_entry: d.scope.po && d.book_entry,
     new_devices: d.new_devices,
+    activities_po: d.activities_po,
+    activities_bozp: d.activities_bozp,
+    previous: d.previous,
+    term_overrides: d.term_overrides,
+    present: d.present,
+    handed_over: d.handed_over,
   };
 }
 
@@ -337,7 +421,16 @@ export type DefectFields = {
   deadline_date: string | null;
   responsible: string | null;
   group_key: string | null;
-  persists_from: null;
+  /** Set when the defect was carried over from the last prehliadka with „Trvá" (spec 6.5). */
+  persists_from: PersistsFrom | null;
+};
+
+export type PersistsFrom = {
+  /** The `details.previous` entry this defect answers. */
+  key: string;
+  inspection_id: number;
+  /** The date of the record it came from. */
+  executed_on: string | null;
 };
 
 /** Reads an item's fields as a defect; null for something that is not one. */
@@ -370,7 +463,18 @@ export function parseDefect(fields: Record<string, unknown> | null | undefined):
     deadline_date: typeof fields.deadline_date === 'string' ? fields.deadline_date : null,
     responsible: typeof fields.responsible === 'string' ? fields.responsible : null,
     group_key: typeof fields.group_key === 'string' ? fields.group_key : null,
-    persists_from: null,
+    persists_from: parsePersistsFrom(fields.persists_from),
+  };
+}
+
+function parsePersistsFrom(raw: unknown): PersistsFrom | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const p = raw as Partial<PersistsFrom>;
+  if (typeof p.key !== 'string' || typeof p.inspection_id !== 'number') return null;
+  return {
+    key: p.key,
+    inspection_id: p.inspection_id,
+    executed_on: typeof p.executed_on === 'string' ? p.executed_on : null,
   };
 }
 
@@ -380,3 +484,66 @@ export function deviceLine(d: Pick<DefectFields, 'devices' | 'device_manual'>): 
   if (d.device_manual) parts.push(d.device_manual);
   return parts.join(', ');
 }
+
+// ─── Nedostatky z minulej prehliadky (spec 6.5) ─────────────────────────────
+
+/** A defect of the last prehliadka, as `GET /api/facilities/{id}/prehliadka-previous` returns it. */
+export type PreviousDefect = {
+  key: string;
+  /** From an old požiarna kniha record: no title, place or devices of its own. */
+  legacy: boolean;
+  title: string;
+  scope: DefectScope;
+  where: Omit<DefectWhere, 'text'> | null;
+  where_text: string;
+  devices: DefectDevice[];
+  device_manual: string | null;
+  description: string;
+  regulation: string;
+  justification: string;
+  measure: string;
+  catalog_id: number | null;
+  deadline_date: string | null;
+  responsible: string | null;
+  source_item_id: number;
+};
+
+/** Is a defect of this scope part of a prehliadka with this setup? `ob` fits either record. */
+export function scopeApplies(defectScope: DefectScope, scope: PrehliadkaScope): boolean {
+  if (defectScope === 'ob') return scope.po || scope.bozp;
+  return defectScope === 'po' ? scope.po : scope.bozp;
+}
+
+/** The scope a carried-over defect gets today: `ob` narrows to the one record being done. */
+export function carriedScope(defectScope: DefectScope, scope: PrehliadkaScope): DefectScope {
+  if (defectScope !== 'ob') return defectScope;
+  return scope.po && scope.bozp ? 'ob' : scope.po ? 'po' : 'bo';
+}
+
+// ─── Termíny (spec 6.6) ─────────────────────────────────────────────────────
+
+/** `GET /api/facilities/{id}/prehliadka-terms` — the facts the automatic terms are computed from. */
+export type TermTraining = {
+  key: string;
+  label: string;
+  book: 'po' | 'bozp';
+  done_on: string;
+  valid_until: string | null;
+  overridden: boolean;
+};
+
+export type RoutinePeriodicities = Record<string, { value: number | null; unit: 'den' | 'tyzden' | 'mesiac' | null }>;
+
+/** One row of „Doplnené samy". `valid_until` null = no recurrence; the override can still give a date. */
+export type AutoTerm = {
+  key: string;
+  label: string;
+  book: 'po' | 'bozp';
+  /** Where the date comes from, as the prototype words it. */
+  source: string;
+  valid_until: string | null;
+};
+
+export const TERM_KEY_PREHLIADKA_PO = 'prehliadka_po';
+export const TERM_KEY_PREHLIADKA_BOZP = 'prehliadka_bozp';
+export const routineTermKey = (type: DeviceType): string => `routine:${type}`;

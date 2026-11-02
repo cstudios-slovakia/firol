@@ -231,7 +231,12 @@ final class BookLedger
         int $userId,
     ): int {
         $pdo = Db::pdo();
-        $pdo->beginTransaction();
+        // Closing a prehliadka writes its entries inside the transaction that
+        // issues its documents — join it instead of starting (and committing) our own.
+        $startedHere = !$pdo->inTransaction();
+        if ($startedHere) {
+            $pdo->beginTransaction();
+        }
         try {
             $pdo->prepare('SELECT id FROM companies WHERE id = ? AND account_id = ? FOR UPDATE')
                 ->execute([$companyId, $accountId]);
@@ -265,14 +270,93 @@ final class BookLedger
                 $userId,
             ]);
             $id = (int) $pdo->lastInsertId();
-            $pdo->commit();
+            if ($startedHere) {
+                $pdo->commit();
+            }
             return $id;
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) {
+            if ($startedHere && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
             throw $e;
         }
+    }
+
+    /**
+     * The entry a prehliadka wrote into a book, if it has one: the row whose
+     * `inspection_ids` holds the record's inspection id. Used when a reopened
+     * prehliadka is closed again, to update its entry instead of adding a second.
+     *
+     * @return array{id: int, seq: int, signed_manager: bool, facility_id: ?int}|null
+     */
+    public static function entryOfInspection(int $accountId, int $companyId, string $book, int $inspectionId): ?array
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT id, seq, facility_id, signed_manager_at
+             FROM   book_entries
+             WHERE  account_id = ? AND company_id = ? AND book = ? AND inspection_ids IS NOT NULL
+               AND  JSON_CONTAINS(inspection_ids, ?)
+             ORDER  BY id ASC LIMIT 1'
+        );
+        $stmt->execute([$accountId, $companyId, $book, (string) $inspectionId]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            return null;
+        }
+        return [
+            'id'             => (int) $row['id'],
+            'seq'            => (int) $row['seq'],
+            'signed_manager' => $row['signed_manager_at'] !== null,
+            'facility_id'    => $row['facility_id'] !== null ? (int) $row['facility_id'] : null,
+        ];
+    }
+
+    /**
+     * Adds a protocol number to an entry's numbers (the text stays). Used for a
+     * signed entry whose record was issued again: the new number is then covered
+     * by the entry, so the book does not offer it a second time.
+     */
+    public static function addProtocolNumber(int $accountId, int $entryId, string $number): void
+    {
+        $stmt = Db::pdo()->prepare('SELECT protocol_numbers FROM book_entries WHERE id = ? AND account_id = ?');
+        $stmt->execute([$entryId, $accountId]);
+        $numbers = self::decodeStrings($stmt->fetchColumn() ?: null);
+        if (in_array($number, $numbers, true)) {
+            return;
+        }
+        $numbers[] = $number;
+        Db::pdo()->prepare('UPDATE book_entries SET protocol_numbers = ? WHERE id = ? AND account_id = ?')
+            ->execute([json_encode($numbers, JSON_UNESCAPED_UNICODE), $entryId, $accountId]);
+    }
+
+    /**
+     * An entry written by a prehliadka that is closed again after „Upraviť": the
+     * date, text and number are brought up to date — but only while the vedúci
+     * zamestnanec has not signed it. A signed entry keeps what was signed and
+     * gets a dopísanie instead (see {@see addAddition()}).
+     *
+     * @param list<string> $protocolNumbers
+     */
+    public static function refreshUnsigned(
+        int $accountId,
+        int $entryId,
+        string $dateIso,
+        string $text,
+        array $protocolNumbers,
+        bool $noDefects,
+    ): void {
+        Db::pdo()->prepare(
+            'UPDATE book_entries
+             SET    entry_date = ?, `text` = ?, protocol_numbers = ?, no_defects_statement = ?
+             WHERE  id = ? AND account_id = ? AND signed_manager_at IS NULL'
+        )->execute([
+            $dateIso,
+            $text,
+            $protocolNumbers === [] ? null : json_encode($protocolNumbers, JSON_UNESCAPED_UNICODE),
+            $noDefects ? 1 : 0,
+            $entryId,
+            $accountId,
+        ]);
     }
 
     public static function addAddition(int $accountId, int $entryId, string $text, int $userId): void
@@ -328,8 +412,9 @@ final class BookLedger
 
     /**
      * Whether any of the inspections is a preventívna prehliadka that carries
-     * defects — then the „bez nedostatkov" statement cannot be ticked (spec 9.7).
-     * The prehliadka arrives with phase 7; until then this is always false.
+     * a defect of the PO record (scope `po` or `ob`) — then the „bez nedostatkov"
+     * statement cannot be ticked (spec 9.7). A defect that belongs to the BOZP
+     * record alone is no reason: it is not in the fire book.
      *
      * @param list<int> $inspectionIds
      */
@@ -343,7 +428,8 @@ final class BookLedger
             "SELECT COUNT(*)
              FROM   inspection_items ii
              JOIN   inspections i ON i.id = ii.inspection_id
-             WHERE  i.account_id = ? AND i.type = 'preventivna_prehliadka' AND i.id IN ($in)"
+             WHERE  i.account_id = ? AND i.type = 'preventivna_prehliadka' AND i.id IN ($in)
+               AND  COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ii.fields, '$.scope')), 'po') IN ('po', 'ob')"
         );
         $stmt->execute([$accountId, ...$inspectionIds]);
         return (int) $stmt->fetchColumn() > 0;

@@ -391,6 +391,12 @@ final class BookController
         $accStmt = Db::pdo()->prepare('SELECT invoice_company_name, theme_color, logo_path FROM accounts WHERE id = ?');
         $accStmt->execute([$accountId]);
 
+        // An entry a prehliadka wrote carries the defects of its record (phase 8a).
+        foreach ($entries as &$entryRow) {
+            $entryRow['defect_lines'] = \Firol\Support\PrehliadkaRecord::bookLines($accountId, $entryRow);
+        }
+        unset($entryRow);
+
         $title = BookMapping::label($book) . ($mode === 'entry' ? ' — zápis č. ' . $entries[0]['seq'] : ' — zápisy na podpis');
         $pdf = PdfRenderer::renderBook([
             'title'       => $title,

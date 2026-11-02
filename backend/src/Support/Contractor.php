@@ -151,7 +151,7 @@ final class Contractor
         if ($details === null) {
             return null;
         }
-        unset($details[self::SNAPSHOT_KEY]);
+        unset($details[self::SNAPSHOT_KEY], $details[PrehliadkaRecord::ISSUED_KEY]);
         return $details === [] ? null : $details;
     }
 

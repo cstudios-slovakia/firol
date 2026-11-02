@@ -55,7 +55,7 @@ export type BookEntry = {
 /** One finished úkon (or several merged, same type and day) the app offers to add. */
 export type BookOffer = {
   key: string;
-  kind: 'inspection' | 'training';
+  kind: 'inspection' | 'training' | 'termin';
   type: string;
   title: string;
   date: string;

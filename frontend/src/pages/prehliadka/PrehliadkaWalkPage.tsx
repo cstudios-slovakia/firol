@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, Camera, ChevronRight, Info, Plus, Settings2, Warehouse } from 'lucide-react';
+import { ArrowLeft, Building2, Camera, CheckCircle2, ChevronRight, Info, Plus, Settings2, Warehouse } from 'lucide-react';
 import { Inspections, type InspectionDetail, type InspectionItem } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
@@ -12,7 +12,9 @@ import {
   effectiveDeadline,
   parseDefect,
   parseDetails,
+  prehliadkaResultPath,
   prehliadkaSetupPath,
+  prehliadkaTermsPath,
   scopeLabel,
   type DefectFields,
 } from '@/lib/prehliadka';
@@ -25,6 +27,8 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { DefectScopeBadge, StepBars } from '@/components/prehliadka/ui';
+import { PreviousDefectsSection } from '@/components/prehliadka/PreviousDefects';
+import { useDetailsSaver } from '@/pages/prehliadka/useDetailsSaver';
 
 type Row = { item: InspectionItem; defect: DefectFields };
 
@@ -49,19 +53,26 @@ export function PrehliadkaWalkPage() {
   const [data, setData] = useState<InspectionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const load = useCallback(
+    () =>
+      Inspections.show(id)
+        .then((res) => {
+          setData(res);
+          return res;
+        })
+        .catch((err: unknown) => {
+          setError(err instanceof ApiError ? err.message : 'Prehliadku sa nepodarilo načítať.');
+          return null;
+        }),
+    [id],
+  );
+
   useEffect(() => {
-    let cancelled = false;
-    Inspections.show(id)
-      .then((res) => {
-        if (!cancelled) setData(res);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof ApiError ? err.message : 'Prehliadku sa nepodarilo načítať.');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
+    void load();
+  }, [load]);
+
+  // The answers about the previous defects live in `details`; the saver keeps the latest of them.
+  const saver = useDetailsSaver(id, data ? parseDetails(data.inspection.details) : null);
 
   const rows = useMemo<Row[]>(
     () =>
@@ -86,7 +97,7 @@ export function PrehliadkaWalkPage() {
   if (!data) return <WalkSkeleton />;
 
   const { inspection: i } = data;
-  const details = parseDetails(i.details);
+  const details = saver.details ?? parseDetails(i.details);
   const draft = i.status === 'draft';
   const canEdit = draft && !isReadOnly;
   const executedOn = i.executed_on;
@@ -142,6 +153,20 @@ export function PrehliadkaWalkPage() {
 
       <PendingSyncBanner resource="inspections" id={id} />
 
+      {/* A closed prehliadka: its documents live on the result screen. */}
+      {!draft && (
+        <Link to={prehliadkaResultPath(id)} className="animate-fade-up">
+          <Card className="flex items-center gap-3 border-status-ok/30 bg-[var(--color-status-ok-bg)]/40 p-4 transition-all duration-300 hover:shadow-sm active:scale-[0.99]">
+            <CheckCircle2 className="size-5 shrink-0 text-status-ok" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-ink-900">Prehliadka je uzavretá</p>
+              <p className="text-xs text-ink-500">Dokumenty, zápisy v knihách a „Upraviť" nájdeš na výsledku.</p>
+            </div>
+            <ChevronRight className="size-4 shrink-0 text-ink-400" />
+          </Card>
+        </Link>
+      )}
+
       {/* What this prehliadka is — one tap to change it. */}
       <Card className="animate-fade-up flex items-start gap-3 p-4">
         <div className="min-w-0 flex-1">
@@ -177,6 +202,21 @@ export function PrehliadkaWalkPage() {
         </Link>
       )}
 
+      {draft && (
+        <PreviousDefectsSection
+          inspectionId={id}
+          facilityId={i.facility_id}
+          executedOn={executedOn}
+          details={details}
+          onChangeDetails={saver.update}
+          carried={rows.map((r) => ({ itemId: r.item.id, persistsKey: r.defect.persists_from?.key ?? null }))}
+          onItemsChanged={async () => {
+            await load();
+          }}
+          canEdit={canEdit}
+        />
+      )}
+
       {rows.length === 0 ? (
         <p className="animate-fade-in rounded-2xl border border-dashed border-ink-200 bg-white px-4 py-5 text-sm text-ink-500">
           Zatiaľ nič. Čo nezapíšeš, do záznamu nejde — záznam vypisuje len to, čo si našiel.
@@ -210,15 +250,31 @@ export function PrehliadkaWalkPage() {
         <Card className="flex items-start gap-3 border-dashed p-4 text-xs text-ink-500">
           <Info className="mt-0.5 size-4 shrink-0 text-ink-400" />
           <p>
-            Termíny, vykonané činnosti a uzavretie prehliadky ešte nie sú dostupné. Zapísané nedostatky ostanú uložené
-            v telefóne a na serveri — prehliadku nájdeš na prevádzke ako „Prehliadka prebieha".
+            Zapísané nedostatky ostanú uložené v telefóne a na serveri — prehliadku nájdeš na prevádzke ako „Prehliadka
+            prebieha".
           </p>
         </Card>
       )}
 
-      <Button type="button" id="pp-interrupt" variant="secondary" onClick={() => navigate(facilityHref)}>
-        Prerušiť
-      </Button>
+      <div className="flex gap-2">
+        <Button type="button" id="pp-interrupt" variant="secondary" className="flex-1" onClick={() => navigate(facilityHref)}>
+          Prerušiť
+        </Button>
+        {draft && (
+          <Button
+            type="button"
+            id="pp-continue"
+            className="flex-1"
+            rightIcon={<ChevronRight className="size-4" />}
+            onClick={async () => {
+              await saver.flush();
+              navigate(prehliadkaTermsPath(id));
+            }}
+          >
+            Pokračovať
+          </Button>
+        )}
+      </div>
       <p className="-mt-2 text-center text-xs text-ink-400">Prerušenú prehliadku nájdeš na prevádzke.</p>
     </div>
   );
@@ -250,6 +306,7 @@ function DefectCard({
               {photos}
             </span>
           )}
+          {defect.persists_from && <Badge tone="bad">Pretrváva</Badge>}
           {devices && (
             <span className="max-w-full truncate rounded-full bg-ink-100 px-2 py-0.5 text-xs font-medium text-ink-600">
               {devices}

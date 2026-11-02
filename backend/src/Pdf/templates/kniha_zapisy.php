@@ -95,6 +95,13 @@ echo $doc->styles();
       <td><?= $esc(ProtocolLayout::date($entry['entry_date'])) ?></td>
       <td>
         <?= nl2br($esc((string) $entry['text'])) ?>
+        <?php if (!empty($entry['defect_lines'])): ?>
+          <div class="zistenia"><b>ZISTENÉ NEDOSTATKY</b>
+            <?php foreach ($entry['defect_lines'] as $line): ?>
+              <br><?= $esc((string) $line) ?>
+            <?php endforeach; ?>
+          </div>
+        <?php endif; ?>
         <?php if (!empty($entry['no_defects_statement'])): ?>
           <div class="zistenia"><b>ZISTENIA</b><br><?= $esc(BookSentences::NO_DEFECTS) ?></div>
         <?php endif; ?>

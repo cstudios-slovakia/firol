@@ -302,11 +302,13 @@ function SetupForm({
 
   async function submit(opts?: { useMemory?: boolean }) {
     if (!loaded) return;
+    // The rest of `details` (devices, ticked activities, answers about the previous
+    // defects …) belongs to the later steps; a PATCH replaces the object, so it travels along.
     const effective: PrehliadkaDetails = {
+      ...details,
       scope,
       routine,
       book_entry: bookEntry,
-      new_devices: details.new_devices,
     };
     if (!effective.scope.po && !effective.scope.bozp) {
       setScopeError('Vyber, akú prehliadku robíš.');
