@@ -91,7 +91,7 @@ const TYPE_CHIPS: [InspectionType, string][] = [
     ["nudzove_osvetlenie", "Nú. osvetlenie"],
     ["ts_hadic", "TS hadíc"],
     ["vyradenie", "Vyradenie PHP"],
-    ["kniha_bozp", "Kniha BOZP"],
+    ["kniha_bozp", "Prehliadka BOZP"],
     ["pracovisko", "Pracovisko"],
     ["osamele_pracovisko", "Osamelé prac."],
     ["fajcenie", "Zákaz fajčenia"],

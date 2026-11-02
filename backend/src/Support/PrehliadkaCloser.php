@@ -63,12 +63,14 @@ final class PrehliadkaCloser
         } catch (\InvalidArgumentException $e) {
             return ['error' => $e->getMessage(), 'status' => 422];
         }
-        if ($details['present'] === []) {
-            return ['error' => 'Doplň, kto bol pri prehliadke prítomný.', 'status' => 422];
-        }
         if ($details['handed_over'] === null) {
-            return ['error' => 'Doplň, kto prehliadku prevzal za organizáciu.', 'status' => 422];
+            return ['error' => 'Doplň, kto bol oboznámený s výsledkom prehliadky.', 'status' => 422];
         }
+
+        $lehotaZakon = (int) ($details['lehota_zakon'] ?? 12);
+        $lehotaVlastna = isset($details['lehota_vlastna']) && $details['lehota_vlastna'] !== null ? (int) $details['lehota_vlastna'] : null;
+        $effectiveMonths = ($lehotaVlastna !== null && $lehotaVlastna > 0) ? $lehotaVlastna : $lehotaZakon;
+        $isCustom = ($lehotaVlastna !== null && $lehotaVlastna > 0) ? 1 : 0;
 
         $po = $details['scope']['po'] === true;
         $bozp = $details['scope']['bozp'] === true;
@@ -106,26 +108,25 @@ final class PrehliadkaCloser
                 return ['error' => 'Prehliadka je už uzavretá.', 'status' => 409];
             }
 
+            $pdo->prepare('UPDATE inspections SET periodicity_value = ?, periodicity_unit = "mesiac", periodicity_is_custom = ? WHERE id = ? AND account_id = ?')
+                ->execute([$effectiveMonths, $isCustom, $inspectionId, $accountId]);
+
             $year = (int) substr((string) $inspection['executed_on'], 0, 4);
             $bozpInspectionId = null;
             $bozpDocumentId = null;
 
-            // ── BOZP: the child record and its entry ─────────────────────────
+            // ── BOZP: the child record (Preventívna prehliadka BOZP) ─────────
             if ($bozp) {
                 $bozpPoints = PrehliadkaRecord::points($items, PrehliadkaRecord::BOZP, PrehliadkaRecord::photoCounts($inspectionId));
                 $bozpPrevious = PrehliadkaRecord::previousRows($details, $previous, PrehliadkaRecord::BOZP, $bozpPoints);
                 $fields = PrehliadkaRecord::bozpFields($inspection, $details, $bozpPrevious, $bozpPoints);
 
-                $bozpInspectionId = self::upsertBozpChild($accountId, $userId, $inspection, $fields);
+                $bozpInspectionId = self::upsertBozpChild($accountId, $userId, $inspection, $fields, $effectiveMonths, $isCustom);
                 $child = DocumentController::loadInspectionForGenerate($accountId, $bozpInspectionId);
                 $childItems = DocumentController::loadItems($bozpInspectionId);
 
                 $number = NumberAllocator::allocate($accountId, 'kniha_bozp', $year)['number'];
-                $entryId = self::writeEntry(
-                    $accountId, $userId, $inspection, BookMapping::BOZP, $bozpInspectionId, $number,
-                    BookSentences::prehliadka(BookMapping::BOZP, (string) $inspection['executed_on'], (string) $inspection['facility_name'], $number, count($bozpPoints)),
-                    false,
-                );
+                // BOZP inspection produces its standalone record and never creates a book_entry (spec 02.11 / decision D4)
 
                 $terms = ClientTerms::forPrehliadka(
                     $accountId,
@@ -240,8 +241,14 @@ final class PrehliadkaCloser
      * @param array<string, mixed> $inspection the prehliadka row
      * @param array<string, mixed> $fields
      */
-    private static function upsertBozpChild(int $accountId, int $userId, array $inspection, array $fields): int
-    {
+    private static function upsertBozpChild(
+        int $accountId,
+        int $userId,
+        array $inspection,
+        array $fields,
+        int $periodicityValue,
+        int $isCustom,
+    ): int {
         $pdo = Db::pdo();
         $find = $pdo->prepare(
             'SELECT id FROM inspections
@@ -251,8 +258,7 @@ final class PrehliadkaCloser
         $find->execute([$accountId, (int) $inspection['id']]);
         $childId = $find->fetchColumn();
 
-        $periodicityValue = $inspection['periodicity_value'] !== null ? (int) $inspection['periodicity_value'] : null;
-        $periodicityUnit = $inspection['periodicity_unit'] !== null ? (string) $inspection['periodicity_unit'] : null;
+        $periodicityUnit = 'mesiac';
 
         if ($childId === false) {
             $pdo->prepare(
@@ -269,7 +275,7 @@ final class PrehliadkaCloser
                 (int) $inspection['id'],
                 $periodicityValue,
                 $periodicityUnit,
-                Periodicity::isCustom('kniha_bozp', $periodicityValue, $periodicityUnit) ? 1 : 0,
+                $isCustom,
                 (string) $inspection['executed_on'],
                 (int) $inspection['inspector_user_id'],
                 $userId,
@@ -293,7 +299,7 @@ final class PrehliadkaCloser
             (string) $inspection['executed_on'],
             $periodicityValue,
             $periodicityUnit,
-            Periodicity::isCustom('kniha_bozp', $periodicityValue, $periodicityUnit) ? 1 : 0,
+            $isCustom,
             (int) $inspection['inspector_user_id'],
             $childId,
             $accountId,

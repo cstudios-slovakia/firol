@@ -70,6 +70,7 @@ export function FacilityForm({
   const [gas, setGas] = useState(initial?.main_gas_location ?? '');
   const [water, setWater] = useState(initial?.main_water_location ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
+  const [vchody, setVchody] = useState(initial?.vchody ?? '');
   const bd = isBytoveDruzstvo(clientType);
   const [floorsAbove, setFloorsAbove] = useState(
     initial?.floors_above != null ? String(initial.floors_above) : bd ? '4' : '',
@@ -140,6 +141,7 @@ export function FacilityForm({
       description: description.trim() || undefined,
       floors_above: bd ? above : null,
       floors_below: bd ? below : null,
+      vchody: bd ? (vchody.trim() || undefined) : undefined,
     };
     try {
       const optimistic = facilityCreateOptimistic({
@@ -157,6 +159,7 @@ export function FacilityForm({
         description: payload.description ?? null,
         floors_above: payload.floors_above ?? null,
         floors_below: payload.floors_below ?? null,
+        vchody: payload.vchody ?? null,
       });
       const res = mode === 'edit' && initial
         ? await Facilities.update(initial.id, payload, csrfToken)
@@ -271,7 +274,7 @@ export function FacilityForm({
         <div>
           <p className="text-xs font-medium text-ink-700">Hlavné vypínače a uzávery</p>
           <p className="mt-1 text-xs leading-relaxed text-ink-500">
-            Kde sa nachádzajú. Tlačí sa do záznamu z prehliadky — § 20 ods. 1 písm. c) vyhl. 121/2002 žiada, aby to zamestnanci vedeli.
+            Kde sa nachádzajú. Tlačí sa do záznamu z prehliadky.
           </p>
         </div>
         <Field label="Hlavný vypínač elektriny">
@@ -392,9 +395,20 @@ export function FacilityForm({
             <p className="text-xs text-ink-500">
               Podľa toho sa pri zápise nedostatku ponúknu podlažia. Osem nadzemných = osem možností, nie pevný zoznam.
             </p>
-            <p className="rounded-xl bg-ink-50 px-3 py-2 text-xs leading-relaxed text-ink-600">
-              Vchody sa tu <span className="font-semibold">nenastavujú</span>. Koľko ich dom má, napíšete do popisu objektu vyššie; pri zápise nedostatku si vchod jednoducho napíšete a odvtedy sa ponúka sám.
-            </p>
+            <Field
+              label="Vchody (voliteľné)"
+              hint="Z počtu alebo zoznamu sa vytvoria dlaždice pri zápise nedostatku."
+            >
+              {(p) => (
+                <Input
+                  {...p}
+                  value={vchody}
+                  maxLength={255}
+                  placeholder="napr. 3 alebo 2, 4, 6; prázdne = dopíšete pri nedostatku"
+                  onChange={(e) => setVchody(e.target.value)}
+                />
+              )}
+            </Field>
           </>
         )}
       </div>

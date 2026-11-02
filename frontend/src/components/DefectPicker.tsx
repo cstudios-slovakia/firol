@@ -26,6 +26,7 @@ import {
   type DefectScope,
 } from '@/api/defectCatalog';
 import { OfflineQueuedError } from '@/lib/api';
+import { mintTempId } from '@/lib/tempId';
 import { useConfirm } from '@/lib/confirm';
 import { useToast } from '@/lib/toast';
 import { fold } from '@/lib/text';
@@ -424,8 +425,24 @@ function OwnItemForm({
           justification: justification.trim(),
           measure: measure.trim() || EMPTY_TEXT,
         };
-        const res = await DefectCatalog.create(body, csrfToken);
-        onCreated(res.item);
+        let createdItem: DefectCatalogItem;
+        try {
+          const res = await DefectCatalog.create(body, csrfToken);
+          createdItem = res.item;
+        } catch (err) {
+          if (err instanceof OfflineQueuedError) {
+            createdItem = {
+              id: mintTempId(),
+              ...body,
+              area: 'Vlastné',
+              default_deadline: 'do 30 dní',
+              own: true,
+            };
+          } else {
+            throw err;
+          }
+        }
+        onCreated(createdItem);
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Uloženie sa nepodarilo.');

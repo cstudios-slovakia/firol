@@ -40,7 +40,7 @@ final class BookController
     private const MAX_NUMBER = 64;
     private const MAX_NUMBERS = 60;
     private const MAX_PERSON = 191;
-    private const SOURCES = ['ukon', 'cislo', 'vlastny', 'termin', 'revizia'];
+    private const SOURCES = ['ukon', 'vlastny', 'hromadny'];
 
     /**
      * GET /api/companies/{id}/book-summary → counts for the card on the firm.
@@ -80,6 +80,7 @@ final class BookController
         $hasLedger = !$perFacility || $facilityId !== null;
         $entries = $hasLedger ? BookLedger::entries($accountId, $company['id'], $book, $facilityId) : [];
         $offers = $hasLedger ? BookOffers::forLedger($accountId, $company['id'], $book, $facilityId) : [];
+        $actions = $hasLedger ? BookOffers::availableActions($accountId, $company['id'], $book, $facilityId) : [];
 
         $signer = ResponsiblePerson::forFireBook($accountId, $company['id']);
 
@@ -98,10 +99,11 @@ final class BookController
             'can_switch_scope'       => count($facilities) > 1,
             'entries'                => $entries,
             'offers'                 => $offers,
+            'available_actions'      => $actions,
+            'availableActions'       => $actions,
             'previous_scope_entries' => BookLedger::previousScopeEntries($accountId, $company['id'], $book, $company['book_scope']),
             'unsigned_count'         => count(array_filter($entries, static fn (array $e): bool => !$e['signed_manager'])),
             'signer'                 => $signer,
-            'manual_kinds'           => BookSentences::manualKinds($book),
             'legal_sentence'         => BookSentences::LEGAL,
             'no_defects_sentence'    => BookSentences::NO_DEFECTS,
         ]);
@@ -110,13 +112,13 @@ final class BookController
     /**
      * POST /api/companies/{id}/book/entries
      *
-     * Body: { book, facility_id?, source: ukon|cislo|vlastny|termin|revizia,
-     *         date?, text?, legal_sentence?, no_defects_statement?,
-     *         protocol_numbers?, inspection_ids?, training_ids?,
-     *         kind?, number?, object? }
+     * Body: { book, facility_id?, source: ukon|hromadny|vlastny,
+     *         date?, text?, vlastny_text?, defects_text?, legal_sentence?,
+     *         no_defects_statement?, protocol_numbers?, inspection_ids?, training_ids? }
      *
-     * `cislo` composes its sentence from kind / number / date / object unless a
-     * text is given. The legal sentence (spec 9.4) is added only on request.
+     * A protocol number typed by hand is no source of its own (decision D2): it
+     * goes into the optional own text. The legal sentence (spec 9.4) is added
+     * only on request.
      */
     public static function store(Request $req, array $params): void
     {
@@ -147,30 +149,25 @@ final class BookController
         $inspectionIds = self::readIds($body['inspection_ids'] ?? []);
         $trainingIds = self::readIds($body['training_ids'] ?? []);
 
-        if ($source === 'cislo') {
-            $kind = is_string($body['kind'] ?? null) ? $body['kind'] : '';
-            $number = is_string($body['number'] ?? null) ? trim($body['number']) : '';
-            if (!BookSentences::isManualKind($book, $kind)) {
-                Response::error('Vyber, čo sa vykonalo.', 422);
-            }
-            if ($number === '' || mb_strlen($number) > self::MAX_NUMBER) {
-                Response::error('Zadaj číslo protokolu.', 422);
-            }
-            $numbers = [$number];
-            $inspectionIds = [];
-            $trainingIds = [];
-            $object = is_string($body['object'] ?? null) ? trim($body['object']) : '';
-            $text = is_string($body['text'] ?? null) && trim($body['text']) !== ''
-                ? trim($body['text'])
-                : BookSentences::byNumber($kind, $date, $number, $object);
-        } else {
-            $text = is_string($body['text'] ?? null) ? trim($body['text']) : '';
-            if ($text === '') {
-                Response::error('Text zápisu nemôže byť prázdny.', 422);
-            }
+        $text = is_string($body['text'] ?? null) ? trim($body['text']) : '';
+        $vlastny = is_string($body['vlastny_text'] ?? null) ? trim($body['vlastny_text']) : '';
+        if ($text === '' && $vlastny !== '') {
+            $text = $vlastny;
+            $vlastny = '';
+        }
+        if ($text === '') {
+            Response::error('Text zápisu nemôže byť prázdny.', 422);
+        }
+        if ($vlastny !== '' && !str_contains($text, $vlastny)) {
+            $text .= "\n" . $vlastny;
         }
 
-        if ($source === 'ukon') {
+        $defectsText = is_string($body['defects_text'] ?? null) ? trim($body['defects_text']) : (is_string($body['zavady_text'] ?? null) ? trim($body['zavady_text']) : null);
+        if ($defectsText === '') {
+            $defectsText = null;
+        }
+
+        if ($source === 'ukon' || $source === 'hromadny') {
             if ($numbers === [] && $inspectionIds === [] && $trainingIds === []) {
                 Response::error('Zápis z úkonu musí niesť číslo protokolu.', 422);
             }
@@ -179,7 +176,7 @@ final class BookController
                 || count(BookLedger::existingIds('trainings', $accountId, $company['id'], $trainingIds)) !== count($trainingIds)) {
                 Response::error('Úkon sa nenašiel.', 404);
             }
-        } elseif ($source !== 'cislo') {
+        } else {
             $numbers = [];
             $inspectionIds = [];
             $trainingIds = [];
@@ -196,7 +193,8 @@ final class BookController
         }
 
         // Spec 9.4 — the legal sentence goes in only when the technician asks.
-        if (($body['legal_sentence'] ?? false) === true) {
+        $legalSentence = ($body['legal_sentence'] ?? false) === true || ($body['pridat_zakonnu_vetu'] ?? false) === true;
+        if ($legalSentence && !str_starts_with($text, BookSentences::LEGAL)) {
             $text = BookSentences::LEGAL . ' ' . $text;
         }
         if (mb_strlen($text) > self::MAX_TEXT) {
@@ -204,7 +202,10 @@ final class BookController
         }
 
         // Spec 9.7 — only the požiarna kniha, and only while no defect is attached.
-        $noDefects = ($body['no_defects_statement'] ?? false) === true;
+        $noDefects = ($body['no_defects_statement'] ?? false) === true || ($body['vyhlasenie'] ?? false) === true;
+        if ($defectsText !== null && $defectsText !== '') {
+            $noDefects = false;
+        }
         if ($noDefects) {
             if ($book !== BookMapping::PO) {
                 Response::error('Vyhlásenie o nedostatkoch patrí len do požiarnej knihy.', 422);
@@ -216,8 +217,13 @@ final class BookController
 
         $id = BookLedger::create(
             $accountId, $company['id'], $facilityId, $book, $date, $text, $source,
-            $numbers, $inspectionIds, $trainingIds, $noDefects, $userId,
+            $numbers, $inspectionIds, $trainingIds, $noDefects, $userId, $defectsText,
         );
+
+        AuditLog::record('book_entry.create', 'company', $company['id'], null, [
+            'entry_id' => $id,
+            'book'     => $book,
+        ]);
 
         $entry = BookLedger::entry($accountId, $id);
         Response::json(['entry' => $entry], 201);
@@ -235,7 +241,8 @@ final class BookController
         if ($entry === null) {
             Response::error('Zápis sa nenašiel.', 404);
         }
-        self::writableCompany($accountId, (int) self::companyIdOfEntry($accountId, (int) $entry['id']));
+        $companyId = (int) self::companyIdOfEntry($accountId, (int) $entry['id']);
+        self::writableCompany($accountId, $companyId);
 
         $text = $req->jsonString('text') ?? '';
         if ($text === '') {
@@ -246,6 +253,9 @@ final class BookController
         }
 
         BookLedger::addAddition($accountId, (int) $entry['id'], $text, Tenant::currentUserId());
+        AuditLog::record('book_entry.addition', 'company', $companyId, null, [
+            'entry_id' => (int) $entry['id'],
+        ]);
         Response::json(['entry' => BookLedger::entry($accountId, (int) $entry['id'])], 201);
     }
 
@@ -323,12 +333,12 @@ final class BookController
     }
 
     /**
-     * GET /api/companies/{id}/book/print?book=&facility_id=&mode=unsigned|entry
+     * GET /api/companies/{id}/book/print?book=&facility_id=&mode=unsigned|entry|all
      *     [&entry_id=][&signer_name=][&signer_role=]
      *
      * The unsigned entries of the ledger on one sheet with one signature block,
-     * or a single entry. Rendered on the fly — nothing is stored, no number is
-     * taken (decision D6).
+     * a single entry (docZapis), or the full book (docKniha). Rendered on the fly —
+     * nothing is stored, no number is taken (decision D6).
      */
     public static function print(Request $req, array $params): void
     {
@@ -344,28 +354,34 @@ final class BookController
             $facilities,
         );
 
-        $mode = $req->query('mode') === 'entry' ? 'entry' : 'unsigned';
+        $mode = in_array($req->query('mode'), ['entry', 'all'], true) ? $req->query('mode') : 'unsigned';
         if ($mode === 'entry') {
             $entry = BookLedger::entry($accountId, (int) ($req->query('entry_id') ?? 0));
-            if ($entry === null || $entry['book'] !== $book) {
+            if ($entry === null || $entry['book'] !== $book || (int) ($entry['company_id'] ?? 0) !== (int) $company['id']) {
                 Response::error('Zápis sa nenašiel.', 404);
             }
             $entries = [$entry];
             // A single entry prints with the book it was written in, whatever the scope is now.
             $facilityId = $entry['facility_id'];
+        } elseif ($mode === 'all') {
+            $entries = BookLedger::entries($accountId, $company['id'], $book, $facilityId);
+            if ($entries === []) {
+                Response::error('V knihe zatiaľ nie sú žiadne zápisy.', 404);
+            }
         } else {
+            $allEntries = BookLedger::entries($accountId, $company['id'], $book, $facilityId);
             $entries = array_values(array_filter(
-                BookLedger::entries($accountId, $company['id'], $book, $facilityId),
+                $allEntries,
                 static fn (array $e): bool => !$e['signed_manager'],
             ));
-        }
-        if ($entries === []) {
-            Response::error(
-                BookLedger::entries($accountId, $company['id'], $book, $facilityId) === []
-                    ? 'V knihe zatiaľ nie sú žiadne zápisy.'
-                    : 'Nie je čo tlačiť — všetky zápisy sú podpísané.',
-                404,
-            );
+            if ($entries === []) {
+                Response::error(
+                    $allEntries === []
+                        ? 'V knihe zatiaľ nie sú žiadne zápisy.'
+                        : 'Nie je čo tlačiť — všetky zápisy sú podpísané.',
+                    404,
+                );
+            }
         }
 
         $facilityName = null;
@@ -374,7 +390,7 @@ final class BookController
                 $facilityName = $f['name'];
             }
         }
-        if ($facilityName === null && $entries[0]['facility_name'] !== null) {
+        if ($facilityName === null && ($entries[0]['facility_name'] ?? null) !== null) {
             $facilityName = $entries[0]['facility_name'];
         }
 
@@ -384,9 +400,22 @@ final class BookController
             ? self::person($req->query('signer_role'))
             : ($signer['role_title'] ?? null);
 
-        $companyRow = Db::pdo()->prepare('SELECT name, ico FROM companies WHERE id = ? AND account_id = ?');
+        $companyRow = Db::pdo()->prepare('SELECT name, ico, street, postal_code, city FROM companies WHERE id = ? AND account_id = ?');
         $companyRow->execute([$company['id'], $accountId]);
-        $companyData = $companyRow->fetch() ?: ['name' => $company['name'], 'ico' => null];
+        $companyData = $companyRow->fetch() ?: [
+            'name'        => $company['name'],
+            'ico'         => null,
+            'street'      => null,
+            'postal_code' => null,
+            'city'        => null,
+        ];
+
+        $facilityData = null;
+        if ($facilityId !== null) {
+            $fStmt = Db::pdo()->prepare('SELECT name, street, postal_code, city FROM facilities WHERE id = ? AND account_id = ?');
+            $fStmt->execute([$facilityId, $accountId]);
+            $facilityData = $fStmt->fetch() ?: null;
+        }
 
         $accStmt = Db::pdo()->prepare('SELECT invoice_company_name, theme_color, logo_path FROM accounts WHERE id = ?');
         $accStmt->execute([$accountId]);
@@ -397,24 +426,46 @@ final class BookController
         }
         unset($entryRow);
 
-        $title = BookMapping::label($book) . ($mode === 'entry' ? ' — zápis č. ' . $entries[0]['seq'] : ' — zápisy na podpis');
+        $allForLedger = ($mode === 'all') ? $entries : BookLedger::entries($accountId, $company['id'], $book, $facilityId);
+        $unsignedCount = count(array_filter($allForLedger, static fn (array $e): bool => !$e['signed_manager']));
+
+        if ($mode === 'entry') {
+            $title = 'Zápis do požiarnej knihy';
+            $filename = 'zapis-' . $entries[0]['seq'] . '.pdf';
+        } elseif ($mode === 'all') {
+            $title = BookMapping::label($book);
+            $filename = ($book === BookMapping::BOZP ? 'kniha-bozp' : 'poziarna-kniha') . '-komplet.pdf';
+        } else {
+            $title = BookMapping::label($book) . ' — zápisy na podpis';
+            $filename = ($book === BookMapping::BOZP ? 'kniha-bozp' : 'poziarna-kniha') . '-na-podpis.pdf';
+        }
+
         $pdf = PdfRenderer::renderBook([
-            'title'       => $title,
-            'brand'       => DocumentController::buildBrand($accStmt->fetch() ?: []),
-            'contractor'  => Contractor::live($accountId, 'kniha'),
-            'company'     => ['name' => $companyData['name'], 'ico' => $companyData['ico']],
-            'facility'    => $facilityName !== null ? ['name' => $facilityName] : null,
-            'book'        => $book,
-            'mode'        => $mode,
-            'printed_on'  => date('Y-m-d'),
-            'entries'     => $entries,
-            'technicians' => self::technicians($accountId, $userId, $book, $entries),
-            'signer'      => ['name' => $signerName, 'role' => $signerRole],
+            'title'          => $title,
+            'brand'          => DocumentController::buildBrand($accStmt->fetch() ?: []),
+            'contractor'     => Contractor::live($accountId, 'kniha'),
+            'company'        => [
+                'name'        => $companyData['name'],
+                'ico'         => $companyData['ico'],
+                'street'      => $companyData['street'] ?? null,
+                'postal_code' => $companyData['postal_code'] ?? null,
+                'city'        => $companyData['city'] ?? null,
+            ],
+            'facility'       => $facilityData ?? ($facilityName !== null ? ['name' => $facilityName] : null),
+            'facilities'     => $facilities,
+            'scope'          => $company['book_scope'],
+            'book'           => $book,
+            'mode'           => $mode,
+            'printed_on'     => date('Y-m-d'),
+            'entries'        => $entries,
+            'unsigned_count' => $unsignedCount,
+            'technicians'    => self::technicians($accountId, $userId, $book, $entries),
+            'signer'         => ['name' => $signerName, 'role' => $signerRole],
         ]);
 
         header('Content-Type: application/pdf');
         header('Content-Length: ' . strlen($pdf));
-        header('Content-Disposition: inline; filename="' . ($book === BookMapping::BOZP ? 'kniha-bozp' : 'poziarna-kniha') . '.pdf"');
+        header('Content-Disposition: inline; filename="' . $filename . '"');
         header('Cache-Control: private, no-store');
         echo $pdf;
         exit;
@@ -495,7 +546,7 @@ final class BookController
     private static function readBook(?string $value): string
     {
         if ($value === null || !BookMapping::isBook($value)) {
-            Response::error('Vyber knihu — požiarna kniha alebo kniha BOZP.', 422);
+            Response::error('Kniha je len jedna — požiarna.', 422);
         }
         return $value;
     }

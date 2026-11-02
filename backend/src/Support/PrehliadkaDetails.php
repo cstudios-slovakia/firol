@@ -102,21 +102,53 @@ final class PrehliadkaDetails
             }
         }
 
+        $lehotaZakon = isset($raw['lehota_zakon']) ? (int) $raw['lehota_zakon'] : 12;
+        if (!in_array($lehotaZakon, [3, 6, 12], true)) {
+            $lehotaZakon = 12;
+        }
+
+        $lehotaVlastna = null;
+        if (isset($raw['lehota_vlastna']) && $raw['lehota_vlastna'] !== '' && $raw['lehota_vlastna'] !== null) {
+            $n = (int) $raw['lehota_vlastna'];
+            if ($n < 1 || $n > 120) {
+                throw new \InvalidArgumentException('Dohodnutá lehota musí byť číslo od 1 do 120 mesiacov.');
+            }
+            $lehotaVlastna = $n;
+        }
+
+        $oboznamenyName = self::text($raw['oboznameny_meno'] ?? null, 191);
+        $oboznamenyRole = self::text($raw['oboznameny_funkcia'] ?? null, 191);
+        $handedOver = $oboznamenyName !== null
+            ? ['name' => $oboznamenyName, 'role' => $oboznamenyRole]
+            : self::person($raw['handed_over'] ?? null, 'S výsledkom prehliadky oboznámený');
+        if ($handedOver !== null) {
+            $oboznamenyName = $handedOver['name'];
+            $oboznamenyRole = $handedOver['role'] ?? null;
+        }
+
+        $note = self::text($raw['poznamka'] ?? $raw['note'] ?? null, 4000);
+
         return [
-            'scope'       => ['po' => $po, 'bozp' => $bozp],
-            'routine'     => $routine,
-            // The checkbox is about the požiarna kniha only; BOZP always
-            // produces its own entry (spec 9.5a), so it never reads as a choice.
-            'book_entry'  => $po && ($raw['book_entry'] ?? false) === true,
-            'new_devices' => self::newDevices($raw['new_devices'] ?? []),
+            'scope'              => ['po' => $po, 'bozp' => $bozp],
+            'routine'            => $routine,
+            // The checkbox is about the požiarna kniha only; BOZP never
+            // produces a book entry (02.11 spec).
+            'book_entry'         => $po && ($raw['book_entry'] ?? false) === true,
+            'lehota_zakon'       => $lehotaZakon,
+            'lehota_vlastna'     => $lehotaVlastna,
+            'note'               => $note,
+            'poznamka'           => $note,
+            'new_devices'        => self::newDevices($raw['new_devices'] ?? []),
             // A set belongs to its record: unticking PO in the setup drops the
             // PO activities with it instead of leaving them to print nowhere.
-            'activities_po'   => $po ? self::activities($raw['activities_po'] ?? []) : [],
-            'activities_bozp' => $bozp ? self::activities($raw['activities_bozp'] ?? []) : [],
-            'previous'        => self::previous($raw['previous'] ?? []),
-            'term_overrides'  => self::termOverrides($raw['term_overrides'] ?? []),
-            'present'         => self::present($raw['present'] ?? []),
-            'handed_over'     => self::person($raw['handed_over'] ?? null, 'Prevzal za organizáciu'),
+            'activities_po'      => $po ? self::activities($raw['activities_po'] ?? []) : [],
+            'activities_bozp'    => $bozp ? self::activities($raw['activities_bozp'] ?? []) : [],
+            'previous'           => self::previous($raw['previous'] ?? []),
+            'term_overrides'     => self::termOverrides($raw['term_overrides'] ?? []),
+            'present'            => self::present($raw['present'] ?? []),
+            'handed_over'        => $handedOver,
+            'oboznameny_meno'    => $oboznamenyName,
+            'oboznameny_funkcia' => $oboznamenyRole,
         ];
     }
 

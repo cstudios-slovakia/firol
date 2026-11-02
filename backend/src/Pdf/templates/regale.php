@@ -43,9 +43,8 @@ $total = (int) ($stats['total'] ?? count($items));
 $disposed = (int) ($stats['vyradene'] ?? 0);
 ?>
 <?= $doc->styles() ?>
-<?= $doc->header('Záznam o kontrole regálov') ?>
+<?= $doc->header('Protokol o vykonaní kontroly — regále') ?>
 <?= $doc->basicInfo() ?>
-<?= $doc->legalWarn('Kontrola vykonaná v rozsahu podľa STN EN 15635 a § 5 nariadenia vlády SR č. 392/2006 Z. z.') ?>
 
 <?= $doc->band('Zoznam kontrolovaných regálov') ?>
 <table class="grid">
@@ -89,9 +88,8 @@ $disposed = (int) ($stats['vyradene'] ?? 0);
   </tr>
 </table>
 
-<?= DefectsTable::render(Defects::collect($items), [
-  'labels'     => DefectsTable::SHORT_LABELS,
-  'photo_note' => !empty($photos),
+<?= DefectsTable::renderRoutineDefects($items, 'regale', [
+  'photo_counts' => $photo_counts ?? [],
 ]) ?>
 
 <?php if ($measures !== ''): ?>
@@ -99,5 +97,5 @@ $disposed = (int) ($stats['vyradene'] ?? 0);
   <div class="note-box"><?= nl2br($e($measures)) ?></div>
 <?php endif ?>
 
-<?= $doc->signatures('regale') ?>
+<?= $doc->signaturesOptionA('regale', 'VYKONAL', 'S VÝSLEDKOM KONTROLY OBOZNÁMENÝ') ?>
 <?= $doc->footer('Kontrolovaných regálov: ' . $total) ?>

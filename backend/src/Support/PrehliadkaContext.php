@@ -74,7 +74,26 @@ final class PrehliadkaContext
                     static fn ($t): bool => is_string($t) && in_array($t, FacilityDevices::TYPES, true),
                 )),
                 'book_entry'        => ($details['book_entry'] ?? false) === true,
+                'lehota_zakon'      => isset($details['lehota_zakon']) ? (int) $details['lehota_zakon'] : null,
+                'lehota_vlastna'    => isset($details['lehota_vlastna']) && $details['lehota_vlastna'] !== null ? (int) $details['lehota_vlastna'] : null,
             ];
+        }
+
+        $facStmt = $pdo->prepare(
+            'SELECT f.vchody, f.entrances, c.client_type
+             FROM facilities f
+             JOIN companies c ON c.id = f.company_id
+             WHERE f.id = ? AND f.account_id = ?'
+        );
+        $facStmt->execute([$facilityId, $accountId]);
+        $facRow = $facStmt->fetch();
+        $isBytovyDom = ($facRow['client_type'] ?? '') === 'bytove_druzstvo';
+        $entrances = [];
+        if ($isBytovyDom) {
+            $custom = is_string($facRow['entrances'] ?? null)
+                ? (json_decode($facRow['entrances'], true) ?: [])
+                : [];
+            $entrances = self::generateEntrances($facRow['vchody'] ?? null, is_array($custom) ? $custom : []);
         }
 
         $placeholders = implode(',', array_fill(0, count(FacilityDevices::TYPES), '?'));
@@ -91,10 +110,52 @@ final class PrehliadkaContext
         }
 
         return [
-            'draft_id'    => $draftId !== false ? (int) $draftId : null,
-            'last'        => $lastSetup,
-            // An empty map must reach the client as {}, not [].
-            'open_drafts' => $openDrafts === [] ? new \stdClass() : $openDrafts,
+            'draft_id'            => $draftId !== false ? (int) $draftId : null,
+            'last'                => $lastSetup,
+            'open_drafts'         => $openDrafts === [] ? new \stdClass() : $openDrafts,
+            'is_bytovy_dom'       => $isBytovyDom,
+            'vchody'              => $isBytovyDom ? ($facRow['vchody'] ?? null) : null,
+            'generated_entrances' => $entrances,
         ];
+    }
+
+    /**
+     * Generate list of entrance labels for a bytový dom per spec/prototype `vchodyPre`.
+     *
+     * @param list<string> $customEntrances
+     * @return list<string>
+     */
+    public static function generateEntrances(?string $vchody, array $customEntrances = []): array
+    {
+        $out = [];
+        $vchody = trim($vchody ?? '');
+        if ($vchody !== '') {
+            if (ctype_digit($vchody)) {
+                $n = max(1, min(40, (int) $vchody));
+                for ($i = 1; $i <= $n; $i++) {
+                    $out[] = 'Vchod ' . $i;
+                }
+            } else {
+                $parts = preg_split('/[,;]+/', $vchody) ?: [];
+                foreach ($parts as $p) {
+                    $p = trim($p);
+                    if ($p === '') {
+                        continue;
+                    }
+                    if (preg_match('/^\d+[a-zA-Z]?$/', $p)) {
+                        $out[] = 'Vchod ' . $p;
+                    } else {
+                        $out[] = $p;
+                    }
+                }
+            }
+        }
+        foreach ($customEntrances as $c) {
+            $c = is_string($c) ? trim($c) : '';
+            if ($c !== '' && $c !== 'Celý objekt' && !in_array($c, $out, true)) {
+                $out[] = $c;
+            }
+        }
+        return $out;
     }
 }

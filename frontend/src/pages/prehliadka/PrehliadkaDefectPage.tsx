@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Lock, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Lock, Plus, Search, Trash2 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type Company } from '@/api/companies';
 import { useDefectCatalog, type DefectCatalogItem } from '@/api/defectCatalog';
@@ -10,6 +10,8 @@ import { ApiError, OfflineQueuedError } from '@/lib/api';
 import { writeCache } from '@/lib/cache';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
 import { isBytoveDruzstvo } from '@/lib/clientKind';
+import { cn } from '@/lib/cn';
+import { Badge } from '@/components/ui/Badge';
 import { useConfirm } from '@/lib/confirm';
 import { responsibleForFacility } from '@/lib/responsiblePerson';
 import { fold } from '@/lib/text';
@@ -42,6 +44,7 @@ import {
   type DefectScope,
   type DeviceOption,
   type DeviceType,
+  vchodyPre,
   type NewDevice,
   type PrehliadkaDetails,
   type PersistsFrom,
@@ -266,7 +269,9 @@ function DefectForm({
   }
 
   // ── Kde
-  const entranceTiles = withoutDuplicates([...(facility.entrances ?? []), ...(state.entrance ? [state.entrance] : [])]);
+  const entranceTiles = bd
+    ? withoutDuplicates([...vchodyPre(facility.vchody, facility.entrances), ...(state.entrance ? [state.entrance] : [])])
+    : [];
   const placeTiles = withoutDuplicates([
     ...(bd ? DEFAULT_PLACES : []),
     ...(facility.places ?? []),
@@ -274,11 +279,15 @@ function DefectForm({
   ]);
   const floors = bd && facility.floors_above != null ? floorTiles(facility.floors_below, facility.floors_above) : [];
   const whereText = composeWhere({
-    entrance: state.entrance,
-    floor: state.floor,
+    entrance: bd ? state.entrance : '',
+    floor: bd ? state.floor : '',
     place: state.place,
     detail: state.detail,
   });
+
+  const [openEntrance, setOpenEntrance] = useState(!state.entrance);
+  const [openFloor, setOpenFloor] = useState(!state.floor);
+  const [openPlace, setOpenPlace] = useState(!state.place);
 
   // ── Na čom
   const options = useMemo<DeviceOption[]>(() => {
@@ -351,7 +360,7 @@ function DefectForm({
   function validate(): boolean {
     const next: typeof errors = {};
     if (state.title.trim() === '') next.title = 'Vyber, o aký nedostatok ide.';
-    if (whereText === '') next.where = 'Ťukni aspoň na jedno — vchod, podlažie alebo miesto — alebo ho dopíš vlastnými slovami.';
+    if (whereText === '') next.where = bd ? 'Ťukni aspoň na jedno — vchod, podlažie alebo miesto — alebo ho dopíš vlastnými slovami.' : 'Ťukni na miesto alebo ho dopíš vlastnými slovami.';
     if (state.description.trim() === '') next.description = 'Doplň popis zisteného stavu.';
     if (state.choice === 'custom' && !state.customDate) next.date = 'Zadaj vlastný dátum odstránenia.';
     setErrors(next);
@@ -618,62 +627,135 @@ function DefectForm({
           className="min-h-11 rounded-xl border border-ink-200 bg-ink-50 px-3 py-2.5 text-sm text-ink-800"
           aria-live="polite"
         >
-          {whereText || <span className="text-ink-400">Ťukni na vchod, podlažie a miesto — alebo ho dopíš.</span>}
+          {whereText || (
+            <span className="text-ink-400">
+              {bd ? 'Ťukni na vchod, podlažie a miesto — alebo ho dopíš.' : 'Ťukni na miesto — alebo ho dopíš.'}
+            </span>
+          )}
         </div>
         {errors.where && <p className="text-xs text-status-bad">{errors.where}</p>}
 
         {bd && (
-          <TileGroup label="Vchod">
-            {entranceTiles.map((e) => (
-              <Chip key={e} active={state.entrance === e} onClick={() => patch({ entrance: state.entrance === e ? '' : e })}>
-                {e}
-              </Chip>
-            ))}
-            <AddTile
-              label="+ iný"
-              inputLabel="Označenie vchodu"
-              placeholder="Vchod 3"
-              onAdd={(v) => patch({ entrance: v })}
-            />
+          <CollapsibleKdeRow
+            label="Vchod"
+            value={state.entrance}
+            isOpen={openEntrance}
+            onToggle={() => setOpenEntrance((v) => !v)}
+          >
+            <div className="flex flex-wrap gap-2">
+              {entranceTiles.map((e) => (
+                <Chip
+                  key={e}
+                  active={state.entrance === e}
+                  onClick={() => {
+                    if (state.entrance === e) {
+                      patch({ entrance: '' });
+                    } else {
+                      patch({ entrance: e });
+                      setOpenEntrance(false);
+                    }
+                  }}
+                >
+                  {e}
+                </Chip>
+              ))}
+              <AddTile
+                label="+ iný"
+                inputLabel="Označenie vchodu"
+                placeholder="Vchod 3"
+                onAdd={(v) => {
+                  patch({ entrance: v });
+                  setOpenEntrance(false);
+                }}
+              />
+            </div>
             {entranceTiles.length === 0 && (
-              <p className="basis-full text-xs text-ink-400">
-                Vchody sa nikde nenastavujú — napíš ho raz a odvtedy sa ponúka sám.
+              <p className="mt-2 text-xs text-ink-400">
+                Vchody si môžeš dopísať cez „+ iný“ a od tej chvíle sa ponúkajú samy.
               </p>
             )}
-          </TileGroup>
+          </CollapsibleKdeRow>
         )}
 
         {bd && (
-          <TileGroup label="Podlažie">
-            {floors.map((f) => (
-              <Chip key={f} active={state.floor === f} onClick={() => patch({ floor: state.floor === f ? '' : f })}>
-                {f}
-              </Chip>
-            ))}
+          <CollapsibleKdeRow
+            label="Podlažie"
+            value={state.floor}
+            isOpen={openFloor}
+            onToggle={() => setOpenFloor((v) => !v)}
+          >
+            <div className="flex flex-wrap gap-2">
+              {floors.map((f) => (
+                <Chip
+                  key={f}
+                  active={state.floor === f}
+                  onClick={() => {
+                    if (state.floor === f) {
+                      patch({ floor: '' });
+                    } else {
+                      patch({ floor: f });
+                      setOpenFloor(false);
+                    }
+                  }}
+                >
+                  {f}
+                </Chip>
+              ))}
+              <AddTile
+                label="+ iné"
+                inputLabel="Iné podlažie"
+                placeholder="napr. 7. NP"
+                onAdd={(v) => {
+                  patch({ floor: v });
+                  setOpenFloor(false);
+                }}
+              />
+            </div>
             {floors.length === 0 && (
-              <p className="basis-full text-xs text-ink-400">
-                Počet podlaží doplníš v úprave bytového domu — dovtedy podlažie dopíš vlastnými slovami.
+              <p className="mt-2 text-xs text-ink-400">
+                Počet podlaží doplníš v úprave bytového domu — alebo ho zadaj cez „+ iné“.
               </p>
             )}
-          </TileGroup>
+          </CollapsibleKdeRow>
         )}
 
-        <TileGroup label="Miesto">
-          {placeTiles.map((m) => (
-            <Chip key={m} active={state.place === m} onClick={() => patch({ place: state.place === m ? '' : m })}>
-              {m}
-            </Chip>
-          ))}
-          <AddTile
-            label="+ iné"
-            inputLabel="Iné miesto"
-            placeholder="strojovňa výťahu"
-            onAdd={(v) => patch({ place: v })}
-          />
-        </TileGroup>
+        <CollapsibleKdeRow
+          label="Miesto"
+          value={state.place}
+          isOpen={openPlace}
+          onToggle={() => setOpenPlace((v) => !v)}
+        >
+          <div className="flex flex-wrap gap-2">
+            {placeTiles.map((m) => (
+              <Chip
+                key={m}
+                active={state.place === m}
+                onClick={() => {
+                  if (state.place === m) {
+                    patch({ place: '' });
+                  } else {
+                    patch({ place: m });
+                    setOpenPlace(false);
+                  }
+                }}
+              >
+                {m}
+              </Chip>
+            ))}
+            <AddTile
+              label="+ iné"
+              inputLabel="Iné miesto"
+              placeholder="strojovňa výťahu"
+              onAdd={(v) => {
+                patch({ place: v });
+                setOpenPlace(false);
+              }}
+            />
+          </div>
+        </CollapsibleKdeRow>
 
         <Field
-          label="Dopísať vlastnými slovami"
+          label="Upresniť miesto vlastnými slovami"
           hint="Dlaždice sú len skratka. Čokoľvek sa dá dopísať rukou — aj miesto, ktoré v ponuke nie je."
         >
           {(p) => (
@@ -804,11 +886,34 @@ function DefectForm({
 
 // ─── Kde ────────────────────────────────────────────────────────────────────
 
-function TileGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function CollapsibleKdeRow({
+  label,
+  value,
+  isOpen,
+  onToggle,
+  children,
+}: {
+  label: string;
+  value: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-xs font-semibold text-ink-500">{label}</span>
-      <div className="flex flex-wrap gap-2">{children}</div>
+    <div className="flex flex-col gap-1.5 border-t border-ink-100 pt-2.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+          {label}: <span className="font-normal text-ink-900">{value || 'nezvolené'}</span>
+        </span>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="text-xs font-medium text-firol-600 hover:text-firol-700"
+        >
+          {isOpen ? 'zbaliť' : 'zmeniť'}
+        </button>
+      </div>
+      {isOpen && <div className="mt-1">{children}</div>}
     </div>
   );
 }
@@ -869,7 +974,7 @@ function AddTile({
   );
 }
 
-// ─── Na čom ─────────────────────────────────────────────────────────────────
+// ─── Čoho sa to týka ────────────────────────────────────────────────────────
 
 function DevicesCard({
   routine,
@@ -890,49 +995,104 @@ function DevicesCard({
   onManual: (v: string) => void;
   onAddNew: (d: Omit<NewDevice, 'tmp_id'>) => Promise<boolean>;
 }) {
+  const [cardOpen, setCardOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [manualOpen, setManualOpen] = useState(manual !== '');
   const [newOpen, setNewOpen] = useState(false);
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
+
+  const selectedList = Object.values(selected);
+  const names = selectedList.map((o) => o.label || o.serial).filter(Boolean);
+  const devicesSummary =
+    names.length > 0
+      ? names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3}` : '')
+      : '';
+  const fullSummary = devicesSummary
+    ? devicesSummary + (manual.trim() ? ` · ${manual.trim()}` : '')
+    : manual.trim() || 'nič neoznačené — nemusí to byť zariadenie';
 
   const foldedQuery = fold(query).trim();
   const showSearch = options.length > DEVICE_SEARCH_THRESHOLD || query !== '';
   const visible = foldedQuery ? options.filter((o) => deviceMatches(o, foldedQuery, fold)) : options;
-  const selectedCount = Object.keys(selected).length;
+  const selectedCount = selectedList.length;
 
-  // Selected ones the list no longer offers (type unticked, entry gone) stay visible so they can be unticked.
   const optionKeys = new Set(options.map((o) => o.key));
-  const orphans = Object.values(selected).filter((o) => !optionKeys.has(o.key));
+  const orphans = selectedList.filter((o) => !optionKeys.has(o.key));
 
   const byType = new Map<DeviceType, DeviceOption[]>();
   for (const o of visible) byType.set(o.type, [...(byType.get(o.type) ?? []), o]);
 
-  // No routine control ticked: nothing to pick from, the device is written by hand (spec 6.3.5, 11.15).
-  if (routine.length === 0) {
+  if (!cardOpen) {
     return (
-      <Card className="flex flex-col gap-3 p-4">
-        <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Ktorých zariadení sa týka</span>
-        <p className="rounded-xl bg-ink-50 px-3 py-2.5 text-xs leading-relaxed text-ink-600">
-          V tejto prehliadke nerobíš žiadnu riadnu kontrolu, takže nie je z čoho vyberať. Ak zariadenie kontroluje niekto
-          iný, <b className="font-semibold">vypíš jeho číslo rukou</b> — do záznamu sa vytlačí tak, ako ho napíšeš.
-        </p>
-        <Field label="Zariadenie rukou" hint="Napríklad „PHP č. 25-08014, kotolňa“.">
-          {(p) => (
-            <Input {...p} value={manual} maxLength={191} placeholder="PHP č. 25-08014, kotolňa" onChange={(e) => onManual(e.target.value)} />
-          )}
-        </Field>
-        <p className="text-xs text-ink-400">
-          Keď chceš, aby sa prístroj rovno prepísal do konceptu kontroly ako vadný, vráť sa do kroku 1 a zaškrtni
-          príslušnú kontrolu — potom si ho vyberieš zo zoznamu.
-        </p>
+      <Card className="p-4 transition-all duration-200">
+        <button
+          type="button"
+          onClick={() => setCardOpen(true)}
+          className="flex w-full items-center justify-between text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300 rounded-lg"
+        >
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Čoho sa to týka</span>
+            <span
+              className={cn(
+                'text-sm',
+                selectedCount > 0 || manual.trim() ? 'font-semibold text-firol-700' : 'text-ink-400',
+              )}
+            >
+              {fullSummary}
+            </span>
+          </div>
+          <span className="inline-flex items-center gap-1.5 text-xs text-firol-600">
+            <span className="text-xs text-ink-500">[zmeniť]</span>
+            <ChevronRight className="size-4 text-ink-400" />
+          </span>
+        </button>
       </Card>
     );
   }
 
   return (
     <Card className="flex flex-col gap-3 p-4">
-      <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Ktorých zariadení sa týka</span>
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => {
+            setCardOpen(false);
+            setQuery('');
+          }}
+          className="flex w-full items-center justify-between text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300 rounded-lg"
+        >
+          <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Čoho sa to týka</span>
+          <span className="inline-flex items-center gap-1.5 text-xs text-firol-600">
+            <span className="text-xs text-ink-500">Hotovo</span>
+            <ChevronRight className="size-4 rotate-90 text-ink-400" />
+          </span>
+        </button>
+      </div>
 
-      {showSearch && (
+      {routine.length === 0 ? (
+        <p className="rounded-xl bg-ink-50 px-3 py-2.5 text-xs leading-relaxed text-ink-600">
+          Register je prázdny — v tejto prehliadke nerobíte riadnu kontrolu.{' '}
+          <b className="font-semibold">Nevadí, nedostatok nemusí byť na zariadení.</b> Napíšte vlastnými slovami,
+          čoho sa týka.
+        </p>
+      ) : options.length === 0 ? (
+        <div className="flex flex-col gap-2">
+          <p className="rounded-xl bg-ink-50 px-3 py-2.5 text-xs leading-relaxed text-ink-600">
+            Zoznam zariadení je zatiaľ prázdny. Prístroj zapíšte rovno teraz — odvtedy sa ponúka sám. Ak nejde o
+            zariadenie, napíšte to vlastnými slovami.
+          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            leftIcon={<Plus className="size-4" />}
+            onClick={() => setNewOpen(true)}
+          >
+            + Zapísať zariadenie
+          </Button>
+        </div>
+      ) : null}
+
+      {options.length > 0 && showSearch && (
         <div className="flex flex-col gap-1.5">
           <Input
             type="search"
@@ -948,7 +1108,11 @@ function DevicesCard({
             {query !== '' && (
               <>
                 {' · '}
-                <button type="button" className="font-medium text-firol-700 hover:underline" onClick={() => setQuery('')}>
+                <button
+                  type="button"
+                  className="font-medium text-firol-700 hover:underline"
+                  onClick={() => setQuery('')}
+                >
                   zrušiť hľadanie
                 </button>
               </>
@@ -957,27 +1121,54 @@ function DevicesCard({
         </div>
       )}
 
-      {DEVICE_TYPES.filter((t) => byType.has(t)).map((t) => (
-        <div key={t} className="flex flex-col gap-2">
-          <h4 className="text-xs font-semibold text-ink-500">
-            {DEVICE_GROUP_LABELS[t]} · {byType.get(t)!.length}
-          </h4>
-          <ul className="flex flex-col gap-2">
-            {byType.get(t)!.map((o) => (
-              <li key={o.key}>
-                <CheckRow
-                  checked={selected[o.key] !== undefined}
-                  onToggle={() => onToggle(o)}
-                  title={[o.label, o.description].filter(Boolean).join(' · ')}
-                  sub={[o.location, o.serial && o.serial !== o.label ? `v. č. ${o.serial}` : null].filter(Boolean).join(' · ') || undefined}
+      {options.length > 0 &&
+        DEVICE_TYPES.filter((t) => byType.has(t)).map((t) => {
+          const typeItems = byType.get(t)!;
+          const selectedInType = typeItems.filter((o) => selected[o.key] !== undefined).length;
+          const isOpen = Boolean(foldedQuery || selectedInType > 0 || groupOpen[t]);
+          return (
+            <div key={t} className="flex flex-col rounded-xl border border-ink-100 bg-white p-2.5">
+              <button
+                type="button"
+                onClick={() => setGroupOpen((prev) => ({ ...prev, [t]: !isOpen }))}
+                className="flex w-full items-center justify-between text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300 rounded-lg"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-ink-700">{DEVICE_GROUP_LABELS[t]}</span>
+                  <span className="text-xs text-ink-400">({typeItems.length})</span>
+                  {selectedInType > 0 && (
+                    <Badge tone="ok" className="text-[11px] font-medium">
+                      {selectedInType} označené
+                    </Badge>
+                  )}
+                </div>
+                <ChevronRight
+                  className={cn('size-4 text-ink-400 transition-transform duration-200', isOpen && 'rotate-90')}
                 />
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+              </button>
+              {isOpen && (
+                <ul className="mt-2.5 flex flex-col gap-2 border-t border-ink-100 pt-2.5">
+                  {typeItems.map((o) => (
+                    <li key={o.key}>
+                      <CheckRow
+                        checked={selected[o.key] !== undefined}
+                        onToggle={() => onToggle(o)}
+                        title={[o.label, o.description].filter(Boolean).join(' · ')}
+                        sub={
+                          [o.location, o.serial && o.serial !== o.label ? `v. č. ${o.serial}` : null]
+                            .filter(Boolean)
+                            .join(' · ') || undefined
+                        }
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })}
 
-      {visible.length === 0 && (
+      {options.length > 0 && visible.length === 0 && (
         <p className="rounded-xl bg-ink-50 px-3 py-2.5 text-sm text-ink-500">
           Nič nesedí s hľadaním. Skús iné číslo, alebo zariadenie zapíš nižšie ako nové.
         </p>
@@ -1007,55 +1198,64 @@ function DevicesCard({
         </p>
       )}
 
-      {manual !== '' && !manualOpen && (
-        <p className="rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-600">
-          Dopísané rukou: <b>{manual}</b>
-        </p>
+      {routine.length > 0 && (
+        <div className="flex flex-col items-start gap-2 pt-1">
+          {newOpen ? (
+            <NewDeviceForm
+              routine={routine}
+              defaultLocation={defaultLocation}
+              onCancel={() => setNewOpen(false)}
+              onSave={async (d) => {
+                const ok = await onAddNew(d);
+                if (ok) setNewOpen(false);
+              }}
+            />
+          ) : (
+            <Button
+              type="button"
+              id="pp-new-device"
+              variant="secondary"
+              size="sm"
+              leftIcon={<Plus className="size-4" />}
+              onClick={() => setNewOpen(true)}
+            >
+              + Zariadenie, ktoré tu ešte nie je
+            </Button>
+          )}
+        </div>
       )}
 
-      <div className="flex flex-col items-start gap-2">
-        {newOpen ? (
-          <NewDeviceForm
-            routine={routine}
-            defaultLocation={defaultLocation}
-            onCancel={() => setNewOpen(false)}
-            onSave={async (d) => {
-              const ok = await onAddNew(d);
-              if (ok) setNewOpen(false);
-            }}
-          />
-        ) : (
-          <Button
-            type="button"
-            id="pp-new-device"
-            variant="secondary"
-            size="sm"
-            leftIcon={<Plus className="size-4" />}
-            onClick={() => setNewOpen(true)}
-          >
-            Zariadenie, ktoré tu ešte nie je
-          </Button>
-        )}
-        {manualOpen ? (
-          <div className="w-full">
-            <Field label="Zariadenie rukou" hint="Vytlačí sa do záznamu tak, ako ho napíšeš.">
-              {(p) => (
-                <Input {...p} value={manual} maxLength={191} placeholder="PHP č. 25-08014, kotolňa" onChange={(e) => onManual(e.target.value)} />
-              )}
-            </Field>
-          </div>
-        ) : (
-          <Button type="button" id="pp-manual-device" variant="ghost" size="sm" onClick={() => setManualOpen(true)}>
-            Alebo vypísať číslo rukou
-          </Button>
-        )}
+      {/* Always available free-text field (spec 6.3.5 / 3.3) */}
+      <div className="mt-1 border-t border-ink-100 pt-3">
+        <Field
+          label="Zariadenie alebo priestor napíšem ručne"
+          hint="Nemusí to byť zariadenie z registra — napr. únikový východ pri schodisku, komunikácia medzi regálmi R3 a R4, alebo PHP č. 25-08014."
+        >
+          {(p) => (
+            <Input
+              {...p}
+              value={manual}
+              maxLength={191}
+              placeholder="únikový východ pri schodisku / PHP č. 25-08014"
+              onChange={(e) => onManual(e.target.value)}
+            />
+          )}
+        </Field>
       </div>
 
-      <p className="text-xs text-ink-400">
-        Čo tu označíš, prepíše sa do konceptu danej kontroly ako nevyhovujúce — aj s fotkami. Ostatné zariadenia budú
-        vyhovujúce, nemusíš na ne klikať. Keď je rovnaký nedostatok na viacerých zariadeniach, zapíš každé zvlášť s
-        vlastnou fotkou — dole je na to tlačidlo „Uložiť a ďalšie zariadenie“.
-      </p>
+      <div className="flex justify-end pt-1">
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={() => {
+            setCardOpen(false);
+            setQuery('');
+          }}
+        >
+          Hotovo
+        </Button>
+      </div>
     </Card>
   );
 }

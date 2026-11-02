@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, CheckCircle2, Plus, Warehouse, X } from 'lucide-react';
+import { ArrowLeft, Building2, CheckCircle2, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyPerson } from '@/api/companies';
@@ -37,7 +37,8 @@ import { Field } from '@/components/ui/Field';
 import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
-import { Chip } from '@/components/prehliadka/ui';
+import { CheckRow, Chip } from '@/components/prehliadka/ui';
+import { cn } from '@/lib/cn';
 import { useDetailsSaver } from '@/pages/prehliadka/useDetailsSaver';
 
 type Loaded = {
@@ -129,6 +130,7 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
   const canEdit = i.status === 'draft' && !isReadOnly;
 
   const [closing, setClosing] = useState(false);
+  const [signedOnScreen, setSignedOnScreen] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
   // Closing reads the prehliadka on the server, so what is still waiting in the
   // outbox (defects, photos, the answers saved here) has to get there first.
@@ -174,44 +176,19 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
 
   const nearest = useMemo(() => nearestDeadline(defects, i.executed_on), [defects, i.executed_on]);
 
-  // ── Prítomní a prevzal ───────────────────────────────────────────────────
-  const [adding, setAdding] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newRole, setNewRole] = useState('');
-
-  function addPresent(p: PrehliadkaPerson) {
-    saver.update((d) =>
-      d.present.some((x) => x.name.toLowerCase() === p.name.toLowerCase()) ? d : { ...d, present: [...d.present, p] },
-    );
-  }
-  function removePresent(name: string) {
-    saver.update((d) => ({ ...d, present: d.present.filter((x) => x.name !== name) }));
-  }
-  function submitNew(e: React.FormEvent) {
-    e.preventDefault();
-    if (newName.trim() === '') return;
-    addPresent({ name: newName.trim(), role: newRole.trim() || null });
-    setNewName('');
-    setNewRole('');
-    setAdding(false);
-  }
-
+  // ── S výsledkom prehliadky oboznámený ────────────────────────────────────
   const handed = details.handed_over;
   function setHanded(patch: Partial<PrehliadkaPerson>) {
     saver.update((d) => {
       const next = { name: d.handed_over?.name ?? '', role: d.handed_over?.role ?? null, ...patch };
-      // An emptied name clears the person — an empty one cannot be stored.
       return { ...d, handed_over: next.name.trim() === '' ? null : { name: next.name, role: next.role } };
     });
   }
 
-  const offeredPersons = loaded.persons.filter(
-    (p) => !details.present.some((x) => x.name.toLowerCase() === p.fullname.toLowerCase()),
-  );
+  const offeredPersons = loaded.persons;
 
   const missing: string[] = [];
-  if (details.present.length === 0) missing.push('Doplň, kto bol prítomný.');
-  if (!handed) missing.push('Doplň, kto prehliadku prevzal za organizáciu.');
+  if (!handed?.name?.trim()) missing.push('Doplň, kto bol s výsledkom prehliadky oboznámený.');
 
   async function close() {
     setCloseError(null);
@@ -248,7 +225,7 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
 
       <header className="animate-fade-up">
         <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">Uzavretie</p>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">Prítomní a prevzatie</h1>
+        <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">Uzavretie prehliadky</h1>
         <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-500">
           <Building2 className="size-3" />
           {i.company_name}
@@ -304,19 +281,8 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
           {details.scope.bozp && (
             <Output
               tag={<Badge className="bg-[#E4EEF9] text-[#2D63A0]">BOZP</Badge>}
-              title="Zápis do knihy BOZP"
-              meta={`${nedostatkyLabel(bozpCount)} · je zároveň záznamom z prehliadky BOZP`}
-            />
-          )}
-          {details.scope.po && (
-            <Output
-              tag={<Badge tone={details.book_entry ? 'ok' : 'neutral'}>zápis</Badge>}
-              title="Zápis do požiarnej knihy"
-              meta={
-                details.book_entry
-                  ? 'pridá sa do knihy firmy ako bod'
-                  : 'neoznačené — appka ho ponúkne po uzavretí'
-              }
+              title="Preventívna prehliadka BOZP"
+              meta={`${nedostatkyLabel(bozpCount)} · nahrádza knihu kontrol BOZP`}
             />
           )}
           {details.routine.map((type) => (
@@ -328,130 +294,53 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
             />
           ))}
         </ul>
-        <p className="text-xs text-ink-400">Prehliadka: {scopeLabel(details.scope)}.</p>
-      </Card>
 
-      {/* Prítomní */}
-      <Card className="animate-fade-up flex flex-col gap-3 p-4">
-        <div>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
-            Prítomní<span className="ml-1 text-firol-500">*</span>
-          </h2>
-          <p className="mt-1 text-xs text-ink-500">
-            Kto bol pri prehliadke — § 14 ods. 3 vyhlášky č. 121/2002 žiada, aby boli v zázname uvedení.
-          </p>
-        </div>
-
-        {details.present.length > 0 && (
-          <ul className="flex flex-col gap-2">
-            {details.present.map((p) => (
-              <li
-                key={p.name}
-                className="flex items-center gap-2 rounded-2xl border border-ink-200 bg-white px-3.5 py-2.5"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-ink-900">{p.name}</p>
-                  {p.role && <p className="text-xs text-ink-500">{p.role}</p>}
-                </div>
-                {canEdit && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Odstrániť ${p.name}`}
-                    onClick={() => removePresent(p.name)}
-                  >
-                    <X className="size-4" />
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {canEdit && offeredPersons.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Osoby firmy</span>
-            <div className="flex flex-wrap gap-2">
-              {offeredPersons.map((p) => (
-                <Chip
-                  key={p.id}
-                  onClick={() => addPresent({ name: p.fullname, role: p.role_title || null })}
-                >
-                  + {p.fullname}
-                  {p.role_title ? ` · ${p.role_title}` : ''}
-                </Chip>
-              ))}
-            </div>
+        {details.scope.po && (
+          <div className="mt-1 border-t border-ink-100 pt-3">
+            <CheckRow
+              id="close-book-entry"
+              checked={details.book_entry}
+              disabled={!canEdit}
+              onToggle={() => saver.update((d) => ({ ...d, book_entry: !d.book_entry }))}
+              title="Zapísať aj do požiarnej knihy"
+              sub={
+                details.book_entry
+                  ? 'Zápis pristane v požiarnej knihe firmy a bude citovať číslo tohto záznamu.'
+                  : 'Nepovinné. Dá sa pridať kedykoľvek neskôr priamo z knihy — aj hromadne za viac domov naraz.'
+              }
+            />
           </div>
         )}
 
-        {canEdit &&
-          (adding ? (
-            <form onSubmit={submitNew} className="flex flex-col gap-3 rounded-2xl bg-ink-50 p-3" noValidate>
-              <Field label="Meno a priezvisko" required>
-                {(p) => (
-                  <Input
-                    {...p}
-                    value={newName}
-                    autoFocus
-                    maxLength={191}
-                    placeholder="Ing. Peter Správca"
-                    onChange={(e) => setNewName(e.target.value)}
-                  />
-                )}
-              </Field>
-              <Field label="Funkcia">
-                {(p) => (
-                  <Input
-                    {...p}
-                    value={newRole}
-                    maxLength={191}
-                    placeholder="vedúci zamestnanec, správca objektu"
-                    onChange={(e) => setNewRole(e.target.value)}
-                  />
-                )}
-              </Field>
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="ghost" size="sm" onClick={() => setAdding(false)}>
-                  Zrušiť
-                </Button>
-                <Button type="submit" size="sm" id="pp-present-save" disabled={newName.trim() === ''}>
-                  Pridať
-                </Button>
-              </div>
-            </form>
-          ) : (
-            <Button
-              type="button"
-              id="pp-present-add"
-              variant="secondary"
-              className="border-dashed"
-              leftIcon={<Plus className="size-4" />}
-              onClick={() => setAdding(true)}
-            >
-              Pridať inú osobu
-            </Button>
-          ))}
+        <p className="text-xs text-ink-400">Prehliadka: {scopeLabel(details.scope)}.</p>
       </Card>
 
-      {/* Prevzal za organizáciu */}
+      {/* S výsledkom prehliadky oboznámený */}
       <Card className="animate-fade-up flex flex-col gap-3 p-4">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
-          Prevzal za organizáciu<span className="ml-1 text-firol-500">*</span>
-        </h2>
-        <Field label="Meno a priezvisko">
+        <div>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+            S výsledkom prehliadky oboznámený<span className="ml-1 text-firol-500">*</span>
+          </h2>
+          <p className="mt-1 text-xs text-ink-500">
+            Meno osoby na strane klienta, ktorá bola oboznámená s výsledkom prehliadky.
+          </p>
+        </div>
+
+        <Field label="Meno a priezvisko" required>
           {(p) => (
             <Input
               {...p}
+              id="uz-kto"
               value={handed?.name ?? ''}
               disabled={!canEdit}
               maxLength={191}
+              placeholder="Ing. Peter Správca"
               onChange={(e) => setHanded({ name: e.target.value })}
             />
           )}
         </Field>
-        <Field label="Funkcia">
+
+        <Field label="Funkcia (nepovinné)">
           {(p) => (
             <Input
               {...p}
@@ -463,9 +352,43 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
             />
           )}
         </Field>
+
+        {canEdit && offeredPersons.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Osoby firmy</span>
+            <div className="flex flex-wrap gap-2">
+              {offeredPersons.map((p) => (
+                <Chip
+                  key={p.id}
+                  onClick={() => setHanded({ name: p.fullname, role: p.role_title || null })}
+                >
+                  + {p.fullname}
+                  {p.role_title ? ` · ${p.role_title}` : ''}
+                </Chip>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-1">
+          <label className="text-xs font-semibold uppercase tracking-wide text-ink-500">Podpis na displeji</label>
+          <button
+            type="button"
+            disabled={!canEdit}
+            onClick={() => setSignedOnScreen((s) => !s)}
+            className={cn(
+              'mt-1.5 flex h-24 w-full items-center justify-center rounded-2xl border text-sm transition-all',
+              signedOnScreen
+                ? 'border-[#BFE0CB] bg-[var(--color-status-ok-bg)] font-semibold text-status-ok'
+                : 'border-dashed border-ink-300 bg-white text-ink-500 hover:border-firol-400 hover:text-firol-700',
+            )}
+          >
+            {signedOnScreen ? '✓ Pripravené na podpis' : 'Vytlačiť a dať podpísať (alebo klikni pre podpis na displeji)'}
+          </button>
+        </div>
+
         <p className="text-xs text-ink-400">
-          Predvyplnené podľa osoby pri prevádzke, inak pri firme — dá sa prepísať. Zápis v požiarnej knihe podpisuje podľa
-          § 29 ods. 1 vedúci zamestnanec organizačnej zložky aj ten, kto zápis vyhotovil — ten sa vytlačí a podpíše.
+          Podpisuje vedúci zamestnanec organizačnej zložky aj ten, kto zápis vyhotovil.
         </p>
       </Card>
 

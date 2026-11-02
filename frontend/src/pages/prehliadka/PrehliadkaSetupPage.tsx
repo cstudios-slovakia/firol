@@ -8,10 +8,10 @@ import { Inspections, type InspectionDetail } from '@/api/inspections';
 import { Prehliadka, type PrehliadkaContext } from '@/api/prehliadka';
 import { Visits, type Visit } from '@/api/visits';
 import { ApiError, OfflineQueuedError } from '@/lib/api';
+import { cn } from '@/lib/cn';
 import { todayIso } from '@/lib/dates';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
 import { inspectionCreateOptimistic } from '@/lib/offlineEntities';
-import { defaultPeriodicity, periodicityLabel, type Periodicity, type PeriodicityUnit } from '@/lib/periodicity';
 import { isBytoveDruzstvo } from '@/lib/clientKind';
 import { visitTrail } from '@/lib/visits';
 import {
@@ -19,10 +19,12 @@ import {
   PREHLIADKA_TYPE,
   ROUTINE_LABELS,
   detailsPayload,
+  effectivePeriodicityMonths,
   parseDetails,
   prehliadkaPath,
   scopeLabel,
   type DeviceType,
+  type LehotaZakon,
   type PrehliadkaDetails,
   type PrehliadkaScope,
 } from '@/lib/prehliadka';
@@ -34,7 +36,6 @@ import { Field } from '@/components/ui/Field';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { CheckRow, Segmented, StepBars } from '@/components/prehliadka/ui';
 
 type ScopeChoice = 'po' | 'bozp' | 'both';
@@ -69,7 +70,6 @@ function devicesLabel(n: number): string {
 type Loaded = {
   facility: Facility;
   company: Company | null;
-  lastPeriodicity: Periodicity | null;
   groups: FacilityDeviceGroup[] | null;
   context: PrehliadkaContext | null;
 };
@@ -193,23 +193,23 @@ function SetupForm({
 
   const [scope, setScope] = useState<PrehliadkaScope>({ po: false, bozp: false });
   const [routine, setRoutine] = useState<DeviceType[]>([]);
-  const [bookEntry, setBookEntry] = useState(false);
   const [executedOn, setExecutedOn] = useState(
     editing?.inspection.executed_on ?? visit?.visit_date ?? presetDate ?? todayIso(),
   );
-  const [periodicity, setPeriodicity] = useState<Periodicity>(() =>
-    editing
-      ? { value: editing.inspection.periodicity_value, unit: editing.inspection.periodicity_unit }
-      : defaultPeriodicity(PREHLIADKA_TYPE),
+
+  const details = useMemo(() => parseDetails(editing?.inspection.details), [editing]);
+
+  const [lehotaZakon, setLehotaZakon] = useState<LehotaZakon>(() => (details.lehota_zakon as LehotaZakon) || 12);
+  const [lehotaVlastna, setLehotaVlastna] = useState<number | null>(() => details.lehota_vlastna ?? null);
+  const [customLehotaInput, setCustomLehotaInput] = useState<string>(
+    details.lehota_vlastna ? String(details.lehota_vlastna) : '',
   );
-  const [periodicityTouched, setPeriodicityTouched] = useState(editing !== null);
+
   // „Ako naposledy" first; „Zmeniť nastavenie" opens the form itself.
   const [changing, setChanging] = useState(false);
   const [scopeError, setScopeError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const details = useMemo(() => parseDetails(editing?.inspection.details), [editing]);
 
   // The prevádzka, its device list and what it remembers of the last prehliadka.
   useEffect(() => {
@@ -223,16 +223,9 @@ function SetupForm({
           Companies.show(facility.company_id).catch(() => null),
         ]);
         if (cancelled) return;
-        const row: FacilityListItem | undefined = companyDetail?.facilities.find((f) => f.id === facilityId);
-        const last =
-          row?.last_periodicities?.[PREHLIADKA_TYPE] ?? row?.last_periodicities?.poziarna_kniha ?? null;
         setLoaded({
           facility,
           company: companyDetail?.company ?? null,
-          lastPeriodicity:
-            last && typeof last.value === 'number' && last.unit
-              ? { value: last.value, unit: last.unit as PeriodicityUnit }
-              : null,
           groups,
           context,
         });
@@ -264,26 +257,33 @@ function SetupForm({
   useEffect(() => {
     if (!loaded || seeded) return;
     setSeeded(true);
+    const bd = isBytoveDruzstvo(loaded.facility.company_client_type);
     if (editing) {
       setScope(details.scope);
       setRoutine(details.routine);
-      setBookEntry(details.book_entry);
+      setLehotaZakon((details.lehota_zakon as LehotaZakon) || (bd ? 12 : 3));
+      setLehotaVlastna(details.lehota_vlastna ?? null);
+      if (details.lehota_vlastna) setCustomLehotaInput(String(details.lehota_vlastna));
       return;
     }
     if (memory) {
       setScope(memory.scope);
       setRoutine(memory.routine.filter((t) => tickable(t, [])));
-      setBookEntry(memory.book_entry);
-      if (!periodicityTouched && memory.periodicity_value !== null && memory.periodicity_unit) {
-        setPeriodicity({ value: memory.periodicity_value, unit: memory.periodicity_unit });
+      if (memory.lehota_zakon === 3 || memory.lehota_zakon === 6 || memory.lehota_zakon === 12) {
+        setLehotaZakon(memory.lehota_zakon as LehotaZakon);
+      } else {
+        setLehotaZakon(bd ? 12 : 3);
       }
-    } else if (!periodicityTouched && loaded.lastPeriodicity) {
-      setPeriodicity(loaded.lastPeriodicity);
+      if (typeof memory.lehota_vlastna === 'number') {
+        setLehotaVlastna(memory.lehota_vlastna);
+        setCustomLehotaInput(String(memory.lehota_vlastna));
+      }
+    } else {
+      setLehotaZakon(bd ? 12 : 3);
     }
     // „Kniha kontrol BOZP" (D2) starts a prehliadka preset to BOZP.
     if (presetBozp) {
       setScope({ po: false, bozp: true });
-      setBookEntry(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
@@ -300,6 +300,8 @@ function SetupForm({
     setRoutine((cur) => (cur.includes(type) ? cur.filter((t) => t !== type) : [...cur, type]));
   }
 
+  const effectivePeriodicity = (lehotaVlastna && lehotaVlastna > 0) ? lehotaVlastna : lehotaZakon;
+
   async function submit(opts?: { useMemory?: boolean }) {
     if (!loaded) return;
     // The rest of `details` (devices, ticked activities, answers about the previous
@@ -308,7 +310,8 @@ function SetupForm({
       ...details,
       scope,
       routine,
-      book_entry: bookEntry,
+      lehota_zakon: lehotaZakon,
+      lehota_vlastna: lehotaVlastna,
     };
     if (!effective.scope.po && !effective.scope.bozp) {
       setScopeError('Vyber, akú prehliadku robíš.');
@@ -326,8 +329,8 @@ function SetupForm({
         const patch = {
           // The date of a prehliadka in a visit is the visit's; the server ignores it there.
           executed_on: executedOn,
-          periodicity_value: periodicity.value,
-          periodicity_unit: periodicity.unit,
+          periodicity_value: effectivePeriodicity,
+          periodicity_unit: 'mesiac' as const,
           details: detailsPayload(effective),
         };
         try {
@@ -343,8 +346,8 @@ function SetupForm({
       const facility = loaded.facility;
       const payload = {
         type: PREHLIADKA_TYPE,
-        periodicity_value: periodicity.value,
-        periodicity_unit: periodicity.unit,
+        periodicity_value: effectivePeriodicity,
+        periodicity_unit: 'mesiac' as const,
         executed_on: executedOn,
         company_id: facility.company_id,
         facility_id: facility.id,
@@ -462,7 +465,6 @@ function SetupForm({
                 const next = choiceToScope(c);
                 setScope(next);
                 setScopeError(null);
-                if (!next.po) setBookEntry(false);
               }}
             />
             {scopeError ? (
@@ -524,29 +526,149 @@ function SetupForm({
             </p>
           </Card>
 
-          <Card className="animate-fade-up flex flex-col gap-2.5 p-4">
-            <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Zápis do knihy</span>
-            {scope.po ? (
-              <CheckRow
-                id="pp-book-entry"
-                checked={bookEntry}
-                onToggle={() => setBookEntry((v) => !v)}
-                title="Pridať aj ako zápis do požiarnej knihy"
-                sub={
-                  bd
-                    ? 'Pri bytovom dome býva zbytočný — vyhláška žiada záznam, nie zápis do knihy. Pridaj ho, len keď ho správca vyslovene chce.'
-                    : 'Zápis pristane v požiarnej knihe firmy. Keď ho nezapneš, appka ti ho po uzavretí ponúkne.'
-                }
-              />
-            ) : (
-              <p className="text-xs text-ink-400">Zápis do požiarnej knihy sa týka len protipožiarnej prehliadky.</p>
-            )}
-            {scope.bozp && (
-              <p className="text-xs text-ink-500">
-                Pri BOZP vznikne zápis do knihy BOZP vždy — je to zároveň záznam z prehliadky BOZP, samostatný
-                dokument nevzniká.
+          {/* Lehota prehliadky */}
+          <Card className="animate-fade-up flex flex-col gap-3 p-4">
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Lehota prehliadky</span>
+              <p className="mt-0.5 text-xs text-ink-400">Vyberte zákonnú lehotu, pod ktorú objekt patrí.</p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {([
+                [12, '12 mesiacov'],
+                [6, '6 mesiacov'],
+                [3, '3 mesiace'],
+              ] as const).map(([val, label]) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setLehotaZakon(val)}
+                  className={cn(
+                    'rounded-xl px-3.5 py-1.5 text-sm font-medium transition-colors',
+                    lehotaZakon === val
+                      ? 'bg-firol-500 text-white shadow-sm'
+                      : 'bg-ink-100 text-ink-700 hover:bg-ink-200',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <p className="text-xs text-ink-500">
+              {lehotaZakon === 12 && 'Obytné domy a objekty s občasnými pracovnými miestami.'}
+              {lehotaZakon === 6 && 'Objekty, kde sa vykonáva len administratívna činnosť.'}
+              {lehotaZakon === 3 && 'Ostatné objekty.'}
+            </p>
+
+            <div className="mt-1 border-t border-ink-100 pt-3">
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+                Dohodnutá kratšia lehota
+              </span>
+              <p className="mt-0.5 text-xs text-ink-400">
+                Nepovinné. Len <b>kratšia</b> než zákonná, dlhšia nie.
               </p>
-            )}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLehotaVlastna(null);
+                    setCustomLehotaInput('');
+                  }}
+                  className={cn(
+                    'rounded-xl px-3 py-1.5 text-sm font-medium transition-colors',
+                    lehotaVlastna === null
+                      ? 'bg-firol-500 text-white shadow-sm'
+                      : 'bg-ink-100 text-ink-700 hover:bg-ink-200',
+                  )}
+                >
+                  bez dohody
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (lehotaVlastna === null) {
+                      const fallback = Math.max(1, lehotaZakon - 1);
+                      setLehotaVlastna(fallback);
+                      setCustomLehotaInput(String(fallback));
+                    }
+                  }}
+                  className={cn(
+                    'rounded-xl px-3 py-1.5 text-sm font-medium transition-colors',
+                    lehotaVlastna !== null
+                      ? 'bg-firol-500 text-white shadow-sm'
+                      : 'bg-ink-100 text-ink-700 hover:bg-ink-200',
+                  )}
+                >
+                  {lehotaVlastna !== null ? `vlastná · ${lehotaVlastna} mes.` : 'vlastná'}
+                </button>
+              </div>
+
+              {lehotaVlastna !== null && (
+                <div className="mt-2.5 flex items-center gap-2">
+                  <div className="w-28">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={120}
+                      value={customLehotaInput}
+                      placeholder="napr. 6"
+                      onChange={(e) => {
+                        setCustomLehotaInput(e.target.value);
+                        const parsed = parseInt(e.target.value, 10);
+                        if (!isNaN(parsed) && parsed > 0 && parsed <= 120) {
+                          setLehotaVlastna(parsed);
+                        } else if (e.target.value === '') {
+                          setLehotaVlastna(null);
+                        }
+                      }}
+                    />
+                  </div>
+                  <span className="text-xs text-ink-500">mesiacov</span>
+                </div>
+              )}
+
+              {lehotaVlastna !== null && lehotaVlastna >= lehotaZakon && (
+                <p className="mt-2 rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-xs font-medium text-[var(--color-status-bad)]">
+                  Dohodnutá lehota ({lehotaVlastna} mes.) nie je kratšia než zákonná ({lehotaZakon} mes.). Dlhšiu lehotu než zákonnú nie je možné dohodnúť.
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-600">
+              Ďalšia prehliadka sa počíta z <b>{effectivePeriodicity} {effectivePeriodicity === 1 ? 'mesiaca' : effectivePeriodicity < 5 ? 'mesiacov' : 'mesiacov'}</b>
+              {lehotaVlastna ? ` — dohodnutá kratšia lehota, zákonná je ${lehotaZakon}` : ''}.
+            </div>
+          </Card>
+
+          {/* Výstup z prehliadky */}
+          <Card className="animate-fade-up flex flex-col gap-2.5 p-4">
+            <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Výstup z prehliadky</span>
+            <ul className="flex flex-col gap-2">
+              {scope.po && (
+                <li className="flex items-center gap-3 rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 opacity-90">
+                  <span className="grid size-5 place-items-center rounded-md bg-firol-50 text-xs font-bold text-firol-600">✓</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-ink-900">
+                      {bd ? 'Záznam o preventívnej protipožiarnej prehliadke bytového domu' : 'Záznam o vykonaní preventívnej protipožiarnej prehliadky'}
+                    </p>
+                    <p className="text-xs text-ink-500">
+                      {bd ? 'Vzniká vždy.' : 'Hlavný výstup prehliadky.'}
+                    </p>
+                  </div>
+                </li>
+              )}
+              {scope.bozp && (
+                <li className="flex items-center gap-3 rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 opacity-90">
+                  <span className="grid size-5 place-items-center rounded-md bg-firol-50 text-xs font-bold text-firol-600">✓</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-ink-900">Preventívna prehliadka BOZP</p>
+                    <p className="text-xs text-ink-500">Nahrádza knihu kontrol BOZP — vzniká vždy.</p>
+                  </div>
+                </li>
+              )}
+            </ul>
+            <p className="text-xs text-ink-400">Zápis do požiarnej knihy sa ponúkne až po uzavretí prehliadky.</p>
           </Card>
 
           <Card className="animate-fade-up flex flex-col gap-4 p-4">
@@ -581,20 +703,6 @@ function SetupForm({
                 )}
               </Field>
             )}
-
-            <Field label="Periodicita ďalšej prehliadky">
-              {() => (
-                <PeriodicityPicker
-                  type={PREHLIADKA_TYPE}
-                  value={periodicity}
-                  executedOn={executedOn || null}
-                  onChange={(next) => {
-                    setPeriodicity(next);
-                    setPeriodicityTouched(true);
-                  }}
-                />
-              )}
-            </Field>
           </Card>
 
           {error && (
@@ -638,6 +746,7 @@ function MemoryCard({
   onChange: () => void;
 }) {
   const routine = routineTypes.map((t) => ROUTINE_LABELS[t]);
+  const months = effectivePeriodicityMonths(memory);
   return (
     <div className="animate-fade-up flex flex-col gap-3">
       <Card className="flex flex-col gap-3 border-firol-200 p-4">
@@ -654,17 +763,12 @@ function MemoryCard({
           <li>
             • Riadne kontroly: <b>{routine.length > 0 ? routine.join(', ') : 'žiadne'}</b>
           </li>
-          {memory.scope.po && (
-            <li>
-              • Zápis do požiarnej knihy: <b>{memory.book_entry ? 'áno' : 'nie'}</b>
-            </li>
-          )}
           <li>
             • Dátum: <b>{formatDateSk(date)}</b>
           </li>
           <li>
-            • Ďalšia prehliadka:{' '}
-            <b>{periodicityLabel({ value: memory.periodicity_value, unit: memory.periodicity_unit })}</b>
+            • Lehota prehliadky: <b>{months} {months === 1 ? 'mesiac' : months < 5 ? 'mesiace' : 'mesiacov'}</b>
+            {memory.lehota_vlastna ? ' (dohodnutá kratšia)' : ''}
           </li>
         </ul>
       </Card>
@@ -699,9 +803,10 @@ function FacilityChooser({ onPick }: { onPick: (companyId: number, facilityId: n
     let cancelled = false;
     Companies.list()
       .then((res) => {
-        if (cancelled) return;
-        setCompanies(res.items);
-        if (companyId === null && res.items.length === 1) setCompanyId(res.items[0].id);
+        if (!cancelled) {
+          setCompanies(res.items);
+          if (companyId === null && res.items.length === 1) setCompanyId(res.items[0].id);
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať firmy.');
@@ -722,9 +827,10 @@ function FacilityChooser({ onPick }: { onPick: (companyId: number, facilityId: n
     setLoadingFacilities(true);
     Companies.show(companyId)
       .then((res) => {
-        if (cancelled) return;
-        setFacilities(res.facilities);
-        setFacilityId(res.facilities.length === 1 ? res.facilities[0].id : null);
+        if (!cancelled) {
+          setFacilities(res.facilities);
+          setFacilityId(res.facilities.length === 1 ? res.facilities[0].id : null);
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať prevádzky.');

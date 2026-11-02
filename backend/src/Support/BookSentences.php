@@ -81,50 +81,6 @@ final class BookSentences
     /** Trainings that read „odborná príprava" (feminine), the rest are „školenie" (neuter). */
     private const TRAINING_FEMININE = ['hliadka_oph', 'hliadka_opah'];
 
-    /**
-     * „Čo sa vykonalo" for an entry by protocol number (spec 9.3b) — the
-     * prototype's `KN_RUCNE`. Each book offers its own kinds: BOZP things do
-     * not belong to the fire book and the other way round (spec 9.6).
-     *
-     * @var array<string, array{0: string, 1: string}> kind → [phrase, gender]
-     */
-    private const MANUAL = [
-        'ppp'     => ['preventívna protipožiarna prehliadka', self::FEMININE],
-        'php'     => ['kontrola prenosných hasiacich prístrojov', self::FEMININE],
-        'hyd'     => ['kontrola hadicových zariadení', self::FEMININE],
-        'osv'     => ['kontrola núdzového osvetlenia', self::FEMININE],
-        'uzv'     => ['kontrola akcieschopnosti požiarnych uzáverov', self::FEMININE],
-        'unik'    => ['kontrola únikových ciest a východov', self::FEMININE],
-        'sko'     => ['školenie o ochrane pred požiarmi', self::NEUTER],
-        'dok'     => ['kontrola dokumentácie ochrany pred požiarmi', self::FEMININE],
-        'poplach' => ['cvičný požiarny poplach', self::MASCULINE],
-        'prac'    => ['kontrola pracoviska', self::FEMININE],
-        'ine'     => ['iný úkon', self::MASCULINE],
-    ];
-
-    /** @var array<string, list<string>> */
-    private const MANUAL_BY_BOOK = [
-        BookMapping::PO   => ['ppp', 'php', 'hyd', 'osv', 'uzv', 'unik', 'sko', 'dok', 'poplach', 'ine'],
-        BookMapping::BOZP => ['prac', 'ine'],
-    ];
-
-    /**
-     * @return list<array{kind: string, label: string}>
-     */
-    public static function manualKinds(string $book): array
-    {
-        $out = [];
-        foreach (self::MANUAL_BY_BOOK[$book] ?? [] as $kind) {
-            $out[] = ['kind' => $kind, 'label' => self::MANUAL[$kind][0]];
-        }
-        return $out;
-    }
-
-    public static function isManualKind(string $book, string $kind): bool
-    {
-        return in_array($kind, self::MANUAL_BY_BOOK[$book] ?? [], true);
-    }
-
     /** Whether an inspection type's protocol states how many items it covered. */
     public static function isCounted(string $type): bool
     {
@@ -204,15 +160,6 @@ final class BookSentences
         $what = $book === BookMapping::BOZP ? 'preventívna prehliadka BOZP' : 'preventívna protipožiarna prehliadka';
         return 'Dňa ' . self::dateSk($dateIso) . ' bola vykonaná ' . $what . self::where([$facilityName]) . '.'
             . ' Záznam č. ' . trim($number) . '. Zistených nedostatkov: ' . $defects . '.';
-    }
-
-    /** Entry by protocol number (spec 9.3b). */
-    public static function byNumber(string $kind, string $dateIso, string $number, string $object): string
-    {
-        [$phrase, $gender] = self::MANUAL[$kind] ?? self::MANUAL['ine'];
-        $where = trim($object) !== '' ? ' v objekte ' . trim($object) : '';
-        return 'Dňa ' . self::dateSk($dateIso) . ' ' . self::done($gender) . ' ' . $phrase . $where
-            . '. Protokol č. ' . trim($number) . '.';
     }
 
     /** „8. 7. 2026" of an ISO date. */

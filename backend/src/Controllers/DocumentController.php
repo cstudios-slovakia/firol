@@ -691,10 +691,10 @@ final class DocumentController
                        i.notes, i.details, i.inspector_user_id, i.source_inspection_id,
                        i.effective_inspector_user_id, i.effective_cert_number,
                        i.effective_cert_valid_from, i.effective_cert_valid_to,
-                       i.company_id, c.name AS company_name, c.ico AS company_ico,
+                       i.company_id, c.name AS company_name, c.ico AS company_ico, c.client_type AS company_client_type,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
                        c.approver AS company_approver,
-                       i.facility_id, f.name AS facility_name,
+                       i.facility_id, f.name AS facility_name, f.description AS facility_description,
                        f.street AS facility_street, f.postal_code AS facility_postal_code, f.city AS facility_city,
                        f.contact_person AS facility_contact_person,
                        (SELECT d.number FROM documents d
@@ -927,16 +927,18 @@ final class DocumentController
                 'source_number'      => $inspection['source_number'] ?? null,
             ],
             'company' => [
-                'name'    => $inspection['company_name'],
-                'ico'     => $inspection['company_ico'],
-                'address' => Address::format($inspection['company_street'], $inspection['company_postal_code'], $inspection['company_city']),
-                'city'    => $inspection['company_city'],
+                'name'        => $inspection['company_name'],
+                'ico'         => $inspection['company_ico'],
+                'client_type' => $inspection['company_client_type'] ?? null,
+                'address'     => Address::format($inspection['company_street'], $inspection['company_postal_code'], $inspection['company_city']),
+                'city'        => $inspection['company_city'],
                 // Schvaľujúca osoba — printed on the Pokyn and the vyraďovací
                 // protokol (change request 2.3 / 2.1).
                 'approver' => $inspection['company_approver'] ?? null,
             ],
             'facility' => [
                 'name'           => $inspection['facility_name'],
+                'description'    => $inspection['facility_description'] ?? null,
                 'address'        => Address::format($inspection['facility_street'], $inspection['facility_postal_code'], $inspection['facility_city']),
                 'city'           => $inspection['facility_city'],
                 'contact_person' => $inspection['facility_contact_person'],
@@ -949,6 +951,7 @@ final class DocumentController
             ],
             'items' => $items,
             'stats' => $stats,
+            'photo_counts' => \Firol\Support\PrehliadkaRecord::photoCounts((int) $inspection['id']),
             // Chapter 13 — filled in by rerenderWithHandover() once the client
             // signs. Null here means the protocol prints an empty signature
             // line for a signature on paper, which is normal practice.
@@ -1432,6 +1435,17 @@ final class DocumentController
                     'kniha_bozp',
                     \Firol\Support\BookMapping::BOZP,
                 );
+            if (isset($items[0]['fields']['prehliadka']) && is_array($items[0]['fields']['prehliadka'])) {
+                $payload['prehliadka'] = $items[0]['fields']['prehliadka'];
+                $fb = \Firol\Support\PrehliadkaRecord::facilityBlock($accountId, (int) $inspection['facility_id']);
+                $payload['prehliadka']['switches'] = $fb['switches'];
+                if (empty($payload['prehliadka']['description'])) {
+                    $payload['prehliadka']['description'] = $fb['description'];
+                }
+                if (empty($payload['facility']['description'])) {
+                    $payload['facility']['description'] = $fb['description'];
+                }
+            }
             // The person who took the prehliadka over for the organisation signs
             // the BOZP record's client column (its „Za organizáciu" cell).
             $handed = $items[0]['fields']['prehliadka']['handed_over'] ?? null;

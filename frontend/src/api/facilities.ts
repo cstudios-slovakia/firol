@@ -20,6 +20,8 @@ export type Facility = {
   description?: string | null;
   floors_above?: number | null;
   floors_below?: number | null;
+  /** Bytový dom optional entrances note/helper (spec 3.2, 5, Decision D1). */
+  vchody?: string | null;
   /** Remembered by the walk-through; not edited on the form. */
   entrances?: string[];
   places?: string[];
@@ -49,6 +51,7 @@ export type FacilityPayload = {
   main_gas_location?: string;
   main_water_location?: string;
   description?: string;
+  vchody?: string;
   floors_above?: number | null;
   floors_below?: number | null;
 };

@@ -12,11 +12,12 @@ import { BOOK_LABELS, bookOfInspectionType, type BookKey } from '@/lib/bookMappi
 import { formatDateSk } from '@/lib/clientNoticeEmail';
 import { useConfirm } from '@/lib/confirm';
 import { offlineMessage } from '@/lib/offline';
-import { periodicityLabel, validUntil } from '@/lib/periodicity';
+import { validUntil } from '@/lib/periodicity';
 import {
   ROUTINE_LABELS,
   TERM_KEY_PREHLIADKA_BOZP,
   TERM_KEY_PREHLIADKA_PO,
+  effectivePeriodicityMonths,
   parseDetails,
   prehliadkaClosePath,
   prehliadkaPath,
@@ -145,8 +146,10 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
   const autoTerms = useMemo<AutoTerm[]>(() => {
     const rows: AutoTerm[] = [];
     const own = { value: i.periodicity_value, unit: i.periodicity_unit };
-    const ownSource =
-      i.periodicity_value === null ? 'bez opakovania' : `${periodicityLabel(own)} od tejto prehliadky`;
+    const pppMonths = effectivePeriodicityMonths(details);
+    const ownSource = `${pppMonths} mesiacov od dnešnej prehliadky${
+      details.lehota_vlastna ? ` (dohodnutá kratšia, zákonná ${details.lehota_zakon})` : ''
+    }`;
     if (details.scope.po) {
       rows.push({
         key: TERM_KEY_PREHLIADKA_PO,
@@ -268,7 +271,10 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
   }
 
   // ── Termíny, ktoré nerobíme my ───────────────────────────────────────────
-  const shownExternal = external.filter((t) => books.includes(t.book));
+  const shownExternal = external.filter((t) => {
+    if (t.book === 'ob') return details.scope.po || details.scope.bozp;
+    return books.includes(t.book);
+  });
 
   async function removeExternal(t: ExternalTerm) {
     const ok = await confirm({
@@ -348,6 +354,22 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
         />
       ))}
 
+      {/* Poznámka do záznamu */}
+      <Card className="animate-fade-up flex flex-col gap-2 p-4">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">Poznámka do záznamu</h2>
+        <p className="text-xs text-ink-400">Nepovinné. Čo sa nezmestí do činností ani nedostatkov.</p>
+        <textarea
+          className="w-full rounded-xl border border-ink-200 bg-white p-3 text-sm text-ink-900 placeholder:text-ink-400 focus:border-firol-500 focus:outline-none focus:ring-1 focus:ring-firol-500 disabled:opacity-50 min-h-[72px]"
+          placeholder="Kotolňa bola v čase prehliadky uzamknutá, správca prístup zabezpečí do konca mesiaca."
+          value={details.note ?? ''}
+          disabled={!canEdit}
+          onChange={(e) => {
+            const val = e.target.value;
+            saver.update((d) => ({ ...d, note: val }));
+          }}
+        />
+      </Card>
+
       {/* Doplnené samy */}
       <Card className="animate-fade-up flex flex-col gap-3 p-4">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">Doplnené samy</h2>
@@ -367,7 +389,7 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
                     {' · '}
                     {override ? 'prepísané rukou' : t.source}
                     {' · '}
-                    <span className={t.book === 'bozp' ? 'text-[#2D63A0]' : 'text-firol-700'}>{BOOK_LABELS[t.book]}</span>
+                    <span className={t.book === 'bozp' ? 'text-[#2D63A0]' : 'text-firol-700'}>{BOOK_LABELS[t.book as BookKey]}</span>
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
@@ -433,7 +455,7 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
                     <p className="mt-0.5 text-xs text-ink-500">
                       {t.valid_until ? `platnosť do ${formatDateSk(t.valid_until)}` : 'nedoložené'}
                       {' · '}
-                      <span className={t.book === 'bozp' ? 'text-[#2D63A0]' : 'text-firol-700'}>{BOOK_LABELS[t.book]}</span>
+                      <span className={t.book === 'bozp' ? 'text-[#2D63A0]' : 'text-firol-700'}>{t.book === 'ob' ? 'oba záznamy' : BOOK_LABELS[t.book]}</span>
                       {t.facility_name ? ` · ${t.facility_name}` : ''}
                     </p>
                     {state.tone !== 'ok' && (
@@ -575,7 +597,7 @@ function ActivitiesCard({
     ...orphans.map((label) => ({ label, custom: null as { id: number; label: string } | null })),
   ];
   const picked = rows.filter((r) => ticked.includes(r.label)).length;
-  const target = kind === 'bozp' ? 'do záznamu BOZP a do knihy BOZP' : 'do záznamu z preventívnej prehliadky';
+  const target = kind === 'bozp' ? 'do záznamu Preventívna prehliadka BOZP' : 'do záznamu z preventívnej prehliadky';
 
   return (
     <Card className="animate-fade-up flex flex-col gap-3 p-4">

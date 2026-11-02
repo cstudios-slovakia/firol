@@ -6,6 +6,7 @@ namespace Firol\Controllers;
 
 use Firol\Audit\AuditLog;
 use Firol\Auth\Csrf;
+use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
@@ -132,6 +133,7 @@ final class ExternalTermController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        MemberRights::requireDelete($accountId);
         $company = self::writableCompany($accountId, (int) $params['id']);
         $term = self::term($accountId, $company['id'], (int) $params['term_id']);
 
@@ -188,8 +190,8 @@ final class ExternalTermController
     /** The book is an explicit answer — it is never guessed from the name. */
     private static function book(?string $value): string
     {
-        if ($value === null || !BookMapping::isBook($value)) {
-            Response::error('Vyber, do ktorej knihy termín patrí.', 422);
+        if ($value === null || !ExternalTerms::isBook($value)) {
+            Response::error('Vyber, do ktorej oblasti termín patrí.', 422);
         }
         return $value;
     }

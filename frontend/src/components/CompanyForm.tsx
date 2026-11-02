@@ -281,18 +281,7 @@ export function CompanyForm({
 
       <Field
         label="Schvaľujúca osoba"
-        hint={
-          <>
-            Meno a funkcia — dopĺňa sa do poľa „Schválil“ na pokynoch a protokoloch.
-            <br />
-            <br />
-            <b className="font-semibold text-ink-600">Požiarnu knihu neschvaľuje</b> — § 31 ods. 1 dáva
-            štatutárnemu orgánu na schválenie identifikačnú kartu, požiarne poriadky pracovísk, poplachové
-            smernice a evakuačné plány, kniha medzi nimi nie je. V knihe sa tá istá osoba podpisuje ako{' '}
-            <b className="font-semibold text-ink-600">vedúci zamestnanec organizačnej zložky</b>, ktorý bol
-            so záznamom oboznámený.
-          </>
-        }
+        hint="Meno a funkcia — dopĺňa sa do poľa „Schválil“ na pokynoch a protokoloch."
       >
         {(p) => (
           <Input

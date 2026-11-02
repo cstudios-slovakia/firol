@@ -179,11 +179,7 @@ export function PrehliadkaWalkPage() {
               ? `Riadne kontroly: ${details.routine.map((t) => ROUTINE_LABELS[t]).join(', ')}`
               : 'Bez riadnych kontrol — zariadenie sa pri nedostatku vypisuje rukou.'}
           </p>
-          {details.scope.po && (
-            <p className="mt-0.5 text-xs text-ink-500">
-              Zápis do požiarnej knihy: {details.book_entry ? 'áno' : 'nie'}
-            </p>
-          )}
+
         </div>
         {canEdit && (
           <Link to={prehliadkaSetupPath(id)} className="shrink-0">

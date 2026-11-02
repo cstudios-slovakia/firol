@@ -161,10 +161,11 @@ final class PrehliadkaDefects
     /**
      * @param array<string, mixed> $body
      * @param string|null $executedOn the prehliadka's date (Y-m-d)
+     * @param bool $isBytovyDom whether the facility belongs to a bytový dom
      * @return array<string, mixed>
      * @throws \InvalidArgumentException with a Slovak message
      */
-    public static function validate(array $body, ?string $executedOn): array
+    public static function validate(array $body, ?string $executedOn, bool $isBytovyDom = true): array
     {
         $title = self::text($body['title'] ?? null, 255);
         if ($title === null) {
@@ -176,7 +177,7 @@ final class PrehliadkaDefects
             throw new \InvalidArgumentException('Neplatné určenie nedostatku (požiarny / BOZP / oboje).');
         }
 
-        $where = self::where($body['where'] ?? null);
+        $where = self::where($body['where'] ?? null, $isBytovyDom);
 
         $description = self::text($body['description'] ?? null, 2000);
         if ($description === null) {
@@ -288,21 +289,24 @@ final class PrehliadkaDefects
     /**
      * @return array{entrance: ?string, floor: ?string, place: ?string, detail: ?string, text: string}
      */
-    private static function where(mixed $raw): array
+    private static function where(mixed $raw, bool $isBytovyDom = true): array
     {
         $raw = is_array($raw) ? $raw : [];
-        $entrance = self::text($raw['entrance'] ?? null, 120);
-        $floor = self::text($raw['floor'] ?? null, 120);
+        $entrance = $isBytovyDom ? self::text($raw['entrance'] ?? null, 120) : null;
+        $floor = $isBytovyDom ? self::text($raw['floor'] ?? null, 120) : null;
         $place = self::text($raw['place'] ?? null, 120);
         $detail = self::text($raw['detail'] ?? null, 255);
 
+        $parts = $isBytovyDom ? [$entrance, $floor, $place, $detail] : [$place, $detail];
         $text = implode(' · ', array_values(array_filter(
-            [$entrance, $floor, $place, $detail],
+            $parts,
             static fn (?string $p): bool => $p !== null,
         )));
         if ($text === '') {
             throw new \InvalidArgumentException(
-                'Zadaj miesto nedostatku — vchod, podlažie, miesto alebo vlastný popis.',
+                $isBytovyDom
+                    ? 'Zadaj miesto nedostatku — vchod, podlažie, miesto alebo vlastný popis.'
+                    : 'Zadaj miesto nedostatku — miesto alebo vlastný popis.',
             );
         }
         return [

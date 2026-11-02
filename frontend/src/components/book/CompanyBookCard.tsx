@@ -4,10 +4,9 @@ import { BookOpen, ChevronRight } from 'lucide-react';
 import { Book, bookPath, type BookSummary } from '@/api/book';
 
 /**
- * Entry to the books on the firm's card (spec 9.1, plan phase 5.8): the book is
- * a place at the firm, so it is reachable from here — „Požiarna kniha a kniha
- * BOZP · N zápisov · M na pridanie". The counts are a best-effort read: offline
- * without a cached copy the card just shows the title.
+ * Entry to the book on the firm's card (spec 9.1, 02.11 D4): the book is
+ * a place at the firm, so it is reachable from here — „Požiarna kniha · N zápisov · M na pridanie".
+ * The counts are a best-effort read: offline without a cached copy the card just shows the title.
  */
 export function CompanyBookCard({ companyId }: { companyId: number }) {
   const [summary, setSummary] = useState<BookSummary | null>(null);
@@ -26,8 +25,8 @@ export function CompanyBookCard({ companyId }: { companyId: number }) {
     };
   }, [companyId]);
 
-  const entries = summary ? summary.summary.po.entries + summary.summary.bozp.entries : null;
-  const offers = summary ? summary.summary.po.offers + summary.summary.bozp.offers : null;
+  const entries = summary ? summary.summary.po.entries : null;
+  const offers = summary ? summary.summary.po.offers : null;
 
   const entriesLabel =
     entries === null
@@ -47,7 +46,7 @@ export function CompanyBookCard({ companyId }: { companyId: number }) {
         <BookOpen className="size-5" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold text-ink-900">Požiarna kniha a kniha BOZP</span>
+        <span className="block text-sm font-semibold text-ink-900">Požiarna kniha</span>
         {entriesLabel !== null && (
           <span className="mt-0.5 block truncate text-xs text-ink-500">
             {entriesLabel}

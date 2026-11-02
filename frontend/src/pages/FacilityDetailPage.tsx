@@ -38,7 +38,7 @@ import { periodicityShort } from "@/lib/periodicity";
 import { bookPath } from "@/api/book";
 import { canRepeatInspection } from "@/lib/sections";
 import { Prehliadka, type PrehliadkaMemory } from "@/api/prehliadka";
-import { PREHLIADKA_TYPE, prehliadkaPath, startPrehliadkaPath } from "@/lib/prehliadka";
+import { PREHLIADKA_TYPE, prehliadkaPath } from "@/lib/prehliadka";
 import {
     TRAINING_TYPE_LABELS,
     TRAINING_TYPES,
@@ -402,28 +402,20 @@ export function FacilityDetailPage() {
                 </dl>
             </Card>
 
-            {/* Action card menu */}
-            {canEdit && (
+            {/* Action card menu: only show continue banner when a draft is in progress */}
+            {canEdit && ppDraftId !== null && (
                 <Link
                     id="pp-start-link"
-                    to={
-                        ppDraftId !== null
-                            ? prehliadkaPath(ppDraftId)
-                            : startPrehliadkaPath({ companyId: facility.company_id, facilityId: facility.id })
-                    }
+                    to={prehliadkaPath(ppDraftId)}
                     className="flex items-center gap-3.5 rounded-2xl bg-firol-500 px-4 py-3.5 text-white shadow-[var(--shadow-glow)] transition-[background-color,transform] duration-200 hover:bg-firol-600 active:scale-[0.99]"
                 >
                     <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white/20">
                         <ClipboardCheck className="size-5 text-white" />
                     </span>
                     <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold">
-                            {ppDraftId !== null ? "Prehliadka prebieha · pokračovať" : "Preventívna prehliadka"}
-                        </p>
+                        <p className="text-sm font-semibold">Prehliadka prebieha · pokračovať</p>
                         <p className="mt-0.5 text-xs text-white/80">
-                            {ppDraftId !== null
-                                ? "Rozpracované nedostatky ostali uložené"
-                                : "Obchôdzka — zapíšeš nedostatky, záznamy vzniknú z nich"}
+                            Rozpracované nedostatky ostali uložené
                         </p>
                     </div>
                     <ChevronRight className="size-4 shrink-0 text-white/70" />

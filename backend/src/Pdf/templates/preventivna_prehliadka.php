@@ -1,26 +1,20 @@
 <?php
 /**
  * Záznam o vykonaní preventívnej protipožiarnej prehliadky (PPP-RRRR-NNN) —
- * POapp 26. 10. 2026, phase 8a, § 14 ods. 3 vyhl. MV SR č. 121/2002 Z. z.
+ * POapp 02. 11. 2026, Option A (2_Vzor_hotoveho_zaznamu_A.pdf).
  *
- * Section order and the fixed sentences are the sample record's
- * (2_Vzor_hotoveho_zaznamu.pdf, acceptance criterion 19):
- *
- *   title → Správca / Právnická osoba → Adresa → Dátum PPP → Popis (+ the scope
- *   sentence) → Hlavné vypínače a uzávery → Vykonané činnosti → Zistené
- *   nedostatky → Nedostatky z predchádzajúcej prehliadky → Termíny → záver →
- *   signatures.
- *
- * Empty sections are left out: a prevádzka without main switches prints none, a
- * prehliadka with nothing ticked no „Vykonané činnosti". One prevádzka is ONE
- * document, whatever number of entrances it has (spec 7.2) — the entrance is only
- * the place of a defect.
+ * Section order and fixed sentences:
+ *   Title (+ § 14 ods. 3 subtitle ONLY for bytový dom) → Základné údaje (Dátum,
+ *   Vykonal, Lehota, Ďalšia do) → Popis objektu → Poznámka → Hlavné vypínače
+ *   a uzávery → Vykonané činnosti → Zistené nedostatky → Stav nedostatkov
+ *   z prehliadky → Termíny (Čo | Platnosť) → Podpisy (Vykonal | S výsledkom
+ *   prehliadky oboznámený).
  *
  * @var string $number
  * @var array  $brand
  * @var array  $inspection    executed_on, …
- * @var array  $company       name, ico, address, city
- * @var array  $facility      name, address, city
+ * @var array  $company       name, ico, address, city, client_type
+ * @var array  $facility      name, address, city, description
  * @var array  $inspector     fullname, certification_number, signature_data_uri
  * @var array|null $handover  the client's on-screen signature, when there is one
  * @var array  $photos
@@ -30,10 +24,10 @@ use Firol\Pdf\PrehliadkaDefectsBlock;
 use Firol\Pdf\ProtocolLayout;
 use Firol\Pdf\SignatureBlock;
 use Firol\Support\Contractor;
+use Firol\Support\Periodicity;
 use Firol\Support\PrehliadkaRecord;
 use Firol\Support\Sections;
 
-// The PO documents follow the account's brand colour (the photo appendix does too).
 $doc = new ProtocolLayout(
     get_defined_vars(),
     (string) (($brand['color'] ?? null) ?: Sections::COLORS[Sections::OPP]),
@@ -41,162 +35,190 @@ $doc = new ProtocolLayout(
 );
 $e = [ProtocolLayout::class, 'esc'];
 
-$p = (array) $prehliadka;
-$isDom = ($p['kind'] ?? 'firma') === 'dom';
+$p = (array) ($prehliadka ?? []);
+$clientType = (string) ($company['client_type'] ?? '');
+$isDom = ($p['kind'] ?? '') === 'dom' || $clientType === 'bytove_druzstvo';
 $points = (array) ($p['points'] ?? []);
 $activities = (array) ($p['activities'] ?? []);
 $terms = (array) ($p['terms'] ?? []);
-$present = (array) ($p['present'] ?? []);
 $handedOver = is_array($p['handed_over'] ?? null) ? $p['handed_over'] : null;
-$bookSeq = isset($p['book_seq']) && is_int($p['book_seq']) ? $p['book_seq'] : null;
 $ho = is_array($handover ?? null) ? $handover : null;
 
-$title = PrehliadkaRecord::TITLE . ($isDom ? "\n" . PrehliadkaRecord::TITLE_DOM_SUFFIX : '');
-
-$companyLine = (string) ($company['name'] ?? '');
+// Rule 6.0a / AC #23 / Decision D5:
+// Bytový dom: Title with bytového domu + subtitle podľa § 14 ods. 3 vyhlášky MV SR č. 121/2002 Z. z.
+// Firma: Title without bytového domu — NO subtitle anywhere.
 if ($isDom) {
-    // Správca: name and seat, as the sample prints it.
-    if (!empty($company['address'])) {
-        $companyLine .= ', ' . $company['address'];
-    }
-} elseif (!empty($company['ico'])) {
-    $companyLine .= ', IČO ' . $company['ico'];
+    $title = "Záznam o vykonaní preventívnej protipožiarnej prehliadky\nbytového domu";
+    $subtitle = 'podľa § 14 ods. 3 vyhlášky MV SR č. 121/2002 Z. z.';
+} else {
+    $title = 'Záznam o vykonaní preventívnej protipožiarnej prehliadky';
+    $subtitle = null;
 }
-$facilityLine = (string) ($facility['name'] ?? '');
-if (!empty($facility['address'])) {
-    $facilityLine .= ', ' . $facility['address'];
-}
-
-// „…prekonzultované s prítomnými: Ing. Peter Správca (predseda družstva), …" — a name
-// cannot be declined by machine, so the people are listed after a colon.
-$presentText = implode(', ', array_map(
-    static fn (array $x): string => (string) $x['name'] . (!empty($x['role']) ? ' (' . $x['role'] . ')' : ''),
-    array_filter($present, 'is_array'),
-));
-
-$city = ($facility['city'] ?? '') ?: ($company['city'] ?? '');
-$place = ($city ? $city . ', ' : '') . ProtocolLayout::date($inspection['executed_on'] ?? null);
 
 $certLine = !empty($inspector['certification_number'])
-    ? '<br><span style="font-size:8pt; color:#555;">technik ochrany pred požiarmi, osv. č. ' . $e((string) $inspector['certification_number']) . '</span>'
-    : '<br><span style="font-size:8pt; color:#555;">technik ochrany pred požiarmi</span>';
+    ? '<br><span style="font-size:8pt; color:#555;">technik požiarnej ochrany, č. opr.: ' . $e((string) $inspector['certification_number']) . '</span>'
+    : '';
 
 if ($ho !== null) {
     $clientName = SignatureBlock::nameCell($ho);
-} elseif ($handedOver !== null) {
+} elseif ($handedOver !== null && !empty($handedOver['name'])) {
     $clientName = $e((string) $handedOver['name'])
-        . (!empty($handedOver['role']) ? '<br><span style="font-size:8pt; color:#555;">' . $e((string) $handedOver['role']) . '</span>' : '');
+        . (!empty($handedOver['role']) ? ', ' . $e((string) $handedOver['role']) : '');
 } else {
     $clientName = 'Zodpovedná osoba organizácie';
 }
+
+$executedOn = ProtocolLayout::date($inspection['executed_on'] ?? null);
+
+// Lehota calculation (lehota_zakon + lehota_vlastna)
+$rawDetails = (array) ($inspection['details'] ?? []);
+$lehotaZakon = (int) ($p['lehota_zakon'] ?? ($rawDetails['lehota_zakon'] ?? ($isDom ? 12 : 3)));
+$lehotaVlastna = isset($p['lehota_vlastna']) && (int) $p['lehota_vlastna'] > 0
+    ? (int) $p['lehota_vlastna']
+    : (isset($rawDetails['lehota_vlastna']) && (int) $rawDetails['lehota_vlastna'] > 0 ? (int) $rawDetails['lehota_vlastna'] : null);
+
+$effectiveMonths = ($lehotaVlastna !== null && $lehotaVlastna > 0)
+    ? $lehotaVlastna
+    : (int) ($inspection['periodicity_value'] ?? $lehotaZakon);
+
+if ($lehotaVlastna !== null && $lehotaVlastna > 0 && $lehotaVlastna < $lehotaZakon) {
+    $lehotaHtml = $effectiveMonths . ' mesiacov <span class="muted" style="font-size:8pt;">(dohodnutá kratšia; zákonná ' . $lehotaZakon . ' mesiacov)</span>';
+} else {
+    $lehotaHtml = $effectiveMonths . ' mesiacov';
+}
+
+$nextDateIso = Periodicity::validUntil($inspection['executed_on'] ?? date('Y-m-d'), $effectiveMonths, 'months');
+$nextDateFormatted = ProtocolLayout::date($nextDateIso);
+
+$facilityDesc = trim((string) ($p['description'] ?? ($facility['description'] ?? '')));
+$note = trim((string) ($p['note'] ?? ($p['poznamka'] ?? ($rawDetails['note'] ?? ($rawDetails['poznamka'] ?? ($inspection['notes'] ?? ''))))));
 ?>
 <?= $doc->styles() ?>
-<?= $doc->header($title) ?>
+<?= $doc->header($title, $subtitle) ?>
 
-<table class="bi">
-  <tr><td class="bl"><?= $isDom ? 'Správca' : 'Právnická osoba' ?></td><td class="bv" colspan="3"><?= $e($companyLine) ?></td></tr>
-  <tr><td class="bl">Adresa</td><td class="bv" colspan="3"><?= $e($facilityLine) ?></td></tr>
-  <tr><td class="bl">Dátum PPP</td><td class="bv" colspan="3"><strong><?= $e(ProtocolLayout::date($inspection['executed_on'] ?? null)) ?></strong></td></tr>
-  <?= Contractor::basicInfoRow(is_array($contractor ?? null) ? $contractor : []) ?>
+<?= $doc->band('Základné údaje') ?>
+<table class="grid" style="margin-top:0;">
+  <tr>
+    <th style="width:14%">Dátum</th>
+    <td style="width:36%"><strong><?= $e($executedOn) ?></strong></td>
+    <th style="width:14%">Vykonal</th>
+    <td style="width:36%"><?= $e((string) ($inspector['fullname'] ?? '')) ?><?= $certLine ?></td>
+  </tr>
+  <tr>
+    <th>Lehota</th>
+    <td><?= $lehotaHtml ?></td>
+    <th>Ďalšia do</th>
+    <td><strong><?= $e($nextDateFormatted) ?></strong></td>
+  </tr>
+  <?php if (!empty($contractor['name'])): ?>
+    <tr>
+      <th>Zhotoviteľ</th>
+      <td colspan="3"><?= Contractor::cellHtml($contractor) ?></td>
+    </tr>
+  <?php endif ?>
 </table>
 
-<?= $doc->band('Popis') ?>
-<?php if (!empty($p['description'])): ?>
-  <div class="text-box"><?= nl2br($e((string) $p['description'])) ?></div>
+<?php if ($facilityDesc !== ''): ?>
+  <?= $doc->band('Popis objektu') ?>
+  <div class="text-box"><?= nl2br($e($facilityDesc)) ?></div>
 <?php endif ?>
-<div class="text-box" style="<?= !empty($p['description']) ? 'border-top:none;' : '' ?>"><?= $e($isDom ? PrehliadkaRecord::SCOPE_DOM : PrehliadkaRecord::SCOPE_FIRMA) ?></div>
+
+<?php if ($note !== ''): ?>
+  <?= $doc->band('Poznámka') ?>
+  <div class="text-box"><?= nl2br($e($note)) ?></div>
+<?php endif ?>
 
 <?php if (!empty($p['switches'])): ?>
   <?= $doc->band('Hlavné vypínače a uzávery') ?>
   <table class="bi">
     <?php foreach ($p['switches'] as $row): ?>
-      <tr><td class="bl" style="width:30%"><?= $e((string) $row['label']) ?></td><td class="bv" colspan="3"><?= $e((string) $row['value']) ?></td></tr>
+      <tr>
+        <td class="bl" style="width:36%"><?= $e((string) $row['label']) ?></td>
+        <td class="bv"><?= $e((string) $row['value']) ?></td>
+      </tr>
     <?php endforeach ?>
   </table>
 <?php endif ?>
 
 <?php if ($activities !== []): ?>
   <?= $doc->band('Vykonané činnosti') ?>
-  <table class="grid">
+  <ul style="margin:4pt 0 4pt; padding-left:18pt; line-height:1.4;">
     <?php foreach ($activities as $a): ?>
-      <tr>
-        <td style="width:5%" class="check">✓</td>
-        <td><?= $e((string) $a['label']) ?><?= !empty($a['custom']) ? ' ' . $e(PrehliadkaRecord::CUSTOM_ACTIVITY_TAG) : '' ?></td>
-      </tr>
+      <li><?= $e((string) ($a['label'] ?? $a)) ?></li>
     <?php endforeach ?>
-  </table>
-  <div class="small-note"><?= $e(PrehliadkaRecord::CHECKED . ($isDom ? ' ' . PrehliadkaRecord::CHECKED_DOM : '')) ?></div>
+  </ul>
+  <div class="small-note" style="font-style:italic; color:#6b6b75; margin-top:3pt;"><?= $e(PrehliadkaRecord::CHECKED) ?></div>
 <?php endif ?>
 
 <?= PrehliadkaDefectsBlock::render($points, [
-    'photos'    => !empty($p['include_photos']),
+    'photos'    => !empty($p['include_photos'] ?? $includePhotos ?? false),
     'when_none' => PrehliadkaRecord::NO_DEFECTS,
 ]) ?>
-<?php if ($points !== []): ?>
-  <div class="small-note" style="font-size:9pt; color:#1a1a1f; margin-top:6pt;"><?= $e(PrehliadkaRecord::NO_OTHER_DEFECTS) ?></div>
-<?php endif ?>
 
-<?= PrehliadkaDefectsBlock::previous((array) ($p['previous'] ?? [])) ?>
+<?php
+$prevRows = (array) ($p['previous'] ?? []);
+$prevDate = '';
+if ($prevRows !== []) {
+    $firstDate = $prevRows[0]['date'] ?? null;
+    $prevDate = $firstDate ? ' ' . ProtocolLayout::date($firstDate) : '';
+}
+?>
+<?= PrehliadkaDefectsBlock::previous($prevRows, 'Stav nedostatkov z prehliadky' . $prevDate) ?>
 
 <?php if ($terms !== []): ?>
   <?= $doc->band('Termíny') ?>
   <table class="grid">
     <thead>
       <tr>
-        <th style="width:44%">Kontrola alebo revízia</th>
-        <th style="width:18%">Vykonaná</th>
-        <th style="width:18%">Platnosť do</th>
-        <th>Stav</th>
+        <th style="width:65%">Čo</th>
+        <th>Platnosť</th>
       </tr>
     </thead>
     <tbody>
       <?php foreach ($terms as $t): ?>
         <tr>
-          <td><?= $e((string) $t['label']) ?><?= !empty($t['overridden']) ? '<br><span class="muted" style="font-size:7.5pt;">prepísané rukou</span>' : '' ?></td>
-          <td><?= $e((string) $t['done']) ?></td>
-          <td><?= $e((string) $t['valid_until']) ?></td>
-          <td class="<?= $e((string) ($t['state_tone'] ?? '')) ?>"><?= $e((string) ($t['state'] ?? '—')) ?></td>
+          <td><?= $e((string) ($t['label'] ?? $t['n'] ?? '')) ?></td>
+          <td><?= $e((string) ($t['valid_until'] ?? $t['valid'] ?? $t['d'] ?? $t['state'] ?? '—')) ?></td>
         </tr>
       <?php endforeach ?>
     </tbody>
   </table>
 <?php endif ?>
 
-<div class="text-box" style="margin-top:8pt;">
-  <?php if ($presentText !== ''): ?>
-    <p style="margin:0 0 4pt;">Výsledky preventívnej protipožiarnej prehliadky a zistené závady boli prekonzultované s prítomnými: <?= $e($presentText) ?>.</p>
-  <?php endif ?>
-  <?php if ($points !== []): ?>
-    <p style="margin:0 0 4pt;">Za odstránenie zistených závad v uvedených termínoch zodpovedá <?= $e($isDom ? PrehliadkaRecord::RESPONSIBLE_DOM : PrehliadkaRecord::RESPONSIBLE_FIRMA) ?>.</p>
-  <?php endif ?>
-  <?php if ($bookSeq !== null): ?>
-    <p style="margin:0;"><?= $points !== []
-        ? 'Zistené nedostatky boli zapísané do požiarnej knihy pod zápisom č. ' . $bookSeq . '.'
-        : 'Prehliadka bola zapísaná do požiarnej knihy pod zápisom č. ' . $bookSeq . '.' ?></p>
-  <?php endif ?>
-</div>
-
 <?= $doc->band('Podpisy') ?>
 <table class="sig-tbl">
   <tr>
-    <th width="34%">Prehliadku vykonal</th>
-    <th width="40%"><?= $isDom ? 'Za vlastníka / správcu prevzal' : 'Za právnickú osobu prevzal' ?></th>
-    <th width="26%">Miesto a dátum</th>
+    <th width="50%">Vykonal</th>
+    <th width="50%">S výsledkom prehliadky oboznámený</th>
   </tr>
   <tr>
-    <td><?= $e((string) ($inspector['fullname'] ?? '')) ?><?= $certLine ?></td>
+    <td>
+      <?= $e((string) ($inspector['fullname'] ?? '')) ?>
+      <?= $certLine ?>
+    </td>
     <td><?= $clientName ?></td>
-    <td><?= SignatureBlock::placeAndDate($ho, $place) ?></td>
   </tr>
   <tr class="sig-row">
     <td>
       <?php if (!empty($inspector['signature_data_uri'])): ?>
         <img class="sig-img" src="<?= $e((string) $inspector['signature_data_uri']) ?>" alt="">
+      <?php else: ?>
+        <i class="muted" style="font-size:8.5pt;">podpísané</i>
       <?php endif ?>
       <div class="sig-line"></div>
     </td>
-    <td><?= SignatureBlock::signCell($ho, 'preventivna_prehliadka') ?></td>
-    <td></td>
+    <td>
+      <?php if (!empty($ho['signature_data_uri'])): ?>
+        <img class="sig-img" src="<?= $e((string) $ho['signature_data_uri']) ?>" alt="">
+        <div class="sig-line"></div>
+      <?php elseif (!empty($ho['signed_on'])): ?>
+        <i class="muted" style="font-size:8.5pt;">podpísané na displeji</i>
+        <div class="sig-line"></div>
+      <?php else: ?>
+        <i class="muted" style="font-size:8.5pt;">podpis po vytlačení</i>
+        <div class="sig-line"></div>
+      <?php endif ?>
+    </td>
   </tr>
 </table>
 

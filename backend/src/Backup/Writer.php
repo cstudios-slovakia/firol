@@ -141,7 +141,7 @@ final class Writer
         $facStmt = $pdo->prepare(
             'SELECT id, company_id, name, street, postal_code, city, email, contact_person, notes,
                     main_power_location, main_gas_location, main_water_location, description,
-                    floors_above, floors_below, entrances, places, created_at
+                    floors_above, floors_below, entrances, places, vchody, created_at
              FROM   facilities WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
         );
         $facStmt->execute([$accountId]);
@@ -152,6 +152,7 @@ final class Writer
             $facility['floors_below'] = $facility['floors_below'] !== null ? (int) $facility['floors_below'] : null;
             $facility['entrances'] = self::jsonList($facility['entrances'] ?? null);
             $facility['places'] = self::jsonList($facility['places'] ?? null);
+            $facility['vchody'] = $facility['vchody'] !== null ? (string) $facility['vchody'] : null;
             $byCompany[(int) $facility['company_id']][] = self::withReadableAddress($facility);
         }
 
@@ -470,7 +471,7 @@ final class Writer
     {
         $stmt = $pdo->prepare(
             'SELECT e.id, e.company_id, e.facility_id, e.book, e.seq, e.entry_date, e.`text`, e.source,
-                    e.protocol_numbers, e.inspection_ids, e.training_ids, e.no_defects_statement,
+                    e.protocol_numbers, e.inspection_ids, e.training_ids, e.no_defects_statement, e.defects_text,
                     e.signed_technician_at, e.signed_manager_at, e.signer_name, e.signer_role,
                     e.created_at, u.email AS created_by_email
              FROM   book_entries e

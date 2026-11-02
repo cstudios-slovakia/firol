@@ -367,10 +367,11 @@ final class PrehliadkaRecord
                 $meta[] = implode(', ', $deviceNames);
             }
 
+            $reason = trim((string) ($answer['reason'] ?? ''));
             [$state, $text] = match ($status) {
                 'ok'    => ['ok', 'odstránené'],
-                'trva'  => ['trva', 'trvá — prechádza do bodu ' . $point],
-                'zanik' => ['zanik', 'dôvod zanikol — ' . trim((string) ($answer['reason'] ?? ''))],
+                'trva'  => ['trva', 'trvá'],
+                'zanik' => ['zanik', 'dôvod zanikol' . ($reason !== '' ? "\n" . $reason : '')],
                 default => ['waiting', 'neoverené'],
             };
             $rows[] = [
@@ -402,9 +403,12 @@ final class PrehliadkaRecord
     {
         $on = (string) $inspection['executed_on'];
         $overrides = (array) ($details['term_overrides'] ?? []);
+        $lehotaZakon = isset($details['lehota_zakon']) ? (int) $details['lehota_zakon'] : 12;
+        $lehotaVlastna = isset($details['lehota_vlastna']) && $details['lehota_vlastna'] !== null ? (int) $details['lehota_vlastna'] : null;
+        $effectiveMonths = ($lehotaVlastna !== null && $lehotaVlastna > 0) ? $lehotaVlastna : $lehotaZakon;
         $own = [
-            'value' => $inspection['periodicity_value'] !== null ? (int) $inspection['periodicity_value'] : null,
-            'unit'  => $inspection['periodicity_unit'] !== null ? (string) $inspection['periodicity_unit'] : null,
+            'value' => $effectiveMonths ?: ($inspection['periodicity_value'] !== null ? (int) $inspection['periodicity_value'] : null),
+            'unit'  => 'mesiac',
         ];
 
         $rows = [];
@@ -548,11 +552,17 @@ final class PrehliadkaRecord
     ): array {
         $facilityId = (int) $inspection['facility_id'];
         $points = self::points($items, self::PO, self::photoCounts((int) $inspection['id']));
+        $note = $details['note'] ?? ($details['poznamka'] ?? null);
+        $lehotaZakon = $details['lehota_zakon'] ?? null;
+        $lehotaVlastna = $details['lehota_vlastna'] ?? null;
 
         if (is_array($issued)) {
             $terms = (array) ($issued['terms'] ?? []);
             $previous = (array) ($issued['previous'] ?? []);
             $facility = (array) ($issued['facility'] ?? self::facilityBlock($accountId, $facilityId));
+            $note = $issued['note'] ?? $note;
+            $lehotaZakon = $issued['lehota_zakon'] ?? $lehotaZakon;
+            $lehotaVlastna = $issued['lehota_vlastna'] ?? $lehotaVlastna;
             $bookSeq = isset($issued['book_seq']) && is_int($issued['book_seq']) ? $issued['book_seq'] : null;
         } else {
             $facts = PrehliadkaTerms::forFacility($accountId, $facilityId, (string) $inspection['executed_on']);
@@ -574,23 +584,29 @@ final class PrehliadkaRecord
         }
 
         return [
-            'kind'          => $facility['kind'],
-            'description'   => $facility['description'],
-            'switches'      => $facility['switches'],
-            'activities'    => self::poActivities($details),
-            'points'        => $points,
-            'previous'      => $previous,
-            'terms'         => $terms,
-            'present'       => (array) ($details['present'] ?? []),
-            'handed_over'   => is_array($details['handed_over'] ?? null) ? $details['handed_over'] : null,
-            'book_seq'      => $bookSeq,
+            'kind'           => $facility['kind'],
+            'description'    => $facility['description'],
+            'note'           => $note,
+            'lehota_zakon'   => $lehotaZakon,
+            'lehota_vlastna' => $lehotaVlastna,
+            'switches'       => $facility['switches'],
+            'activities'     => self::poActivities($details),
+            'points'         => $points,
+            'previous'       => $previous,
+            'terms'          => $terms,
+            'present'        => (array) ($details['present'] ?? []),
+            'handed_over'    => is_array($details['handed_over'] ?? null) ? $details['handed_over'] : null,
+            'book_seq'       => $bookSeq,
             'include_photos' => $includePhotos,
             // What re-rendering needs to say the same thing again.
-            '_issued'       => [
-                'terms'    => $terms,
-                'previous' => $previous,
-                'facility' => $facility,
-                'book_seq' => $bookSeq,
+            '_issued'        => [
+                'terms'          => $terms,
+                'previous'       => $previous,
+                'facility'       => $facility,
+                'note'           => $note,
+                'lehota_zakon'   => $lehotaZakon,
+                'lehota_vlastna' => $lehotaVlastna,
+                'book_seq'       => $bookSeq,
             ],
         ];
     }
@@ -661,6 +677,9 @@ final class PrehliadkaRecord
                 'points'               => $points,
                 'previous'             => $previousRows,
                 'handed_over'          => is_array($details['handed_over'] ?? null) ? $details['handed_over'] : null,
+                'note'                 => $details['note'] ?? ($details['poznamka'] ?? null),
+                'lehota_zakon'         => $details['lehota_zakon'] ?? null,
+                'lehota_vlastna'       => $details['lehota_vlastna'] ?? null,
             ],
         ];
     }

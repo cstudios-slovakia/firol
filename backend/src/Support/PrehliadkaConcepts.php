@@ -273,7 +273,19 @@ final class PrehliadkaConcepts
                 } else {
                     continue; // only a snapshot is left; nothing to point at
                 }
-                $out[$ref]['defects'][] = ['item_id' => (int) $item['id'], 'text' => $text];
+                $out[$ref]['defects'][] = [
+                    'item_id'       => (int) $item['id'],
+                    'text'          => $text,
+                    'title'         => trim((string) ($f['title'] ?? '')),
+                    'description'   => trim((string) ($f['description'] ?? '')),
+                    'regulation'    => trim((string) ($f['regulation'] ?? '')),
+                    'justification' => trim((string) ($f['justification'] ?? '')),
+                    'measure'       => trim((string) ($f['measure'] ?? '')),
+                    'deadline_date' => $f['deadline_date'] ?? null,
+                    'deadline_text' => $f['deadline_text'] ?? null,
+                    'responsible'   => $f['responsible'] ?? null,
+                    'where'         => $f['where'] ?? null,
+                ];
             }
         }
         return $out;
@@ -349,6 +361,7 @@ final class PrehliadkaConcepts
                 $note = mb_substr($note, 0, self::MAX_NOTE - 1) . '…';
             }
             $note = $note === '' ? null : $note;
+            $fields['prehliadka_defects'] = $hit['defects'];
         }
 
         switch ($type) {

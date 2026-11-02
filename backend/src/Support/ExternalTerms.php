@@ -18,6 +18,16 @@ use Firol\Db;
  */
 final class ExternalTerms
 {
+    public const PO = BookMapping::PO;
+    public const BOZP = 'bozp';
+    public const OB = 'ob';
+    public const BOOKS = [self::PO, self::BOZP, self::OB];
+
+    public static function isBook(string $book): bool
+    {
+        return in_array($book, self::BOOKS, true);
+    }
+
     /**
      * Name → suggested book — the prototype's `REVIZIE`. Only a suggestion: the
      * form asks, and a free name is allowed.
@@ -25,15 +35,15 @@ final class ExternalTerms
      * @var array<string, string>
      */
     public const SUGGESTIONS = [
-        'Revízia elektrických spotrebičov a ručných nástrojov' => BookMapping::BOZP,
-        'Revízia elektrickej inštalácie'                       => BookMapping::BOZP,
-        'Revízia bleskozvodu'                                  => BookMapping::BOZP,
-        'Kontrola a čistenie komína'                           => BookMapping::PO,
-        'Revízia tlakových nádob'                              => BookMapping::BOZP,
-        'Revízia plynového zariadenia'                         => BookMapping::BOZP,
-        'Revízia zdvíhacieho zariadenia'                       => BookMapping::BOZP,
-        'Kontrola elektrickej požiarnej signalizácie'          => BookMapping::PO,
-        'Iná revízia'                                          => BookMapping::PO,
+        'Revízia elektrických spotrebičov a ručných nástrojov' => self::BOZP,
+        'Revízia elektrickej inštalácie'                       => self::OB,
+        'Revízia bleskozvodu'                                  => self::OB,
+        'Kontrola a čistenie komína'                           => self::PO,
+        'Revízia tlakových nádob'                              => self::BOZP,
+        'Revízia plynového zariadenia'                         => self::BOZP,
+        'Revízia zdvíhacieho zariadenia'                       => self::BOZP,
+        'Kontrola elektrickej požiarnej signalizácie'          => self::PO,
+        'Iná revízia'                                          => self::PO,
     ];
 
     /**
@@ -63,8 +73,14 @@ final class ExternalTerms
                 WHERE  t.account_id = ? AND t.company_id = ? AND t.archived_at IS NULL';
         $args = [$accountId, $companyId];
         if ($book !== null) {
-            $sql .= ' AND t.book = ?';
-            $args[] = $book;
+            if ($book === self::PO || $book === self::BOZP) {
+                $sql .= ' AND t.book IN (?, ?)';
+                $args[] = $book;
+                $args[] = self::OB;
+            } else {
+                $sql .= ' AND t.book = ?';
+                $args[] = $book;
+            }
         }
         if ($facilityId !== null) {
             $sql .= ' AND (t.facility_id IS NULL OR t.facility_id = ?)';

@@ -1,20 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, BookPlus, CalendarClock, ChevronDown, FileText, Hash, Pencil, PenLine, Plus, Printer, Signature, Trash2,
+  ArrowLeft, FileText, Plus, Printer, Signature,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import {
-  Book, bookPrintUrl, type BookEntry, type BookOffer, type BookScope, type BookView,
+  Book, bookPrintUrl, type BookEntry, type BookScope, type BookView,
 } from '@/api/book';
-import {
-  ExternalTerms, termState, type ExternalTerm, type ExternalTermSuggestion,
-} from '@/api/externalTerms';
 import { ApiError } from '@/lib/api';
-import { BOOKS, BOOK_LABELS, isBook, type BookKey } from '@/lib/bookMapping';
-import { todayIso } from '@/lib/dates';
-import { useConfirm } from '@/lib/confirm';
+import { isBytoveDruzstvo } from '@/lib/clientKind';
 import { offlineMessage } from '@/lib/offline';
 import { cn } from '@/lib/cn';
 import { useRevalidateOnReturn } from '@/lib/useRevalidateOnReturn';
@@ -24,59 +19,42 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { formatDay } from '@/components/ClientArchive';
-import {
-  AdditionSheet, EntrySheet, SignSheet, type EntrySheetMode,
-} from '@/components/book/BookSheets';
-import { ExternalTermSheet } from '@/components/book/ExternalTermSheet';
-
-/** Offers older than this fold into one row, so a firm with years of history is not buried. */
-const FOLD_OFFERS_AFTER_MONTHS = 12;
+import { AdditionSheet, SignSheet } from '@/components/book/BookSheets';
+import { NewBookEntryModal } from '@/components/book/NewBookEntryModal';
 
 function plural(n: number, one: string, few: string, many: string): string {
   return `${n} ${n === 1 ? one : n >= 2 && n <= 4 ? few : many}`;
 }
 
-function olderThanCutoff(iso: string): boolean {
-  const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - FOLD_OFFERS_AFTER_MONTHS);
-  return iso < cutoff.toISOString().slice(0, 10);
-}
-
 type Sheet =
-  | { type: 'entry'; mode: EntrySheetMode }
   | { type: 'addition'; entry: BookEntry }
-  | { type: 'term'; term?: ExternalTerm }
   | { type: 'sign' };
 
 /**
- * Požiarna kniha and kniha BOZP of one firm (spec 9). The book is a place at
- * the firm with a numbered row per entry; the app offers an entry for every
- * finished úkon and the technician adds it with one tap or edits it first.
- * Reads work offline; adding, dopísanie and signing need a connection.
+ * Požiarna kniha of one firm (spec 9, 02.11 overhaul).
+ * The book is strictly Požiarna kniha; BOZP has no book ledger (decision D4).
+ * The book screen features a unified pull modal (+ Nový zápis do požiarnej knihy)
+ * where the technician selects unbooked activities, writes custom notes or defects,
+ * toggles optional statutory sentences, previews live, and prints single entries
+ * or the full ledger.
  */
 export function BookPage() {
   const { id: idStr } = useParams<{ id: string }>();
   const companyId = Number(idStr);
   const [params, setParams] = useSearchParams();
-  const book: BookKey = isBook(params.get('book')) ? (params.get('book') as BookKey) : 'po';
   const facilityParam = Number(params.get('facility')) || null;
 
   const { csrfToken } = useAuth();
   const isReadOnly = useIsReadOnly();
   const toast = useToast();
-  const confirm = useConfirm();
-  const [terms, setTerms] = useState<ExternalTerm[]>([]);
-  const [termSuggestions, setTermSuggestions] = useState<ExternalTermSuggestion[]>([]);
   const [view, setView] = useState<BookView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<Sheet | null>(null);
-  const [adding, setAdding] = useState<string | null>(null);
-  const [showOldOffers, setShowOldOffers] = useState(false);
-  const [showPrevious, setShowPrevious] = useState(false);
+  const [novyZapisOpen, setNovyZapisOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
 
   const load = useCallback(() => {
-    return Book.show(companyId, book, facilityParam)
+    return Book.show(companyId, 'po', facilityParam)
       .then((res) => {
         setView(res);
         setError(null);
@@ -84,69 +62,23 @@ export function BookPage() {
       .catch((err: unknown) => {
         setError(err instanceof ApiError ? err.message : 'Knihu sa nepodarilo načítať.');
       });
-  }, [companyId, book, facilityParam]);
+  }, [companyId, facilityParam]);
 
   useEffect(() => {
     setView(null);
     void load();
   }, [load]);
 
-  // Entries and offers change when someone else books an úkon: refresh quietly.
-  // `load` only sets the view (the loader is reset by the effect above), so the
-  // book stays on screen while it runs.
-  // A failed or late refresh must not replace the book with an error, nor
-  // overwrite the view of a book the user has switched to meanwhile.
   const shownKey = useRef('');
-  shownKey.current = `${companyId}|${book}|${facilityParam ?? ''}`;
+  shownKey.current = `${companyId}|po|${facilityParam ?? ''}`;
   useRevalidateOnReturn(() => {
     const key = shownKey.current;
-    return Book.show(companyId, book, facilityParam)
+    return Book.show(companyId, 'po', facilityParam)
       .then((res) => {
         if (shownKey.current === key) setView(res);
       })
       .catch(() => undefined);
   });
-
-  // The firm's termíny cudzích revízií for the book on screen. A failed read
-  // (e.g. offline with nothing cached) just leaves the section empty.
-  const loadTerms = useCallback(() => {
-    return ExternalTerms.list(companyId, book)
-      .then((res) => {
-        setTerms(res.items);
-        setTermSuggestions(res.suggestions);
-      })
-      .catch(() => undefined);
-  }, [companyId, book]);
-
-  useEffect(() => {
-    setTerms([]);
-    void loadTerms();
-  }, [loadTerms]);
-
-  async function removeTerm(term: ExternalTerm) {
-    const ok = await confirm({
-      title: 'Odstrániť termín?',
-      description: `„${term.name}“ sa prestane tlačiť v prehľade termínov. Už vydané záznamy zostávajú nedotknuté.`,
-      confirmLabel: 'Odstrániť',
-    });
-    if (!ok) return;
-    try {
-      await ExternalTerms.remove(companyId, term.id, csrfToken);
-      toast.success('Termín odstránený.');
-      await loadTerms();
-    } catch (err) {
-      toast.error(offlineMessage(err, 'Termín sa nepodarilo odstrániť.'));
-    }
-  }
-
-  const recentOffers = useMemo(() => (view?.offers ?? []).filter((o) => !olderThanCutoff(o.date)), [view]);
-  const oldOffers = useMemo(() => (view?.offers ?? []).filter((o) => olderThanCutoff(o.date)), [view]);
-
-  function selectBook(next: BookKey) {
-    const qs = new URLSearchParams(params);
-    qs.set('book', next);
-    setParams(qs, { replace: true });
-  }
 
   function selectFacility(id: number) {
     const qs = new URLSearchParams(params);
@@ -159,39 +91,17 @@ export function BookPage() {
     setSwitching(true);
     try {
       await Book.setScope(companyId, next, csrfToken);
-      toast.success(next === 'firma' ? 'Jedna kniha za celú firmu.' : 'Kniha za každú prevádzku.');
+      const isBd = isBytoveDruzstvo(view.company.client_type);
+      toast.success(
+        next === 'firma'
+          ? (isBd ? 'Spoločná kniha za celý subjekt.' : 'Jedna kniha za celú firmu.')
+          : (isBd ? 'Samostatná kniha za každý dom.' : 'Kniha za každú prevádzku.')
+      );
       await load();
     } catch (err) {
       toast.error(offlineMessage(err, 'Rozsah knihy sa nepodarilo zmeniť.'));
     } finally {
       setSwitching(false);
-    }
-  }
-
-  async function addOffer(offer: BookOffer) {
-    if (!view) return;
-    setAdding(offer.key);
-    try {
-      await Book.createEntry(
-        companyId,
-        {
-          book: view.book,
-          facility_id: view.facility_id,
-          source: offer.kind === 'termin' ? 'termin' : 'ukon',
-          date: offer.date,
-          text: offer.text,
-          protocol_numbers: offer.protocol_numbers,
-          inspection_ids: offer.inspection_ids,
-          training_ids: offer.training_ids,
-        },
-        csrfToken,
-      );
-      toast.success('Zapísané do knihy. Čaká na podpis vedúceho.');
-      await load();
-    } catch (err) {
-      toast.error(offlineMessage(err, 'Zápis sa nepodarilo uložiť.'));
-    } finally {
-      setAdding(null);
     }
   }
 
@@ -222,6 +132,7 @@ export function BookPage() {
   const canWrite = !isReadOnly && !view.company.archived;
   const hasLedger = view.scope === 'firma' || view.facility_id !== null;
   const currentFacility = view.facilities.find((f) => f.id === view.facility_id) ?? null;
+  const isBd = isBytoveDruzstvo(view.company.client_type);
   const offerCount = view.offers.length;
 
   return (
@@ -238,35 +149,16 @@ export function BookPage() {
         <div className="flex items-center gap-2.5">
           <span
             aria-hidden
-            className={cn('h-9 w-1.5 shrink-0 rounded-full', book === 'bozp' ? 'bg-[#3D7FC1]' : 'bg-[#E8433A]')}
+            className="h-9 w-1.5 shrink-0 rounded-full bg-[#E8433A]"
           />
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold tracking-tight text-ink-900">{view.book_label}</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-ink-900">Požiarna kniha</h1>
             <p className="mt-0.5 text-sm text-ink-500">
               {view.scope === 'prevadzka' && currentFacility ? `${currentFacility.name} · ` : ''}
               {plural(view.entries.length, 'zápis', 'zápisy', 'zápisov')}
               {offerCount > 0 && ` · ${offerCount} na pridanie`}
             </p>
           </div>
-        </div>
-
-        <div role="radiogroup" aria-label="Kniha" className="grid grid-cols-2 gap-1 rounded-2xl bg-ink-100/80 p-1">
-          {BOOKS.map((b) => (
-            <button
-              key={b}
-              type="button"
-              role="radio"
-              aria-checked={book === b}
-              onClick={() => selectBook(b)}
-              className={cn(
-                'inline-flex h-10 items-center justify-center rounded-xl px-3 text-sm font-medium transition-all duration-200',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300 active:scale-[0.98]',
-                book === b ? 'bg-white text-ink-900 shadow-sm' : 'text-ink-600 hover:bg-white/60 hover:text-ink-800',
-              )}
-            >
-              {BOOK_LABELS[b]}
-            </button>
-          ))}
         </div>
       </header>
 
@@ -276,11 +168,12 @@ export function BookPage() {
         </p>
       )}
 
-      <p className="rounded-2xl bg-ink-50 px-3.5 py-3 text-xs leading-relaxed text-ink-600">
-        {book === 'po'
-          ? 'Záznamy o dôležitých skutočnostiach podľa § 29 vyhlášky č. 121/2002 Z. z. — najmä o preventívnych prehliadkach, zistených nedostatkoch a ich odstránení.'
-          : 'Vlastná kniha pre BOZP. Nie je to súčasť požiarnej knihy — tá je dokument podľa § 29 vyhlášky č. 121/2002 Z. z. a je čisto pre ochranu pred požiarmi. Mechanika je tá istá.'}
-      </p>
+      <div className="flex flex-col gap-2 rounded-2xl bg-ink-50 px-3.5 py-3 text-xs leading-relaxed text-ink-600">
+        <p>Záznamy o dôležitých skutočnostiach — prehliadky, nedostatky, ich odstránenie.</p>
+        <p className="text-ink-500">
+          Kniha je <strong>len požiarna</strong>. Preventívna prehliadka BOZP je samostatný záznam z prehliadky, nie kniha.
+        </p>
+      </div>
 
       {view.can_switch_scope && (
         <section className="flex animate-fade-up flex-col gap-3">
@@ -303,14 +196,20 @@ export function BookPage() {
                       : 'text-ink-600 hover:bg-white/60 hover:text-ink-800 disabled:opacity-60',
                   )}
                 >
-                  {s === 'firma' ? 'Jedna za firmu' : 'Za každú prevádzku'}
+                  {s === 'firma'
+                    ? (isBd ? 'Spoločná kniha za celý subjekt' : 'Jedna za celú firmu')
+                    : (isBd ? 'Samostatne za každý dom' : 'Za každú prevádzku')}
                 </button>
               ))}
             </div>
             <p className="text-xs leading-relaxed text-ink-500">
               {view.scope === 'firma'
-                ? 'Jedna kniha na všetky prevádzky. Keď ten istý úkon urobíte v ten istý deň na viacerých, appka ponúkne jeden zápis za všetky.'
-                : 'Každá prevádzka má vlastnú knihu a vlastné číslovanie. § 29 to pripúšťa — nižšie organizačné jednotky môžu mať samostatné knihy.'}
+                ? (isBd
+                  ? 'Spoločná kniha za všetky bytové domy. Keď ten istý úkon urobíte v ten istý deň na viacerých domoch, appka ponúkne jeden zápis za všetky.'
+                  : 'Jedna kniha na všetky prevádzky. Keď ten istý úkon urobíte v ten istý deň na viacerých prevádzkach, appka ponúkne jeden zápis za všetky.')
+                : (isBd
+                  ? 'Každý bytový dom má vlastnú knihu a vlastné číslovanie.'
+                  : 'Každá prevádzka má vlastnú knihu a vlastné číslovanie.')}
             </p>
           </Card>
 
@@ -344,138 +243,52 @@ export function BookPage() {
 
       {hasLedger && (
         <>
-          {/* Appka ponúka pridať */}
+          {/* Nový zápis pull card */}
           <section className="flex animate-fade-up flex-col gap-2.5">
-            <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-ink-400">
-              Appka ponúka pridať
-              {offerCount > 0 && <Badge tone="brand">{offerCount}</Badge>}
-            </h2>
+            <Card className="flex flex-col gap-3 border-firol-200 bg-firol-50/20 px-4 py-4">
+              <div>
+                <h2 className="text-base font-semibold text-ink-900">Nový zápis</h2>
+                <p className="mt-1 text-xs leading-relaxed text-ink-600">
+                  {offerCount > 0
+                    ? `Appka ponúkne posledné kontroly ako hotové odseky — čaká ${offerCount} ${plural(offerCount, 'úkon', 'úkony', 'úkonov')}.`
+                    : 'Všetky úkony už v knihe sú — zápis napíšete vlastnými slovami.'}
+                </p>
+              </div>
 
-            {offerCount === 0 ? (
-              <p className="rounded-2xl border border-dashed border-ink-200 bg-white px-3.5 py-3 text-xs leading-relaxed text-ink-500">
-                Všetky hotové úkony tejto firmy už sú v knihe. Nové sa tu ponúknu samé, keď ich dokončíte.
+              {canWrite && (
+                <Button
+                  id="btn-novy-zapis"
+                  className="self-start"
+                  leftIcon={<Plus className="size-4" />}
+                  onClick={() => setNovyZapisOpen(true)}
+                >
+                  + Nový zápis do požiarnej knihy
+                </Button>
+              )}
+
+              <p className="text-xs text-ink-400">
+                Úkon, ktorý v appke nie je, zapíšete vlastnými slovami priamo v zápise.
               </p>
-            ) : (
-              <>
-                {recentOffers.map((o) => (
-                  <OfferCard
-                    key={o.key}
-                    offer={o}
-                    canWrite={canWrite}
-                    busy={adding === o.key}
-                    onAdd={() => void addOffer(o)}
-                    onEdit={() => setSheet({ type: 'entry', mode: { kind: 'offer', offer: o } })}
-                  />
-                ))}
-
-                {oldOffers.length > 0 && (
-                  <>
-                    <button
-                      type="button"
-                      aria-expanded={showOldOffers}
-                      onClick={() => setShowOldOffers((v) => !v)}
-                      className="flex min-h-11 items-center justify-between gap-2 rounded-2xl border border-ink-100 bg-white px-4 text-sm font-medium text-ink-700 transition-all duration-200 hover:bg-ink-50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
-                    >
-                      <span>Staršie než 12 mesiacov · {oldOffers.length}</span>
-                      <ChevronDown className={cn('size-4 text-ink-400 transition-transform duration-200', showOldOffers && 'rotate-180')} />
-                    </button>
-                    {showOldOffers &&
-                      oldOffers.map((o) => (
-                        <div key={o.key} className="animate-fade-up">
-                          <OfferCard
-                            offer={o}
-                            canWrite={canWrite}
-                            busy={adding === o.key}
-                            onAdd={() => void addOffer(o)}
-                            onEdit={() => setSheet({ type: 'entry', mode: { kind: 'offer', offer: o } })}
-                          />
-                        </div>
-                      ))}
-                  </>
-                )}
-              </>
-            )}
+            </Card>
           </section>
 
           {/* Zápisy */}
           <section className="flex animate-fade-up flex-col gap-2.5">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-400">Zápisy</h2>
             {view.entries.length === 0 ? (
-              <p className="rounded-2xl border border-dashed border-ink-200 bg-white px-3.5 py-3 text-xs leading-relaxed text-ink-500">
-                Kniha je ešte prázdna. Pridajte prvý zápis z ponuky vyššie alebo napíšte vlastný.
+              <p className="rounded-2xl border border-dashed border-ink-200 bg-white px-3.5 py-4 text-xs leading-relaxed text-ink-500">
+                Kniha je ešte prázdna. Pridajte prvý zápis tlačidlom vyššie.
               </p>
             ) : (
               view.entries.map((e) => (
                 <EntryCard
                   key={e.id}
                   entry={e}
-                  book={view.book}
                   companyId={view.company.id}
                   canWrite={canWrite}
                   onAddition={() => setSheet({ type: 'addition', entry: e })}
                 />
               ))
-            )}
-          </section>
-
-          {/* Pridať zápis ručne */}
-          {canWrite && (
-            <section className="flex animate-fade-up flex-col gap-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-400">Pridať zápis ručne</h2>
-              <Button
-                variant="secondary"
-                leftIcon={<PenLine className="size-4" />}
-                onClick={() => setSheet({ type: 'entry', mode: { kind: 'own' } })}
-              >
-                Vlastný zápis
-              </Button>
-              <Button
-                variant="secondary"
-                leftIcon={<Hash className="size-4" />}
-                onClick={() => setSheet({ type: 'entry', mode: { kind: 'number' } })}
-              >
-                Podľa čísla protokolu
-              </Button>
-              <p className="text-xs leading-relaxed text-ink-500">
-                Zápis podľa čísla funguje aj pre úkon, ktorý v appke vôbec nie je — zadáte číslo protokolu a appka zloží vetu.
-              </p>
-            </section>
-          )}
-
-          {/* Termíny cudzích revízií */}
-          <section className="flex animate-fade-up flex-col gap-2.5">
-            <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-ink-400">
-              Termíny cudzích revízií
-              {terms.length > 0 && <Badge tone="neutral">{terms.length}</Badge>}
-            </h2>
-            <p className="text-xs leading-relaxed text-ink-500">
-              Revízie, ktoré u klienta nerobíte vy. Appka si ich pamätá pri firme a vytlačí ich v prehľade termínov
-              v zázname — {view.book === 'bozp' ? 'z knihy BOZP' : 'z požiarnej knihy'}.
-            </p>
-            {terms.length === 0 ? (
-              <p className="rounded-2xl border border-dashed border-ink-200 bg-white px-3.5 py-3 text-xs leading-relaxed text-ink-500">
-                Zatiaľ žiadny termín pre túto knihu.
-              </p>
-            ) : (
-              terms.map((t) => (
-                <TermCard
-                  key={t.id}
-                  term={t}
-                  canWrite={canWrite}
-                  onToBook={() => setSheet({ type: 'entry', mode: { kind: 'term', term: t } })}
-                  onEdit={() => setSheet({ type: 'term', term: t })}
-                  onRemove={() => void removeTerm(t)}
-                />
-              ))
-            )}
-            {canWrite && (
-              <Button
-                variant="secondary"
-                leftIcon={<CalendarClock className="size-4" />}
-                onClick={() => setSheet({ type: 'term' })}
-              >
-                Pridať termín cudzej revízie
-              </Button>
             )}
           </section>
 
@@ -518,75 +331,66 @@ export function BookPage() {
                   leftIcon={<Printer className="size-4" />}
                   onClick={() => setSheet({ type: 'sign' })}
                 >
-                  Vytlačiť nepodpísané ({view.unsigned_count})
+                  Vytlačiť hárok nepovinných podpisov ({view.unsigned_count})
                 </Button>
               )}
+            </Card>
+          </section>
+
+          {/* Vytlačiť celú knihu */}
+          <section className="flex animate-fade-up flex-col gap-2.5">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-400">Vytlačiť celú knihu</h2>
+            <Card className="flex flex-col gap-3 px-4 py-3.5">
+              <p className="text-xs leading-relaxed text-ink-600">
+                Všetky zápisy za sebou v jednom dokumente — to, čo odovzdáte klientovi alebo ukážete pri kontrole.
+              </p>
+              <a
+                href={
+                  view.entries.length > 0
+                    ? bookPrintUrl(view.company.id, 'po', { facilityId: view.facility_id, mode: 'all' })
+                    : '#'
+                }
+                target={view.entries.length > 0 ? '_blank' : undefined}
+                rel="noopener noreferrer"
+                onClick={(e) => {
+                  if (view.entries.length === 0) {
+                    e.preventDefault();
+                    toast.error('Kniha je zatiaľ prázdna.');
+                  }
+                }}
+                className={cn(
+                  'inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-ink-200 bg-white px-4 text-sm font-medium text-ink-800 transition-all duration-200',
+                  view.entries.length > 0
+                    ? 'hover:border-ink-300 hover:bg-ink-50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300'
+                    : 'opacity-50 cursor-not-allowed',
+                )}
+              >
+                <Printer className="size-4" />
+                Vytlačiť celú knihu
+              </a>
             </Card>
           </section>
         </>
       )}
 
-      {view.previous_scope_entries.length > 0 && (
-        <section className="flex flex-col gap-2.5">
-          <button
-            type="button"
-            aria-expanded={showPrevious}
-            onClick={() => setShowPrevious((v) => !v)}
-            className="flex min-h-11 items-center justify-between gap-2 rounded-2xl border border-ink-100 bg-white px-4 text-left text-sm font-medium text-ink-700 transition-all duration-200 hover:bg-ink-50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
-          >
-            <span>Zápisy z predchádzajúceho rozsahu · {view.previous_scope_entries.length}</span>
-            <ChevronDown className={cn('size-4 shrink-0 text-ink-400 transition-transform duration-200', showPrevious && 'rotate-180')} />
-          </button>
-          {showPrevious && (
-            <>
-              <p className="text-xs leading-relaxed text-ink-500">
-                Tieto zápisy ostali v knihe, v ktorej vznikli ({view.scope === 'firma' ? 'knihy jednotlivých prevádzok' : 'kniha celej firmy'}), a nemenia sa.
-              </p>
-              {view.previous_scope_entries.map((e) => (
-                <div key={e.id} className="animate-fade-up">
-                  <EntryCard
-                    entry={e}
-                    book={view.book}
-                    companyId={view.company.id}
-                    canWrite={canWrite}
-                    onAddition={() => setSheet({ type: 'addition', entry: e })}
-                  />
-                </div>
-              ))}
-            </>
-          )}
-        </section>
-      )}
-
       <p className="rounded-2xl bg-ink-50 px-3.5 py-3 text-xs leading-relaxed text-ink-600">
-        Zákonná veta („v zmysle zákona č. 314/2001 Z. z. …“) sa do zápisu <strong>nedopĺňa sama</strong> — technik si ju zapne, keď ju tam chce. Titulnú stranu knihy si robí technik sám — je na nej napísané, pre ktoré prevádzky kniha platí. Appka len vie, kam ktorý zápis patrí.
+        Zákonná veta sa do zápisu <strong>nedopĺňa sama</strong> — technik si ju zapne, keď ju tam chce. Titulnú stranu knihy si robí technik sám.
       </p>
 
-      {sheet?.type === 'entry' && (
-        <EntrySheet
+      {/* Unified pull modal */}
+      {novyZapisOpen && (
+        <NewBookEntryModal
           view={view}
-          mode={sheet.mode}
-          onClose={() => setSheet(null)}
+          onClose={() => setNovyZapisOpen(false)}
           onSaved={() => {
-            setSheet(null);
+            setNovyZapisOpen(false);
             void load();
           }}
+          onSwitchScope={switchScope}
+          onSelectFacility={selectFacility}
         />
       )}
-      {sheet?.type === 'term' && (
-        <ExternalTermSheet
-          companyId={view.company.id}
-          term={sheet.term}
-          currentBook={view.book}
-          suggestions={termSuggestions}
-          facilities={view.facilities}
-          onClose={() => setSheet(null)}
-          onSaved={() => {
-            setSheet(null);
-            void loadTerms();
-          }}
-        />
-      )}
+
       {sheet?.type === 'addition' && (
         <AdditionSheet
           entry={sheet.entry}
@@ -597,6 +401,7 @@ export function BookPage() {
           }}
         />
       )}
+
       {sheet?.type === 'sign' && (
         <SignSheet
           view={view}
@@ -611,105 +416,13 @@ export function BookPage() {
   );
 }
 
-function OfferCard({
-  offer,
-  canWrite,
-  busy,
-  onAdd,
-  onEdit,
-}: {
-  offer: BookOffer;
-  canWrite: boolean;
-  busy: boolean;
-  onAdd: () => void;
-  onEdit: () => void;
-}) {
-  return (
-    <Card className="flex flex-col gap-3 border-[#D8CBE8] bg-[#F7F3FC] px-4 py-3.5">
-      <div className="flex items-start gap-3">
-        <span className="grid size-9 shrink-0 place-items-center rounded-2xl bg-[#EBE1F7] text-[#5B3E8C]">
-          <Plus className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-ink-900">{offer.title}</p>
-          <p className="mt-0.5 text-xs text-ink-500">
-            {offer.merged > 1 && <strong className="font-semibold text-[#5B3E8C]">{offer.merged} prevádzok naraz · </strong>}
-            {offer.merged === 1 && offer.facilities.length > 0 && `${offer.facilities[0]} · `}
-            {formatDay(offer.date)}
-            {offer.merged === 1 && offer.protocol_numbers[0] && ` · ${offer.protocol_numbers[0]}`}
-          </p>
-          <p className="mt-2 text-[13px] leading-relaxed text-ink-600">{offer.text}</p>
-        </div>
-      </div>
-      {canWrite && (
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" size="sm" disabled={busy} onClick={onEdit}>
-            Upraviť a pridať
-          </Button>
-          <Button size="sm" loading={busy} onClick={onAdd}>
-            Pridať do knihy
-          </Button>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function TermCard({
-  term,
-  canWrite,
-  onToBook,
-  onEdit,
-  onRemove,
-}: {
-  term: ExternalTerm;
-  canWrite: boolean;
-  onToBook: () => void;
-  onEdit: () => void;
-  onRemove: () => void;
-}) {
-  const state = termState(term.valid_until, todayIso());
-  return (
-    <Card className="flex flex-col gap-3 px-4 py-3.5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-ink-900">{term.name}</p>
-          <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
-            {term.valid_until ? `platnosť do ${formatDay(term.valid_until)}` : 'platnosť nedoložená'}
-            {term.done_on && ` · vykonaná ${formatDay(term.done_on)}`}
-            {term.performed_by && ` · ${term.performed_by}`}
-            {term.facility_name && ` · ${term.facility_name}`}
-          </p>
-          {term.note && <p className="mt-1 text-xs leading-relaxed text-ink-600">{term.note}</p>}
-        </div>
-        <Badge tone={state.tone}>{state.label}</Badge>
-      </div>
-      {canWrite && (
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" size="sm" leftIcon={<Trash2 className="size-3.5" />} onClick={onRemove}>
-            Odstrániť
-          </Button>
-          <Button variant="secondary" size="sm" leftIcon={<Pencil className="size-3.5" />} onClick={onEdit}>
-            Upraviť
-          </Button>
-          <Button variant="secondary" size="sm" leftIcon={<BookPlus className="size-3.5" />} onClick={onToBook}>
-            Do knihy
-          </Button>
-        </div>
-      )}
-    </Card>
-  );
-}
-
 function EntryCard({
   entry,
-  book,
   companyId,
   canWrite,
   onAddition,
 }: {
   entry: BookEntry;
-  book: BookKey;
   companyId: number;
   canWrite: boolean;
   onAddition: () => void;
@@ -718,10 +431,7 @@ function EntryCard({
     <Card className="flex flex-col gap-3 px-4 py-3.5">
       <div className="flex items-start gap-3">
         <span
-          className={cn(
-            'grid size-9 shrink-0 place-items-center rounded-xl text-[13px] font-bold tabular-nums',
-            book === 'bozp' ? 'bg-[#EEF3F9] text-[#3D7FC1]' : 'bg-firol-50 text-firol-600',
-          )}
+          className="grid size-9 shrink-0 place-items-center rounded-xl bg-firol-50 text-firol-600 text-[13px] font-bold tabular-nums"
         >
           {entry.seq}
         </span>
@@ -732,6 +442,13 @@ function EntryCard({
             {entry.facility_name && ` · ${entry.facility_name}`}
           </p>
           <p className="mt-1 whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-ink-800">{entry.text}</p>
+
+          {entry.defects_text && (
+            <div className="mt-2 rounded-xl bg-ink-50 p-2.5 text-xs text-ink-700">
+              <strong className="block font-semibold text-ink-800 mb-0.5">Zistené závady a nedostatky:</strong>
+              <p className="whitespace-pre-wrap">{entry.defects_text}</p>
+            </div>
+          )}
 
           {entry.no_defects_statement && (
             <p className="mt-2 rounded-xl bg-[var(--color-status-ok-bg)] px-2.5 py-2 text-xs leading-relaxed text-[var(--color-status-ok)]">
@@ -762,13 +479,13 @@ function EntryCard({
           </Button>
         )}
         <a
-          href={bookPrintUrl(companyId, book, { entryId: entry.id, facilityId: entry.facility_id })}
+          href={bookPrintUrl(companyId, 'po', { entryId: entry.id, facilityId: entry.facility_id, mode: 'entry' })}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3 text-sm font-medium text-ink-800 transition-[background-color,box-shadow,transform] duration-200 hover:border-ink-300 hover:bg-ink-50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
         >
           <Printer className="size-3.5" />
-          Tlačiť
+          Tlač
         </a>
       </div>
     </Card>

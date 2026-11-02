@@ -39,14 +39,6 @@ if (!empty($inspector['certification_number'])) {
 // "Miesto" for the signature line: facility city, falling back to company city.
 $city = ($facility['city'] ?? '') ?: ($company['city'] ?? '');
 $miesto = ($city ? $city . ', ' : '') . $formatDate($inspection['executed_on'] ?? null);
-
-$bulletItems = [];
-foreach ($items as $idx => $it) {
-    $f = $it['fields'];
-    if ((string) ($f['result'] ?? '') !== 'nevyhovuje') continue;
-    $kindLabel = $kindLabels[$f['kind'] ?? ''] ?? (string) ($f['kind'] ?? '');
-    $bulletItems[] = 'Uzáver č. ' . ($idx + 1) . ' (' . $kindLabel . ' ' . ($f['identifier'] ?? '') . ', ' . ($f['location'] ?? '') . ')';
-}
 ?>
 <style>
   body { font-family: dejavusans, sans-serif; color: #1a1a1f; font-size: 10pt; }
@@ -83,6 +75,14 @@ foreach ($items as $idx => $it) {
   .sig-row td { height: 36pt; vertical-align: bottom; text-align: center; }
   .sig-img { max-height: 38pt; max-width: 150pt; }
   .sig-line { border-top: 1pt solid #2a2a32; margin-top: 4pt; padding-top: 3pt; font-size: 8pt; color: #6b6b75; }
+  .tag {
+    border: 1pt solid <?= $h($brandColor) ?>;
+    color: <?= $h($brandColor) ?>;
+    font-size: 7.5pt;
+    font-weight: bold;
+    letter-spacing: .6pt;
+    padding: 1pt 5pt;
+  }
   .footer { border-top: 1pt solid #e5e5ea; margin-top: 8pt; padding-top: 4pt; font-size: 8pt; color: #6b6b75; }
 </style>
 
@@ -108,7 +108,8 @@ foreach ($items as $idx => $it) {
       </table>
     </td>
     <td width="43%" class="hdr-right">
-      <div class="hdr-title">Záznam o prevádzkovej údržbe požiarnych uzáverov</div>
+      <div><span class="tag">OCHRANA PRED POŽIARMI</span></div>
+      <div class="hdr-title">Protokol o vykonaní kontroly — požiarne uzávery (údržba)</div>
       <div class="hdr-meta">Č. dokumentu: <?= $h($number) ?></div>
       <div class="hdr-meta">Dátum: <?= $formatDate($inspection['executed_on'] ?? null) ?></div>
     </td>
@@ -190,41 +191,48 @@ foreach ($items as $idx => $it) {
   </tr>
 </table>
 
-<?php if ($bulletItems): ?>
-<div class="notes-box">
-  <?php foreach ($bulletItems as $label): ?>
-  <p>&#9632; <strong><?= $h($label) ?></strong> – Nevyhovuje.</p>
-  <?php endforeach ?>
-</div>
-<?php endif ?>
+<?= \Firol\Pdf\DefectsTable::renderRoutineDefects($items, 'pu_udrzba', ['photo_counts' => $photo_counts ?? []]) ?>
 
 <h2>Podpisy</h2>
 <table class="sig-tbl">
   <tr>
-    <th width="38%">Kontrolu vykonal</th>
-    <th width="38%"><?= \Firol\Pdf\SignatureBlock::heading('pu_udrzba') ?></th>
-    <th width="24%">Miesto a dátum</th>
+    <th width="50%">Vykonal</th>
+    <th width="50%">S výsledkom kontroly oboznámený</th>
   </tr>
   <tr>
-    <td><?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?><br><span style="font-size:8pt; color:#555;">č. oprávnenia: <?= $h($inspector['certification_number']) ?></span><?php endif ?></td>
+    <td>
+      <?= $h($inspector['fullname']) ?>
+      <?php if (!empty($inspector['certification_number'])): ?>
+        <br><span style="font-size:8pt; color:#555;">technik požiarnej ochrany, č. opr.: <?= $h($inspector['certification_number']) ?></span>
+      <?php endif ?>
+    </td>
     <td><?= \Firol\Pdf\SignatureBlock::nameCell($handover ?? null) ?></td>
-    <td><?= \Firol\Pdf\SignatureBlock::placeAndDate($handover ?? null, $miesto) ?></td>
   </tr>
   <tr class="sig-row">
     <td>
       <?php if (!empty($inspector['signature_data_uri'])): ?>
         <img class="sig-img" src="<?= $h($inspector['signature_data_uri']) ?>" alt="">
+      <?php else: ?>
+        <i class="muted" style="font-size:8.5pt;">podpísané</i>
       <?php endif ?>
       <div class="sig-line"></div>
     </td>
     <td>
-      <?= \Firol\Pdf\SignatureBlock::signCell($handover ?? null, 'pu_udrzba') ?>
+      <?php if (!empty($handover['signature_data_uri'])): ?>
+        <img class="sig-img" src="<?= $h($handover['signature_data_uri']) ?>" alt="">
+        <div class="sig-line"></div>
+      <?php elseif (!empty($handover['signed_on'])): ?>
+        <i class="muted" style="font-size:8.5pt;">podpísané na displeji</i>
+        <div class="sig-line"></div>
+      <?php else: ?>
+        <i class="muted" style="font-size:8.5pt;">podpis po vytlačení</i>
+        <div class="sig-line"></div>
+      <?php endif ?>
     </td>
-    <td></td>
   </tr>
 </table>
 
 <div class="footer">
   Vypracoval: <?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?> | č. oprávnenia: <?= $h($inspector['certification_number']) ?><?php endif ?>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Strana 1
+  <span style="float:right; font-size:8pt; color:#6b6b75;">Tento dokument bol vytvorený pomocou softvéru poapp.sk</span>
 </div>

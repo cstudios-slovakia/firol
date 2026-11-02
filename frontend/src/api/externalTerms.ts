@@ -12,12 +12,14 @@
 import { api } from '@/lib/api';
 import type { BookKey } from '@/lib/bookMapping';
 
+export type ExternalTermBook = 'po' | 'bozp' | 'ob';
+
 export type ExternalTerm = {
   id: number;
   /** Null = the whole firm; set = pinned to one prevádzka. */
   facility_id: number | null;
   facility_name: string | null;
-  book: BookKey;
+  book: ExternalTermBook;
   name: string;
   performed_by: string | null;
   done_on: string | null;
@@ -28,11 +30,11 @@ export type ExternalTerm = {
 };
 
 /** A name the form offers; the book is only a suggestion, the technician answers it. */
-export type ExternalTermSuggestion = { name: string; book: BookKey };
+export type ExternalTermSuggestion = { name: string; book: ExternalTermBook };
 
 export type ExternalTermBody = {
   name: string;
-  book: BookKey;
+  book: ExternalTermBook;
   facility_id: number | null;
   performed_by: string | null;
   done_on: string | null;
@@ -42,7 +44,7 @@ export type ExternalTermBody = {
 
 export const ExternalTerms = {
   /** `facilityId` narrows the list to the firm-wide terms plus those pinned to that prevádzka. */
-  list: (companyId: number, book?: BookKey, facilityId?: number) => {
+  list: (companyId: number, book?: ExternalTermBook | BookKey, facilityId?: number) => {
     const parts = [book ? `book=${book}` : '', facilityId ? `facility_id=${facilityId}` : ''].filter(Boolean);
     const qs = parts.length > 0 ? `?${parts.join('&')}` : '';
     return api<{ items: ExternalTerm[]; suggestions: ExternalTermSuggestion[] }>(

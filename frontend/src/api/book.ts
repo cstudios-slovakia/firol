@@ -1,5 +1,5 @@
 /**
- * Požiarna kniha and kniha BOZP as ledgers (spec 9, phase 5).
+ * Požiarna kniha as a ledger (spec 9, phase 5, 02.11 D4).
  *
  * A book is a place at a firm; an entry is one numbered row in it, never a
  * document. Offline handling, per endpoint:
@@ -16,7 +16,7 @@ import type { ClientType } from '@/lib/clientKind';
 import type { BookKey } from '@/lib/bookMapping';
 
 export type BookScope = 'firma' | 'prevadzka';
-export type BookEntrySource = 'ukon' | 'cislo' | 'vlastny' | 'termin' | 'revizia';
+export type BookEntrySource = 'ukon' | 'cislo' | 'vlastny' | 'termin' | 'revizia' | 'hromadny';
 
 export type BookAddition = {
   id: number;
@@ -40,6 +40,7 @@ export type BookEntry = {
   inspection_ids: number[];
   training_ids: number[];
   no_defects_statement: boolean;
+  defects_text: string | null;
   /** Made by the technician — true from the moment the entry is written. */
   signed_technician: boolean;
   /** Printed and signed by the vedúci zamestnanec. */
@@ -68,6 +69,16 @@ export type BookOffer = {
   text: string;
   /** True when the úkon carries defects, so „bez nedostatkov" cannot be ticked. */
   has_defects: boolean;
+  is_latest?: boolean;
+  preselected?: boolean;
+  defects_text?: string | null;
+};
+
+export type BookActionGroup = {
+  type: string;
+  title: string;
+  count: number;
+  items: BookOffer[];
 };
 
 export type BookManualKind = { kind: string; label: string };
@@ -83,11 +94,12 @@ export type BookView = {
   can_switch_scope: boolean;
   entries: BookEntry[];
   offers: BookOffer[];
+  available_actions?: BookActionGroup[];
   previous_scope_entries: BookEntry[];
   unsigned_count: number;
   /** Prefill of the signing person (company level); the field stays editable. */
   signer: { fullname: string; role_title: string | null } | null;
-  manual_kinds: BookManualKind[];
+  manual_kinds?: BookManualKind[];
   legal_sentence: string;
   no_defects_sentence: string;
 };
@@ -103,6 +115,8 @@ export type CreateEntryBody = {
   source: BookEntrySource;
   date?: string;
   text?: string;
+  vlastny_text?: string;
+  defects_text?: string;
   legal_sentence?: boolean;
   no_defects_statement?: boolean;
   protocol_numbers?: string[];
@@ -161,13 +175,20 @@ export const Book = {
     }),
 };
 
-/** URL of the PDF of the unsigned entries, or of one entry (`entryId`). */
+/** URL of the PDF of the full book (`mode=all`), unsigned entries (`mode=unsigned`), or one entry (`mode=entry`, `entryId`). */
 export function bookPrintUrl(
   companyId: number,
   book: BookKey,
-  opts: { facilityId?: number | null; entryId?: number; signerName?: string; signerRole?: string } = {},
+  opts: {
+    facilityId?: number | null;
+    entryId?: number;
+    mode?: 'entry' | 'all' | 'unsigned';
+    signerName?: string;
+    signerRole?: string;
+  } = {},
 ): string {
-  const qs = new URLSearchParams({ book, mode: opts.entryId ? 'entry' : 'unsigned' });
+  const mode = opts.mode ?? (opts.entryId ? 'entry' : 'unsigned');
+  const qs = new URLSearchParams({ book, mode });
   if (opts.facilityId) qs.set('facility_id', String(opts.facilityId));
   if (opts.entryId) qs.set('entry_id', String(opts.entryId));
   if (opts.signerName) qs.set('signer_name', opts.signerName);

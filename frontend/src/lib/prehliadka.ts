@@ -70,7 +70,7 @@ export const ROUTINE_LABELS: Record<DeviceType, string> = {
   pu_akcieschopnost: 'Požiarne uzávery — akcieschopnosť',
   pu_udrzba: 'Požiarne uzávery — údržba',
   nudzove_osvetlenie: 'Núdzové osvetlenie',
-  rebriky: 'Rebríky',
+  rebriky: 'Rebríky (pracovné)',
   regale: 'Regále',
 };
 
@@ -120,10 +120,14 @@ export type PreviousEntry = {
 /** A person written on the record: who was present, who took it over. */
 export type PrehliadkaPerson = { name: string; role: string | null };
 
+export type LehotaZakon = 12 | 6 | 3;
+
 export type PrehliadkaDetails = {
   scope: PrehliadkaScope;
   routine: DeviceType[];
   book_entry: boolean;
+  lehota_zakon: LehotaZakon;
+  lehota_vlastna: number | null;
   new_devices: NewDevice[];
   /** „Vykonané činnosti" ticked for the PO record / the BOZP record (spec 6.4) — never mixed. */
   activities_po: string[];
@@ -131,6 +135,7 @@ export type PrehliadkaDetails = {
   previous: PreviousEntry[];
   /** Hand-written validity over an automatic term, by term key (spec 6.6). */
   term_overrides: Record<string, string>;
+  note?: string | null;
   present: PrehliadkaPerson[];
   handed_over: PrehliadkaPerson | null;
 };
@@ -177,11 +182,14 @@ export function parseDetails(raw: Record<string, unknown> | null | undefined): P
     scope: { po: scope.po === true, bozp: scope.bozp === true },
     routine,
     book_entry: raw?.book_entry === true,
+    lehota_zakon: (raw?.lehota_zakon === 3 || raw?.lehota_zakon === 6 || raw?.lehota_zakon === 12) ? raw.lehota_zakon : 12,
+    lehota_vlastna: (typeof raw?.lehota_vlastna === 'number' && Number.isInteger(raw.lehota_vlastna) && raw.lehota_vlastna >= 1 && raw.lehota_vlastna <= 120) ? raw.lehota_vlastna : null,
     new_devices: newDevices,
     activities_po: strings(raw?.activities_po),
     activities_bozp: strings(raw?.activities_bozp),
     previous,
     term_overrides: overrides,
+    note: typeof raw?.note === 'string' ? raw.note : typeof raw?.poznamka === 'string' ? raw.poznamka : null,
     present: Array.isArray(raw?.present)
       ? (raw!.present as unknown[]).flatMap((p) => {
           const parsed = person(p);
@@ -198,15 +206,64 @@ export function detailsPayload(d: PrehliadkaDetails): Record<string, unknown> {
     scope: d.scope,
     routine: d.routine,
     // The checkbox is about the požiarna kniha only (spec 9.5a).
-    book_entry: d.scope.po && d.book_entry,
+    book_entry: Boolean(d.scope.po && d.book_entry),
+    lehota_zakon: d.lehota_zakon,
+    lehota_vlastna: d.lehota_vlastna ?? null,
     new_devices: d.new_devices,
     activities_po: d.activities_po,
     activities_bozp: d.activities_bozp,
     previous: d.previous,
     term_overrides: d.term_overrides,
+    note: d.note ?? null,
+    poznamka: d.note ?? null,
     present: d.present,
     handed_over: d.handed_over,
+    oboznameny_meno: d.handed_over?.name ?? null,
+    oboznameny_funkcia: d.handed_over?.role ?? null,
   };
+}
+
+export function effectivePeriodicityMonths(d?: {
+  lehota_zakon?: LehotaZakon | number;
+  lehota_vlastna?: number | null;
+  periodicity_value?: number | null;
+} | null): number {
+  if (!d) return 12;
+  if (typeof d.lehota_vlastna === 'number' && d.lehota_vlastna > 0) return d.lehota_vlastna;
+  if (d.lehota_zakon === 3 || d.lehota_zakon === 6 || d.lehota_zakon === 12) return d.lehota_zakon;
+  if (typeof d.periodicity_value === 'number' && d.periodicity_value > 0) return d.periodicity_value;
+  return 12;
+}
+
+/**
+ * Generated entrance tiles for a bytový dom per spec/prototype `vchodyPre` (lines 399-411).
+ * For a regular firma, no entrances are generated.
+ */
+export function vchodyPre(vchody?: string | null, customEntrances: string[] = []): string[] {
+  const out: string[] = [];
+  const raw = (vchody ?? '').trim();
+  if (raw !== '') {
+    if (/^\d+$/.test(raw)) {
+      const n = Math.max(1, Math.min(40, parseInt(raw, 10)));
+      for (let i = 1; i <= n; i++) out.push('Vchod ' + i);
+    } else {
+      const parts = raw.split(/[,;]+/).map((p) => p.trim()).filter(Boolean);
+      for (const p of parts) {
+        if (/^\d+[a-zA-Z]?$/.test(p)) {
+          out.push('Vchod ' + p);
+        } else {
+          out.push(p);
+        }
+      }
+    }
+  }
+  for (const c of customEntrances) {
+    const trimmed = (c ?? '').trim();
+    if (trimmed !== '' && trimmed !== 'Celý objekt' && !out.includes(trimmed)) {
+      out.push(trimmed);
+    }
+  }
+  return out;
 }
 
 export function scopeLabel(scope: PrehliadkaScope): string {

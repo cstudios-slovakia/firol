@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useAuth } from '@/auth/AuthContext';
 import {
-  ExternalTerms, type ExternalTerm, type ExternalTermSuggestion,
+  ExternalTerms, type ExternalTerm, type ExternalTermBook, type ExternalTermSuggestion,
 } from '@/api/externalTerms';
-import { BOOKS, BOOK_LABELS, type BookKey } from '@/lib/bookMapping';
+import { BOOK_LABELS, type BookKey } from '@/lib/bookMapping';
 import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { Button } from '@/components/ui/Button';
@@ -33,7 +33,7 @@ export function ExternalTermSheet({
   /** The term being edited; omitted when adding. */
   term?: ExternalTerm;
   /** Prefill for a new term whose name and book are already known („doplniť školenie"). */
-  preset?: { name: string; book: BookKey };
+  preset?: { name: string; book: ExternalTermBook };
   /** The book on screen — the answer offered for a name of one's own. */
   currentBook: BookKey;
   suggestions: ExternalTermSuggestion[];
@@ -55,7 +55,7 @@ export function ExternalTermSheet({
   const [ownName, setOwnName] = useState(
     term && !isSuggested(term.name) ? term.name : !term && preset && !isSuggested(preset.name) ? preset.name : '',
   );
-  const [book, setBook] = useState<BookKey>(
+  const [book, setBook] = useState<ExternalTermBook>(
     term?.book ?? preset?.book ?? suggestions.find((s) => s.name === pick)?.book ?? currentBook,
   );
   const [performedBy, setPerformedBy] = useState(term?.performed_by ?? '');
@@ -95,9 +95,9 @@ export function ExternalTermSheet({
         ? await ExternalTerms.update(companyId, term.id, body, csrfToken)
         : await ExternalTerms.create(companyId, body, csrfToken);
       toast.success(
-        res.term.book === currentBook
+        (res.term.book as string) === currentBook || res.term.book === 'ob'
           ? 'Termín uložený. Appka si ho pamätá pri tejto firme.'
-          : `Termín uložený do knihy: ${BOOK_LABELS[res.term.book]}.`,
+          : `Termín uložený do: ${BOOK_LABELS[res.term.book as BookKey]}.`,
       );
       onSaved(res.term);
     } catch (err) {
@@ -143,13 +143,17 @@ export function ExternalTermSheet({
           </Field>
         )}
 
-        <Field label="Patrí do knihy" required hint="Určujete vy — názov to nerozhoduje. Termín sa vytlačí len v zázname tejto knihy.">
+        <Field label="Patrí do záznamu" required hint="Určujete vy — názov to nerozhoduje. Termín sa vytlačí v zázname zvolenej oblasti.">
           {(p) => (
             <Select
               id={p.id}
               value={book}
-              onChange={(v) => setBook(v as BookKey)}
-              options={BOOKS.map((b) => ({ value: b, label: BOOK_LABELS[b] }))}
+              onChange={(v) => setBook(v as ExternalTermBook)}
+              options={[
+                { value: 'po', label: 'Ochrane pred požiarmi' },
+                { value: 'bozp', label: 'BOZP' },
+                { value: 'ob', label: 'Obom — PO aj BOZP' },
+              ]}
             />
           )}
         </Field>

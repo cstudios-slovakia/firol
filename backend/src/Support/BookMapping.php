@@ -5,26 +5,24 @@ declare(strict_types=1);
 namespace Firol\Support;
 
 /**
- * Which of the two books an úkon belongs to (spec 6.6, 9.6).
+ * Which book an úkon belongs to (spec 6.6, 9.6).
  *
  *   po    — požiarna kniha (§ 29 vyhl. 121/2002): fire extinguishers, hydrants,
  *           požiarne uzávery (akcieschopnosť and údržba), núdzové osvetlenie,
  *           TS hadíc, oprava / plnenie / TS PHP, vyradenie, the preventívna
  *           prehliadka (its PO record), the old `poziarna_kniha` records and
  *           every training of the PO tree plus the Pokyn — žatevné práce.
- *   bozp  — kniha BOZP (zák. 124/2006): every úkon of the BOZP section —
- *           rebríky and regále included, they are not ochrana pred požiarmi —
- *           and the oboznámenie BOZP.
  *
- * Two separate books, the same mechanics. The TypeScript twin is
- * frontend/src/lib/bookMapping.ts; the two lists must stay identical.
+ * Per 02.11 spec and Decision D4, kniha BOZP does not exist; only Požiarna kniha.
+ * BOZP inspections are standalone records, never entered into a book.
+ * The TypeScript twin is frontend/src/lib/bookMapping.ts.
  */
 final class BookMapping
 {
     public const PO   = 'po';
     public const BOZP = 'bozp';
 
-    public const BOOKS = [self::PO, self::BOZP];
+    public const BOOKS = [self::PO];
 
     /**
      * Inspection types of the požiarna kniha. `preventivna_prehliadka` is the
@@ -49,13 +47,13 @@ final class BookMapping
         if (in_array($type, self::PO_INSPECTION_TYPES, true)) {
             return self::PO;
         }
-        return Sections::forInspectionType($type) === Sections::BOZP ? self::BOZP : null;
+        return null;
     }
 
     /**
      * Trainings of the trainings table are all PO: the six attendance-based
      * ones and the Pokyn. The oboznámenie BOZP is the inspection type
-     * `skolenie_bozp`, which {@see forInspectionType()} sends to the BOZP book.
+     * `skolenie_bozp`, which is BOZP and never goes into a book.
      */
     public static function forTraining(string $trainingType): string
     {
@@ -68,11 +66,11 @@ final class BookMapping
         if ($book === self::PO) {
             return self::PO_INSPECTION_TYPES;
         }
-        return Sections::INSPECTION_TYPES[Sections::BOZP];
+        return [];
     }
 
     public static function label(string $book): string
     {
-        return $book === self::BOZP ? 'Kniha BOZP' : 'Požiarna kniha';
+        return 'Požiarna kniha';
     }
 }

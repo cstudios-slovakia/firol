@@ -126,7 +126,7 @@ const TYPES: TypeMeta[] = [
   // Block 2 — single-record BOZP úkony (kniha, pracovisko, osamelé, fajčenie).
   {
     type: 'kniha_bozp',
-    shortLabel: 'Kniha kontrol BOZP',
+    shortLabel: 'Preventívna prehliadka BOZP',
     description: 'Záznam o kontrole stavu BOZP s prehľadom termínov klienta.',
     intervalLabel: '12 / 6 / 3 mes.',
     icon: <BookCheck className="size-5" />,

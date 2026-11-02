@@ -134,6 +134,15 @@ try {
     $o5 = $offer($f5, '2026-11-02');
     $expect('5 ticked control overridden', $o5[$php] ?? null, '2027-04-15');
     $expect('5 malformed override ignored', $o5[ClientTerms::LABELS['hydranty']] ?? null, '2027-11-02');
+
+    // 6 — a control finalized the same day, but after the prehliadka (the concept it
+    // created), keeps its own periodicity; the prehliadka's own term still follows its override.
+    $f6 = $newFacility('Koncept v ten istý deň');
+    $ukon($f6, 'preventivna_prehliadka', '2026-11-02', $prehliadka(['routine:php' => '2027-04-15', 'prehliadka_po' => '2027-03-01']));
+    $ukon($f6, 'php', '2026-11-02');
+    $o6 = $offer($f6, '2026-11-02');
+    $expect('6 same-day control finalized after the prehliadka uses its own term', $o6[$php] ?? null, '2027-11-02');
+    $expect('6 prehliadka term keeps its same-day override', $o6[$pp] ?? null, '2027-03-01');
 } finally {
     $pdo->rollBack();
 }

@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
-import { Book, type BookOffer, type BookView } from '@/api/book';
+import { Book, type BookView } from '@/api/book';
 import {
   INSPECTION_TYPE_LABELS,
   Inspections,
@@ -39,7 +39,7 @@ import { DEFECT_TASKS_CHANGED_EVENT, offerPrehliadkaDefectTasks } from '@/compon
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { HandoverDialog } from '@/components/HandoverDialog';
 import { VisitNextUkon } from '@/components/VisitNextUkon';
-import { EntrySheet } from '@/components/book/BookSheets';
+import { NewBookEntryModal } from '@/components/book/NewBookEntryModal';
 
 type Loaded = { result: PrehliadkaResult; detail: InspectionDetail | null };
 
@@ -115,7 +115,7 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
 
   const [signing, setSigning] = useState<{ doc: InspectionDocument; type: string } | null>(null);
   const [offerBusy, setOfferBusy] = useState(false);
-  const [sheet, setSheet] = useState<{ view: BookView; offer: BookOffer } | null>(null);
+  const [bookView, setBookView] = useState<BookView | null>(null);
   const [unlocking, setUnlocking] = useState(false);
 
   const facilityHref = `/facilities/${i.facility_id}`;
@@ -125,7 +125,7 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
     return `/companies/${i.company_id}/kniha?${q.toString()}`;
   };
 
-  /** The offer lives in the book view; open the same sheet the book screen uses. */
+  /** The offer lives in the book view; open the same modal the book screen uses. */
   async function openOffer() {
     setOfferBusy(true);
     try {
@@ -136,7 +136,7 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
         await reload();
         return;
       }
-      setSheet({ view, offer });
+      setBookView(view);
     } catch (err) {
       toast.error(offlineMessage(err, 'Zápis do knihy sa nepodarilo pripraviť.'));
     } finally {
@@ -148,7 +148,7 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
     const ok = await confirm({
       title: 'Upraviť uzavretú prehliadku?',
       description:
-        'Vydané dokumenty (záznam z prehliadky aj zápis BOZP) sa zrušia a po novom uzavretí dostanú nové čísla. ' +
+        'Vydané dokumenty (záznam z prehliadky aj záznam BOZP) sa zrušia a po novom uzavretí dostanú nové čísla. ' +
         'Pôvodné čísla sa nepoužijú znova. Zápisy v knihách sa upravia, kým ich vedúci nepodpísal — podpísaný zápis ' +
         'dostane len dopísanie s novým číslom.',
       confirmLabel: 'Upraviť',
@@ -220,8 +220,8 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
       {result.bozp && (
         <DocumentCard
           tag={<Badge className="bg-[#E4EEF9] text-[#2D63A0]">BOZP</Badge>}
-          title="Zápis do knihy BOZP"
-          meta={`${nedostatkyLabel(result.bozp.defects)} · zároveň je to záznam z prehliadky BOZP`}
+          title="Preventívna prehliadka BOZP"
+          meta={`${nedostatkyLabel(result.bozp.defects)} · nahrádza knihu kontrol BOZP`}
           doc={bozpDoc}
           type="kniha_bozp"
           companyId={i.company_id}
@@ -231,19 +231,16 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
         />
       )}
 
-      {/* Zápisy v knihách */}
-      {(result.entries.po || result.entries.bozp || result.offer) && (
+      {/* Zápis v požiarnej knihe */}
+      {(result.entries.po || result.offer) && (
         <section className="flex flex-col gap-2 animate-fade-up">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">Zápisy v knihách</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">Zápis v požiarnej knihe</h2>
           {result.entries.po && (
             <EntryLink
               to={bookHref('po', result.entries.po)}
               title="Zapísané do požiarnej knihy"
               entry={result.entries.po}
             />
-          )}
-          {result.entries.bozp && (
-            <EntryLink to={bookHref('bozp', result.entries.bozp)} title="Zapísané do knihy BOZP" entry={result.entries.bozp} />
           )}
           {result.offer && !isReadOnly && (
             <button
@@ -341,13 +338,12 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
         />
       )}
 
-      {sheet && (
-        <EntrySheet
-          view={sheet.view}
-          mode={{ kind: 'offer', offer: sheet.offer }}
-          onClose={() => setSheet(null)}
+      {bookView && (
+        <NewBookEntryModal
+          view={bookView}
+          onClose={() => setBookView(null)}
           onSaved={() => {
-            setSheet(null);
+            setBookView(null);
             void reload();
           }}
         />

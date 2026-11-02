@@ -263,8 +263,8 @@ final class Restorer
             'INSERT INTO facilities
                 (account_id, company_id, name, street, postal_code, city, email, contact_person, notes,
                  main_power_location, main_gas_location, main_water_location, description,
-                 floors_above, floors_below, entrances, places, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 floors_above, floors_below, entrances, places, vchody, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
 
         foreach ($companies as $company) {
@@ -340,6 +340,7 @@ final class Restorer
                     $this->floor($facility, 'floors_below', 0, 5),
                     $this->jsonListEncoded($facility, 'entrances'),
                     $this->jsonListEncoded($facility, 'places'),
+                    $this->str($facility, 'vchody'),
                     $this->createdAt($facility),
                 ]);
                 $facilityId = (int) $this->pdo->lastInsertId();
@@ -422,8 +423,30 @@ final class Restorer
             if (isset($existing[$key])) {
                 // The record is already here — leave it and everything under it
                 // alone. Merge never overwrites; it only fills gaps.
-                $this->inspectionMap[$oldId] = $existing[$key];
+                $existingInspId = $existing[$key];
+                $this->inspectionMap[$oldId] = $existingInspId;
                 $this->skipped['inspections']++;
+
+                // Map old item IDs to existing DB item IDs by position so that
+                // relinking, tasks and defect photos can resolve them.
+                if (!empty($inspection['items']) && is_array($inspection['items'])) {
+                    $itemStmt = $this->pdo->prepare('SELECT id, position FROM inspection_items WHERE inspection_id = ? ORDER BY position ASC, id ASC');
+                    $itemStmt->execute([$existingInspId]);
+                    $existingItemsByPos = [];
+                    while ($row = $itemStmt->fetch()) {
+                        $existingItemsByPos[(int) $row['position']][] = (int) $row['id'];
+                    }
+                    foreach ($inspection['items'] as $oldItem) {
+                        if (!is_array($oldItem) || !isset($oldItem['id'])) {
+                            continue;
+                        }
+                        $oldItemId = (int) $oldItem['id'];
+                        $pos = (int) ($oldItem['position'] ?? 0);
+                        if (!empty($existingItemsByPos[$pos])) {
+                            $this->itemMap[$oldItemId] = array_shift($existingItemsByPos[$pos]);
+                        }
+                    }
+                }
                 continue;
             }
 
@@ -601,12 +624,12 @@ final class Restorer
                         $fields['persists_from']['key'] = "p{$kNewInsp}-{$kNewItem}";
                         $changed = true;
                     }
-                } elseif (preg_match('/^pk(\d+)-(\d+)$/', $oldKey, $m)) {
+                } elseif (preg_match('/^(?:pk|k)(\d+)-(\d+)$/', $oldKey, $m)) {
                     $kOldInsp = (int) $m[1];
                     $kIdx = $m[2];
                     $kNewInsp = $this->inspectionMap[$kOldInsp] ?? null;
                     if ($kNewInsp !== null) {
-                        $fields['persists_from']['key'] = "pk{$kNewInsp}-{$kIdx}";
+                        $fields['persists_from']['key'] = "k{$kNewInsp}-{$kIdx}";
                         $changed = true;
                     }
                 }
@@ -650,12 +673,12 @@ final class Restorer
                             $details['previous'][$idx]['key'] = "p{$kNewInsp}-{$kNewItem}";
                             $changed = true;
                         }
-                    } elseif (preg_match('/^pk(\d+)-(\d+)$/', $oldKey, $m)) {
+                    } elseif (preg_match('/^(?:pk|k)(\d+)-(\d+)$/', $oldKey, $m)) {
                         $kOldInsp = (int) $m[1];
                         $kIdx = $m[2];
                         $kNewInsp = $this->inspectionMap[$kOldInsp] ?? null;
                         if ($kNewInsp !== null) {
-                            $details['previous'][$idx]['key'] = "pk{$kNewInsp}-{$kIdx}";
+                            $details['previous'][$idx]['key'] = "k{$kNewInsp}-{$kIdx}";
                             $changed = true;
                         }
                     }
@@ -1124,6 +1147,12 @@ final class Restorer
                 ? ($this->inspectionMap[(int) $task['source_inspection_id']] ?? null)
                 : null;
             $defectKey = $inspectionId !== null ? $this->str($task, 'source_defect_key') : null;
+            if ($defectKey !== null && preg_match('/^p(\d+)$/', $defectKey, $m)) {
+                $oldItemId = (int) $m[1];
+                if (isset($this->itemMap[$oldItemId])) {
+                    $defectKey = 'p' . $this->itemMap[$oldItemId];
+                }
+            }
             $done = (int) ($task['done'] ?? 0) === 1;
 
             $insert->execute([
@@ -1197,10 +1226,9 @@ final class Restorer
         $insert = $this->pdo->prepare(
             'INSERT INTO book_entries
                 (account_id, company_id, facility_id, book, seq, entry_date, `text`, source,
-                 protocol_numbers, inspection_ids, training_ids, no_defects_statement,
-                 signed_technician_at, signed_manager_at, signer_name, signer_role,
+                 protocol_numbers, inspection_ids, training_ids, no_defects_statement, defects_text, signed_technician_at, signed_manager_at, signer_name, signer_role,
                  created_by_user_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insertAddition = $this->pdo->prepare(
             'INSERT INTO book_entry_additions (account_id, entry_id, `text`, created_by_user_id, created_at)
@@ -1240,7 +1268,7 @@ final class Restorer
             $usedSeq[$ledger][$seq] = true;
 
             $source = $this->str($entry, 'source');
-            if (!in_array($source, ['ukon', 'cislo', 'vlastny', 'termin', 'revizia'], true)) {
+            if (!in_array($source, ['ukon', 'cislo', 'vlastny', 'termin', 'revizia', 'hromadny'], true)) {
                 $source = 'vlastny';
             }
             $inspectionIds = $this->remapIds($entry['inspection_ids'] ?? [], $this->inspectionMap);
@@ -1266,6 +1294,7 @@ final class Restorer
                 $inspectionIds === [] ? null : json_encode($inspectionIds),
                 $trainingIds === [] ? null : json_encode($trainingIds),
                 (int) ($entry['no_defects_statement'] ?? 0) === 1 && $book === 'po' ? 1 : 0,
+                $this->str($entry, 'defects_text'),
                 $this->dateTime($entry, 'signed_technician_at'),
                 $this->dateTime($entry, 'signed_manager_at'),
                 $this->str($entry, 'signer_name'),

@@ -24,9 +24,11 @@ final class BookLedger
     public const SCOPE_FIRMA     = 'firma';
     public const SCOPE_PREVADZKA = 'prevadzka';
 
+    public const BOOKS = [BookMapping::PO];
+
     private const ENTRY_COLUMNS = 'e.id, e.company_id, e.facility_id, f.name AS facility_name, e.book, e.seq,
         e.entry_date, e.`text`, e.source, e.protocol_numbers, e.inspection_ids, e.training_ids,
-        e.no_defects_statement, e.signed_technician_at, e.signed_manager_at, e.signer_name, e.signer_role,
+        e.no_defects_statement, e.defects_text, e.signed_technician_at, e.signed_manager_at, e.signer_name, e.signer_role,
         e.created_by_user_id, u.fullname AS created_by_name, e.created_at';
 
     /**
@@ -184,7 +186,7 @@ final class BookLedger
     {
         $out = [];
         $facilities = self::facilities($accountId, $company['id']);
-        foreach (BookMapping::BOOKS as $book) {
+        foreach (self::BOOKS as $book) {
             $stmt = Db::pdo()->prepare(
                 'SELECT COUNT(*) FROM book_entries WHERE account_id = ? AND company_id = ? AND book = ?'
             );
@@ -229,6 +231,7 @@ final class BookLedger
         array $trainingIds,
         bool $noDefects,
         int $userId,
+        ?string $defectsText = null,
     ): int {
         $pdo = Db::pdo();
         // Closing a prehliadka writes its entries inside the transaction that
@@ -251,9 +254,9 @@ final class BookLedger
             $pdo->prepare(
                 'INSERT INTO book_entries
                     (account_id, company_id, facility_id, book, seq, entry_date, `text`, source,
-                     protocol_numbers, inspection_ids, training_ids, no_defects_statement,
+                     protocol_numbers, inspection_ids, training_ids, no_defects_statement, defects_text,
                      signed_technician_at, created_by_user_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)'
             )->execute([
                 $accountId,
                 $companyId,
@@ -267,6 +270,7 @@ final class BookLedger
                 $inspectionIds === [] ? null : json_encode($inspectionIds),
                 $trainingIds === [] ? null : json_encode($trainingIds),
                 $noDefects ? 1 : 0,
+                $defectsText !== null && trim($defectsText) !== '' ? trim($defectsText) : null,
                 $userId,
             ]);
             $id = (int) $pdo->lastInsertId();
@@ -344,16 +348,18 @@ final class BookLedger
         string $text,
         array $protocolNumbers,
         bool $noDefects,
+        ?string $defectsText = null,
     ): void {
         Db::pdo()->prepare(
             'UPDATE book_entries
-             SET    entry_date = ?, `text` = ?, protocol_numbers = ?, no_defects_statement = ?
+             SET    entry_date = ?, `text` = ?, protocol_numbers = ?, no_defects_statement = ?, defects_text = ?
              WHERE  id = ? AND account_id = ? AND signed_manager_at IS NULL'
         )->execute([
             $dateIso,
             $text,
             $protocolNumbers === [] ? null : json_encode($protocolNumbers, JSON_UNESCAPED_UNICODE),
             $noDefects ? 1 : 0,
+            $defectsText !== null && trim($defectsText) !== '' ? trim($defectsText) : null,
             $entryId,
             $accountId,
         ]);
@@ -470,6 +476,7 @@ final class BookLedger
             $id = (int) $r['id'];
             return [
                 'id'                   => $id,
+                'company_id'           => (int) $r['company_id'],
                 'facility_id'          => $r['facility_id'] !== null ? (int) $r['facility_id'] : null,
                 'facility_name'        => $r['facility_name'] !== null ? (string) $r['facility_name'] : null,
                 'book'                 => (string) $r['book'],
@@ -481,6 +488,7 @@ final class BookLedger
                 'inspection_ids'       => self::decodeInts($r['inspection_ids']),
                 'training_ids'         => self::decodeInts($r['training_ids']),
                 'no_defects_statement' => (int) $r['no_defects_statement'] === 1,
+                'defects_text'         => $r['defects_text'] !== null ? (string) $r['defects_text'] : null,
                 'signed_technician'    => $r['signed_technician_at'] !== null,
                 'signed_manager'       => $r['signed_manager_at'] !== null,
                 'signed_manager_at'    => $r['signed_manager_at'] !== null ? (string) $r['signed_manager_at'] : null,

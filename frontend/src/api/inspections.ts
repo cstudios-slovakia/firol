@@ -49,7 +49,7 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   ts_hadic: 'Tlaková skúška hadíc',
   vyradenie: 'Vyraďovací protokol PHP',
   // Block 2 — typy_ukonov.json `nazov`.
-  kniha_bozp: 'Kniha kontrol BOZP',
+  kniha_bozp: 'Preventívna prehliadka BOZP',
   pracovisko: 'Kontrola pracoviska',
   osamele_pracovisko: 'Kontrola osamelých pracovísk',
   fajcenie: 'Kontrola dodržiavania zákazu fajčenia',

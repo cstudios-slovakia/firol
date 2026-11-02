@@ -6,6 +6,7 @@ namespace Firol\Controllers;
 
 use Firol\Audit\AuditLog;
 use Firol\Auth\Csrf;
+use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
@@ -98,6 +99,7 @@ final class PrehliadkaController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        MemberRights::requireDelete($accountId);
         $company = self::writableCompany($accountId, (int) $params['id']);
 
         if (!PrehliadkaActivities::archive($accountId, $company['id'], (int) $params['activity_id'])) {
@@ -279,7 +281,7 @@ final class PrehliadkaController
             'bozp'  => $bozp ? ['inspection_id' => $childId, 'documents' => $bozpDocs, 'defects' => count($bozpPoints)] : null,
             'entries' => [
                 'po'   => $poEntry,
-                'bozp' => $entry(BookMapping::BOZP, $childId),
+                'bozp' => null,
             ],
             'offer' => $offer,
             // Koncepty riadnych kontrol (spec 7.3) — one draft úkon per ticked type.

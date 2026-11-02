@@ -53,6 +53,8 @@ export type PrehliadkaMemory = {
   scope: PrehliadkaScope;
   routine: DeviceType[];
   book_entry: boolean;
+  lehota_zakon?: number;
+  lehota_vlastna?: number | null;
 };
 
 export type PrehliadkaContext = {

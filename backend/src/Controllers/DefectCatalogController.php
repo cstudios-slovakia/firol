@@ -158,8 +158,15 @@ final class DefectCatalogController
     {
         Csrf::require($req);
         $accountId = Tenant::currentAccountId();
+        $userId = Tenant::currentUserId();
         $id = (int) ($params['id'] ?? 0);
-        self::loadOwnOrFail($id, $accountId);
+        $row = self::loadOwnOrFail($id, $accountId);
+
+        // Whoever wrote the item may always edit it; anyone else's follows
+        // the members' switch (chapter 1.6).
+        if ((int) ($row['created_by_user_id'] ?? 0) !== $userId) {
+            MemberRights::requireDelete($accountId);
+        }
         $body = $req->json();
 
         $set = [];
@@ -189,9 +196,13 @@ final class DefectCatalogController
             Db::pdo()->prepare(
                 'UPDATE defect_catalog SET ' . implode(', ', $set) . ' WHERE id = ? AND account_id = ?'
             )->execute($args);
+            $updated = self::load($id, $accountId);
+            AuditLog::record('defect_catalog.update', 'defect_catalog', $id, self::shape($row), self::shape($updated));
+        } else {
+            $updated = self::load($id, $accountId);
         }
 
-        Response::json(['item' => self::load($id, $accountId)]);
+        Response::json(['item' => $updated]);
     }
 
     /**

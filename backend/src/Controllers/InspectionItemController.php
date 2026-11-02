@@ -302,9 +302,11 @@ final class InspectionItemController
         // POapp 26. 10. 2026 — a defect of a preventívna prehliadka.
         if ($type === PrehliadkaDetails::TYPE) {
             try {
+                $isBytovyDom = ($inspection['client_type'] ?? '') === 'bytove_druzstvo';
                 $fields = PrehliadkaDefects::validate(
                     $body,
                     isset($inspection['executed_on']) ? (string) $inspection['executed_on'] : null,
+                    $isBytovyDom,
                 );
                 if (isset($fields['persists_from']) && is_array($fields['persists_from'])) {
                     $srcInspId = (int) ($fields['persists_from']['inspection_id'] ?? 0);
@@ -348,7 +350,7 @@ final class InspectionItemController
                 self::failValidation($e->getMessage());
             }
         }
-        return match ($type) {
+        $fields = match ($type) {
             'php'                => self::validatePhpFields($body),
             'hydranty'           => self::validateHydrantyFields($body),
             'oprava_ts_php'      => self::validateOpravaTsPhpFields($body),
@@ -360,6 +362,10 @@ final class InspectionItemController
             'vyradenie'          => self::validateVyradenieFields($body),
             default => self::failValidation("Items for type '$type' are not supported yet."),
         };
+        if (isset($body['prehliadka_defects']) && is_array($body['prehliadka_defects'])) {
+            $fields['prehliadka_defects'] = $body['prehliadka_defects'];
+        }
+        return $fields;
     }
 
     /**
@@ -885,11 +891,13 @@ final class InspectionItemController
     /** @return array<string, mixed> */
     private static function loadInspectionOrFail(?int $accountId, int $inspectionId): array
     {
-        $sql = 'SELECT id, type, status, account_id, facility_id, executed_on FROM inspections
-                WHERE id = ? AND archived_at IS NULL';
+        $sql = 'SELECT i.id, i.type, i.status, i.account_id, i.facility_id, i.executed_on, c.client_type
+                FROM   inspections i
+                JOIN   companies c ON c.id = i.company_id
+                WHERE  i.id = ? AND i.archived_at IS NULL';
         $params = [$inspectionId];
         if ($accountId !== null) {
-            $sql .= ' AND account_id = ?';
+            $sql .= ' AND i.account_id = ?';
             $params[] = $accountId;
         }
         $stmt = Db::pdo()->prepare($sql);

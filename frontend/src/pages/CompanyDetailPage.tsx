@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMemberRights } from '@/auth/useMemberRights';
-import { Archive, ArchiveRestore, ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Home, Mail, MapPin, Phone, Plus, Route, Send, UserCheck, Warehouse } from 'lucide-react';
+import { Archive, ArchiveRestore, ArrowLeft, Building2, ChevronRight, ClipboardCheck, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Home, Mail, MapPin, Phone, Plus, Route, Send, UserCheck, Warehouse } from 'lucide-react';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyDetail } from '@/api/companies';
 import { ApiError } from '@/lib/api';
@@ -22,6 +22,9 @@ import { cn } from '@/lib/cn';
 import { companyRecipientEmail } from '@/lib/companyEmail';
 import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { InspectionTags } from '@/components/InspectionTags';
+import { startPrehliadkaPath } from '@/lib/prehliadka';
+import { Dialog } from '@/components/ui/Dialog';
+import { Button } from '@/components/ui/Button';
 
 type CompanyTab = 'general' | 'facilities' | 'protocols';
 
@@ -54,6 +57,7 @@ export function CompanyDetailPage() {
   // Chapter 10 — a potvrdenie can also be built after the fact from whatever
   // was finished at this client on a chosen day, not only from a visit.
   const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [prehliadkaFacilityOpen, setPrehliadkaFacilityOpen] = useState(false);
   const [confirmationsKey, setConfirmationsKey] = useState(0);
   // "Pridať prevádzku" dialog. A freshly created firm lands here with
   // `?nova_prevadzka=1` so the first prevádzka is asked for straight away.
@@ -253,6 +257,21 @@ export function CompanyDetailPage() {
               >
                 <FileSignature className="size-4" />
                 Potvrdenie o práci
+              </button>
+              <button
+                type="button"
+                id="company-start-prehliadka"
+                onClick={() => {
+                  if (facilities.length === 1) {
+                    navigate(startPrehliadkaPath({ companyId: company.id, facilityId: facilities[0].id }));
+                  } else if (facilities.length > 1) {
+                    setPrehliadkaFacilityOpen(true);
+                  }
+                }}
+                className="inline-flex h-10 items-center gap-1.5 rounded-2xl border border-ink-200 bg-white px-4 text-sm font-medium text-ink-700 transition-colors hover:border-ink-300 hover:bg-ink-50"
+              >
+                <ClipboardCheck className="size-4" />
+                Preventívna prehliadka
               </button>
             </div>
           )}
@@ -467,6 +486,33 @@ export function CompanyDetailPage() {
           )}
         </div>
       </Card>
+
+      {facilities.length > 1 && (
+        <Dialog
+          open={prehliadkaFacilityOpen}
+          onClose={() => setPrehliadkaFacilityOpen(false)}
+          title="Preventívna prehliadka"
+          description="Vyber prevádzku, na ktorej sa prehliadka vykonáva."
+        >
+          <div className="flex flex-col gap-2">
+            {facilities.map((f) => (
+              <Button
+                key={f.id}
+                type="button"
+                variant="secondary"
+                className="justify-start text-left"
+                onClick={() => {
+                  setPrehliadkaFacilityOpen(false);
+                  navigate(startPrehliadkaPath({ companyId: company.id, facilityId: f.id }));
+                }}
+              >
+                <Warehouse className="mr-2 size-4 shrink-0 text-ink-500" />
+                <span className="truncate">{f.name}</span>
+              </Button>
+            ))}
+          </div>
+        </Dialog>
+      )}
 
       <BulkSendDialog
         open={sendOpen}

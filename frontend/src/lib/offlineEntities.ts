@@ -157,6 +157,17 @@ export function inspectionCreateOptimistic(args: {
     patches: [
       seed(`/api/inspections/${id}`, detail),
       prependListRow('/api/inspections', listRow),
+      ...(args.payload.type === 'preventivna_prehliadka'
+        ? [
+            {
+              path: `/api/facilities/${args.facility.id}/prehliadka-context`,
+              apply: (current: unknown) => {
+                if (!current || typeof current !== 'object') return current;
+                return { ...current, draft_id: id };
+              },
+            },
+          ]
+        : []),
     ],
   };
 }
@@ -308,6 +319,7 @@ export function facilityCreateOptimistic(args: {
   description?: string | null;
   floors_above?: number | null;
   floors_below?: number | null;
+  vchody?: string | null;
 }): OptimisticSpec {
   const id = mintTempId();
   const address = formatAddress(args.street, args.postal_code, args.city);
@@ -327,6 +339,7 @@ export function facilityCreateOptimistic(args: {
     description: args.description ?? null,
     floors_above: args.floors_above ?? null,
     floors_below: args.floors_below ?? null,
+    vchody: args.vchody ?? null,
     entrances: [],
     places: [],
     company_id: args.companyId,
@@ -463,7 +476,7 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
     const keys = [
       'name', 'street', 'postal_code', 'city', 'email', 'contact_person', 'notes',
       'main_power_location', 'main_gas_location', 'main_water_location', 'description',
-      'floors_above', 'floors_below',
+      'floors_above', 'floors_below', 'vchody',
     ];
     return {
       label: 'Úprava prevádzky',
@@ -492,7 +505,7 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
     // `valid_until` is derived from the date and the period — unless the
     // technician wrote the validity by hand (spec 8.1) — so it follows them.
     const merged = <T extends Record<string, unknown>>(row: T): T => {
-      const next = mergeFields(row, f, keys);
+      const next: Record<string, unknown> = mergeFields(row, f, keys);
       const computed = validUntil(next.date as string | null, {
         value: next.periodicity_value as Periodicity['value'],
         unit: next.periodicity_unit as Periodicity['unit'],
@@ -501,7 +514,7 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
         ...next,
         valid_until_computed: computed,
         valid_until: (next.valid_until_override as string | null | undefined) || computed,
-      };
+      } as unknown as T;
     };
     return {
       label: 'Úprava školenia',
@@ -527,6 +540,16 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
     const id = Number(inspection[1]);
     // `details` — the úkon's header data (block 2, inspections.details).
     const keys = ['executed_on', 'notes', 'periodicity_value', 'periodicity_unit', 'details'];
+    const mergedInspection = <T extends Record<string, unknown>>(row: T): T => {
+      const next = mergeFields(row, f, keys) as Record<string, unknown>;
+      if (f.details && typeof f.details === 'object' && !Array.isArray(f.details)) {
+        next.details = {
+          ...((row.details as Record<string, unknown> | null | undefined) ?? {}),
+          ...(f.details as Record<string, unknown>),
+        };
+      }
+      return next as unknown as T;
+    };
     return {
       label: 'Úprava kontroly',
       patches: [
@@ -535,12 +558,15 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
           apply: (current) => {
             const d = current as InspectionDetail | undefined;
             if (!d) return undefined;
-            return { ...d, inspection: mergeFields(d.inspection, f, keys) };
+            return {
+              ...d,
+              inspection: mergedInspection(d.inspection as unknown as Record<string, unknown>) as unknown as Inspection,
+            };
           },
         },
         {
           path: '/api/inspections',
-          apply: (current) => updateListRow(current, id, (row) => mergeFields(row, f, keys)),
+          apply: (current) => updateListRow(current, id, mergedInspection),
         },
       ],
     };

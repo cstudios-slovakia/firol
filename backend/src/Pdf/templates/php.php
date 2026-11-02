@@ -249,15 +249,14 @@ $statusLabels = ['A' => 'Akcieschopný', 'TS' => 'Tlaková skúška', 'O' => 'Vy
     color: #6b6b75;
   }
 
-  .legal-note {
-    margin-top: 8pt;
-    padding: 5pt 8pt 5pt 10pt;
-    background: #f7f7f9;
-    border: 1pt solid #e5e5ea;
-    border-left: 3pt solid <?= $h($brandColor) ?>;
+
+  .tag {
+    border: 1pt solid <?= $h($brandColor) ?>;
+    color: <?= $h($brandColor) ?>;
     font-size: 7.5pt;
-    color: #6b6b75;
-    font-style: italic;
+    font-weight: bold;
+    letter-spacing: .6pt;
+    padding: 1pt 5pt;
   }
 
   .footer {
@@ -291,7 +290,8 @@ $statusLabels = ['A' => 'Akcieschopný', 'TS' => 'Tlaková skúška', 'O' => 'Vy
       </table>
     </td>
     <td width="43%" class="hdr-right">
-      <div class="hdr-title">Potvrdenie o vykonaní kontroly prenosného / pojazdného hasiaceho prístroja</div>
+      <div><span class="tag">OCHRANA PRED POŽIARMI</span></div>
+      <div class="hdr-title">Protokol o vykonaní kontroly — hasiace prístroje</div>
       <div class="hdr-meta">Č. dokumentu: <?= $h($number) ?></div>
       <div class="hdr-meta">Dátum: <?= $formatDate($inspection['executed_on'] ?? null) ?></div>
     </td>
@@ -377,60 +377,49 @@ $statusLabels = ['A' => 'Akcieschopný', 'TS' => 'Tlaková skúška', 'O' => 'Vy
 <div class="legenda">Legenda: A – akcieschopný | TS – určený na tlakovú skúšku | O – vyžaduje opravu | V – vyradený z
   prevádzky</div>
 
-<?php
-$bulletItems = [];
-foreach ($items as $idx => $it) {
-  $f = $it['fields'];
-  $st = (string) ($f['status'] ?? '');
-  $hasNote = !empty($f['notes']);
-  // Non-OK items are always listed; OK (A) items only when the technician wrote a note.
-  if ($st === 'A' && !$hasNote)
-    continue;
-  $label = 'HP č. ' . ($idx + 1) . ' (' . ($f['type'] ?? '') . ', ' . ($f['serial'] ?? '') . ')';
-  $note = $hasNote ? (string) $f['notes'] : ($statusLabels[$st] ?? $st);
-  $bulletItems[] = ['label' => $label, 'note' => $note];
-}
-?>
-<?php if ($bulletItems): ?>
-  <div class="notes-box">
-    <?php foreach ($bulletItems as $b): ?>
-      <p>&#9632; <strong><?= $h($b['label']) ?></strong> – <?= $h($b['note']) ?></p>
-    <?php endforeach ?>
-  </div>
-<?php endif ?>
-
-<div class="legal-note">Vydané podľa § 9 ods. 3 až 5 vyhlášky Ministerstva vnútra Slovenskej republiky č. 347/2022 Z. z. o vlastnostiach a o podmienkach prevádzkovania, označovania a zabezpečenia pravidelnej kontroly hasiacich prístrojov.</div>
+<?= \Firol\Pdf\DefectsTable::renderRoutineDefects($items, 'php', ['photo_counts' => $photo_counts ?? []]) ?>
 
 <h2>Podpisy</h2>
 <table class="sig-tbl">
   <tr>
-    <th width="38%">Kontrolu vykonal</th>
-    <th width="38%"><?= \Firol\Pdf\SignatureBlock::heading('php') ?></th>
-    <th width="24%">Miesto a dátum</th>
+    <th width="50%">Vykonal</th>
+    <th width="50%">S výsledkom kontroly oboznámený</th>
   </tr>
   <tr>
-    <td><?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?><br><span
-          style="font-size:8pt; color:#555;">č. oprávnenia:
-          <?= $h($inspector['certification_number']) ?></span><?php endif ?></td>
+    <td>
+      <?= $h($inspector['fullname']) ?>
+      <?php if (!empty($inspector['certification_number'])): ?>
+        <br><span style="font-size:8pt; color:#555;">technik požiarnej ochrany, č. opr.: <?= $h($inspector['certification_number']) ?></span>
+      <?php endif ?>
+    </td>
     <td><?= \Firol\Pdf\SignatureBlock::nameCell($handover ?? null) ?></td>
-    <td><?= \Firol\Pdf\SignatureBlock::placeAndDate($handover ?? null, $miesto) ?></td>
   </tr>
   <tr class="sig-row">
     <td>
       <?php if (!empty($inspector['signature_data_uri'])): ?>
         <img class="sig-img" src="<?= $h($inspector['signature_data_uri']) ?>" alt="">
+      <?php else: ?>
+        <i class="muted" style="font-size:8.5pt;">podpísané</i>
       <?php endif ?>
       <div class="sig-line"></div>
     </td>
     <td>
-      <?= \Firol\Pdf\SignatureBlock::signCell($handover ?? null, 'php') ?>
+      <?php if (!empty($handover['signature_data_uri'])): ?>
+        <img class="sig-img" src="<?= $h($handover['signature_data_uri']) ?>" alt="">
+        <div class="sig-line"></div>
+      <?php elseif (!empty($handover['signed_on'])): ?>
+        <i class="muted" style="font-size:8.5pt;">podpísané na displeji</i>
+        <div class="sig-line"></div>
+      <?php else: ?>
+        <i class="muted" style="font-size:8.5pt;">podpis po vytlačení</i>
+        <div class="sig-line"></div>
+      <?php endif ?>
     </td>
-    <td></td>
   </tr>
 </table>
 
 <div class="footer">
   Vypracoval: <?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?> | č.
     oprávnenia: <?= $h($inspector['certification_number']) ?><?php endif ?>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Strana 1
+  <span style="float:right; font-size:8pt; color:#6b6b75;">Tento dokument bol vytvorený pomocou softvéru poapp.sk</span>
 </div>

@@ -47,7 +47,7 @@ final class PrehliadkaDefectsBlock
                 $meta[] = $p['devices'];
             }
             if (!empty($options['photos']) && (int) ($p['photos'] ?? 0) > 0) {
-                $meta[] = self::photos((int) $p['photos']) . ' v prílohe';
+                $meta[] = (int) $p['photos'] . ' foto v prílohe';
             }
 
             $deadline = trim(implode(' · ', array_filter(
@@ -60,13 +60,11 @@ final class PrehliadkaDefectsBlock
                 'Predpis'               => $p['regulation'] ?? '',
                 'Odôvodnenie'           => $p['justification'] ?? '',
                 'Opatrenie'             => $p['measure'] ?? '',
-                'Termín · zodpovedný'   => $deadline,
+                'Termín'                => $deadline,
             ];
 
             $html .= '<table class="pt"><tr><td class="pt-head" colspan="2"><b>' . (int) $p['number'] . '. '
-                . self::esc((string) $p['title']) . '</b>'
-                . (!empty($p['persists']) ? ' <span class="pt-tag">NEDOSTATOK PRETRVÁVA</span>' : '')
-                . '</td></tr>';
+                . self::esc((string) $p['title']) . '</b></td></tr>';
             if ($meta !== []) {
                 $html .= '<tr><td class="pt-meta" colspan="2">' . self::esc(implode(' · ', $meta)) . '</td></tr>';
             }
@@ -75,8 +73,14 @@ final class PrehliadkaDefectsBlock
                 if ($text === '') {
                     continue;
                 }
+                $valHtml = match ($label) {
+                    'Predpis' => '<span style="color:#5B3E8C; font-weight:600;">' . nl2br(self::esc($text)) . '</span>',
+                    'Termín'  => (!empty($p['deadline_text']) ? '<b style="color:#c62828;">' . self::esc((string) $p['deadline_text']) . '</b>' : '')
+                        . (!empty($p['responsible']) ? (!empty($p['deadline_text']) ? ' · ' : '') . self::esc((string) $p['responsible']) : ''),
+                    default   => nl2br(self::esc($text)),
+                };
                 $html .= '<tr><td class="pt-l">' . self::esc(mb_strtoupper($label)) . '</td><td class="pt-v">'
-                    . nl2br(self::esc($text)) . '</td></tr>';
+                    . $valHtml . '</td></tr>';
             }
             $html .= '</table>';
         }
@@ -92,7 +96,7 @@ final class PrehliadkaDefectsBlock
             return '';
         }
         $html = '<h2>' . self::esc($title) . '</h2><table class="grid"><thead><tr>'
-            . '<th style="width:50%">Nedostatok</th><th style="width:16%">Z prehliadky</th><th>Stav</th>'
+            . '<th style="width:65%">Nedostatok</th><th>Stav</th>'
             . '</tr></thead><tbody>';
         foreach ($rows as $r) {
             $class = match ($r['status']) {
@@ -101,18 +105,26 @@ final class PrehliadkaDefectsBlock
                 'waiting' => 'muted',
                 default   => '',
             };
+            $textLines = explode("\n", (string) ($r['text'] ?? ''), 2);
+            $tdText = self::esc($textLines[0]);
+            if (isset($textLines[1]) && trim($textLines[1]) !== '') {
+                $tdText .= '<br><span class="muted" style="font-size:7.5pt;">' . self::esc(trim($textLines[1])) . '</span>';
+            }
+            if ($r['status'] === 'trva') {
+                $tdText = '<b class="bad">' . $tdText . '</b>';
+            }
             $html .= '<tr><td><b>' . self::esc($r['title']) . '</b>'
                 . ($r['meta'] !== '' ? '<br><span class="muted">' . self::esc($r['meta']) . '</span>' : '')
-                . '</td><td>' . self::esc(self::date($r['date'])) . '</td>'
-                . '<td' . ($class !== '' ? ' class="' . $class . '"' : '') . '>' . self::esc($r['text']) . '</td></tr>';
+                . '</td>'
+                . '<td' . ($class !== '' ? ' class="' . $class . '"' : '') . '>' . $tdText . '</td></tr>';
         }
         return $html . '</tbody></table>';
     }
 
-    /** „1 fotografia", „2 fotografie", „5 fotografií". */
+    /** „1 foto", „2 foto". */
     public static function photos(int $n): string
     {
-        return $n . ' ' . ($n === 1 ? 'fotografia' : ($n >= 2 && $n <= 4 ? 'fotografie' : 'fotografií'));
+        return $n . ' foto';
     }
 
     private static function styles(): string

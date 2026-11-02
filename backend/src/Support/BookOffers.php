@@ -36,6 +36,10 @@ final class BookOffers
      */
     public static function forLedger(int $accountId, int $companyId, string $book, ?int $facilityId): array
     {
+        if ($book !== BookMapping::PO) {
+            return [];
+        }
+
         $booked = BookLedger::bookedNumbers($accountId, $companyId, $book);
 
         $groups = [];
@@ -46,14 +50,12 @@ final class BookOffers
             $key = 'i|' . $row['type'] . '|' . $row['date'];
             $groups[$key][] = $row;
         }
-        if ($book === BookMapping::PO) {
-            foreach (self::trainings($accountId, $companyId, $facilityId) as $row) {
-                if ($row['number'] !== '' && isset($booked[$row['number']])) {
-                    continue;
-                }
-                $key = 't|' . $row['type'] . '|' . $row['date'];
-                $groups[$key][] = $row;
+        foreach (self::trainings($accountId, $companyId, $facilityId) as $row) {
+            if ($row['number'] !== '' && isset($booked[$row['number']])) {
+                continue;
             }
+            $key = 't|' . $row['type'] . '|' . $row['date'];
+            $groups[$key][] = $row;
         }
 
         $offers = [];
@@ -106,69 +108,55 @@ final class BookOffers
                 // entry can be attached to; „bez nedostatkov" is then off.
                 'has_defects'      => !$isTraining && $first['type'] === 'preventivna_prehliadka'
                     && BookLedger::carriesDefects($accountId, array_map(static fn (array $r): int => (int) $r['id'], $rows)),
+                'defects_text'     => (!$isTraining && $first['type'] === 'preventivna_prehliadka')
+                    ? self::defectsTextOfInspections($accountId, array_map(static fn (array $r): int => (int) $r['id'], $rows))
+                    : null,
             ];
         }
 
         usort($offers, static fn (array $a, array $b): int => [$b['date'], $a['title']] <=> [$a['date'], $b['title']]);
 
-        // Phase 6 — „Termíny ďalších kontrol", requested for the požiarna kniha only.
-        $terms = self::termsOffer($accountId, $companyId, $book, $facilityId);
-        if ($terms !== null) {
-            array_unshift($offers, $terms);
+        // Mark the date-wise newest row of each activity type group with is_latest and preselected (spec 9.3).
+        $seenTitles = [];
+        foreach ($offers as &$offer) {
+            $t = $offer['title'];
+            if (!isset($seenTitles[$t])) {
+                $offer['is_latest'] = true;
+                $offer['preselected'] = true;
+                $seenTitles[$t] = true;
+            } else {
+                $offer['is_latest'] = false;
+                $offer['preselected'] = false;
+            }
         }
+        unset($offer);
+
         return $offers;
     }
 
     /**
-     * The next due dates of the firm's own kontroly as one proposed sentence
-     * (prototype `knihaTerminy`, `source = termin`). Offered only while no entry
-     * of this book carries exactly that sentence — an unchanged sentence is not
-     * offered again, a new úkon changes it and so brings the offer back.
+     * Grouped unbooked PO úkony of the firm for the 02.11 „Nový zápis" pull flow (spec 9.3).
      *
-     * @return array<string, mixed>|null
+     * @return list<array{type: string, title: string, count: int, items: list<array<string, mixed>>}>
      */
-    private static function termsOffer(int $accountId, int $companyId, string $book, ?int $facilityId): ?array
+    public static function availableActions(int $accountId, int $companyId, string $book, ?int $facilityId): array
     {
-        if ($book !== BookMapping::PO) {
-            return null;
+        $offers = self::forLedger($accountId, $companyId, $book, $facilityId);
+        $byTitle = [];
+        foreach ($offers as $offer) {
+            $title = $offer['title'];
+            $byTitle[$title][] = $offer;
         }
-        $today = date('Y-m-d');
-        $upcoming = ClientTerms::upcoming($accountId, $companyId, $facilityId, $today, $book);
-        if ($upcoming === []) {
-            return null;
+        $groups = [];
+        foreach ($byTitle as $title => $items) {
+            $groups[] = [
+                'type'  => $items[0]['type'] ?? 'ukon',
+                'title' => $title,
+                'count' => count($items),
+                'items' => $items,
+            ];
         }
-
-        $parts = array_map(
-            static fn (array $t): string => mb_strtolower($t['label']) . ' do ' . ExternalTerms::skDate($t['valid']),
-            $upcoming,
-        );
-        $text = 'Termíny ďalších kontrol: ' . implode(', ', $parts) . '.';
-
-        // Any scope of this firm's book, like the protocol numbers.
-        $seen = Db::pdo()->prepare(
-            'SELECT 1 FROM book_entries
-             WHERE  account_id = ? AND company_id = ? AND book = ? AND source = "termin" AND `text` = ?
-             LIMIT  1'
-        );
-        $seen->execute([$accountId, $companyId, $book, $text]);
-        if ($seen->fetchColumn() !== false) {
-            return null;
-        }
-
-        return [
-            'key'              => 'termin|' . md5($text),
-            'kind'             => 'termin',
-            'type'             => 'termin',
-            'title'            => 'Termíny ďalších kontrol',
-            'date'             => $today,
-            'facilities'       => [],
-            'merged'           => 0,
-            'protocol_numbers' => [],
-            'inspection_ids'   => [],
-            'training_ids'     => [],
-            'text'             => $text,
-            'has_defects'      => false,
-        ];
+        return $groups;
     }
 
     /**
@@ -261,5 +249,45 @@ final class BookOffers
             ];
         }
         return $out;
+    }
+
+    /**
+     * Formats PO defects from preventívna prehliadka inspection items for pre-populating defects_text.
+     *
+     * @param list<int> $inspectionIds
+     */
+    private static function defectsTextOfInspections(int $accountId, array $inspectionIds): ?string
+    {
+        if ($inspectionIds === []) {
+            return null;
+        }
+        $in = implode(',', array_fill(0, count($inspectionIds), '?'));
+        $stmt = Db::pdo()->prepare(
+            "SELECT ii.fields FROM inspection_items ii
+             JOIN inspections i ON i.id = ii.inspection_id
+             WHERE i.account_id = ? AND ii.inspection_id IN ($in)
+             ORDER BY ii.position, ii.id"
+        );
+        $stmt->execute([$accountId, ...$inspectionIds]);
+        $lines = [];
+        $n = 0;
+        foreach ($stmt->fetchAll() as $row) {
+            $f = json_decode((string) ($row['fields'] ?? '{}'), true);
+            if (!is_array($f)) {
+                continue;
+            }
+            $scope = $f['scope'] ?? 'po';
+            if (!in_array($scope, ['po', 'ob'], true)) {
+                continue;
+            }
+            $title = trim((string) ($f['title'] ?? ''));
+            if ($title === '') {
+                continue;
+            }
+            $desc = trim((string) ($f['description'] ?? ''));
+            $n++;
+            $lines[] = $n . '. ' . $title . ($desc !== '' ? ' — ' . $desc : '');
+        }
+        return $lines !== [] ? implode("\n", $lines) : null;
     }
 }

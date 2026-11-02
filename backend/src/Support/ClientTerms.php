@@ -58,12 +58,12 @@ final class ClientTerms
         'oopp'                 => 'Kontrola OOPP',
         'oznacenie'            => 'Kontrola bezpečnostného označenia',
         'pracovne_prostriedky' => 'Kontrola pracovných prostriedkov',
-        'rebriky'              => 'Kontrola rebríkov',
+        'rebriky'              => 'Rebríky (pracovné)',
         'regale'               => 'Kontrola regálov',
         'fajcenie'             => 'Kontrola dodržiavania zákazu fajčenia',
         'dychova_skuska'       => 'Dychová skúška',
         'oprava_ts_php'        => 'Oprava, plnenie a tlaková skúška PHP',
-        'kniha_bozp'           => 'Kniha kontrol BOZP',
+        'kniha_bozp'           => 'Preventívna prehliadka BOZP',
         'pracovisko'           => 'Kontrola pracoviska',
         'osamele_pracovisko'   => 'Kontrola osamelých pracovísk',
         'omamne_latky'         => 'Kontrola omamných a psychotropných látok',
@@ -242,7 +242,7 @@ final class ClientTerms
         // is_preventive_inspection = 0 and are no „kontrola" of anything.
         $facilitySql = $facilityId !== null ? ' AND i.facility_id = :fac' : '';
         $stmt = Db::pdo()->prepare(
-            'SELECT i.type, i.facility_id, i.executed_on, i.periodicity_value, i.periodicity_unit
+            'SELECT i.id, i.type, i.facility_id, i.executed_on, i.periodicity_value, i.periodicity_unit
              FROM   inspections i
              WHERE  i.account_id = :acct AND i.company_id = :comp' . $facilitySql . '
                AND  i.status = "finalized" AND i.archived_at IS NULL
@@ -367,8 +367,21 @@ final class ClientTerms
         $key = Periodicity::inspectionChain($type) === 'preventivna_prehliadka' ? 'prehliadka_po' : self::termKey($type);
         $override = $overrides[(int) ($inspection['facility_id'] ?? 0)][$key] ?? null;
         // An úkon done after the prehliadka replaces its override with its own term.
-        if ($override !== null && $override['on'] >= (string) $inspection['executed_on']) {
-            return $override['valid'];
+        // On the very day of the prehliadka the order they were written in decides:
+        // a routine control finalized after it (the concept the prehliadka created)
+        // keeps its own periodicity. The prehliadka's own term is governed by its
+        // own override, so that chain never yields to it.
+        if ($override !== null) {
+            $executedOn = (string) $inspection['executed_on'];
+            if ($key === 'prehliadka_po') {
+                $overrideHolds = $override['on'] >= $executedOn;
+            } else {
+                $overrideHolds = $override['on'] > $executedOn
+                    || ($override['on'] === $executedOn && (int) $override['id'] > (int) ($inspection['id'] ?? 0));
+            }
+            if ($overrideHolds) {
+                return $override['valid'];
+            }
         }
         $value = $inspection['periodicity_value'] !== null ? (int) $inspection['periodicity_value'] : null;
         $unit = $inspection['periodicity_unit'] !== null ? (string) $inspection['periodicity_unit'] : null;
@@ -394,7 +407,7 @@ final class ClientTerms
     {
         $facilitySql = $facilityId !== null ? ' AND facility_id = :fac' : '';
         $stmt = Db::pdo()->prepare(
-            'SELECT facility_id, executed_on, details
+            'SELECT id, facility_id, executed_on, details
              FROM   inspections
              WHERE  account_id = :acct AND company_id = :comp' . $facilitySql . '
                AND  type = "preventivna_prehliadka"
@@ -425,7 +438,7 @@ final class ClientTerms
             foreach ($governed as $key) {
                 $date = $written[$key] ?? null;
                 if (is_string($date) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1) {
-                    $out[$fac][$key] = ['on' => (string) $r['executed_on'], 'valid' => $date];
+                    $out[$fac][$key] = ['on' => (string) $r['executed_on'], 'id' => (int) $r['id'], 'valid' => $date];
                 } else {
                     unset($out[$fac][$key]);
                 }

@@ -17,6 +17,9 @@ final class DefectCatalogSeed
         'ochrana pred požiarmi'         => 'po',
         'BOZP'                          => 'bo',
         'ochrana pred požiarmi aj BOZP' => 'ob',
+        // The wording of the 02. 11. 2026 delivery (7_Ciselnik_nedostatkov_strojovo.md).
+        'požiarny'                      => 'po',
+        'požiarny aj BOZP'              => 'ob',
     ];
 
     /**

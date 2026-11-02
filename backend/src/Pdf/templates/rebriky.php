@@ -35,9 +35,8 @@ $resultCell = static function (?string $r) use ($e): string {
 $total = (int) ($stats['total'] ?? count($items));
 ?>
 <?= $doc->styles() ?>
-<?= $doc->header('Záznam o kontrole rebríkov') ?>
+<?= $doc->header('Protokol o vykonaní kontroly — rebríky (pracovné)') ?>
 <?= $doc->basicInfo() ?>
-<?= $doc->legalWarn('Kontrola vykonaná v rozsahu podľa STN EN 131-3 a § 5 nariadenia vlády SR č. 392/2006 Z. z. o minimálnych bezpečnostných a zdravotných požiadavkách pri používaní pracovných prostriedkov.') ?>
 
 <?= $doc->band('Zoznam kontrolovaných rebríkov') ?>
 <table class="grid">
@@ -79,9 +78,8 @@ $total = (int) ($stats['total'] ?? count($items));
   </tr>
 </table>
 
-<?= DefectsTable::render(Defects::collect($items), [
-  'labels'     => DefectsTable::SHORT_LABELS,
-  'photo_note' => !empty($photos),
+<?= DefectsTable::renderRoutineDefects($items, 'rebriky', [
+  'photo_counts' => $photo_counts ?? [],
 ]) ?>
 
 <?php if ($measures !== ''): ?>
@@ -89,5 +87,5 @@ $total = (int) ($stats['total'] ?? count($items));
   <div class="note-box"><?= nl2br($e($measures)) ?></div>
 <?php endif ?>
 
-<?= $doc->signatures('rebriky') ?>
+<?= $doc->signaturesOptionA('rebriky', 'VYKONAL', 'S VÝSLEDKOM KONTROLY OBOZNÁMENÝ') ?>
 <?= $doc->footer('Kontrolovaných rebríkov: ' . $total) ?>

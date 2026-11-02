@@ -73,8 +73,8 @@ final class FacilityController
             'INSERT INTO facilities
                 (account_id, company_id, name, street, postal_code, city, email, contact_person, notes,
                  main_power_location, main_gas_location, main_water_location, description,
-                 floors_above, floors_below, entrances, places)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 floors_above, floors_below, entrances, places, vchody)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $accountId, $companyId, $fields['name'],
@@ -82,7 +82,7 @@ final class FacilityController
             $fields['email'], $fields['contact_person'], $fields['notes'],
             $fields['main_power_location'], $fields['main_gas_location'], $fields['main_water_location'],
             $fields['description'], $fields['floors_above'], $fields['floors_below'],
-            '[]', '[]',
+            '[]', '[]', $fields['vchody'],
         ]);
         $id = (int) Db::pdo()->lastInsertId();
 
@@ -118,19 +118,22 @@ final class FacilityController
             if (!array_key_exists('floors_below', $body)) {
                 $fields['floors_below'] = $existing['floors_below'] !== null ? (int) $existing['floors_below'] : null;
             }
+            if (!array_key_exists('vchody', $body)) {
+                $fields['vchody'] = $existing['vchody'] !== null && $existing['vchody'] !== '' ? (string) $existing['vchody'] : null;
+            }
         }
 
         Db::pdo()->prepare(
             'UPDATE facilities
              SET    name = ?, street = ?, postal_code = ?, city = ?, email = ?, contact_person = ?, notes = ?,
                     main_power_location = ?, main_gas_location = ?, main_water_location = ?, description = ?,
-                    floors_above = ?, floors_below = ?
+                    floors_above = ?, floors_below = ?, vchody = ?
              WHERE  id = ? AND account_id = ?'
         )->execute([
             $fields['name'], $fields['addr']['street'], $fields['addr']['postal_code'], $fields['addr']['city'],
             $fields['email'], $fields['contact_person'], $fields['notes'],
             $fields['main_power_location'], $fields['main_gas_location'], $fields['main_water_location'],
-            $fields['description'], $fields['floors_above'], $fields['floors_below'],
+            $fields['description'], $fields['floors_above'], $fields['floors_below'], $fields['vchody'],
             $id, $scopeAccountId,
         ]);
 
@@ -255,11 +258,16 @@ final class FacilityController
 
         $floorsAbove = null;
         $floorsBelow = null;
+        $vchody      = null;
         if (ClientKind::isBytovyDom($clientType)) {
             $floorsAbove = self::readFloor($req, 'floors_above', 1, 40, 'Počet nadzemných podlaží');
             $floorsBelow = self::readFloor($req, 'floors_below', 0, 5, 'Počet podzemných podlaží');
             if ($creating && ($floorsAbove === null || $floorsBelow === null)) {
                 Response::error('Pri bytovom dome zadaj počet nadzemných (1–40) a podzemných (0–5) podlaží.', 422);
+            }
+            $vchody = self::blankToNull($req->jsonString('vchody'));
+            if ($vchody !== null && mb_strlen($vchody) > 255) {
+                Response::error('Text vchodov je príliš dlhý.', 422);
             }
         }
         // The edit form sends the structured parts; offline/import clients may
@@ -282,6 +290,7 @@ final class FacilityController
             'description'          => $description,
             'floors_above'         => $floorsAbove,
             'floors_below'         => $floorsBelow,
+            'vchody'               => $vchody,
         ];
     }
 
@@ -334,7 +343,7 @@ final class FacilityController
         $sql = 'SELECT f.id, f.account_id, f.name, f.street, f.postal_code, f.city, f.email,
                        f.contact_person, f.notes,
                        f.main_power_location, f.main_gas_location, f.main_water_location, f.description,
-                       f.floors_above, f.floors_below, f.entrances, f.places,
+                       f.floors_above, f.floors_below, f.entrances, f.places, f.vchody,
                        f.archived_at, f.archived_reason,
                        f.company_id, c.name AS company_name, c.client_type AS company_client_type,
                        c.contact_email AS company_contact_email, c.contact AS company_contact,
@@ -373,7 +382,13 @@ final class FacilityController
         $row['company_id'] = (int) $row['company_id'];
         $row['floors_above'] = $row['floors_above'] !== null ? (int) $row['floors_above'] : null;
         $row['floors_below'] = $row['floors_below'] !== null ? (int) $row['floors_below'] : null;
-        $row['entrances'] = self::jsonList($row['entrances'] ?? null);
+        if (ClientKind::isBytovyDom($row['company_client_type'] ?? '')) {
+            $row['vchody'] = $row['vchody'] !== null && $row['vchody'] !== '' ? (string) $row['vchody'] : null;
+            $row['entrances'] = self::jsonList($row['entrances'] ?? null);
+        } else {
+            $row['vchody'] = null;
+            $row['entrances'] = [];
+        }
         $row['places'] = self::jsonList($row['places'] ?? null);
         $row['recipient_email'] = ClientEmail::resolve(
             isset($row['email']) ? (string) $row['email'] : null,
