@@ -13,6 +13,7 @@ use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Support\BookLedger;
 use Firol\Support\BookMapping;
+use Firol\Support\ClientKind;
 use Firol\Support\ExternalTerms;
 
 /**
@@ -160,7 +161,7 @@ final class ExternalTermController
     {
         $company = self::company($accountId, $companyId);
         if ($company['archived_at'] !== null) {
-            Response::error('Firma je archivovaná — termíny sa už nemenia.', 409);
+            Response::error(ClientKind::clientArchivedReadOnly((string) $company['client_type'], 'termíny sa už nemenia.'), 409);
         }
         return $company;
     }

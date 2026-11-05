@@ -13,7 +13,7 @@ import { formatDay } from '@/components/ClientArchive';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
-import { isBytoveDruzstvo } from '@/lib/clientKind';
+import { clientNouns, facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { cn } from '@/lib/cn';
 import { todayIso } from '@/lib/dates';
 import { offlineMessage } from '@/lib/offline';
@@ -309,7 +309,7 @@ export function NewBookEntryModal({
 
           {groupedOffers.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-ink-200 bg-ink-50/50 px-4 py-3 text-xs leading-relaxed text-ink-600">
-              Všetky hotové úkony tejto firmy už v knihe sú. Napíšte zápis vlastnými slovami.
+              Všetky hotové úkony {clientNouns(view.company.client_type).demo.gen} už v knihe sú. Napíšte zápis vlastnými slovami.
             </p>
           ) : (
             <div className="flex max-h-72 flex-col gap-3 overflow-y-auto pr-1">
@@ -355,7 +355,7 @@ export function NewBookEntryModal({
                             </span>
                             <span className="mt-0.5 block truncate text-[11px] text-ink-500">
                               {offer.merged > 1
-                                ? `${offer.merged} prevádzok naraz · ${offer.facilities.join(', ')}`
+                                ? `${facilityNouns(view.company.client_type).count(offer.merged)} naraz · ${offer.facilities.join(', ')}`
                                 : offer.facilities.join(', ')}
                             </span>
                           </span>

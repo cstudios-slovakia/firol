@@ -9,7 +9,7 @@ import {
 import {
     AlertTriangle,
     AtSign,
-    Building2,
+    Building,
     CalendarDays,
     Check,
     CheckCircle2,
@@ -898,7 +898,7 @@ function BrandingSection() {
                         {(p) => (
                             <Input
                                 {...p}
-                                leftIcon={<Building2 className="size-4" />}
+                                leftIcon={<Building className="size-4" />}
                                 value={companyName}
                                 onChange={(e) => setCompanyName(e.target.value)}
                                 placeholder="Vaša firma s.r.o."
@@ -1970,7 +1970,7 @@ type ImportSectionDef = {
     title: string;
     description: string;
     hint: string;
-    Icon: typeof Building2;
+    Icon: typeof Building;
     color: string;
     bg: string;
     createdLabels: Record<string, string>;
@@ -1982,7 +1982,7 @@ const IMPORT_DEFS: ImportSectionDef[] = [
         title: "Firmy a prevádzky",
         description: "Importuj firmy aj ich prevádzky naraz. Prevádzky sa naviažu na firmu cez IČO.",
         hint: 'Sheet „Firmy" — Názov je povinný. Sheet „Prevadzky" — IČO firmy musí existovať (buď v sheete vyššie, alebo už v aplikácii).',
-        Icon: Building2,
+        Icon: Building,
         color: "text-blue-600",
         bg: "bg-blue-50",
         createdLabels: { companies: "firiem", facilities: "prevádzok" },
@@ -2380,7 +2380,7 @@ function DataSection() {
                         <p>
                             Archív obsahuje{" "}
                             <strong className="text-ink-800">
-                                firmy, prevádzky, kontroly, školenia
+                                klientov, prevádzky, bytové domy, kontroly, školenia
                             </strong>{" "}
                             vrátane všetkých položiek a účastníkov, a k tomu
                             skutočné súbory —{" "}
@@ -2499,21 +2499,21 @@ function DataSection() {
                 </div>
                 <div className="flex flex-col gap-3 px-5 py-5">
                     <PurgeCard
-                        title="Vymazať všetky firmy"
-                        description="Vymaže všetky firmy a prevádzky vrátane všetkých kontrol, školení a dokumentov."
-                        detail="Toto je totálny reset — zmažú sa aj všetky kontroly a školenia, pretože sú naviazané na firmy."
+                        title="Vymazať všetkých klientov"
+                        description="Vymaže všetkých klientov (firmy aj bytové družstvá) a ich prevádzky či bytové domy vrátane všetkých kontrol, školení a dokumentov."
+                        detail="Toto je totálny reset — zmažú sa aj všetky kontroly a školenia, pretože sú naviazané na klientov."
                         busy={busyCompanies}
                         onConfirm={() =>
                             purge(
                                 () => DataApi.purgeCompanies(csrfToken),
                                 setBusyCompanies,
-                                "Firmy",
+                                "Klienti",
                             )
                         }
                     />
                     <PurgeCard
                         title="Vymazať všetky kontroly"
-                        description="Vymaže všetky záznamy o kontrolách a ich položky. Firmy a školenia zostanú."
+                        description="Vymaže všetky záznamy o kontrolách a ich položky. Klienti a školenia zostanú."
                         detail="Zmažú sa všetky kontroly bez ohľadu na stav (draft aj finalizované)."
                         busy={busyInspections}
                         onConfirm={() =>
@@ -2526,7 +2526,7 @@ function DataSection() {
                     />
                     <PurgeCard
                         title="Vymazať všetky školenia"
-                        description="Vymaže všetky školenia a zoznamy účastníkov. Firmy a kontroly zostanú."
+                        description="Vymaže všetky školenia a zoznamy účastníkov. Klienti a kontroly zostanú."
                         detail="Zmažú sa všetky školenia bez ohľadu na stav."
                         busy={busyTrainings}
                         onConfirm={() =>
@@ -2579,8 +2579,8 @@ function ExportToggle({
 // ─── Obnova zo zálohy ─────────────────────────────────────────────────────────
 
 const RESTORE_LABELS: Record<string, string> = {
-    companies: "firiem",
-    facilities: "prevádzok",
+    companies: "klientov",
+    facilities: "prevádzok a bytových domov",
     inspections: "kontrol",
     items: "položiek",
     photos: "fotiek",
@@ -2608,7 +2608,7 @@ const RESTORE_MODES: {
         value: "replace",
         title: "Nahradiť všetko",
         description:
-            "Najprv zmaže všetky firmy, kontroly, školenia, fotky a protokoly v účte a potom nahrá zálohu. Presná kópia zálohy — pre prípad, že je databáza poškodená.",
+            "Najprv zmaže všetkých klientov, kontroly, školenia, fotky a protokoly v účte a potom nahrá zálohu. Presná kópia zálohy — pre prípad, že je databáza poškodená.",
     },
 ];
 
@@ -2630,7 +2630,7 @@ function RestoreCard() {
             const ok = await confirm({
                 title: "Nahradiť všetky dáta v účte?",
                 description:
-                    "Všetky firmy, prevádzky, kontroly, školenia, fotky aj PDF protokoly sa nenávratne zmažú a nahradia obsahom zálohy. Táto operácia sa nedá vrátiť späť.",
+                    "Všetci klienti, prevádzky, bytové domy, kontroly, školenia, fotky aj PDF protokoly sa nenávratne zmažú a nahradia obsahom zálohy. Táto operácia sa nedá vrátiť späť.",
                 confirmLabel: "Zmazať a obnoviť",
             });
             if (!ok) {

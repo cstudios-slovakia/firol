@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, ChevronRight, Pencil, Plus, Trash2, Warehouse } from 'lucide-react';
+import { ArrowLeft, Building, ChevronRight, Pencil, Plus, Trash2, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies } from '@/api/companies';
+import { clientNouns } from '@/lib/clientKind';
 import { ExternalTerms, termState, type ExternalTerm, type ExternalTermSuggestion } from '@/api/externalTerms';
 import { Inspections, type InspectionDetail } from '@/api/inspections';
 import { Prehliadka, type CompanyActivities, type TermFacts } from '@/api/prehliadka';
@@ -47,6 +48,8 @@ type Loaded = {
   external: ExternalTerm[];
   suggestions: ExternalTermSuggestion[];
   facilities: { id: number; name: string }[];
+  /** Type of the client — drives firma / bytové družstvo wording. */
+  clientType: string | null;
 };
 
 const todayIso = (): string => {
@@ -92,6 +95,7 @@ export function PrehliadkaTermsPage() {
           external: external?.items ?? [],
           suggestions: external?.suggestions ?? [],
           facilities: (company?.facilities ?? []).map((f) => ({ id: f.id, name: f.name })),
+          clientType: company?.company.client_type ?? null,
         });
       } catch (err) {
         if (!cancelled) setError(err instanceof ApiError ? err.message : 'Prehliadku sa nepodarilo načítať.');
@@ -125,6 +129,7 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
   const isReadOnly = useIsReadOnly();
 
   const { inspection: i } = loaded.detail;
+  const client = clientNouns(loaded.clientType);
   const saver = useDetailsSaver(id, parseDetails(i.details));
   const details: PrehliadkaDetails = saver.details ?? parseDetails(i.details);
   const canEdit = i.status === 'draft' && !isReadOnly;
@@ -230,7 +235,7 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
         const field = kind === 'po' ? 'activities_po' : 'activities_bozp';
         return d[field].includes(res.activity.label) ? d : { ...d, [field]: [...d[field], res.activity.label] };
       });
-      toast.success('Pridané. Ostane pri tejto firme.');
+      toast.success(`Pridané. Ostane pri ${client.demo.loc}.`);
       return null;
     } catch (err) {
       return offlineMessage(err, 'Činnosť sa nepodarilo pridať.');
@@ -240,7 +245,7 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
   async function removeActivity(kind: 'po' | 'bozp', activity: { id: number; label: string }) {
     const ok = await confirm({
       title: 'Odstrániť činnosť?',
-      description: `„${activity.label}“ sa odstráni zo zoznamu tejto firmy. Už hotové záznamy sa nemenia.`,
+      description: `„${activity.label}“ sa odstráni zo zoznamu ${client.demo.gen}. Už hotové záznamy sa nemenia.`,
       confirmLabel: 'Odstrániť',
     });
     if (!ok) return;
@@ -279,7 +284,7 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
   async function removeExternal(t: ExternalTerm) {
     const ok = await confirm({
       title: 'Odstrániť termín?',
-      description: `„${t.name}“ sa odstráni zo zoznamu tejto firmy. Už hotové záznamy sa nemenia.`,
+      description: `„${t.name}“ sa odstráni zo zoznamu ${client.demo.gen}. Už hotové záznamy sa nemenia.`,
       confirmLabel: 'Odstrániť',
     });
     if (!ok) return;
@@ -328,7 +333,7 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
         <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">Krok 3 z 3 · Termíny</p>
         <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">Termíny a činnosti</h1>
         <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-500">
-          <Building2 className="size-3" />
+          <Building className="size-3" />
           {i.company_name}
           <span className="text-ink-300">·</span>
           <Warehouse className="size-3" />
@@ -343,6 +348,7 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
       {sets.map(({ kind, ticked }) => (
         <ActivitiesCard
           key={kind}
+          clientType={loaded.clientType}
           kind={kind}
           defaults={activities?.[kind].defaults ?? []}
           custom={activities?.[kind].custom ?? []}
@@ -506,7 +512,7 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
           </Button>
         )}
         <p className="text-xs text-ink-400">
-          Napríklad revízia elektroinštalácie, plynu, komínov alebo výťahu. Uložia sa k firme, takže o rok ich už len
+          Napríklad revízia elektroinštalácie, plynu, komínov alebo výťahu. Uložia sa k {client.cases.dat}, takže o rok ich už len
           aktualizujete. Termín sa vytlačí len v zázname tej knihy, ktorú zvolíte.
         </p>
       </section>
@@ -544,6 +550,7 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
       {customFor && (
         <CustomActivitySheet
           kind={customFor}
+          clientType={loaded.clientType}
           onClose={() => setCustomFor(null)}
           onSave={async (label) => {
             const err = await addActivity(customFor, label);
@@ -556,6 +563,7 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
       {externalSheet && (
         <ExternalTermSheet
           companyId={i.company_id}
+          clientType={loaded.clientType}
           term={externalSheet.kind === 'edit' ? externalSheet.term : undefined}
           preset={externalSheet.kind === 'add' ? externalSheet.preset : undefined}
           currentBook={details.scope.po ? 'po' : 'bozp'}
@@ -571,6 +579,7 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
 
 function ActivitiesCard({
   kind,
+  clientType,
   defaults,
   custom,
   ticked,
@@ -580,6 +589,7 @@ function ActivitiesCard({
   onRemove,
 }: {
   kind: 'po' | 'bozp';
+  clientType: string | null;
   defaults: string[];
   custom: { id: number; label: string }[];
   ticked: string[];
@@ -654,7 +664,7 @@ function ActivitiesCard({
         </Button>
       )}
       <p className="text-xs text-ink-400">
-        Vlastná činnosť ostane <b>pri tejto firme</b> a nabudúce sa ponúkne sama. Pri iných firmách nie.
+        Vlastná činnosť ostane <b>pri {clientNouns(clientType).demo.loc}</b> a nabudúce sa ponúkne sama. Pri iných klientoch nie.
       </p>
       {picked > 0 ? (
         <p className="rounded-xl bg-[var(--color-status-ok-bg)] px-3 py-2 text-xs font-medium text-[var(--color-status-ok)]">
@@ -671,10 +681,12 @@ function ActivitiesCard({
 
 function CustomActivitySheet({
   kind,
+  clientType,
   onClose,
   onSave,
 }: {
   kind: 'po' | 'bozp';
+  clientType: string | null;
   onClose: () => void;
   /** Resolves with an error message, or null when saved. */
   onSave: (label: string) => Promise<string | null>;
@@ -702,7 +714,7 @@ function CustomActivitySheet({
       open
       onClose={onClose}
       title="Vlastná činnosť"
-      description="Pridá sa do zoznamu vykonaných činností. Ostane pri tejto firme aj pri ďalších prehliadkach."
+      description={`Pridá sa do zoznamu vykonaných činností. Ostane pri ${clientNouns(clientType).demo.loc} aj pri ďalších prehliadkach.`}
       dismissible={!saving}
     >
       <form onSubmit={submit} className="flex flex-col gap-4" noValidate>

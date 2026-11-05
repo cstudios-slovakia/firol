@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Building2, CalendarDays, Save, User, Warehouse,
+  ArrowLeft, Building, CalendarDays, Save, User, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Team, type TeamMember } from '@/api/team';
@@ -184,7 +184,7 @@ export function TrainingEditPage() {
 
       {training && (
         <Card className="flex items-center gap-3 px-4 py-3 bg-ink-50/60">
-          <Building2 className="size-4 shrink-0 text-ink-400" />
+          <Building className="size-4 shrink-0 text-ink-400" />
           <span className="text-sm text-ink-600">{training.company_name}</span>
           {training.facility_name && (
             <>

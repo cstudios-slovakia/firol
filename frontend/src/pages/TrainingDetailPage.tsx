@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { InvoicingBlock } from '@/components/InvoicingBlock';
 import { invoicingOf } from '@/api/invoicing';
 import {
-  ArrowLeft, Briefcase, Building2, CalendarCheck, CalendarDays, Clock,
+  ArrowLeft, Briefcase, Building, CalendarCheck, CalendarDays, Clock,
   ClipboardPaste, Download, Edit2, FileText, GraduationCap, Hash, Lock, LockOpen, MapPin, Pencil, Plus, Repeat,
   Trash2, User, Users, Warehouse, Wheat,
 } from 'lucide-react';
@@ -30,6 +30,7 @@ import { periodicityLabel } from '@/lib/periodicity';
 import { peopleCount, type ParsedAttendee } from '@/lib/attendeeLines';
 import { useToast } from '@/lib/toast';
 import { useConfirm } from '@/lib/confirm';
+import { clientNouns, facilityNouns } from '@/lib/clientKind';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -420,14 +421,14 @@ export function TrainingDetailPage() {
         </div>
 
         <dl className="flex flex-col divide-y divide-ink-100 px-5 py-3 text-sm">
-          <DetailRow icon={<Building2 className="size-4" />} label="Firma">
+          <DetailRow icon={<Building className="size-4" />} label={clientNouns(t.company_client_type).singular}>
             <Link to={`/companies/${t.company_id}`} className="text-firol-700 hover:underline">
               {t.company_name}
             </Link>
             {t.company_ico && <span className="ml-2 text-ink-400">IČO {t.company_ico}</span>}
           </DetailRow>
           {t.facility_id !== null && t.facility_name && (
-            <DetailRow icon={<Warehouse className="size-4" />} label="Prevádzka">
+            <DetailRow icon={<Warehouse className="size-4" />} label={facilityNouns(t.company_client_type).singular}>
               <Link to={`/facilities/${t.facility_id}`} className="text-firol-700 hover:underline">
                 {t.facility_name}
               </Link>
@@ -542,6 +543,7 @@ export function TrainingDetailPage() {
             trainingId={id}
             fields={t.fields}
             companyApprover={t.company_approver}
+            clientType={t.company_client_type}
             csrfToken={csrfToken}
             editable={isDraft && !isReadOnly}
             onSaved={refreshDetail}

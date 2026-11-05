@@ -2,6 +2,7 @@ import { api } from '@/lib/api';
 import type { InspectionType } from '@/api/inspections';
 import type { TrainingType } from '@/api/trainings';
 import type { Section } from '@/lib/sections';
+import type { ClientType } from '@/lib/clientKind';
 
 /**
  * Calendar API (change request 2.5, BOZP extension chapter 11).
@@ -53,9 +54,11 @@ export type CalendarDeadline = {
   section: Section | null;
   company_id: number;
   company_name: string;
+  /** Type of the client — picks firma / bytové družstvo wording. */
+  company_client_type?: ClientType;
   /** Company contact e-mail — recipient of the client notice (11.3). */
   company_email: string | null;
-  /** Null for a training of the whole firma — shown as „Celá firma". */
+  /** Null for a training of the whole client — shown as „Celá firma" / „Celé bytové družstvo". */
   facility_id: number | null;
   facility_name: string | null;
   /** Obec from the prevádzka's address; null when not filled in. */

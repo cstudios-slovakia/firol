@@ -42,6 +42,7 @@ final class VisitController
         $isAdmin = Admin::isAdmin(Tenant::currentUserId());
 
         $sql = 'SELECT v.id, v.company_id, c.name AS company_name,
+                       c.client_type AS company_client_type,
                        v.facility_id, f.name AS facility_name,
                        v.visit_date, v.technician_user_id, u.fullname AS technician_name,
                        v.planned_types, v.status, v.created_at
@@ -482,6 +483,7 @@ final class VisitController
     private static function loadOrFail(?int $accountId, int $id): array
     {
         $sql = 'SELECT v.id, v.account_id, v.company_id, c.name AS company_name,
+                       c.client_type AS company_client_type,
                        v.facility_id, f.name AS facility_name,
                        v.visit_date, v.technician_user_id, u.fullname AS technician_name,
                        v.planned_types, v.status, v.created_at
@@ -515,6 +517,7 @@ final class VisitController
             'id'                 => (int) $row['id'],
             'company_id'         => (int) $row['company_id'],
             'company_name'       => (string) $row['company_name'],
+            'company_client_type' => (string) $row['company_client_type'],
             'facility_id'        => (int) $row['facility_id'],
             'facility_name'      => (string) $row['facility_name'],
             'visit_date'         => (string) $row['visit_date'],

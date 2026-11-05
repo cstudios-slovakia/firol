@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, Camera, CheckCircle2, ChevronRight, Info, Plus, Settings2, Warehouse } from 'lucide-react';
+import { ArrowLeft, Building, Camera, CheckCircle2, ChevronRight, Info, Plus, Settings2, Warehouse } from 'lucide-react';
 import { Inspections, type InspectionDetail, type InspectionItem } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
@@ -20,6 +20,7 @@ import {
 } from '@/lib/prehliadka';
 import { visitTrail } from '@/lib/visits';
 import { Badge } from '@/components/ui/Badge';
+import { facilityNouns } from '@/lib/clientKind';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -97,6 +98,7 @@ export function PrehliadkaWalkPage() {
   if (!data) return <WalkSkeleton />;
 
   const { inspection: i } = data;
+  const nouns = facilityNouns(i.company_client_type);
   const details = saver.details ?? parseDetails(i.details);
   const draft = i.status === 'draft';
   const canEdit = draft && !isReadOnly;
@@ -132,7 +134,7 @@ export function PrehliadkaWalkPage() {
       ) : (
         <Link to={facilityHref} className="inline-flex items-center gap-1 self-start text-sm text-ink-500 hover:text-ink-700">
           <ArrowLeft className="size-4" />
-          Späť na prevádzku
+          Späť na {nouns.cases.acc}
         </Link>
       )}
 
@@ -140,7 +142,7 @@ export function PrehliadkaWalkPage() {
         <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">Krok 2 z 3 · Obchôdzka</p>
         <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">Zapisujem len nedostatky</h1>
         <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-500">
-          <Building2 className="size-3" />
+          <Building className="size-3" />
           {i.company_name}
           <span className="text-ink-300">·</span>
           <Warehouse className="size-3" />
@@ -246,7 +248,7 @@ export function PrehliadkaWalkPage() {
         <Card className="flex items-start gap-3 border-dashed p-4 text-xs text-ink-500">
           <Info className="mt-0.5 size-4 shrink-0 text-ink-400" />
           <p>
-            Zapísané nedostatky ostanú uložené v telefóne a na serveri — prehliadku nájdeš na prevádzke ako „Prehliadka
+            Zapísané nedostatky ostanú uložené v telefóne a na serveri — prehliadku nájdeš na {nouns.cases.loc} ako „Prehliadka
             prebieha".
           </p>
         </Card>
@@ -271,7 +273,7 @@ export function PrehliadkaWalkPage() {
           </Button>
         )}
       </div>
-      <p className="-mt-2 text-center text-xs text-ink-400">Prerušenú prehliadku nájdeš na prevádzke.</p>
+      <p className="-mt-2 text-center text-xs text-ink-400">Prerušenú prehliadku nájdeš na {nouns.cases.loc}.</p>
     </div>
   );
 }

@@ -389,8 +389,8 @@ function BookLinkCard({ href, hasCompany }: { href: string; hasCompany: boolean 
           <h3 className="truncate text-sm font-semibold text-ink-900">Zápis do požiarnej knihy</h3>
           <p className="mt-0.5 line-clamp-2 text-xs text-ink-500">
             {hasCompany
-              ? 'Otvorí knihu firmy — zápisy sa pridávajú tam.'
-              : 'Kniha je pri firme — vyber firmu a otvor jej knihu.'}
+              ? 'Otvorí knihu klienta — zápisy sa pridávajú tam.'
+              : 'Kniha je pri klientovi — vyber klienta a otvor jeho knihu.'}
           </p>
         </div>
         <ChevronRight className="size-4 shrink-0 text-ink-300 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-firol-500" />

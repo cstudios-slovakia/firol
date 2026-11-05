@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Building2, CalendarDays, Route, Warehouse } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Building, CalendarDays, Route, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type CompanyListItem, type FacilityListItem } from '@/api/companies';
 import {
@@ -27,6 +27,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Spinner } from '@/components/ui/Spinner';
 import { cn } from '@/lib/cn';
+import { CLIENT_NEUTRAL, facilityPickerNouns } from '@/lib/clientKind';
 
 /** Term within this many days counts as due, and is ticked in advance. */
 const DUE_SOON_DAYS = 30;
@@ -79,7 +80,7 @@ export function VisitNewPage() {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať firmy.');
+          setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať klientov.');
         }
       });
     return () => {
@@ -202,6 +203,12 @@ export function VisitNewPage() {
     setTypes(new Set([...dueTypes].filter((t) => !RETIRED_FOR_NEW_UKON.some((r) => r === t))));
   }, [dueTypes, touchedTypes]);
 
+  // Facility wording follows the chosen client (both nouns before one is chosen).
+  const fNouns = facilityPickerNouns(
+    companyId !== null,
+    (companies ?? []).find((c) => c.id === companyId)?.client_type,
+  );
+
   function toggleType(type: VisitType) {
     setTouchedTypes(true);
     setTypes((prev) => {
@@ -215,7 +222,7 @@ export function VisitNewPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!companyId || !facilityId) {
-      setError('Vyber firmu aj prevádzku.');
+      setError(`Vyber klienta aj ${fNouns.cases.acc}.`);
       return;
     }
     if (types.size === 0) {
@@ -271,21 +278,21 @@ export function VisitNewPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-ink-900">Nová návšteva</h1>
           <p className="mt-0.5 text-sm text-ink-500">
-            Firmu a prevádzku vyberieš raz — potom ťa appka prevedie úkonmi jedným po druhom.
+            Klienta a {fNouns.cases.acc} vyberieš raz — potom ťa appka prevedie úkonmi jedným po druhom.
           </p>
         </div>
       </header>
 
       <Card className="p-5">
         <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-          <Field label="Spoločnosť" required>
+          <Field label={CLIENT_NEUTRAL.singular} required>
             {(p) => (
               <Select
                 id={p.id}
                 value={companyId !== null ? String(companyId) : ''}
                 onChange={(v) => setCompanyId(v ? Number(v) : null)}
-                placeholder="— vyber firmu —"
-                leftIcon={<Building2 className="size-4" />}
+                placeholder={CLIENT_NEUTRAL.pickPlaceholder}
+                leftIcon={<Building className="size-4" />}
                 searchable
                 options={companies.map((c) => ({
                   value: String(c.id),
@@ -296,14 +303,14 @@ export function VisitNewPage() {
             )}
           </Field>
 
-          <Field label="Prevádzka" required>
+          <Field label={fNouns.singular} required>
             {(p) => (
               <Select
                 id={p.id}
                 value={facilityId !== null ? String(facilityId) : ''}
                 onChange={(v) => setFacilityId(v ? Number(v) : null)}
                 disabled={companyId === null}
-                placeholder={companyId === null ? '— najprv vyber firmu —' : '— vyber prevádzku —'}
+                placeholder={companyId === null ? CLIENT_NEUTRAL.pickFirstPlaceholder : `— vyber ${fNouns.cases.acc} —`}
                 leftIcon={<Warehouse className="size-4" />}
                 searchable
                 options={facilities.map((f) => ({ value: String(f.id), label: f.name }))}
@@ -328,7 +335,7 @@ export function VisitNewPage() {
             hint={
               dueTypes.size > 0
                 ? 'Predvybrané sú tie, ktorým sa termín blíži (do 30 dní) alebo je po termíne. Výber môžeš kedykoľvek zmeniť.'
-                : 'Odškrtni, čo na prevádzke urobíš. Ponuka je zo všetkých sekcií naraz.'
+                : `Odškrtni, čo na ${fNouns.cases.loc} urobíš. Ponuka je zo všetkých sekcií naraz.`
             }
           >
             {() => (

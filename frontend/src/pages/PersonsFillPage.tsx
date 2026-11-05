@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardPaste, CopyPlus,
+  AlertTriangle, ArrowLeft, ArrowRight, Building, CalendarDays, ClipboardPaste, CopyPlus,
   Hash, Lock, Plus, Trash2, UserPlus, Users, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
@@ -206,7 +206,7 @@ export function PersonsFillPage() {
         </p>
         <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">{INSPECTION_TYPE_LABELS[i.type]}</h1>
         <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
-          <Building2 className="size-3" />{i.company_name}
+          <Building className="size-3" />{i.company_name}
           <span className="text-ink-300">·</span>
           <Warehouse className="size-3" />{i.facility_name}
           {i.executed_on && (<><span className="text-ink-300">·</span><CalendarDays className="size-3" />{skDate(i.executed_on)}</>)}

@@ -88,7 +88,7 @@ export function BackupReminderModal({ onProceed, onCancel, confirm }: Props) {
                 {/* Body */}
                 <div className="px-5 py-4">
                     <p className="text-sm text-ink-700">
-                        Stiahni si zálohu účtu — firmy, kontroly a školenia
+                        Stiahni si zálohu účtu — klientov, kontroly a školenia
                         vrátane fotiek a PDF protokolov, v jednom .zip archíve.
                         Ak sa niečo pokazí, obnovíš z neho účet v Nastavenia →
                         Správa dát.

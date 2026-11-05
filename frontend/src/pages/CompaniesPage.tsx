@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMemberRights } from '@/auth/useMemberRights';
-import { Archive, ArchiveRestore, Building2, Edit2, Home, Plus, Search, ShieldCheck } from 'lucide-react';
+import { Archive, ArchiveRestore, Building, Edit2, Plus, Search, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyListItem } from '@/api/companies';
@@ -11,7 +11,17 @@ import { Card } from '@/components/ui/Card';
 import { Pagination } from '@/components/ui/Pagination';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import { ArchiveDialog, formatDay, useRestoreArchived } from '@/components/ClientArchive';
-import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
+import {
+  CLIENT_NEUTRAL,
+  CLIENT_TYPES,
+  cap,
+  clientNouns,
+  clientTypeIcon,
+  clientTypeOf,
+  clientTypeStyles,
+  facilityNouns,
+  isBytoveDruzstvo,
+} from '@/lib/clientKind';
 
 const PAGE_SIZE = 10;
 
@@ -25,7 +35,7 @@ export function CompaniesPage() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  // Spec 25 — archived firms show only behind the „aj archivované" filter.
+  // Spec 25 — archived clients show only behind the „aj archivované" filter.
   const [showArchived, setShowArchived] = useState(false);
   const [archiving, setArchiving] = useState<CompanyListItem | null>(null);
 
@@ -49,7 +59,7 @@ export function CompaniesPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať firmy.');
+        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať klientov.');
         setStatus('error');
       });
     return () => {
@@ -59,10 +69,20 @@ export function CompaniesPage() {
 
   const activeItems = useMemo(() => items.filter((c) => !c.archived_at), [items]);
   const archivedCount = items.length - activeItems.length;
-  const totalFacilities = useMemo(
-    () => activeItems.reduce((acc, c) => acc + c.facilities_count, 0),
-    [activeItems],
-  );
+  // "2 firmy · 1 bytové družstvo · 5 prevádzok · 3 bytové domy" — counted per
+  // client type so each noun matches what it counts.
+  const summary = useMemo(() => {
+    const clients: string[] = [];
+    const facilities: string[] = [];
+    for (const t of CLIENT_TYPES) {
+      const ofType = activeItems.filter((c) => clientTypeOf(c.client_type) === t);
+      if (ofType.length === 0) continue;
+      clients.push(clientNouns(t).count(ofType.length));
+      const n = ofType.reduce((acc, c) => acc + c.facilities_count, 0);
+      facilities.push(facilityNouns(t).count(n));
+    }
+    return [...clients, ...facilities].join(' · ');
+  }, [activeItems]);
 
   const totalPages = Math.ceil(items.length / PAGE_SIZE);
   const paged = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -79,7 +99,7 @@ export function CompaniesPage() {
   }
 
   async function onRestore(company: CompanyListItem) {
-    if (!(await restoreArchived('company', company.id, company.name))) return;
+    if (!(await restoreArchived('company', company.id, company.name, company.client_type))) return;
     setItems((prev) =>
       prev.map((c) => (c.id === company.id ? { ...c, archived_at: null, archived_reason: null } : c)),
     );
@@ -92,22 +112,22 @@ export function CompaniesPage() {
           <h1 className="text-xl font-semibold tracking-tight text-ink-900">
             {isAdmin ? (
               <span className="flex items-center gap-2">
-                Všetky firmy
+                Všetci klienti
                 <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
                   <ShieldCheck className="size-3" />
                   Admin
                 </span>
               </span>
             ) : (
-              'Firmy'
+              CLIENT_NEUTRAL.plural
             )}
           </h1>
           <p className="mt-0.5 text-sm text-ink-500">
             {activeItems.length === 0
-              ? 'Žiadne aktívne firmy.'
-              : `${activeItems.length} ${plural(activeItems.length, 'firma', 'firmy', 'firiem')} · ${totalFacilities} ${plural(totalFacilities, 'prevádzka', 'prevádzky', 'prevádzok')}`}
+              ? 'Žiadni aktívni klienti.'
+              : summary}
             {archivedCount > 0 &&
-              ` · ${archivedCount} ${plural(archivedCount, 'archivovaná', 'archivované', 'archivovaných')}`}
+              ` · ${archivedCount} ${plural(archivedCount, 'archivovaný', 'archivovaní', 'archivovaných')}`}
           </p>
         </div>
         {!isReadOnly && (
@@ -116,7 +136,7 @@ export function CompaniesPage() {
             className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-2xl bg-firol-500 px-3 text-sm font-medium text-white shadow-[var(--shadow-glow)] transition-colors hover:bg-firol-600"
           >
             <Plus className="size-4" />
-            Nová firma
+            Nový klient
           </Link>
         )}
       </header>
@@ -127,7 +147,7 @@ export function CompaniesPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Vyhľadať firmu alebo IČO"
+            placeholder="Vyhľadať klienta alebo IČO"
             className="w-full bg-transparent text-sm text-ink-800 placeholder:text-ink-400 focus:outline-none"
             aria-label="Vyhľadávanie"
           />
@@ -176,18 +196,18 @@ export function CompaniesPage() {
       {status !== 'loading' && items.length === 0 && !debounced && (
         <Card className="flex flex-col items-center gap-3 px-6 py-12 text-center">
           <div className="grid size-14 place-items-center rounded-2xl bg-firol-50 text-firol-500">
-            <Building2 className="size-6" />
+            <Building className="size-6" />
           </div>
-          <h2 className="text-base font-semibold text-ink-900">Zatiaľ žiadne firmy</h2>
+          <h2 className="text-base font-semibold text-ink-900">Zatiaľ žiadni klienti</h2>
           <p className="max-w-xs text-sm text-ink-500">
-            Pridaj prvú firmu, ku ktorej budeš zaznamenávať revízie a kontroly.
+            Pridaj prvého klienta, ku ktorému budeš zaznamenávať revízie a kontroly.
           </p>
           <Link
             to="/companies/new"
             className="mt-2 inline-flex h-11 items-center gap-2 rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
           >
             <Plus className="size-4" />
-            Pridať firmu
+            Pridať klienta
           </Link>
         </Card>
       )}
@@ -228,6 +248,7 @@ export function CompaniesPage() {
         kind="company"
         id={archiving?.id ?? 0}
         name={archiving?.name ?? ''}
+        clientType={archiving?.client_type}
         onClose={() => setArchiving(null)}
         onArchived={() => archiving && onArchived(archiving.id)}
       />
@@ -252,6 +273,8 @@ function CompanyRow({
   const archived = Boolean(company.archived_at);
   const nouns = facilityNouns(company.client_type);
   const bytove = isBytoveDruzstvo(company.client_type);
+  const styles = clientTypeStyles(company.client_type, archived);
+  const Icon = clientTypeIcon(company.client_type);
   const lastDate = company.last_inspection_at;
   const formattedLast = lastDate
     ? new Date(lastDate).toLocaleDateString('sk-SK', { day: 'numeric', month: 'numeric', year: 'numeric' })
@@ -264,12 +287,10 @@ function CompanyRow({
           to={`/companies/${company.id}`}
           className={cn(
             'grid size-11 shrink-0 place-items-center rounded-2xl transition-colors',
-            archived
-              ? 'bg-ink-200 text-ink-500 hover:bg-ink-300'
-              : 'bg-firol-500 text-white shadow-[var(--shadow-glow)] hover:bg-firol-600',
+            styles.avatarBg,
           )}
         >
-          {archived ? <Archive className="size-5" /> : bytove ? <Home className="size-5" /> : <Building2 className="size-5" />}
+          {archived ? <Archive className="size-5" /> : <Icon className="size-5" />}
         </Link>
 
         <div className="min-w-0 flex-1">
@@ -285,7 +306,7 @@ function CompanyRow({
             </Link>
             {archived && (
               <span className="inline-flex shrink-0 items-center rounded-full bg-ink-200/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-600">
-                Archivovaná
+                {cap(clientNouns(company.client_type).archivedAdj)}
               </span>
             )}
             {showAccount && company.account_name && (
@@ -311,7 +332,7 @@ function CompanyRow({
             )}
           </p>
           <p className="mt-0.5 truncate text-[11px] text-ink-400">
-            {company.archived_at && `archivovaná ${formatDay(company.archived_at)} · `}
+            {company.archived_at && `${clientNouns(company.client_type).archivedAdj} ${formatDay(company.archived_at)} · `}
             {company.inspections_count === 0
               ? 'Žiadne kontroly'
               : `${company.inspections_count} ${plural(company.inspections_count, 'kontrola', 'kontroly', 'kontrol')}${formattedLast ? ` · posledná ${formattedLast}` : ''}`}

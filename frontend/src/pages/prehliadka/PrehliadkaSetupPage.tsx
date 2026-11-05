@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Building2, CalendarDays, CloudOff, Play, Warehouse } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Building, CalendarDays, CloudOff, Play, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type Company, type CompanyListItem, type FacilityListItem } from '@/api/companies';
 import { Facilities, type Facility, type FacilityDeviceGroup } from '@/api/facilities';
@@ -12,7 +12,7 @@ import { cn } from '@/lib/cn';
 import { todayIso } from '@/lib/dates';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
 import { inspectionCreateOptimistic } from '@/lib/offlineEntities';
-import { isBytoveDruzstvo } from '@/lib/clientKind';
+import { CLIENT_NEUTRAL, facilityNouns, facilityPickerNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { visitTrail } from '@/lib/visits';
 import {
   DEVICE_TYPES,
@@ -230,7 +230,7 @@ function SetupForm({
           context,
         });
       } catch (err) {
-        if (!cancelled) setLoadError(err instanceof ApiError ? err.message : 'Prevádzku sa nepodarilo načítať.');
+        if (!cancelled) setLoadError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať údaje.');
       }
     })();
     return () => {
@@ -383,6 +383,7 @@ function SetupForm({
 
   const { facility, context } = loaded;
   const bd = isBytoveDruzstvo(facility.company_client_type);
+  const nouns = facilityNouns(facility.company_client_type);
   const inProgress = editing === null ? (context?.draft_id ?? null) : null;
 
   return (
@@ -407,7 +408,7 @@ function SetupForm({
           {showMemoryCard ? 'Ako naposledy?' : 'Preventívna prehliadka'}
         </h1>
         <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-500">
-          <Building2 className="size-3" />
+          <Building className="size-3" />
           {facility.company_name}
           <span className="text-ink-300">·</span>
           <Warehouse className="size-3" />
@@ -423,7 +424,7 @@ function SetupForm({
           <div>
             <p className="text-sm font-semibold text-ink-900">Prehliadka tu už prebieha</p>
             <p className="mt-0.5 text-xs text-ink-500">
-              Na tejto prevádzke je rozpracovaná prehliadka. Dokonči ju, alebo ju zahoď na zozname kontrol.
+              Na {nouns.demo.loc} je rozpracovaná prehliadka. Dokonči ju, alebo ju zahoď na zozname kontrol.
             </p>
           </div>
           <Link to={prehliadkaPath(inProgress)} className="self-start">
@@ -522,7 +523,7 @@ function SetupForm({
             </ul>
             <p className="text-xs text-ink-400">
               Z každej zaškrtnutej vznikne na konci vlastný koncept kontroly — aj s výsledkami, ktoré pri obchôdzke
-              zapíšeš. Typ bez zariadení sa zvoliť nedá; zariadenia pribudnú z kontrol na tejto prevádzke.
+              zapíšeš. Typ bez zariadení sa zvoliť nedá; zariadenia pribudnú z kontrol na {nouns.demo.loc}.
             </p>
           </Card>
 
@@ -809,7 +810,7 @@ function FacilityChooser({ onPick }: { onPick: (companyId: number, facilityId: n
         }
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať firmy.');
+        if (!cancelled) setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať klientov.');
       });
     return () => {
       cancelled = true;
@@ -833,7 +834,7 @@ function FacilityChooser({ onPick }: { onPick: (companyId: number, facilityId: n
         }
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať prevádzky.');
+        if (!cancelled) setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať zoznam.');
       })
       .finally(() => {
         if (!cancelled) setLoadingFacilities(false);
@@ -844,6 +845,12 @@ function FacilityChooser({ onPick }: { onPick: (companyId: number, facilityId: n
   }, [companyId]);
 
   if (companies === null && !error) return <SetupSkeleton />;
+
+  // Facility wording follows the chosen client (both nouns before one is chosen).
+  const fNouns = facilityPickerNouns(
+    companyId !== null,
+    (companies ?? []).find((c) => c.id === companyId)?.client_type,
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -856,14 +863,14 @@ function FacilityChooser({ onPick }: { onPick: (companyId: number, facilityId: n
         <p className="mt-1 text-sm text-ink-500">Najprv vyber, kde sa prehliadka robí.</p>
       </header>
       <Card className="flex flex-col gap-4 p-5">
-        <Field label="Spoločnosť" required>
+        <Field label={CLIENT_NEUTRAL.singular} required>
           {(p) => (
             <Select
               id={p.id}
               value={companyId !== null ? String(companyId) : ''}
               onChange={(v) => setCompanyId(v ? Number(v) : null)}
-              placeholder="— vyber firmu —"
-              leftIcon={<Building2 className="size-4" />}
+              placeholder={CLIENT_NEUTRAL.pickPlaceholder}
+              leftIcon={<Building className="size-4" />}
               searchable
               options={(companies ?? []).map((c) => ({
                 value: String(c.id),
@@ -873,14 +880,14 @@ function FacilityChooser({ onPick }: { onPick: (companyId: number, facilityId: n
             />
           )}
         </Field>
-        <Field label="Prevádzka" required>
+        <Field label={fNouns.singular} required>
           {(p) => (
             <Select
               id={p.id}
               value={facilityId !== null ? String(facilityId) : ''}
               onChange={(v) => setFacilityId(v ? Number(v) : null)}
               disabled={companyId === null || loadingFacilities}
-              placeholder={companyId === null ? '— najprv vyber firmu —' : loadingFacilities ? 'Načítavam…' : '— vyber prevádzku —'}
+              placeholder={companyId === null ? CLIENT_NEUTRAL.pickFirstPlaceholder : loadingFacilities ? 'Načítavam…' : `— vyber ${fNouns.cases.acc} —`}
               leftIcon={<Warehouse className="size-4" />}
               searchable
               options={facilities.map((f) => ({ value: String(f.id), label: f.name }))}

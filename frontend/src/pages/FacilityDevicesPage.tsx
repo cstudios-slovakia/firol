@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { Facilities, type FacilityDeviceGroup } from "@/api/facilities";
 import { INSPECTION_TYPE_LABELS } from "@/api/inspections";
 import { ApiError } from "@/lib/api";
+import { facilityNouns } from "@/lib/clientKind";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 
@@ -15,6 +16,7 @@ export function FacilityDevicesPage() {
   const { id: idStr } = useParams<{ id: string }>();
   const id = Number(idStr);
   const [name, setName] = useState<string | null>(null);
+  const [clientType, setClientType] = useState<string | null>(null);
   const [groups, setGroups] = useState<FacilityDeviceGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,6 +26,7 @@ export function FacilityDevicesPage() {
       .then(([facility, devices]) => {
         if (cancelled) return;
         setName(facility.facility.name);
+        setClientType(facility.facility.company_client_type ?? null);
         setGroups(devices.groups);
       })
       .catch((err: unknown) => {
@@ -34,6 +37,7 @@ export function FacilityDevicesPage() {
     };
   }, [id]);
 
+  const nouns = facilityNouns(clientType);
   const total = (groups ?? []).reduce((sum, g) => sum + g.items.length, 0);
 
   return (
@@ -49,7 +53,7 @@ export function FacilityDevicesPage() {
       <header>
         <h1 className="text-xl font-semibold tracking-tight text-ink-900">Zariadenia</h1>
         <p className="mt-0.5 text-sm text-ink-500">
-          {groups === null ? "Načítavam…" : `${total} zariadení · z posledných kontrol tejto prevádzky`}
+          {groups === null ? "Načítavam…" : `${total} zariadení · z posledných kontrol ${nouns.demo.gen}`}
         </p>
       </header>
 
@@ -65,7 +69,7 @@ export function FacilityDevicesPage() {
 
       {groups !== null && groups.length === 0 && (
         <p className="rounded-2xl bg-ink-50 px-3 py-3 text-sm leading-relaxed text-ink-600">
-          Zatiaľ tu nie je nič. Zariadenia pribudnú, keď na tejto prevádzke urobíte prvú kontrolu daného typu — alebo ich nahráte importom z Excelu.
+          Zatiaľ tu nie je nič. Zariadenia pribudnú, keď na {nouns.demo.loc} urobíte prvú kontrolu daného typu — alebo ich nahráte importom z Excelu.
         </p>
       )}
 

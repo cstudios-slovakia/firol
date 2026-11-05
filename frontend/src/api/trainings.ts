@@ -1,6 +1,7 @@
 import { api, buildUrl, type OptimisticSpec } from '@/lib/api';
 import type { InvoicingFields } from '@/api/invoicing';
 import type { PeriodicityUnit } from '@/lib/periodicity';
+import type { ClientType } from '@/lib/clientKind';
 
 export type TrainingType =
   | 'vstupne'
@@ -102,6 +103,8 @@ export type TrainingListItem = InvoicingFields & {
   created_at: string;
   company_id: number;
   company_name: string;
+  /** Type of the client — picks firma / bytové družstvo wording. */
+  company_client_type?: ClientType;
   facility_id: number | null;
   facility_name: string | null;
   /** The visit this training was recorded under, when it came out of one (chapter 9). */

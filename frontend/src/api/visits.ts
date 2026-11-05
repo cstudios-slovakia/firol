@@ -1,6 +1,7 @@
 import { api } from '@/lib/api';
 import type { InspectionType } from '@/api/inspections';
 import type { TrainingType } from '@/api/trainings';
+import type { ClientType } from '@/lib/clientKind';
 
 /**
  * Návšteva — one trip to a client, several úkony (block 1 / chapter 9).
@@ -54,6 +55,8 @@ export type Visit = {
   id: number;
   company_id: number;
   company_name: string;
+  /** Type of the client — picks firma / bytové družstvo wording. */
+  company_client_type?: ClientType;
   facility_id: number;
   facility_name: string;
   visit_date: string;

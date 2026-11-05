@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
-    Building2,
+    Building,
     CalendarDays,
     ClipboardList,
     Edit2,
@@ -386,7 +386,7 @@ export function InspectionsListPage({
                         <Search className="size-4 shrink-0 text-ink-400" />
                         <input
                             type="search"
-                            placeholder="Hľadať firmu, prevádzku, technika…"
+                            placeholder="Hľadať klienta, objekt, technika…"
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                             className="min-w-0 flex-1 bg-transparent text-sm text-ink-900 placeholder:text-ink-400 outline-none"
@@ -522,7 +522,7 @@ export function InspectionsListPage({
                         Zatiaľ žiadne kontroly
                     </h2>
                     <p className="max-w-xs text-sm text-ink-500">
-                        Začni výberom firmy a typu kontroly. Koncepty zostávajú
+                        Začni výberom klienta a typu kontroly. Koncepty zostávajú
                         uložené, kým nevygeneruješ PDF protokol.
                     </p>
                     <Link
@@ -708,7 +708,7 @@ function InspectionRow({
                         />
                     </div>
                     <p className="mt-0.5 truncate text-xs text-ink-500">
-                        <Building2 className="-mt-0.5 mr-1 inline size-3" />
+                        <Building className="-mt-0.5 mr-1 inline size-3" />
                         {it.company_name}
                         <span className="mx-1.5 text-ink-300">·</span>
                         <Warehouse className="-mt-0.5 mr-1 inline size-3" />

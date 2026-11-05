@@ -14,6 +14,7 @@ use Firol\Http\Response;
 use Firol\Support\BookLedger;
 use Firol\Support\BookMapping;
 use Firol\Support\BookSentences;
+use Firol\Support\ClientKind;
 use Firol\Support\InspectionDetails;
 use Firol\Support\PrehliadkaActivities;
 use Firol\Support\PrehliadkaConcepts;
@@ -323,7 +324,7 @@ final class PrehliadkaController
     {
         $company = self::company($accountId, $companyId);
         if ($company['archived_at'] !== null) {
-            Response::error('Firma je archivovaná — činnosti sa už nemenia.', 409);
+            Response::error(ClientKind::clientArchivedReadOnly((string) $company['client_type'], 'činnosti sa už nemenia.'), 409);
         }
         return $company;
     }

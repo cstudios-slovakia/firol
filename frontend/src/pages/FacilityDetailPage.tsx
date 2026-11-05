@@ -4,6 +4,7 @@ import {
     Archive,
     ArrowLeft,
     BookOpen,
+    Building,
     Building2,
     CalendarDays,
     ChevronRight,
@@ -11,7 +12,7 @@ import {
     ClipboardList,
     Edit2,
     GraduationCap,
-    Home,
+
     Mail,
     MapPin,
     NotebookPen,
@@ -58,7 +59,7 @@ import { DetailHeaderSkeleton, SkeletonList } from "@/components/ui/Skeleton";
 import { PendingSyncBanner } from "@/components/PendingSyncBanner";
 import { InspectionTags } from "@/components/InspectionTags";
 import { useMemberRights } from "@/auth/useMemberRights";
-import { isBytoveDruzstvo } from "@/lib/clientKind";
+import { clientNouns, clientTypeStyles, facilityNouns, isBytoveDruzstvo } from "@/lib/clientKind";
 
 export function FacilityDetailPage() {
     const { id: idStr } = useParams<{ id: string }>();
@@ -122,7 +123,7 @@ export function FacilityDetailPage() {
 
     async function onRestore() {
         if (!facility) return;
-        if (!(await restoreArchived("facility", facility.id, facility.name))) return;
+        if (!(await restoreArchived("facility", facility.id, facility.name, facility.company_client_type))) return;
         setFacility({ ...facility, archived_at: null, archived_reason: null });
     }
 
@@ -211,7 +212,7 @@ export function FacilityDetailPage() {
                 setError(
                     err instanceof ApiError
                         ? err.message
-                        : "Nepodarilo sa načítať prevádzku.",
+                        : "Nepodarilo sa načítať údaje.",
                 );
             });
         return () => {
@@ -270,6 +271,8 @@ export function FacilityDetailPage() {
     // Spec 25 — archived on its own or with its firm: the history and the
     // protocols stay reachable, but nothing new starts here.
     const archived = Boolean(facility.archived_at || facility.company_archived_at);
+    const nouns = facilityNouns(facility.company_client_type);
+    const client = clientNouns(facility.company_client_type);
     const canEdit = !isReadOnly && !archived;
     // A prehliadka in progress here: the draft in the list (also one created
     // offline), else what the server reported.
@@ -283,20 +286,20 @@ export function FacilityDetailPage() {
                 className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start"
             >
                 <ArrowLeft className="size-4" />
-                Späť na firmu
+                Späť na {client.cases.acc}
             </Link>
 
             <PendingSyncBanner resource="facilities" id={id} />
 
             {facility.company_archived_at ? (
                 <ArchivedNotice
-                    label="Firma tejto prevádzky je archivovaná od"
+                    label={`${client.singular} ${nouns.demo.gen} je ${client.archivedAdj} od`}
                     archivedAt={facility.company_archived_at}
-                    hint="Protokoly a história zostávajú. Prevádzka sa vráti spolu s obnovením firmy."
+                    hint={`Protokoly a história zostávajú. ${nouns.singular} sa vráti spolu s obnovením ${client.cases.gen}.`}
                 />
             ) : facility.archived_at ? (
                 <ArchivedNotice
-                    label="Prevádzka je archivovaná od"
+                    label={`${nouns.singular} je ${nouns.archivedAdj} od`}
                     archivedAt={facility.archived_at}
                     reason={facility.archived_reason}
                     onRestore={canDelete && !isReadOnly ? onRestore : undefined}
@@ -307,7 +310,7 @@ export function FacilityDetailPage() {
                 <div
                     className={cn(
                         "bg-gradient-to-br to-transparent px-5 pt-5",
-                        archived ? "from-ink-100/70" : "from-firol-50/60",
+                        clientTypeStyles(facility.company_client_type, archived).heroGradient,
                     )}
                 >
                     <div className="flex items-start gap-3">
@@ -316,10 +319,10 @@ export function FacilityDetailPage() {
                                 "grid size-12 place-items-center rounded-2xl",
                                 archived
                                     ? "bg-ink-200 text-ink-500"
-                                    : "bg-firol-500 text-white shadow-[var(--shadow-glow)]",
+                                    : clientTypeStyles(facility.company_client_type, archived).avatarStaticBg,
                             )}
                         >
-                            {archived ? <Archive className="size-5" /> : isBytoveDruzstvo(facility.company_client_type) ? <Home className="size-5" /> : <Warehouse className="size-5" />}
+                            {archived ? <Archive className="size-5" /> : isBytoveDruzstvo(facility.company_client_type) ? <Building2 className="size-5" /> : <Warehouse className="size-5" />}
                         </div>
                         <div className="min-w-0 flex-1">
                             <h1 className="truncate text-lg font-semibold tracking-tight text-ink-900">
@@ -330,7 +333,11 @@ export function FacilityDetailPage() {
                                     to={`/companies/${facility.company_id}`}
                                     className="inline-flex items-center gap-1 text-xs text-ink-500 hover:text-firol-600"
                                 >
-                                    <Building2 className="size-3" />
+                                    {isBytoveDruzstvo(facility.company_client_type) ? (
+                                        <Building2 className="size-3" />
+                                    ) : (
+                                        <Building className="size-3" />
+                                    )}
                                     {facility.company_name}
                                 </Link>
                             )}
@@ -370,13 +377,13 @@ export function FacilityDetailPage() {
                     )}
                     <DetailRow
                         icon={<Mail className="size-4" />}
-                        label="E-mail prevádzky"
+                        label={`E-mail ${nouns.cases.gen}`}
                         value={
                             facility.email
                                 ? facility.email
                                 : facility.recipient_email
                                   ? `nevyplnený — použije sa ${facility.recipient_email}`
-                                  : "nevyplnený ani na prevádzke, ani na firme — doplňte ho cez ✎"
+                                  : `nevyplnený ani na ${nouns.cases.loc}, ani na ${client.cases.loc} — doplňte ho cez ✎`
                         }
                         muted={!facility.email}
                     />
@@ -447,7 +454,7 @@ export function FacilityDetailPage() {
                 </span>
                 <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-ink-900">Zápis do požiarnej knihy</p>
-                    <p className="mt-0.5 text-xs text-ink-500">Otvorí knihu firmy s touto prevádzkou</p>
+                    <p className="mt-0.5 text-xs text-ink-500">Otvorí knihu {client.cases.gen} pre {nouns.demo.acc}</p>
                 </div>
                 <ChevronRight className="size-4 shrink-0 text-ink-300" />
             </Link>
@@ -906,6 +913,7 @@ export function FacilityDetailPage() {
                 kind="facility"
                 id={facility.id}
                 name={facility.name}
+                clientType={facility.company_client_type}
                 onClose={() => setArchiveOpen(false)}
                 onArchived={() => {
                     setArchiveOpen(false);
@@ -951,7 +959,7 @@ function ObjektPanel({
     const meta = (devices ?? [])
         .map((g) => `${DEVICE_SHORT[g.type] ?? g.type} ${g.items.length}`)
         .join(" · ");
-    const place = isBytoveDruzstvo(facility.company_client_type) ? "tomto bytovom dome" : "tejto prevádzke";
+    const place = facilityNouns(facility.company_client_type).demo.loc;
 
     return (
         <section key="objekt" className="flex animate-fade-up flex-col gap-3">

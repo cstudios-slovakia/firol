@@ -47,6 +47,7 @@ import type {
 } from '@/api/companies';
 import type { Facility } from '@/api/facilities';
 import { formatAddress } from './address';
+import { clientNouns, facilityNouns } from './clientKind';
 import {
   COMPANY_BILLING_DEFAULT,
   isUninvoiced,
@@ -294,7 +295,7 @@ export function companyCreateOptimistic(args: {
   return {
     returns: { company },
     create: { clientId: id, idPath: 'company.id' },
-    label: 'Nová firma',
+    label: clientNouns(args.client_type).createTitle,
     detail: args.name,
     patches: [
       seed(`/api/companies/${id}`, detail),
@@ -306,6 +307,8 @@ export function companyCreateOptimistic(args: {
 export function facilityCreateOptimistic(args: {
   companyId: number;
   companyName?: string;
+  /** Type of the client — the queue label says prevádzka or bytový dom. */
+  clientType?: string | null;
   name: string;
   street: string | null;
   postal_code: string | null;
@@ -369,7 +372,7 @@ export function facilityCreateOptimistic(args: {
   return {
     returns: { facility },
     create: { clientId: id, idPath: 'facility.id' },
-    label: 'Nová prevádzka',
+    label: facilityNouns(args.clientType).createTitle,
     detail: args.name,
     patches: [seed(`/api/facilities/${id}`, { facility }), appendToCompany],
   };
@@ -451,7 +454,7 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
     const id = Number(company[1]);
     const keys = ['name', 'client_type', 'ico', 'street', 'postal_code', 'city', 'contact', 'contact_email', 'approver', 'billing_mode'];
     return {
-      label: 'Úprava firmy',
+      label: `Úprava ${clientNouns(typeof f.client_type === 'string' ? f.client_type : null).cases.gen}`,
       detail: typeof f.name === 'string' ? f.name : undefined,
       patches: [
         {
@@ -479,7 +482,7 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
       'floors_above', 'floors_below', 'vchody',
     ];
     return {
-      label: 'Úprava prevádzky',
+      label: 'Úprava prevádzky / bytového domu',
       detail: typeof f.name === 'string' ? f.name : undefined,
       patches: [
         {

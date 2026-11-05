@@ -9,7 +9,7 @@ import {
   Book, bookPrintUrl, type BookEntry, type BookScope, type BookView,
 } from '@/api/book';
 import { ApiError } from '@/lib/api';
-import { isBytoveDruzstvo } from '@/lib/clientKind';
+import { clientNouns, facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { offlineMessage } from '@/lib/offline';
 import { cn } from '@/lib/cn';
 import { useRevalidateOnReturn } from '@/lib/useRevalidateOnReturn';
@@ -164,7 +164,7 @@ export function BookPage() {
 
       {view.company.archived && (
         <p className="rounded-2xl bg-ink-50 px-3 py-2.5 text-xs leading-relaxed text-ink-600">
-          Firma je archivovaná — kniha sa dá čítať a tlačiť, ale nič sa do nej už nezapisuje.
+          {clientNouns(view.company.client_type).singular} je {clientNouns(view.company.client_type).archivedAdj} — kniha sa dá čítať a tlačiť, ale nič sa do nej už nezapisuje.
         </p>
       )}
 
@@ -237,7 +237,7 @@ export function BookPage() {
 
       {!hasLedger && (
         <p className="rounded-2xl bg-ink-50 px-3 py-3 text-sm text-ink-600">
-          Kniha je vedená po prevádzkach — najprv pridajte prevádzku.
+          Kniha je vedená {isBd ? 'po bytových domoch' : 'po prevádzkach'} — najprv pridajte {facilityNouns(view.company.client_type).cases.acc}.
         </p>
       )}
 

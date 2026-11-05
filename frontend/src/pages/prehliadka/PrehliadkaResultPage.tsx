@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   BookOpen,
-  Building2,
+  Building,
   CheckCircle2,
   Download,
   FileText,
@@ -26,6 +26,7 @@ import {
 } from '@/api/inspections';
 import { Prehliadka, type PrehliadkaConcept, type PrehliadkaResult, type ResultEntry } from '@/api/prehliadka';
 import { ApiError } from '@/lib/api';
+import { facilityNouns } from '@/lib/clientKind';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
 import { useConfirm } from '@/lib/confirm';
 import { offlineMessage } from '@/lib/offline';
@@ -119,6 +120,7 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
   const [unlocking, setUnlocking] = useState(false);
 
   const facilityHref = `/facilities/${i.facility_id}`;
+  const backToFacility = `Späť na ${facilityNouns(detail?.inspection.company_client_type).cases.acc}`;
   const bookHref = (book: 'po' | 'bozp', entry: ResultEntry | null): string => {
     const q = new URLSearchParams({ book });
     if (entry?.facility_id) q.set('facility', String(entry.facility_id));
@@ -175,7 +177,7 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
     <div className="flex flex-col gap-5">
       <Link to={facilityHref} className="inline-flex items-center gap-1 self-start text-sm text-ink-500 hover:text-ink-700">
         <ArrowLeft className="size-4" />
-        Späť na prevádzku
+        {backToFacility}
       </Link>
 
       <header className="animate-fade-up">
@@ -185,7 +187,7 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
         </p>
         <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">Prehliadka je uzavretá</h1>
         <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-500">
-          <Building2 className="size-3" />
+          <Building className="size-3" />
           {detail?.inspection.company_name ?? ''}
           <span className="text-ink-300">·</span>
           <Warehouse className="size-3" />
@@ -315,7 +317,7 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
         )}
         <Link to={facilityHref}>
           <Button type="button" variant="ghost" className="w-full">
-            Späť na prevádzku
+            {backToFacility}
           </Button>
         </Link>
       </div>

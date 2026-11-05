@@ -4,7 +4,7 @@ import {
     AlertTriangle,
     BadgeCheck,
     BellRing,
-    Building2,
+    Building,
     CalendarDays,
     CalendarPlus,
     CheckCircle2,
@@ -45,6 +45,7 @@ import { ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { useConfirm } from "@/lib/confirm";
 import { cn } from "@/lib/cn";
+import { CLIENT_NEUTRAL, facilityPickerNouns } from "@/lib/clientKind";
 import {
     daysUntil,
     groupByFacilityDay,
@@ -352,7 +353,7 @@ export function CalendarPage() {
                         value={groupBy}
                         onChange={setGroupBy}
                         options={[
-                            { value: "firma", label: "Firma" },
+                            { value: "firma", label: "Klient" },
                             { value: "mesto", label: "Mesto" },
                         ]}
                     />
@@ -688,7 +689,7 @@ function TerminGroupCard({
                     )}
                 >
                     {groupBy === "firma" ? (
-                        <Building2 className="size-4" />
+                        <Building className="size-4" />
                     ) : (
                         <MapPin className="size-4" />
                     )}
@@ -1128,7 +1129,7 @@ function NotifyClientButton({
             </a>
             {!notice.to && (
                 <p className="mt-2 text-xs text-ink-500">
-                    Firma nemá kontaktný e-mail — správa sa otvorí s prázdnym
+                    Klient nemá kontaktný e-mail — správa sa otvorí s prázdnym
                     adresátom.{" "}
                     <Link
                         to={`/companies/${group.company_id}/edit`}
@@ -1173,6 +1174,11 @@ function EventForm({
     const [facilities, setFacilities] = useState<FacilityListItem[]>([]);
     const [loadingFacilities, setLoadingFacilities] = useState(false);
     const [saving, setSaving] = useState(false);
+    // Facility wording follows the chosen client (both nouns before one is chosen).
+    const eventFacility = facilityPickerNouns(
+        companyId !== null,
+        companies.find((c) => c.id === companyId)?.client_type,
+    );
     const [error, setError] = useState<string | null>(null);
 
     // Re-seed the form each time it's opened, since it stays mounted
@@ -1327,7 +1333,7 @@ function EventForm({
                         )}
                     </Field>
                 </div>
-                <Field label="Firma" hint="Voliteľné">
+                <Field label={CLIENT_NEUTRAL.singular} hint="Voliteľné">
                     {(p) => (
                         <Select
                             id={p.id}
@@ -1336,7 +1342,7 @@ function EventForm({
                                 setCompanyId(v ? Number(v) : null)
                             }
                             placeholder="— nepriradené —"
-                            leftIcon={<Building2 className="size-4" />}
+                            leftIcon={<Building className="size-4" />}
                             searchable
                             options={companies.map((c) => ({
                                 value: String(c.id),
@@ -1345,7 +1351,7 @@ function EventForm({
                         />
                     )}
                 </Field>
-                <Field label="Prevádzka" hint="Voliteľné">
+                <Field label={eventFacility.singular} hint="Voliteľné">
                     {(p) => (
                         <Select
                             id={p.id}
@@ -1358,7 +1364,7 @@ function EventForm({
                             disabled={companyId === null || loadingFacilities}
                             placeholder={
                                 companyId === null
-                                    ? "— najprv vyber firmu —"
+                                    ? CLIENT_NEUTRAL.pickFirstPlaceholder
                                     : loadingFacilities
                                       ? "Načítavam…"
                                       : "— nepriradené —"

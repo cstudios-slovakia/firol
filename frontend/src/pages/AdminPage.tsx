@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
     AtSign,
     Bug,
-    Building2,
+    Building,
     CalendarDays,
     ChevronDown,
     ChevronRight,
@@ -628,7 +628,7 @@ function AccountRow({
                     )}
                 </button>
                 <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-firol-50 text-firol-600">
-                    <Building2 className="size-4" />
+                    <Building className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
                     <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-ink-900">
@@ -956,7 +956,7 @@ function AccountEditForm({
                     {(p) => (
                         <Input
                             {...p}
-                            leftIcon={<Building2 className="size-4" />}
+                            leftIcon={<Building className="size-4" />}
                             value={name}
                             onChange={(e) => setName(e.target.value)}
                         />

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMemberRights } from '@/auth/useMemberRights';
-import { Archive, ArchiveRestore, ArrowLeft, Building2, ChevronRight, ClipboardCheck, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Home, Mail, MapPin, Phone, Plus, Route, Send, UserCheck, Warehouse } from 'lucide-react';
+import { Archive, ArchiveRestore, ArrowLeft, ChevronRight, ClipboardCheck, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Mail, MapPin, Phone, Plus, Route, Send, UserCheck, Warehouse } from 'lucide-react';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyDetail } from '@/api/companies';
 import { ApiError } from '@/lib/api';
@@ -20,7 +20,7 @@ import { Documents, type DocumentSend, type SendableDocument } from '@/api/docum
 import { documentDownloadUrl, INSPECTION_TYPE_LABELS } from '@/api/inspections';
 import { cn } from '@/lib/cn';
 import { companyRecipientEmail } from '@/lib/companyEmail';
-import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
+import { clientNouns, clientTypeIcon, clientTypeStyles, facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { InspectionTags } from '@/components/InspectionTags';
 import { startPrehliadkaPath } from '@/lib/prehliadka';
 import { Dialog } from '@/components/ui/Dialog';
@@ -59,8 +59,8 @@ export function CompanyDetailPage() {
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [prehliadkaFacilityOpen, setPrehliadkaFacilityOpen] = useState(false);
   const [confirmationsKey, setConfirmationsKey] = useState(0);
-  // "Pridať prevádzku" dialog. A freshly created firm lands here with
-  // `?nova_prevadzka=1` so the first prevádzka is asked for straight away.
+  // "Pridať prevádzku / bytový dom" dialog. A freshly created client lands here
+  // with `?nova_prevadzka=1` so the first facility is asked for straight away.
   const [facilityOpen, setFacilityOpen] = useState(params.get('nova_prevadzka') === '1');
 
   const loadSends = useCallback(() => {
@@ -85,8 +85,13 @@ export function CompanyDetailPage() {
     else reload();
   }
 
-  async function onRestore(kind: 'company' | 'facility', targetId: number, name: string) {
-    if (await restoreArchived(kind, targetId, name)) reload();
+  async function onRestore(
+    kind: 'company' | 'facility',
+    targetId: number,
+    name: string,
+    clientType: string | null | undefined,
+  ) {
+    if (await restoreArchived(kind, targetId, name, clientType)) reload();
   }
 
   // Drop the one-shot flag from the URL once it has opened the dialog, so a
@@ -107,7 +112,7 @@ export function CompanyDetailPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať firmu.');
+        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať klienta.');
       });
     return () => {
       cancelled = true;
@@ -141,6 +146,7 @@ export function CompanyDetailPage() {
 
   const { company, facilities } = data;
   const nouns = facilityNouns(company.client_type);
+  const client = clientNouns(company.client_type);
   const bytove = isBytoveDruzstvo(company.client_type);
   const archivedFacilities = data.archived_facilities ?? [];
   // An archived firm opens read-only: protocols can be opened and sent, but no
@@ -166,10 +172,10 @@ export function CompanyDetailPage() {
 
       {company.archived_at && (
         <ArchivedNotice
-          label="Firma je archivovaná od"
+          label={`${client.singular} je ${client.archivedAdj} od`}
           archivedAt={company.archived_at}
           reason={company.archived_reason}
-          onRestore={canDelete && !isReadOnly ? () => onRestore('company', company.id, company.name) : undefined}
+          onRestore={canDelete && !isReadOnly ? () => onRestore('company', company.id, company.name, company.client_type) : undefined}
         />
       )}
 
@@ -178,17 +184,20 @@ export function CompanyDetailPage() {
         <div
           className={cn(
             'bg-gradient-to-br to-transparent px-5 pb-4 pt-5',
-            archived ? 'from-ink-100/70' : 'from-firol-50/60',
+            clientTypeStyles(company.client_type, archived).heroGradient,
           )}
         >
           <div className="flex items-start gap-3">
             <div
               className={cn(
                 'grid size-12 shrink-0 place-items-center rounded-2xl',
-                archived ? 'bg-ink-200 text-ink-500' : 'bg-firol-500 text-white shadow-[var(--shadow-glow)]',
+                archived ? 'bg-ink-200 text-ink-500' : clientTypeStyles(company.client_type, archived).avatarStaticBg,
               )}
             >
-              {archived ? <Archive className="size-5" /> : bytove ? <Home className="size-5" /> : <Building2 className="size-5" />}
+              {archived ? <Archive className="size-5" /> : (() => {
+                const Icon = clientTypeIcon(company.client_type);
+                return <Icon className="size-5" />;
+              })()}
             </div>
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-lg font-semibold tracking-tight text-ink-900">
@@ -227,7 +236,7 @@ export function CompanyDetailPage() {
               start buttons are missing instead of leaving the card bare. */}
           {canEdit && facilities.length === 0 && (
             <p className="mt-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-600">
-              Úkony sa robia na {bytove ? 'bytovom dome' : 'prevádzke'} — najprv {nouns.addLabel.toLowerCase()}.
+              Úkony sa robia na {nouns.cases.loc} — najprv {nouns.addLabel.toLowerCase()}.
             </p>
           )}
 
@@ -282,7 +291,7 @@ export function CompanyDetailPage() {
 
         <div
           role="tablist"
-          aria-label="Sekcie firmy"
+          aria-label={`Sekcie ${client.cases.gen}`}
           className="flex gap-1 overflow-x-auto border-b border-ink-100 px-3"
         >
           {TABS.map((t) => (
@@ -336,11 +345,11 @@ export function CompanyDetailPage() {
                   <DetailRow icon={<UserCheck className="size-4" />} label="Schvaľujúca osoba" value={company.approver} />
                 )}
                 {!company.ico && !company.address && !company.contact && !company.contact_email && !company.approver && (
-                  <div className="py-2 text-ink-400">Žiadne ďalšie údaje. Doplň ich úpravou firmy.</div>
+                  <div className="py-2 text-ink-400">Žiadne ďalšie údaje. Doplň ich úpravou {client.cases.gen}.</div>
                 )}
               </dl>
               {/* The persons are edited only while the firm is active. */}
-              {!archived && <CompanyPersons companyId={company.id} facilities={facilities} />}
+              {!archived && <CompanyPersons companyId={company.id} facilities={facilities} clientType={company.client_type} />}
             </div>
           )}
 
@@ -365,7 +374,7 @@ export function CompanyDetailPage() {
                     <Warehouse className="size-5" />
                   </div>
                   <p className="text-sm text-ink-700">
-                    {bytove ? 'Bytové družstvo zatiaľ nemá bytové domy.' : 'Firma zatiaľ nemá prevádzky.'}
+                    {client.singular} zatiaľ nemá {nouns.pluralNom}.
                   </p>
                   <p className="max-w-xs text-xs text-ink-500">
                     {bytove
@@ -437,7 +446,7 @@ export function CompanyDetailPage() {
                           <div className="min-w-0 flex-1">
                             <h4 className="truncate text-sm font-semibold text-ink-500 group-hover:text-firol-700">{f.name}</h4>
                             <p className="truncate text-xs text-ink-400">
-                              archivovaná {formatDay(f.archived_at)}
+                              {nouns.archivedAdj} {formatDay(f.archived_at)}
                               {f.archived_reason && ` · ${f.archived_reason}`}
                             </p>
                           </div>
@@ -447,7 +456,7 @@ export function CompanyDetailPage() {
                             type="button"
                             title="Obnoviť"
                             aria-label="Obnoviť"
-                            onClick={() => onRestore('facility', f.id, f.name)}
+                            onClick={() => onRestore('facility', f.id, f.name, company.client_type)}
                             className="grid size-8 shrink-0 place-items-center rounded-xl text-firol-600 transition-all duration-200 hover:bg-firol-50 active:scale-95"
                           >
                             <ArchiveRestore className="size-4" />
@@ -492,7 +501,7 @@ export function CompanyDetailPage() {
           open={prehliadkaFacilityOpen}
           onClose={() => setPrehliadkaFacilityOpen(false)}
           title="Preventívna prehliadka"
-          description="Vyber prevádzku, na ktorej sa prehliadka vykonáva."
+          description={`Vyber ${nouns.cases.acc}, ${bytove ? 'na ktorom' : 'na ktorej'} sa prehliadka vykonáva.`}
         >
           <div className="flex flex-col gap-2">
             {facilities.map((f) => (
@@ -519,6 +528,7 @@ export function CompanyDetailPage() {
         onClose={() => setSendOpen(false)}
         companyId={company.id}
         companyName={company.name}
+        clientType={company.client_type}
         defaultRecipient={companyRecipientEmail(company)}
         onSent={loadSends}
       />
@@ -528,6 +538,7 @@ export function CompanyDetailPage() {
         onClose={() => setConfirmationOpen(false)}
         companyId={company.id}
         companyName={company.name}
+        clientType={company.client_type}
         date={todayIso()}
         onCreated={() => setConfirmationsKey((k) => k + 1)}
       />
@@ -547,6 +558,7 @@ export function CompanyDetailPage() {
         kind={archiving?.kind ?? 'company'}
         id={archiving?.id ?? 0}
         name={archiving?.name ?? ''}
+        clientType={company.client_type}
         onClose={() => setArchiving(null)}
         onArchived={onArchived}
       />

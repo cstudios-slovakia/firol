@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Field } from '@/components/ui/Field';
 import { Input } from '@/components/ui/Input';
+import { clientNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 
 /**
  * The sheets of the book screen (spec 9): write an addition under an entry and
@@ -169,7 +170,7 @@ export function SignSheet({
 
         <Field
           label="Podpisuje — vedúci zamestnanec"
-          hint="Predvyplnené z firmy, dá sa prepísať. Kniha nikdy nehovorí „schvaľuje“ — vedúci záznam podpisuje ako oboznámený."
+          hint={`Predvyplnené z ${clientNouns(view.company.client_type).cases.gen}, dá sa prepísať. Kniha nikdy nehovorí „schvaľuje“ — vedúci záznam podpisuje ako oboznámený.`}
         >
           {(p) => (
             <Input {...p} value={name} maxLength={191} placeholder="Meno a priezvisko" onChange={(e) => setName(e.target.value)} />
@@ -177,7 +178,7 @@ export function SignSheet({
         </Field>
         <Field label="Funkcia">
           {(p) => (
-            <Input {...p} value={role} maxLength={191} placeholder="riaditeľ pobočky, vedúci prevádzky…" onChange={(e) => setRole(e.target.value)} />
+            <Input {...p} value={role} maxLength={191} placeholder={isBytoveDruzstvo(view.company.client_type) ? 'správca bytového domu…' : 'riaditeľ pobočky, vedúci prevádzky…'} onChange={(e) => setRole(e.target.value)} />
           )}
         </Field>
 

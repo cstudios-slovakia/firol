@@ -273,7 +273,7 @@ final class CompanyController
         // Archiving sits under the members' switch (chapter 1.6, spec 25).
         MemberRights::requireDelete($scopeAccountId, MemberRights::ARCHIVE_DENIED);
         if ($existing['archived_at'] !== null) {
-            Response::error('Firma je už archivovaná.', 409);
+            Response::error(ClientKind::companyAlreadyArchived((string) $existing['client_type']), 409);
         }
 
         ClientArchive::archiveCompany($scopeAccountId, $id, ClientArchive::readReason($req));
@@ -296,7 +296,7 @@ final class CompanyController
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
         MemberRights::requireDelete($scopeAccountId, MemberRights::ARCHIVE_DENIED);
         if ($existing['archived_at'] === null) {
-            Response::error('Firma nie je archivovaná.', 409);
+            Response::error(ClientKind::companyNotArchived((string) $existing['client_type']), 409);
         }
 
         ClientArchive::restoreCompany($scopeAccountId, $id);
@@ -326,7 +326,7 @@ final class CompanyController
         $approver = $req->jsonString('approver');
 
         if ($name === null || $name === '') {
-            Response::error('Zadaj názov firmy.', 422);
+            Response::error(ClientKind::companyNameRequired((string) $req->jsonString('client_type')), 422);
         }
         if ($ico !== null) {
             $ico = preg_replace('/\s+/', '', $ico);
@@ -386,7 +386,7 @@ final class CompanyController
             return null;
         }
         if (!in_array($mode, \Firol\Support\Invoicing::COMPANY_MODES, true)) {
-            Response::error('Neplatný režim fakturácie firmy.', 422);
+            Response::error('Neplatný režim fakturácie klienta.', 422);
         }
         return $mode;
     }

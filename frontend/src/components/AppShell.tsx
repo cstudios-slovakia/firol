@@ -1,7 +1,7 @@
 import { Link, Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
     AlertTriangle,
-    Building2,
+    Building,
     CalendarClock,
     ChartNoAxesGantt,
     CreditCard,
@@ -94,8 +94,8 @@ const TOP_TABS = [
     },
     {
         to: "/companies",
-        label: "Firmy",
-        icon: Building2,
+        label: "Klienti",
+        icon: Building,
         activeColor: "text-blue-600",
         activeBg: "bg-blue-50 shadow-[inset_0_0_0_1px_theme(colors.blue.100)]",
         iconBg: "bg-blue-100",

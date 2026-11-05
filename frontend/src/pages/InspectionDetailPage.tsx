@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { PREHLIADKA_TYPE, prehliadkaPath } from '@/lib/prehliadka';
 import {
-  ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, CopyPlus, Download,
+  ArrowLeft, ArrowRight, Building, CalendarDays, ClipboardList, CopyPlus, Download,
   FileText, GitBranch, History, Images, Link2, Lock, LockOpen, NotebookPen, Pencil,
   PenLine, Plus, Repeat, ShieldCheck, Warehouse,
 } from 'lucide-react';
@@ -20,6 +20,7 @@ import {
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { useConfirm } from '@/lib/confirm';
@@ -378,6 +379,7 @@ export function InspectionDetailPage() {
   }
 
   const { inspection: i, items } = data;
+  const facilityN = facilityNouns(i.company_client_type);
   const isDraft = i.status === 'draft';
   const module = getTypeModule(i.type);
   // Block 2 — a list of people is typed on its own screen and issued with
@@ -425,7 +427,7 @@ export function InspectionDetailPage() {
             {INSPECTION_TYPE_LABELS[i.type]}
           </h1>
           <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
-            <Building2 className="size-3" />
+            <Building className="size-3" />
             <Link to={`/companies/${i.company_id}`} className="hover:text-firol-600">
               {i.company_name}
             </Link>
@@ -622,7 +624,7 @@ export function InspectionDetailPage() {
         <Card className="flex items-start gap-2.5 bg-ink-50 px-4 py-3 text-xs text-ink-600">
           <History className="mt-0.5 size-4 shrink-0 text-ink-400" />
           <p>
-            Túto kontrolu už nahradila novšia kontrola tej istej prevádzky
+            Túto kontrolu už nahradila novšia kontrola {isBytoveDruzstvo(i.company_client_type) ? 'toho istého' : 'tej istej'} {facilityN.cases.gen}
             a typu, preto sa neoznačuje ako „po termíne". Stále ju môžeš
             zobraziť aj znova opakovať.
           </p>
@@ -724,7 +726,7 @@ export function InspectionDetailPage() {
           </span>
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">
-              Poznámky k prevádzke
+              Poznámky k {facilityN.cases.dat}
             </p>
             <p className="mt-0.5 whitespace-pre-line text-sm text-ink-700">{i.notes}</p>
           </div>

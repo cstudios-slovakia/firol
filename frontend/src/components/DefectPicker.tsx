@@ -130,13 +130,13 @@ export function DefectPicker({
   async function remove(item: DefectCatalogItem) {
     const ok = await confirm({
       title: 'Odstrániť z číselníka?',
-      description: `${item.title} — odstránenie ho zmaže vo vašom číselníku pri všetkých firmách. Už zapísané nedostatky sa nemenia, text je v nich uložený.`,
+      description: `${item.title} — odstránenie ho zmaže vo vašom číselníku pri všetkých klientoch. Už zapísané nedostatky sa nemenia, text je v nich uložený.`,
       confirmLabel: 'Odstrániť',
     });
     if (!ok) return;
     try {
       await DefectCatalog.remove(item, csrfToken);
-      toast.success('Odstránené z číselníka — aj pri ostatných firmách.');
+      toast.success('Odstránené z číselníka — aj pri ostatných klientoch.');
       onItemRemoved?.(item.id);
     } catch (err) {
       if (err instanceof OfflineQueuedError) {
@@ -298,7 +298,7 @@ export function DefectPicker({
             Vlastný nedostatok
           </Button>
           <p className="mt-2 text-xs text-ink-400">
-            Vlastný nedostatok ostane vo vašom číselníku <b className="font-semibold text-ink-500">pri všetkých firmách</b>,
+            Vlastný nedostatok ostane vo vašom číselníku <b className="font-semibold text-ink-500">pri všetkých klientoch</b>,
             nielen pri tejto. Dá sa upraviť aj odstrániť — odstránenie ho zmaže všade.
           </p>
         </div>
@@ -354,7 +354,7 @@ function OwnItemSheet({
       title={state?.mode === 'edit' ? 'Upraviť vlastný nedostatok' : 'Vlastný nedostatok'}
       description={
         state?.mode === 'edit'
-          ? 'Zmena sa prejaví vo vašom číselníku pri všetkých firmách.'
+          ? 'Zmena sa prejaví vo vašom číselníku pri všetkých klientoch.'
           : 'Uloží sa aj do vášho číselníka na ďalšie prehliadky.'
       }
     >

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowRight, Building2, CheckCircle2, CopyPlus, Edit2, Gauge,
+  AlertTriangle, ArrowRight, Building, CheckCircle2, CopyPlus, Edit2, Gauge,
   ListChecks, MapPin, NotebookPen, Ruler, Save, Trash2,
 } from 'lucide-react';
 import {
@@ -198,7 +198,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
 
         <Field label="Výrobca" required error={fieldErrors.manufacturer}>
           {(p) => (
-            <AutocompleteInput {...p} required field="manufacturer" leftIcon={<Building2 className="size-4" />}
+            <AutocompleteInput {...p} required field="manufacturer" leftIcon={<Building className="size-4" />}
               value={manufacturer} onChange={(v) => { setManufacturer(v); clearErr('manufacturer'); }}
               placeholder="PYROSTOP s.r.o." />
           )}

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, ArrowRight, Building2, CalendarDays, GraduationCap, Plus, Wheat,
+  ArrowLeft, ArrowRight, Building, CalendarDays, GraduationCap, Plus, Wheat,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies, type Company, type CompanyDetail, type CompanyListItem, type FacilityListItem } from '@/api/companies';
@@ -18,7 +18,13 @@ import {
 import { Visits, type Visit } from '@/api/visits';
 import { ApiError } from '@/lib/api';
 import { TRAINING_SECTION, TRAININGS_PATH } from '@/lib/sections';
-import { facilityNouns } from '@/lib/clientKind';
+import {
+  CLIENT_NEUTRAL,
+  clientPickerNouns,
+  facilityNouns,
+  facilityPickerNouns,
+  isBytoveDruzstvo,
+} from '@/lib/clientKind';
 import { todayIso } from '@/lib/dates';
 import {
   TRAINING_RECOMMENDED_MONTHS,
@@ -211,12 +217,23 @@ export function NewTrainingPage() {
   // Only the two hliadka types name a workplace / activity (spec 8.2).
   const patrolMeta = PATROL_SCOPE_LABELS[type];
 
+  // Client / facility wording follows the chosen client (neutral before one is).
+  const clientChosen = visit !== null || companyId !== null;
+  const clientType = visit
+    ? visit.company_client_type
+    : (companies ?? []).find((c) => c.id === companyId)?.client_type;
+  const cNouns = clientPickerNouns(clientChosen, clientType);
+  const fNouns = facilityPickerNouns(clientChosen, clientType);
+  const noFacility = !clientChosen
+    ? '— bez konkrétneho objektu —'
+    : `— bez konkrétn${isBytoveDruzstvo(clientType) ? 'eho' : 'ej'} ${fNouns.cases.gen} —`;
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const errs: typeof fieldErrors = {};
     // Inside a visit the three shared values are the visit's own.
     if (visitId !== null && !visit) return;
-    if (!companyId) errs.company = 'Vyber firmu.';
+    if (!companyId) errs.company = 'Vyber klienta.';
     if (!date) errs.date = pokyn ? 'Zadaj dátum vydania pokynu.' : 'Zadaj dátum školenia.';
     if (Object.keys(errs).length > 0) {
       setFieldErrors(errs);
@@ -355,15 +372,15 @@ export function NewTrainingPage() {
           Späť
         </Link>
         <Card className="flex flex-col items-center gap-3 px-6 py-10 text-center">
-          <h2 className="text-base font-semibold text-ink-900">Najprv pridaj firmu</h2>
+          <h2 className="text-base font-semibold text-ink-900">Najprv pridaj klienta</h2>
           <p className="max-w-xs text-sm text-ink-500">
-            Školenie sa viaže na konkrétnu firmu — potrebuješ aspoň jednu vytvorenú.
+            Školenie sa viaže na konkrétneho klienta — potrebuješ aspoň jedného vytvoreného.
           </p>
           <Link
             to="/companies/new"
             className="inline-flex h-11 items-center rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
           >
-            Pridať firmu
+            Pridať klienta
           </Link>
         </Card>
       </div>
@@ -408,20 +425,21 @@ export function NewTrainingPage() {
             <VisitSharedFields
               companyName={visit.company_name}
               facilityName={visit.facility_name}
+              clientType={visit.company_client_type}
               date={visit.visit_date}
               dateLabel="Dátum školenia"
             />
           ) : (
             <>
-            <Field label="Spoločnosť" required error={fieldErrors.company}>
+            <Field label={CLIENT_NEUTRAL.singular} required error={fieldErrors.company}>
               {(p) => (
                 <Select
                   id={p.id}
                   aria-invalid={p['aria-invalid']}
                   value={companyId !== null ? String(companyId) : ''}
                   onChange={(v) => { setCompanyId(v ? Number(v) : null); if (fieldErrors.company) setFieldErrors((prev) => ({ ...prev, company: undefined })); }}
-                  placeholder="— vyber firmu —"
-                  leftIcon={<Building2 className="size-4" />}
+                  placeholder={CLIENT_NEUTRAL.pickPlaceholder}
+                  leftIcon={<Building className="size-4" />}
                   searchable
                   options={companies.map((c) => ({
                     value: String(c.id),
@@ -440,7 +458,7 @@ export function NewTrainingPage() {
                       <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
                         <Plus className="size-3.5" />
                       </span>
-                      Pridať novú firmu
+                      Pridať nového klienta
                     </button>
                   )}
                 />
@@ -448,10 +466,10 @@ export function NewTrainingPage() {
             </Field>
 
             <Field
-              label="Prevádzka"
+              label={fNouns.singular}
               hint={pokyn
-                ? 'Voliteľné — pokyn môže platiť pre celú firmu.'
-                : 'Voliteľné — niektoré školenia sú pre celú firmu.'}
+                ? `Voliteľné — pokyn môže platiť pre ${cNouns.whole.acc}.`
+                : `Voliteľné — niektoré školenia sú pre ${cNouns.whole.acc}.`}
             >
               {(p) => (
                 <Select
@@ -459,10 +477,10 @@ export function NewTrainingPage() {
                   value={facilityId !== null ? String(facilityId) : ''}
                   onChange={(v) => setFacilityId(v ? Number(v) : null)}
                   disabled={companyId === null}
-                  placeholder="— bez konkrétnej prevádzky —"
+                  placeholder={noFacility}
                   searchable
                   options={[
-                    { value: '', label: '— bez konkrétnej prevádzky —' },
+                    { value: '', label: noFacility },
                     ...facilities.map((f) => ({ value: String(f.id), label: f.name })),
                   ]}
                   headerSlot={companyId !== null ? ({ closeDropdown }) => (
@@ -670,7 +688,7 @@ function TypeButton({
       <div className="flex items-start gap-2">
         {isPokyn(value)
           ? <Wheat className={cn('mt-0.5 size-4 shrink-0', active ? 'text-firol-500' : 'text-ink-400')} />
-          : <Building2 className={cn('mt-0.5 size-4 shrink-0', active ? 'text-firol-500' : 'text-ink-400')} />}
+          : <Building className={cn('mt-0.5 size-4 shrink-0', active ? 'text-firol-500' : 'text-ink-400')} />}
         <div className="min-w-0">
           <p className="font-semibold">{TRAINING_TYPE_SHORT[value]}</p>
           <p className={cn('text-[11px] line-clamp-2', active ? 'text-firol-600' : 'text-ink-500')}>

@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
+import { facilityNouns } from '@/lib/clientKind';
 import { clearDuplicateSeed, peekDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
 import type {
   InspectionTypeModule,
@@ -37,7 +38,7 @@ function isPhpStatus(s: unknown): s is PhpStatus {
 /** Fields carried into the next item by "Ďalší rovnaký" — never serial/location. */
 type PhpSeed = { manufacturer: string; type: string; year: string; status: PhpStatus };
 
-function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function RphpStep2Form({ inspectionId, facilityId, clientType, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -184,7 +185,7 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
           </Field>
         </div>
 
-        <Field label="Umiestnenie" required hint={fieldErrors.location ? undefined : 'Kde sa prístroj nachádza v prevádzke.'} error={fieldErrors.location}>
+        <Field label="Umiestnenie" required hint={fieldErrors.location ? undefined : `Kde sa prístroj nachádza v ${facilityNouns(clientType).cases.loc}.`} error={fieldErrors.location}>
           {(p) => (
             <AutocompleteInput {...p} required field="location" facilityId={facilityId} leftIcon={<MapPin className="size-4" />}
               value={location} onChange={(v) => { setLocation(v); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}

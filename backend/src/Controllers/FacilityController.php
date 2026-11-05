@@ -158,10 +158,10 @@ final class FacilityController
         // Archiving sits under the members' switch (chapter 1.6, spec 25).
         MemberRights::requireDelete($scopeAccountId, MemberRights::ARCHIVE_DENIED);
         if ($existing['archived_at'] !== null) {
-            Response::error('Prevádzka je už archivovaná.', 409);
+            Response::error(ClientKind::facilityAlreadyArchived((string) $existing['company_client_type']), 409);
         }
         if ($existing['company_archived_at'] !== null) {
-            Response::error('Firma tejto prevádzky je archivovaná.', 409);
+            Response::error(ClientKind::clientOfFacilityArchived((string) $existing['company_client_type']), 409);
         }
 
         ClientArchive::archiveFacility($scopeAccountId, $id, ClientArchive::readReason($req));
@@ -181,11 +181,11 @@ final class FacilityController
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
         MemberRights::requireDelete($scopeAccountId, MemberRights::ARCHIVE_DENIED);
         if ($existing['archived_at'] === null) {
-            Response::error('Prevádzka nie je archivovaná.', 409);
+            Response::error(ClientKind::facilityNotArchived((string) $existing['company_client_type']), 409);
         }
         // A prevádzka of an archived firm would stay hidden anyway.
         if ($existing['company_archived_at'] !== null) {
-            Response::error('Najprv obnov firmu tejto prevádzky.', 409);
+            Response::error(ClientKind::restoreClientOfFacilityFirst((string) $existing['company_client_type']), 409);
         }
 
         ClientArchive::restoreFacility($scopeAccountId, $id);
@@ -246,7 +246,7 @@ final class FacilityController
         $address       = $req->jsonString('address');
         $contactPerson = $req->jsonString('contact_person');
         $notes         = $req->jsonString('notes');
-        $email         = self::readEmail($req);
+        $email         = self::readEmail($req, $clientType);
         $power         = self::blankToNull($req->jsonString('main_power_location'));
         $gas           = self::blankToNull($req->jsonString('main_gas_location'));
         $water         = self::blankToNull($req->jsonString('main_water_location'));
@@ -294,14 +294,14 @@ final class FacilityController
         ];
     }
 
-    private static function readEmail(Request $req): ?string
+    private static function readEmail(Request $req, string $clientType): ?string
     {
         $email = $req->jsonString('email');
         if ($email === null || $email === '') {
             return null;
         }
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            Response::error('Zadaj platný e-mail prevádzky.', 422, ['field' => 'email']);
+            Response::error(ClientKind::facilityEmailInvalid($clientType), 422, ['field' => 'email']);
         }
         return $email;
     }

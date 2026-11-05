@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/ui/Field';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { clientNouns, facilityNouns } from '@/lib/clientKind';
 import { SkeletonList } from '@/components/ui/Skeleton';
 
 /**
@@ -32,10 +33,14 @@ import { SkeletonList } from '@/components/ui/Skeleton';
 export function CompanyPersons({
   companyId,
   facilities,
+  clientType,
 }: {
   companyId: number;
   facilities: FacilityListItem[];
+  clientType?: string | null;
 }) {
+  const client = clientNouns(clientType);
+  const facility = facilityNouns(clientType);
   const { csrfToken } = useAuth();
   const isReadOnly = useIsReadOnly();
   const confirm = useConfirm();
@@ -91,8 +96,8 @@ export function CompanyPersons({
             Osoby oprávnené podpisovať
           </h2>
           <p className="mt-0.5 text-xs text-ink-400">
-            Ponúknu sa pri prevzatí protokolu. Osoba priradená k prevádzke má
-            prednosť pred celofiremnou.
+            Ponúknu sa pri prevzatí protokolu. Osoba priradená k {facility.cases.dat} má
+            prednosť pred osobou platnou pre {client.whole.acc}.
           </p>
         </div>
         {!isReadOnly && editing === null && (
@@ -108,6 +113,7 @@ export function CompanyPersons({
         <PersonForm
           companyId={companyId}
           facilities={facilities}
+          clientType={clientType}
           roleSuggestions={roleSuggestions}
           person={editing === 'new' ? null : editing}
           onCancel={() => setEditing(null)}
@@ -160,8 +166,8 @@ export function CompanyPersons({
                     {person.role_title}
                     {' · '}
                     {person.facility_id
-                      ? (facilities.find((f) => f.id === person.facility_id)?.name ?? 'prevádzka')
-                      : 'celá firma'}
+                      ? (facilities.find((f) => f.id === person.facility_id)?.name ?? facility.cases.nom)
+                      : client.whole.nom}
                     {person.email && ` · ${person.email}`}
                   </p>
                 </div>
@@ -197,6 +203,7 @@ export function CompanyPersons({
 function PersonForm({
   companyId,
   facilities,
+  clientType,
   roleSuggestions,
   person,
   onCancel,
@@ -205,12 +212,14 @@ function PersonForm({
 }: {
   companyId: number;
   facilities: FacilityListItem[];
+  clientType?: string | null;
   roleSuggestions: string[];
   person: CompanyPerson | null;
   onCancel: () => void;
   onSaved: () => void;
   onError: (message: string | null) => void;
 }) {
+  const client = clientNouns(clientType);
   const { csrfToken } = useAuth();
   const [fullname, setFullname] = useState(person?.fullname ?? '');
   const [roleTitle, setRoleTitle] = useState(person?.role_title ?? '');
@@ -277,7 +286,7 @@ function PersonForm({
                 list="company-person-roles"
                 value={roleTitle}
                 onChange={(e) => setRoleTitle(e.target.value)}
-                placeholder="konateľ"
+                placeholder={clientType === 'bytove_druzstvo' ? 'správca' : 'konateľ'}
               />
               <datalist id="company-person-roles">
                 {roleSuggestions.map((r) => (
@@ -292,13 +301,13 @@ function PersonForm({
             <Input {...p} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           )}
         </Field>
-        <Field label="Platí pre" hint="Prázdne = pre celú firmu.">
+        <Field label="Platí pre" hint={`Prázdne = pre ${client.whole.acc}.`}>
           {(p) => (
             <Select
               id={p.id}
               value={facilityId === null ? '' : String(facilityId)}
               onChange={(v) => setFacilityId(v ? Number(v) : null)}
-              placeholder="— celá firma —"
+              placeholder={`— ${client.whole.nom} —`}
               options={facilities.map((f) => ({ value: String(f.id), label: f.name }))}
             />
           )}

@@ -233,7 +233,7 @@ function EmptySection({ section }: { section: Section }) {
         Sekcia {SECTION_LABELS[section]} sa pripravuje
       </h2>
       <p className="max-w-sm text-sm text-ink-500">
-        Typy úkonov pre túto sekciu zatiaľ nie sú k dispozícii. Firmy, prevádzky
+        Typy úkonov pre túto sekciu zatiaľ nie sú k dispozícii. Klienti, prevádzky a bytové domy
         a kalendár sú spoločné pre všetky sekcie a fungujú aj bez nej.
       </p>
     </Card>

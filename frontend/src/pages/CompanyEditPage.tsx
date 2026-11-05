@@ -6,6 +6,7 @@ import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import { CompanyForm } from '@/components/CompanyForm';
+import { clientNouns, type ClientType } from '@/lib/clientKind';
 
 export function CompanyEditPage() {
   const params = useParams<{ id?: string }>();
@@ -17,6 +18,9 @@ export function CompanyEditPage() {
   const [company, setCompany] = useState<Company | null>(null);
   const [loadStatus, setLoadStatus] = useState<'idle' | 'loading'>(editing ? 'loading' : 'idle');
   const [error, setError] = useState<string | null>(null);
+  // Follows the Druh klienta selector inside the form so the title matches it.
+  const [clientType, setClientType] = useState<ClientType | undefined>(undefined);
+  const nouns = clientNouns(clientType);
 
   useEffect(() => {
     if (!editing || id === null) return;
@@ -29,7 +33,7 @@ export function CompanyEditPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať firmu.');
+        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať klienta.');
         setLoadStatus('idle');
       });
     return () => {
@@ -38,8 +42,8 @@ export function CompanyEditPage() {
   }, [editing, id]);
 
   function handleSaved(saved: Company) {
-    // A new firma has no prevádzka yet and every úkon happens on one — land on
-    // the prevádzky tab with the "Pridať prevádzku" dialog already open.
+    // A new client has no prevádzka / bytový dom yet and every úkon happens on
+    // one — land on the facilities tab with the add dialog already open.
     navigate(
       editing ? `/companies/${saved.id}` : `/companies/${saved.id}?tab=facilities&nova_prevadzka=1`,
       { replace: true },
@@ -58,7 +62,7 @@ export function CompanyEditPage() {
 
       <header>
         <h1 className="text-xl font-semibold tracking-tight text-ink-900">
-          {editing ? 'Upraviť firmu' : 'Nová firma'}
+          {editing ? (clientType ? nouns.editTitle : 'Upraviť klienta') : nouns.createTitle}
         </h1>
         <p className="mt-0.5 text-sm text-ink-500">
           Klient, ku ktorému budeš zaznamenávať revízie a kontroly.
@@ -84,6 +88,7 @@ export function CompanyEditPage() {
           <CompanyForm
             initial={company ?? undefined}
             onSaved={handleSaved}
+            onClientTypeChange={setClientType}
           />
         </Card>
       )}

@@ -9,11 +9,13 @@ import { useToast } from '@/lib/toast';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Field } from '@/components/ui/Field';
+import { clientNouns, facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 
 /**
- * Spec 25 — archivácia firmy a prevádzky.
+ * Spec 25 — archivácia klienta (firmy / bytového družstva) a jeho prevádzky
+ * (prevádzky / bytového domu); the wording follows the client type.
  *
- * A firma or prevádzka is never deleted from the app: its protocols have to be
+ * A client or facility is never deleted from the app: its protocols have to be
  * kept after the client leaves. Archiving hides it from the lists, the
  * calendar, the časová os and Dnes, closes its open úlohy as „zrušené" and
  * stops the client notices; restoring brings it back with termíny computed
@@ -23,26 +25,35 @@ import { Field } from '@/components/ui/Field';
 
 type Kind = 'company' | 'facility';
 
-const COPY: Record<Kind, { title: string; what: string; done: string; failed: string }> = {
-  company: {
-    title: 'Archivovať firmu?',
-    what: 'Firma aj všetky jej prevádzky',
-    done: 'Firma archivovaná',
-    failed: 'Firmu sa nepodarilo archivovať.',
-  },
-  facility: {
-    title: 'Archivovať prevádzku?',
-    what: 'Prevádzka',
-    done: 'Prevádzka archivovaná',
-    failed: 'Prevádzku sa nepodarilo archivovať.',
-  },
-};
+type Copy = { title: string; what: string; done: string; failed: string };
+
+function archiveCopy(kind: Kind, clientType: string | null | undefined): Copy {
+  if (kind === 'company') {
+    const c = clientNouns(clientType);
+    const f = facilityNouns(clientType);
+    const poss = isBytoveDruzstvo(clientType) ? 'jeho' : 'jej';
+    return {
+      title: `Archivovať ${c.cases.acc}?`,
+      what: `${c.singular} aj všetky ${poss} ${f.pluralNom}`,
+      done: `${c.singular} ${c.archivedAdj}`,
+      failed: `Nepodarilo sa archivovať ${c.cases.acc}.`,
+    };
+  }
+  const f = facilityNouns(clientType);
+  return {
+    title: `Archivovať ${f.cases.acc}?`,
+    what: f.singular,
+    done: `${f.singular} ${f.archivedAdj}`,
+    failed: `Nepodarilo sa archivovať ${f.cases.acc}.`,
+  };
+}
 
 export function ArchiveDialog({
   open,
   kind,
   id,
   name,
+  clientType,
   onClose,
   onArchived,
 }: {
@@ -50,6 +61,8 @@ export function ArchiveDialog({
   kind: Kind;
   id: number;
   name: string;
+  /** Type of the client (for a facility: of the client it belongs to). */
+  clientType?: string | null;
   onClose: () => void;
   onArchived: () => void;
 }) {
@@ -58,7 +71,7 @@ export function ArchiveDialog({
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const copy = COPY[kind];
+  const copy = archiveCopy(kind, clientType);
 
   useEffect(() => {
     if (open) {
@@ -155,9 +168,15 @@ export function useRestoreArchived() {
   const confirm = useConfirm();
   const toast = useToast();
 
-  return async function restore(kind: Kind, id: number, name: string): Promise<boolean> {
+  return async function restore(
+    kind: Kind,
+    id: number,
+    name: string,
+    clientType?: string | null,
+  ): Promise<boolean> {
+    const noun = kind === 'company' ? clientNouns(clientType) : facilityNouns(clientType);
     const ok = await confirm({
-      title: kind === 'company' ? 'Obnoviť firmu?' : 'Obnoviť prevádzku?',
+      title: `Obnoviť ${noun.cases.acc}?`,
       description:
         `„${name}“ sa vráti medzi aktívne. Termíny sa vypočítajú nanovo z poslednej vykonanej ` +
         'kontroly a jej periodicity — ak medzitým lehota uplynula, termín bude po termíne.',
@@ -168,21 +187,16 @@ export function useRestoreArchived() {
     try {
       if (kind === 'company') await Companies.restore(id, csrfToken);
       else await Facilities.restore(id, csrfToken);
-      toast.success(kind === 'company' ? 'Firma obnovená' : 'Prevádzka obnovená');
+      toast.success(`${noun.singular} ${noun.restoredAdj}`);
       return true;
     } catch (err) {
-      toast.error(
-        offlineMessage(
-          err,
-          kind === 'company' ? 'Firmu sa nepodarilo obnoviť.' : 'Prevádzku sa nepodarilo obnoviť.',
-        ),
-      );
+      toast.error(offlineMessage(err, `Nepodarilo sa obnoviť ${noun.cases.acc}.`));
       return false;
     }
   };
 }
 
-/** The „archivovaná" strip on a firm's or prevádzka's detail page. */
+/** The „archivovaná" strip on a client's or facility's detail page. */
 export function ArchivedNotice({
   label,
   archivedAt,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, ArrowRight, Building2, CalendarDays, Check, CheckCircle2, FileSignature,
+  ArrowLeft, ArrowRight, Building, CalendarDays, Check, CheckCircle2, FileSignature,
   FileText, Info, Plus, Route, Send, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
@@ -177,7 +177,7 @@ export function VisitDetailPage() {
           <div className="min-w-0">
             <h1 className="text-xl font-semibold tracking-tight text-ink-900">Návšteva</h1>
             <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
-              <Building2 className="size-3" />
+              <Building className="size-3" />
               <Link to={`/companies/${visit.company_id}`} className="hover:text-firol-600">
                 {visit.company_name}
               </Link>
@@ -309,6 +309,7 @@ export function VisitDetailPage() {
         onClose={() => setSendOpen(false)}
         companyId={visit.company_id}
         companyName={visit.company_name}
+        clientType={visit.company_client_type}
         defaultRecipient={companyEmail}
         preselectDocumentIds={documentIds}
         visitId={visit.id}
@@ -319,6 +320,7 @@ export function VisitDetailPage() {
         onClose={() => setConfirmationOpen(false)}
         visitId={visit.id}
         companyName={visit.company_name}
+        clientType={visit.company_client_type}
         facilityName={visit.facility_name}
         date={visit.visit_date}
         actCount={

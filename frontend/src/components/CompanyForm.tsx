@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
-import { Building2, Hash, Home, MapPin, Phone, Mailbox, Map, Mail, UserCheck } from 'lucide-react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Building, Building2, Hash, MapPin, Phone, Mailbox, Map, Mail, UserCheck } from 'lucide-react';
 import { Companies, type Company, type CompanyPayload } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { companyCreateOptimistic } from '@/lib/offlineEntities';
@@ -16,7 +16,14 @@ import {
   type CompanyBillingMode,
 } from '@/api/invoicing';
 import { cn } from '@/lib/cn';
-import { CLIENT_TYPES, clientTypeHint, clientTypeOf, type ClientType } from '@/lib/clientKind';
+import {
+  CLIENT_TYPES,
+  clientNouns,
+  clientTypeHint,
+  clientTypeIcon,
+  clientTypeOf,
+  type ClientType,
+} from '@/lib/clientKind';
 
 const ICO_PATTERN = /^\d{8}$/;
 const ICO_MESSAGE = 'IČO musí mať presne 8 číslic.';
@@ -41,11 +48,16 @@ type CompanyFormProps = {
   submitLabel?: string;
   /** Render mode — used for label switches. */
   mode?: 'create' | 'edit';
+  /**
+   * Fires with the type the form starts on and again on every switch of the
+   * Druh klienta selector, so a title outside the form can follow it.
+   */
+  onClientTypeChange?: (type: ClientType) => void;
 };
 
 /**
  * Shared company create/edit form. Used by both the standalone
- * /companies/new page and the in-dropdown "Pridať firmu" dialog so the
+ * /companies/new page and the in-dropdown "Pridať klienta" dialog so the
  * validation, error handling and field layout stay in one place.
  */
 export function CompanyForm({
@@ -54,6 +66,7 @@ export function CompanyForm({
   onCancel,
   submitLabel,
   mode = initial ? 'edit' : 'create',
+  onClientTypeChange,
 }: CompanyFormProps) {
   const { csrfToken } = useAuth();
   const toast = useToast();
@@ -67,10 +80,16 @@ export function CompanyForm({
   const [contact, setContact] = useState(initial?.contact ?? '');
   const [contactEmail, setContactEmail] = useState(initial?.contact_email ?? '');
   const [approver, setApprover] = useState(initial?.approver ?? '');
-  // Chapter 22 — what a new úkon for this firm is prefilled with.
+  // Chapter 22 — what a new úkon for this client is prefilled with.
   const [billingMode, setBillingMode] = useState<CompanyBillingMode>(
     initial?.billing_mode ?? COMPANY_BILLING_DEFAULT,
   );
+
+  const nouns = clientNouns(clientType);
+
+  useEffect(() => {
+    onClientTypeChange?.(clientType);
+  }, [clientType, onClientTypeChange]);
 
   const [submitting, setSubmitting] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -81,11 +100,11 @@ export function CompanyForm({
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) {
-      setNameError('Doplň názov firmy.');
+      setNameError(nouns.nameRequired);
       return;
     }
     // Spec 4 — IČO is optional, but exactly 8 digits when filled. An untouched
-    // legacy value on an existing firm is not re-checked (same rule as the server).
+    // legacy value on an existing client is not re-checked (same rule as the server).
     const icoClean = ico.replace(/\s+/g, '');
     if (icoClean && icoClean !== (initial?.ico ?? '').replace(/\s+/g, '') && !ICO_PATTERN.test(icoClean)) {
       setIcoError(ICO_MESSAGE);
@@ -129,7 +148,7 @@ export function CompanyForm({
         ? await Companies.update(initial.id, payload, csrfToken)
         : await Companies.create(payload, csrfToken, optimistic);
       onSaved(res.company);
-      toast.success(mode === 'edit' ? 'Firma uložená' : 'Firma vytvorená');
+      toast.success(mode === 'edit' ? nouns.savedToast : nouns.createdToast);
     } catch (err) {
       // Offline edit: the PATCH is queued and the local cache already reflects
       // the change — navigate on as if saved; the detail shows the "waiting to
@@ -174,8 +193,12 @@ export function CompanyForm({
                     : 'text-ink-600 hover:bg-white/60 hover:text-ink-800',
                 )}
               >
-                {t === 'bytove_druzstvo' ? <Home className="size-3.5" /> : <Building2 className="size-3.5" />}
-                {t === 'bytove_druzstvo' ? 'Bytové družstvo' : 'Firma'}
+                {t === 'bytove_druzstvo' ? (
+                  <Building2 className={cn('size-3.5', active ? 'text-blue-600' : 'text-ink-500')} />
+                ) : (
+                  <Building className={cn('size-3.5', active ? 'text-firol-600' : 'text-ink-500')} />
+                )}
+                {clientNouns(t).singular}
               </button>
             );
           })}
@@ -183,18 +206,25 @@ export function CompanyForm({
         <p className="mt-2 text-xs leading-relaxed text-ink-500">{clientTypeHint(clientType)}</p>
       </div>
 
-      <Field label="Názov firmy" required error={nameError}>
-        {(p) => (
-          <Input
-            {...p}
-            required
-            leftIcon={<Building2 className="size-4" />}
-            value={name}
-            onChange={(e) => { setName(e.target.value); if (nameError) setNameError(null); }}
-            placeholder="ALFA Trade s. r. o."
-            autoFocus={mode === 'create'}
-          />
-        )}
+      <Field
+        label={nouns.nameLabel}
+        required
+        error={nameError}
+      >
+        {(p) => {
+          const NameIcon = clientTypeIcon(clientType);
+          return (
+            <Input
+              {...p}
+              required
+              leftIcon={<NameIcon className="size-4" />}
+              value={name}
+              onChange={(e) => { setName(e.target.value); if (nameError) setNameError(null); }}
+              placeholder={nouns.namePlaceholder}
+              autoFocus={mode === 'create'}
+            />
+          );
+        }}
       </Field>
 
       <Field label="IČO" hint="Nepovinné — ak ho vyplníš, musí mať presne 8 číslic." error={icoError}>
@@ -255,7 +285,7 @@ export function CompanyForm({
             leftIcon={<Phone className="size-4" />}
             value={contact}
             onChange={(e) => setContact(e.target.value)}
-            placeholder="info@firma.sk · +421 900 123 456"
+            placeholder="info@example.sk · +421 900 123 456"
           />
         )}
       </Field>
@@ -274,7 +304,7 @@ export function CompanyForm({
             leftIcon={<Mail className="size-4" />}
             value={contactEmail}
             onChange={(e) => { setContactEmail(e.target.value); if (emailError) setEmailError(null); }}
-            placeholder="info@firma.sk"
+            placeholder="info@example.sk"
           />
         )}
       </Field>
@@ -289,14 +319,14 @@ export function CompanyForm({
             leftIcon={<UserCheck className="size-4" />}
             value={approver}
             onChange={(e) => setApprover(e.target.value)}
-            placeholder="Ján Novák, konateľ"
+            placeholder={clientType === 'bytove_druzstvo' ? 'Ján Novák, správca' : 'Ján Novák, konateľ'}
           />
         )}
       </Field>
 
       <Field
         label="Fakturácia úkonov"
-        hint="Predvyplní sa pri každom novom úkone tejto firmy — pri konkrétnom úkone sa dá zmeniť."
+        hint={`Predvyplní sa pri každom novom úkone ${nouns.demo.gen} — pri konkrétnom úkone sa dá zmeniť.`}
       >
         {(p) => (
           <div
@@ -343,7 +373,7 @@ export function CompanyForm({
           </Button>
         )}
         <Button type="submit" loading={submitting}>
-          {submitLabel ?? (mode === 'edit' ? 'Uložiť zmeny' : 'Vytvoriť firmu')}
+          {submitLabel ?? (mode === 'edit' ? 'Uložiť zmeny' : nouns.createLabel)}
         </Button>
       </div>
     </form>

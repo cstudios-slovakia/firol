@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
     AlertTriangle,
-    Building2,
+    Building,
     CalendarCheck,
     CalendarDays,
     ChartNoAxesGantt,
@@ -140,7 +140,7 @@ export function TimelinePage() {
                     options={[
                         { value: "mesiac", label: "Mesiac" },
                         { value: "mesto", label: "Mesto" },
-                        { value: "firma", label: "Firma" },
+                        { value: "firma", label: "Klient" },
                     ]}
                 />
             </Card>
@@ -188,7 +188,7 @@ function TimelineGroupCard({
         : groupBy === "mesto"
           ? MapPin
           : groupBy === "firma"
-            ? Building2
+            ? Building
             : CalendarDays;
 
     return (

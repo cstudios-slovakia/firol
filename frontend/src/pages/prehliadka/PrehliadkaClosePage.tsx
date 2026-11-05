@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, CheckCircle2, Warehouse } from 'lucide-react';
+import { ArrowLeft, Building, CheckCircle2, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyPerson } from '@/api/companies';
@@ -10,6 +10,7 @@ import { Prehliadka, type PreviousDefects } from '@/api/prehliadka';
 import { ApiError } from '@/lib/api';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
 import { offlineMessage } from '@/lib/offline';
+import { clientNouns, facilityNouns } from '@/lib/clientKind';
 import { entityPendingMutations } from '@/lib/pendingEntity';
 import { responsibleForFacility } from '@/lib/responsiblePerson';
 import { useToast } from '@/lib/toast';
@@ -125,6 +126,8 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
   const isReadOnly = useIsReadOnly();
   const pendingMutations = usePendingMutations();
   const { inspection: i, items } = loaded.detail;
+  const client = clientNouns(i.company_client_type);
+  const facility = facilityNouns(i.company_client_type);
   const saver = useDetailsSaver(id, parseDetails(i.details));
   const details: PrehliadkaDetails = saver.details ?? parseDetails(i.details);
   const canEdit = i.status === 'draft' && !isReadOnly;
@@ -227,7 +230,7 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
         <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">Uzavretie</p>
         <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">Uzavretie prehliadky</h1>
         <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-500">
-          <Building2 className="size-3" />
+          <Building className="size-3" />
           {i.company_name}
           <span className="text-ink-300">·</span>
           <Warehouse className="size-3" />
@@ -305,8 +308,8 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
               title="Zapísať aj do požiarnej knihy"
               sub={
                 details.book_entry
-                  ? 'Zápis pristane v požiarnej knihe firmy a bude citovať číslo tohto záznamu.'
-                  : 'Nepovinné. Dá sa pridať kedykoľvek neskôr priamo z knihy — aj hromadne za viac domov naraz.'
+                  ? `Zápis pristane v požiarnej knihe ${client.cases.gen} a bude citovať číslo tohto záznamu.`
+                  : `Nepovinné. Dá sa pridať kedykoľvek neskôr priamo z knihy — aj hromadne za viac ${facility.pluralGen} naraz.`
               }
             />
           </div>
@@ -355,7 +358,7 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
 
         {canEdit && offeredPersons.length > 0 && (
           <div className="flex flex-col gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Osoby firmy</span>
+            <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Osoby {client.cases.gen}</span>
             <div className="flex flex-wrap gap-2">
               {offeredPersons.map((p) => (
                 <Chip

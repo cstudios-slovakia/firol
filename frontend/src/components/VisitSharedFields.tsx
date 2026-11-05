@@ -1,7 +1,8 @@
-import { Building2, CalendarDays, Lock, Warehouse } from 'lucide-react';
+import { Building, CalendarDays, Lock, Warehouse } from 'lucide-react';
 import { Field } from '@/components/ui/Field';
 import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { CLIENT_NEUTRAL, facilityNouns } from '@/lib/clientKind';
 
 /**
  * Company, prevádzka and date of a návšteva, shown on Step 1 of an úkon that
@@ -12,11 +13,14 @@ import { Skeleton } from '@/components/ui/Skeleton';
 export function VisitSharedFields({
   companyName,
   facilityName,
+  clientType,
   date,
   dateLabel,
 }: {
   companyName: string;
   facilityName: string;
+  /** Type of the visit's client — picks the facility noun. */
+  clientType?: string | null;
   date: string;
   dateLabel: string;
 }) {
@@ -26,8 +30,8 @@ export function VisitSharedFields({
         <Lock className="size-3.5 shrink-0 text-ink-400" />
         Spoločné pre celú návštevu
       </p>
-      <LockedField label="Spoločnosť" value={companyName} icon={<Building2 className="size-4" />} />
-      <LockedField label="Prevádzka" value={facilityName} icon={<Warehouse className="size-4" />} />
+      <LockedField label={CLIENT_NEUTRAL.singular} value={companyName} icon={<Building className="size-4" />} />
+      <LockedField label={facilityNouns(clientType).singular} value={facilityName} icon={<Warehouse className="size-4" />} />
       <LockedField
         label={dateLabel}
         value={new Date(`${date}T00:00:00`).toLocaleDateString('sk-SK')}

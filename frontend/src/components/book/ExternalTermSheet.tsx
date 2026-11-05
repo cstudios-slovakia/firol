@@ -11,6 +11,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Field } from '@/components/ui/Field';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { cap, clientNouns, facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 
 /** Value of the name picker that opens the free-text field. */
 const OWN_NAME = '__own__';
@@ -21,6 +22,7 @@ const OWN_NAME = '__own__';
  */
 export function ExternalTermSheet({
   companyId,
+  clientType,
   term,
   preset,
   currentBook,
@@ -30,6 +32,8 @@ export function ExternalTermSheet({
   onSaved,
 }: {
   companyId: number;
+  /** Type of the client — drives firma / bytové družstvo wording. */
+  clientType?: string | null;
   /** The term being edited; omitted when adding. */
   term?: ExternalTerm;
   /** Prefill for a new term whose name and book are already known („doplniť školenie"). */
@@ -43,6 +47,8 @@ export function ExternalTermSheet({
 }) {
   const { csrfToken } = useAuth();
   const toast = useToast();
+  const client = clientNouns(clientType);
+  const facility = facilityNouns(clientType);
 
   const isSuggested = (n: string) => suggestions.some((s) => s.name === n);
   const [pick, setPick] = useState(
@@ -96,7 +102,7 @@ export function ExternalTermSheet({
         : await ExternalTerms.create(companyId, body, csrfToken);
       toast.success(
         (res.term.book as string) === currentBook || res.term.book === 'ob'
-          ? 'Termín uložený. Appka si ho pamätá pri tejto firme.'
+          ? `Termín uložený. Appka si ho pamätá pri ${client.demo.loc}.`
           : `Termín uložený do: ${BOOK_LABELS[res.term.book as BookKey]}.`,
       );
       onSaved(res.term);
@@ -183,14 +189,14 @@ export function ExternalTermSheet({
         </Field>
 
         {facilities.length > 1 && (
-          <Field label="Platí pre" hint="Celá firma sa vytlačí v zázname každej prevádzky.">
+          <Field label="Platí pre" hint={`${cap(client.whole.nom)} sa vytlačí v zázname ${isBytoveDruzstvo(clientType) ? 'každého' : 'každej'} ${facility.cases.gen}.`}>
             {(p) => (
               <Select
                 id={p.id}
                 value={facilityId}
                 onChange={setFacilityId}
                 options={[
-                  { value: '', label: 'Celá firma' },
+                  { value: '', label: cap(client.whole.nom) },
                   ...facilities.map((f) => ({ value: String(f.id), label: f.name })),
                 ]}
               />

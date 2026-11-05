@@ -2,7 +2,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { FacilityForm } from '@/components/FacilityForm';
 import type { Facility } from '@/api/facilities';
 import type { CompanyAddress } from '@/components/FacilityForm';
-import { facilityNouns, type ClientType } from '@/lib/clientKind';
+import { clientNouns, facilityNouns, type ClientType } from '@/lib/clientKind';
 
 type Props = {
   open: boolean;
@@ -35,7 +35,7 @@ export function NewFacilityDialog({ open, onClose, companyId, companyName, compa
       open={open}
       onClose={onClose}
       title={nouns.createTitle}
-      description={`${nouns.addLabel} pre firmu ${companyName}`}
+      description={`${nouns.addLabel} pre ${clientNouns(clientType).cases.acc} ${companyName}`}
       maxWidthClassName="max-w-lg"
     >
       <FacilityForm

@@ -5,6 +5,7 @@ import type { BozpRecordFields } from '@/api/bozpRecords';
 import type { PersonFields } from '@/api/personList';
 import type { InvoicingFields } from '@/api/invoicing';
 import type { DefectFields } from '@/lib/prehliadka';
+import type { ClientType } from '@/lib/clientKind';
 
 /**
  * Inspection types — locked slugs from docs/Firol base document.
@@ -92,6 +93,8 @@ export type InspectionListItem = InvoicingFields & {
   created_at: string;
   company_id: number;
   company_name: string;
+  /** Type of the client — picks firma / bytové družstvo wording. */
+  company_client_type?: ClientType;
   facility_id: number;
   facility_name: string;
   inspector_user_id: number;

@@ -34,7 +34,7 @@ import type { InspectionTypeModule, ItemRowProps, StatsBarProps, Step2FormProps 
 type Custom = { id: number; label: string; checked: boolean };
 let nextId = 1;
 
-function KnihaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function KnihaStep2Form({ inspectionId, facilityId, clientType, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
   const toast = useToast();
   const defects = useDefects(initialItem);
@@ -126,6 +126,7 @@ function KnihaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSa
           values={workspaces}
           onChange={(v) => { setWorkspaces(v); setErrors((e) => ({ ...e, workspaces: null })); }}
           facilityId={facilityId}
+          clientType={clientType}
           placeholder="Napr. výrobná hala"
           error={errors.workspaces ?? null}
         />

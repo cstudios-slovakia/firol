@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, Lock, Warehouse } from 'lucide-react';
+import { ArrowLeft, Building, Lock, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
   INSPECTION_TYPE_LABELS,
@@ -170,7 +170,7 @@ export function InspectionStep2Page() {
             {INSPECTION_TYPE_LABELS[i.type]}
           </span>
           <span className="text-ink-300">·</span>
-          <Building2 className="size-3" />
+          <Building className="size-3" />
           {i.company_name}
           <span className="text-ink-300">·</span>
           <Warehouse className="size-3" />
@@ -198,6 +198,7 @@ export function InspectionStep2Page() {
         key={editing ? `edit-${itemId}` : `new-${detail.items.length}`}
         inspectionId={inspectionId}
         facilityId={i.facility_id}
+        clientType={i.company_client_type}
         initialItem={initialItem}
         csrfToken={csrfToken}
         onSaved={handleSaved}

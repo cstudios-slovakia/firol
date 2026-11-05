@@ -15,6 +15,7 @@ use Firol\Support\BookLedger;
 use Firol\Support\BookMapping;
 use Firol\Support\BookOffers;
 use Firol\Support\BookSentences;
+use Firol\Support\ClientKind;
 use Firol\Support\Contractor;
 use Firol\Support\ResponsiblePerson;
 
@@ -141,7 +142,7 @@ final class BookController
             $facilities,
         );
         if ($company['book_scope'] === BookLedger::SCOPE_PREVADZKA && $facilityId === null) {
-            Response::error('Kniha je vedená po prevádzkach — najprv pridaj prevádzku.', 422);
+            Response::error(ClientKind::bookNeedsFacility((string) $company['client_type']), 422);
         }
 
         $date = self::readDate($body['date'] ?? null);
@@ -531,7 +532,7 @@ final class BookController
     {
         $company = self::company($accountId, $companyId);
         if ($company['archived_at'] !== null) {
-            Response::error('Firma je archivovaná — do jej knihy sa už nezapisuje.', 409);
+            Response::error(ClientKind::bookArchived((string) $company['client_type']), 409);
         }
         return $company;
     }

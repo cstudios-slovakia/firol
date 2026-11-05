@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Building, Droplets, Flame, Mail, Map, Mailbox, MapPin, NotebookPen, User, Warehouse, Zap } from 'lucide-react';
+import { Building, Building2, Droplets, Flame, Mail, Map, Mailbox, MapPin, NotebookPen, User, Warehouse, Zap } from 'lucide-react';
 import { Facilities, type Facility, type FacilityPayload } from '@/api/facilities';
 import { ApiError } from '@/lib/api';
 import { facilityCreateOptimistic } from '@/lib/offlineEntities';
@@ -10,7 +10,7 @@ import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/auth/AuthContext';
 import { formatAddress } from '@/lib/address';
-import { descriptionHint, facilityNouns, isBytoveDruzstvo, type ClientType } from '@/lib/clientKind';
+import { clientNouns, descriptionHint, facilityNouns, isBytoveDruzstvo, type ClientType } from '@/lib/clientKind';
 
 /** The firm's seat, as far as the "Rovnaká adresa ako sídlo firmy" button needs it. */
 export type CompanyAddress = {
@@ -85,6 +85,7 @@ export function FacilityForm({
   const [floorError, setFloorError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
   const nouns = facilityNouns(clientType);
+  const client = clientNouns(clientType);
 
   // Spec 5 — offered only when the firm has an address to take over (street
   // or obec, like the prototype).
@@ -95,7 +96,7 @@ export function FacilityForm({
     setStreet(companyAddress?.street ?? '');
     setPostalCode(companyAddress?.postal_code ?? '');
     setCity(companyAddress?.city ?? '');
-    toast.success('Adresa prevzatá zo sídla firmy');
+    toast.success(`Adresa prevzatá zo sídla ${client.cases.gen}`);
   }
 
   async function onSubmit(e: FormEvent) {
@@ -119,7 +120,7 @@ export function FacilityForm({
       }
     }
     if (mode === 'create' && companyId === undefined) {
-      setApiError('Najprv vyber firmu.');
+      setApiError('Najprv vyber klienta.');
       return;
     }
     setNameError(null);
@@ -146,6 +147,7 @@ export function FacilityForm({
     try {
       const optimistic = facilityCreateOptimistic({
         companyId: companyId!,
+        clientType,
         name: payload.name,
         street: payload.street ?? null,
         postal_code: payload.postal_code ?? null,
@@ -187,7 +189,7 @@ export function FacilityForm({
           <Input
             {...p}
             required
-            leftIcon={<Warehouse className="size-4" />}
+            leftIcon={bd ? <Building2 className="size-4" /> : <Warehouse className="size-4" />}
             value={name}
             onChange={(e) => { setName(e.target.value); if (nameError) setNameError(null); }}
             placeholder={nouns.namePlaceholder}
@@ -205,11 +207,10 @@ export function FacilityForm({
           >
             <Building className="mt-0.5 size-4 shrink-0 text-firol-600" />
             <span className="min-w-0">
-              <span className="block text-sm font-medium text-ink-800">Rovnaká adresa ako sídlo firmy</span>
+              <span className="block text-sm font-medium text-ink-800">Rovnaká adresa ako sídlo {client.cases.gen}</span>
               <span className="mt-0.5 block break-words text-xs text-ink-500">{seatAddress}</span>
             </span>
           </button>
-          <p className="text-xs text-ink-400">Doplní ulicu, PSČ aj obec. Potom sa to dá prepísať.</p>
         </div>
       )}
 
@@ -252,8 +253,8 @@ export function FacilityForm({
       </div>
 
       <Field
-        label="E-mail prevádzky"
-        hint="Protokoly a zápisy z tejto prevádzky sa posielajú sem. Má prednosť pred celofiremným e-mailom."
+        label={`E-mail ${nouns.cases.gen}`}
+        hint={`Protokoly a zápisy z ${nouns.demo.gen} sa posielajú sem. Má prednosť pred e-mailom ${client.cases.gen}.`}
         error={emailError}
       >
         {(p) => (
@@ -274,7 +275,7 @@ export function FacilityForm({
         <div>
           <p className="text-xs font-medium text-ink-700">Hlavné vypínače a uzávery</p>
           <p className="mt-1 text-xs leading-relaxed text-ink-500">
-            Kde sa nachádzajú. Tlačí sa do záznamu z prehliadky.
+            Tlačí sa do záznamu z prehliadky.
           </p>
         </div>
         <Field label="Hlavný vypínač elektriny">
@@ -392,9 +393,6 @@ export function FacilityForm({
                 </div>
               )}
             </Field>
-            <p className="text-xs text-ink-500">
-              Podľa toho sa pri zápise nedostatku ponúknu podlažia. Osem nadzemných = osem možností, nie pevný zoznam.
-            </p>
             <Field
               label="Vchody (voliteľné)"
               hint="Z počtu alebo zoznamu sa vytvoria dlaždice pri zápise nedostatku."

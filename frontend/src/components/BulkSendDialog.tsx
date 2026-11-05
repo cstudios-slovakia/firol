@@ -12,6 +12,7 @@ import { Field } from '@/components/ui/Field';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
 import { cn } from '@/lib/cn';
+import { cap, clientNouns } from '@/lib/clientKind';
 import { bulkRecipientEmail } from '@/lib/companyEmail';
 import { InspectionTags } from '@/components/InspectionTags';
 
@@ -31,6 +32,7 @@ export function BulkSendDialog({
   onClose,
   companyId,
   companyName,
+  clientType,
   defaultRecipient,
   /** Preselect exactly these protocols (the ones a visit just produced). */
   preselectDocumentIds,
@@ -41,6 +43,8 @@ export function BulkSendDialog({
   onClose: () => void;
   companyId: number;
   companyName: string;
+  /** Type of the client — picks firma / bytové družstvo wording. */
+  clientType?: string | null;
   defaultRecipient?: string | null;
   preselectDocumentIds?: number[];
   visitId?: number;
@@ -211,7 +215,7 @@ export function BulkSendDialog({
         </div>
       ) : documents.length === 0 ? (
         <p className="py-4 text-sm text-ink-500">
-          Táto firma zatiaľ nemá vystavený žiadny protokol.
+          {cap(clientNouns(clientType).demo.nom)} zatiaľ nemá vystavený žiadny protokol.
         </p>
       ) : (
         <div className="flex flex-col gap-4">

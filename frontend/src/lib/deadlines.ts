@@ -1,6 +1,7 @@
 import { INSPECTION_TYPE_LABELS } from '@/api/inspections';
 import { TRAINING_TYPE_LABELS } from '@/api/trainings';
 import { Calendar, type CalendarDeadline } from '@/api/calendar';
+import { CLIENT_NEUTRAL, cap, clientNouns } from '@/lib/clientKind';
 
 /**
  * A computed deadline comes from an inspection or, since change request 6,
@@ -8,9 +9,6 @@ import { Calendar, type CalendarDeadline } from '@/api/calendar';
  * opens a deadline goes through here instead of reading `inspection_id` and
  * `INSPECTION_TYPE_LABELS[type]` directly.
  */
-
-/** What a training term shows where a prevádzka name would be: it is the whole firma's. */
-export const WHOLE_FIRM_LABEL = 'Celá firma';
 
 /** Name of the control or training the deadline is for. */
 export function deadlineLabel(d: Pick<CalendarDeadline, 'type' | 'training_type'>): string {
@@ -23,9 +21,16 @@ export function deadlineHref(d: Pick<CalendarDeadline, 'inspection_id' | 'traini
   return d.training_id !== null ? `/trainings/${d.training_id}` : `/inspections/${d.inspection_id}`;
 }
 
-/** Prevádzka name, or „Celá firma" for a training without one. */
-export function deadlineFacilityName(d: Pick<CalendarDeadline, 'facility_name'>): string {
-  return d.facility_name ?? WHOLE_FIRM_LABEL;
+/**
+ * Prevádzka / bytový dom name, or — for a training without one, which is the
+ * whole client's — „Celá firma" / „Celé bytové družstvo". Where the client
+ * type is not on the row it stays neutral („Celý klient").
+ */
+export function deadlineFacilityName(
+  d: Pick<CalendarDeadline, 'facility_name'> & { company_client_type?: string | null },
+): string {
+  if (d.facility_name) return d.facility_name;
+  return cap(d.company_client_type ? clientNouns(d.company_client_type).whole.nom : CLIENT_NEUTRAL.whole.nom);
 }
 
 /** Set the planned visit date on whichever úkon defines the deadline. */

@@ -1,6 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Building2, Mail, Phone, Sparkles, User } from 'lucide-react';
+import { Building, Mail, Phone, Sparkles, User } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { PasswordInput } from '@/components/ui/PasswordInput';
@@ -210,7 +210,7 @@ export function RegisterPage() {
               <Input
                 {...p}
                 required
-                leftIcon={<Building2 className="size-4" />}
+                leftIcon={<Building className="size-4" />}
                 value={companyName}
                 onChange={(e) => { setCompanyName(e.target.value); if (fieldErrors.companyName) setFieldErrors((prev) => ({ ...prev, companyName: undefined })); }}
                 placeholder="Vaša firma s. r. o."
