@@ -76,7 +76,7 @@ final class DocumentController
             $formVariant,
         );
         if (isset($result['error'])) {
-            Response::error((string) $result['error'], (int) $result['status']);
+            Response::error((string) $result['error'], (int) $result['status'], Response::errorExtras($result));
         }
 
         Response::json([
@@ -490,7 +490,7 @@ final class DocumentController
 
         $result = self::generateForTrainingInternal((int) $training['account_id'], $trainingId);
         if (isset($result['error'])) {
-            Response::error((string) $result['error'], (int) $result['status']);
+            Response::error((string) $result['error'], (int) $result['status'], Response::errorExtras($result));
         }
 
         Response::json(['document' => $result['document']], 201);

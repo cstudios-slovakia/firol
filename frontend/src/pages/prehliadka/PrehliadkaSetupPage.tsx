@@ -29,6 +29,7 @@ import {
   type PrehliadkaScope,
 } from '@/lib/prehliadka';
 import { useToast } from '@/lib/toast';
+import { useCertMissingToast } from '@/lib/certMissing';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -186,6 +187,7 @@ function SetupForm({
 }) {
   const { user, csrfToken } = useAuth();
   const toast = useToast();
+  const certMissing = useCertMissingToast();
   const navigate = useNavigate();
 
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -372,7 +374,7 @@ function SetupForm({
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
       setError(msg);
-      toast.error(msg);
+      if (!certMissing(err, { returnLabel: 'Späť na prehliadku' })) toast.error(msg);
     } finally {
       setSubmitting(false);
     }

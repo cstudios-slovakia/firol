@@ -14,6 +14,7 @@ import { clientNouns, facilityNouns } from '@/lib/clientKind';
 import { entityPendingMutations } from '@/lib/pendingEntity';
 import { responsibleForFacility } from '@/lib/responsiblePerson';
 import { useToast } from '@/lib/toast';
+import { useCertMissingToast } from '@/lib/certMissing';
 import { usePendingMutations } from '@/lib/usePendingMutations';
 import {
   ROUTINE_LABELS,
@@ -122,6 +123,7 @@ export function PrehliadkaClosePage() {
 function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
   const { csrfToken } = useAuth();
   const toast = useToast();
+  const certMissing = useCertMissingToast();
   const navigate = useNavigate();
   const isReadOnly = useIsReadOnly();
   const pendingMutations = usePendingMutations();
@@ -202,8 +204,18 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
       toast.success('Prehliadka je uzavretá.');
       navigate(prehliadkaResultPath(id), { replace: true });
     } catch (err) {
-      setCloseError(offlineMessage(err, 'Prehliadku sa nepodarilo uzavrieť.'));
       setClosing(false);
+      // A missing oprávnenie is the one refusal that sends the technician
+      // elsewhere — say the walk is kept and offer the field to fill in.
+      if (
+        certMissing(err, {
+          saved: 'Nič sa nestratilo — prehliadka je uložená ako koncept. Po doplnení čísla sa sem vráť a uzavri ju.',
+          returnLabel: 'Späť na uzavretie prehliadky',
+        })
+      ) {
+        return;
+      }
+      setCloseError(offlineMessage(err, 'Prehliadku sa nepodarilo uzavrieť.'));
     }
   }
 

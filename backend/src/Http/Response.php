@@ -30,4 +30,17 @@ final class Response
     {
         self::json(['error' => $message] + $extra, $status);
     }
+
+    /**
+     * The machine-readable part of an internal `['error' => …, 'status' => …]`
+     * result — `code` and its companions (e.g. `cert` of a `cert_missing`) —
+     * so a helper's refusal reaches the client as fully as a direct one.
+     *
+     * @param array<string, mixed> $result
+     * @return array<string, mixed>
+     */
+    public static function errorExtras(array $result): array
+    {
+        return array_intersect_key($result, ['code' => true, 'cert' => true]);
+    }
 }

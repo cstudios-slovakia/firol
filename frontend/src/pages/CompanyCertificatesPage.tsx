@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { BadgeCheck, CalendarDays, Hash, Lock, Save } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsMainUser } from '@/auth/useIsMainUser';
@@ -16,6 +17,13 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { CardBlockSkeleton } from '@/components/ui/Skeleton';
 import { SectionBack } from '@/pages/SettingsPage';
+import { cn } from '@/lib/cn';
+import {
+  CERT_HIGHLIGHT_CLASS,
+  CertFocusBanner,
+  useCertFocus,
+  useCertFocusScroll,
+} from '@/components/CertFocus';
 
 type Draft = Record<CompanyCertificateType, CompanyCertificateInput>;
 
@@ -41,6 +49,9 @@ export function CompanyCertificatesPage() {
   const { csrfToken } = useAuth();
   const isMain = useIsMainUser();
   const toast = useToast();
+  const navigate = useNavigate();
+  // Sent here from a refused oboznámenie BOZP: highlight `vv`, lead back after saving.
+  const { focus, back } = useCertFocus();
   const [list, setList] = useState<CompanyCertificate[] | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
@@ -90,7 +101,10 @@ export function CompanyCertificatesPage() {
       const res = await AccountCertificates.save({ bts: clean(draft.bts), vv: clean(draft.vv) }, csrfToken);
       setList(res.certificates);
       setDraft(toDraft(res.certificates));
-      toast.success('Firemné oprávnenia uložené');
+      toast.success(
+        'Firemné oprávnenia uložené',
+        back ? { action: { label: back.returnLabel, onClick: () => navigate(back.returnTo) } } : undefined,
+      );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Uloženie sa nepodarilo.');
     } finally {
@@ -105,6 +119,7 @@ export function CompanyCertificatesPage() {
         Oprávnenia firmy sa zadávajú raz pre celý účet a na protokoloch všetkých technikov sú rovnaké.
         Osobné oprávnenia si každý technik vedie vo svojom profile.
       </Card>
+      {focus === 'vv' && <CertFocusBanner cert="vv" back={back} />}
 
       {!list || !draft ? (
         error ? <Card className="px-4 py-3 text-sm text-status-bad">{error}</Card> : <CardBlockSkeleton rows={4} />
@@ -115,7 +130,8 @@ export function CompanyCertificatesPage() {
             const set = (patch: Partial<CompanyCertificateInput>) =>
               setDraft({ ...draft, [c.type]: { ...d, ...patch } });
             return (
-              <Card key={c.type} className="flex flex-col gap-3 p-4">
+              <CertificateCard key={c.type} highlighted={focus === c.type}>
+                {(inputRef) => (<>
                 <div className="flex items-start gap-3">
                   <span className="grid size-9 shrink-0 place-items-center rounded-2xl bg-blue-50 text-blue-600">
                     <BadgeCheck className="size-4" />
@@ -127,7 +143,7 @@ export function CompanyCertificatesPage() {
                 </div>
                 <Field label="Číslo oprávnenia">
                   {(p) => (
-                    <Input {...p} leftIcon={<Hash className="size-4" />} value={d.number ?? ''}
+                    <Input {...p} ref={inputRef} leftIcon={<Hash className="size-4" />} value={d.number ?? ''}
                       onChange={(e) => set({ number: e.target.value })} />
                   )}
                 </Field>
@@ -145,7 +161,8 @@ export function CompanyCertificatesPage() {
                     )}
                   </Field>
                 </div>
-              </Card>
+                </>)}
+              </CertificateCard>
             );
           })}
           {error && <p className="text-sm text-status-bad">{error}</p>}
@@ -155,6 +172,22 @@ export function CompanyCertificatesPage() {
           </Button>
         </>
       )}
+    </div>
+  );
+}
+
+/** One certificate's card; scrolls to and rings itself when it is the one to fill in. */
+function CertificateCard({
+  highlighted,
+  children,
+}: {
+  highlighted: boolean;
+  children: (inputRef: React.RefObject<HTMLInputElement | null>) => React.ReactNode;
+}) {
+  const { blockRef, inputRef } = useCertFocusScroll<HTMLDivElement>(highlighted);
+  return (
+    <div ref={blockRef} className={cn('rounded-2xl transition-all duration-300', highlighted && CERT_HIGHLIGHT_CLASS)}>
+      <Card className="flex flex-col gap-3 p-4">{children(inputRef)}</Card>
     </div>
   );
 }

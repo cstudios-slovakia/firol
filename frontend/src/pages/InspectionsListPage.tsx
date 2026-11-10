@@ -34,6 +34,7 @@ import { InspectionTags } from "@/components/InspectionTags";
 import { useAuth } from "@/auth/AuthContext";
 import { useIsReadOnly } from "@/auth/useIsReadOnly";
 import { useToast } from "@/lib/toast";
+import { useCertMissingToast } from "@/lib/certMissing";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -122,6 +123,7 @@ export function InspectionsListPage({
     const { csrfToken } = useAuth();
     const isReadOnly = useIsReadOnly();
     const toast = useToast();
+    const certMissing = useCertMissingToast();
     const navigate = useNavigate();
 
     const [allItems, setAllItems] = useState<InspectionListItem[] | null>(null);
@@ -344,6 +346,7 @@ export function InspectionsListPage({
             const res = await Inspections.repeat(insId, csrfToken);
             navigate(`/inspections/${res.inspection.id}`);
         } catch (err) {
+            if (certMissing(err, { returnLabel: "Späť na zoznam kontrol" })) return;
             toast.error(
                 err instanceof ApiError ? err.message : "Opakovať sa nepodarilo.",
             );

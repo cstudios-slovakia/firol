@@ -354,7 +354,7 @@ export function FacilityForm({
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Počet podlaží, garáže, kotolňa, spôsob vykurovania…"
+              placeholder="Garáže, kotolňa, spôsob vykurovania…"
               className="w-full rounded-xl border border-ink-200 bg-white px-3 py-2.5 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200"
             />
           )}

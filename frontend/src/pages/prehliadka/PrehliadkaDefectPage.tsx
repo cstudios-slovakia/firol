@@ -493,7 +493,6 @@ function DefectForm({
         <h1 className="text-xl font-semibold tracking-tight text-ink-900">
           {item ? 'Upraviť nedostatok' : 'Nový nedostatok'}
         </h1>
-        <p className="mt-1 text-sm text-ink-500">Najprv fotka, potom čo to je.</p>
         {state.groupKey && item === null && (
           <p className="mt-2 rounded-xl bg-firol-50 px-3 py-2 text-xs text-firol-700">
             Ďalšie zariadenie k rovnakému nedostatku — v zázname pôjdu pod jeden bod, každé s vlastnou fotkou.
@@ -503,10 +502,7 @@ function DefectForm({
 
       {/* 1 · Fotky */}
       <Card className="p-4">
-        <ItemPhotoField
-          photos={photos}
-          helpText="Dá sa aj preskočiť — niektoré nedostatky sa fotiť nedajú."
-        />
+        <ItemPhotoField photos={photos} helpText="" />
       </Card>
 
       {/* 2 · Čo to je */}
@@ -623,16 +619,6 @@ function DefectForm({
       {/* 5 · Kde */}
       <Card className="flex flex-col gap-3 p-4">
         <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Kde</span>
-        <div
-          className="min-h-11 rounded-xl border border-ink-200 bg-ink-50 px-3 py-2.5 text-sm text-ink-800"
-          aria-live="polite"
-        >
-          {whereText || (
-            <span className="text-ink-400">
-              {bd ? 'Ťukni na vchod, podlažie a miesto — alebo ho dopíš.' : 'Ťukni na miesto — alebo ho dopíš.'}
-            </span>
-          )}
-        </div>
         {errors.where && <p className="text-xs text-status-bad">{errors.where}</p>}
 
         {bd && (
@@ -754,10 +740,7 @@ function DefectForm({
           </div>
         </CollapsibleKdeRow>
 
-        <Field
-          label="Upresniť miesto vlastnými slovami"
-          hint="Dlaždice sú len skratka. Čokoľvek sa dá dopísať rukou — aj miesto, ktoré v ponuke nie je."
-        >
+        <Field label="Upresniť miesto vlastnými slovami">
           {(p) => (
             <Input
               {...p}
@@ -901,18 +884,20 @@ function CollapsibleKdeRow({
 }) {
   return (
     <div className="flex flex-col gap-1.5 border-t border-ink-100 pt-2.5">
-      <div className="flex items-center justify-between">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isOpen}
+        aria-label={`${label}: ${value || 'nezvolené'}`}
+        className="flex w-full items-center justify-between rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
+      >
         <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">
           {label}: <span className="font-normal text-ink-900">{value || 'nezvolené'}</span>
         </span>
-        <button
-          type="button"
-          onClick={onToggle}
-          className="text-xs font-medium text-firol-600 hover:text-firol-700"
-        >
-          {isOpen ? 'zbaliť' : 'zmeniť'}
-        </button>
-      </div>
+        <ChevronRight
+          className={cn('size-4 text-ink-400 transition-transform duration-200', isOpen && 'rotate-90')}
+        />
+      </button>
       {isOpen && <div className="mt-1">{children}</div>}
     </div>
   );
@@ -1040,10 +1025,7 @@ function DevicesCard({
               {fullSummary}
             </span>
           </div>
-          <span className="inline-flex items-center gap-1.5 text-xs text-firol-600">
-            <span className="text-xs text-ink-500">[zmeniť]</span>
-            <ChevronRight className="size-4 text-ink-400" />
-          </span>
+          <ChevronRight className="size-4 text-ink-400" />
         </button>
       </Card>
     );
@@ -1061,10 +1043,7 @@ function DevicesCard({
           className="flex w-full items-center justify-between text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300 rounded-lg"
         >
           <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Čoho sa to týka</span>
-          <span className="inline-flex items-center gap-1.5 text-xs text-firol-600">
-            <span className="text-xs text-ink-500">Hotovo</span>
-            <ChevronRight className="size-4 rotate-90 text-ink-400" />
-          </span>
+          <ChevronRight className="size-4 rotate-90 text-ink-400" />
         </button>
       </div>
 
@@ -1227,10 +1206,7 @@ function DevicesCard({
 
       {/* Always available free-text field (spec 6.3.5 / 3.3) */}
       <div className="mt-1 border-t border-ink-100 pt-3">
-        <Field
-          label="Zariadenie alebo priestor napíšem ručne"
-          hint="Nemusí to byť zariadenie z registra — napr. únikový východ pri schodisku, komunikácia medzi regálmi R3 a R4, alebo PHP č. 25-08014."
-        >
+        <Field label="Zariadenie alebo priestor napíšem ručne">
           {(p) => (
             <Input
               {...p}

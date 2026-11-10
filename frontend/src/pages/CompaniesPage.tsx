@@ -7,6 +7,7 @@ import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyListItem } from '@/api/companies';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { ClientTypePill } from '@/components/ClientTypePill';
 import { Card } from '@/components/ui/Card';
 import { Pagination } from '@/components/ui/Pagination';
 import { SkeletonList } from '@/components/ui/Skeleton';
@@ -20,7 +21,6 @@ import {
   clientTypeOf,
   clientTypeStyles,
   facilityNouns,
-  isBytoveDruzstvo,
 } from '@/lib/clientKind';
 
 const PAGE_SIZE = 10;
@@ -272,7 +272,6 @@ function CompanyRow({
   const { canDelete } = useMemberRights();
   const archived = Boolean(company.archived_at);
   const nouns = facilityNouns(company.client_type);
-  const bytove = isBytoveDruzstvo(company.client_type);
   const styles = clientTypeStyles(company.client_type, archived);
   const Icon = clientTypeIcon(company.client_type);
   const lastDate = company.last_inspection_at;
@@ -304,6 +303,7 @@ function CompanyRow({
             >
               {company.name}
             </Link>
+            <ClientTypePill clientType={company.client_type} />
             {archived && (
               <span className="inline-flex shrink-0 items-center rounded-full bg-ink-200/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-600">
                 {cap(clientNouns(company.client_type).archivedAdj)}
@@ -324,12 +324,6 @@ function CompanyRow({
               </>
             )}
             {nouns.count(company.facilities_count)}
-            {bytove && (
-              <>
-                <span className="mx-1.5 text-ink-300">·</span>
-                bytové družstvo
-              </>
-            )}
           </p>
           <p className="mt-0.5 truncate text-[11px] text-ink-400">
             {company.archived_at && `${clientNouns(company.client_type).archivedAdj} ${formatDay(company.archived_at)} · `}

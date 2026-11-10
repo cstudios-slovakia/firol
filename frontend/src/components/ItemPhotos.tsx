@@ -375,7 +375,7 @@ export function ItemPhotoField({
             {photos.error ? (
                 <p className="text-xs text-status-bad">{photos.error}</p>
             ) : (
-                !disabled && <p className="text-xs text-ink-400">{helpText}</p>
+                !disabled && helpText !== '' && <p className="text-xs text-ink-400">{helpText}</p>
             )}
         </div>
     );

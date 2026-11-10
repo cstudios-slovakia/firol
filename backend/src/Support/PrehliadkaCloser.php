@@ -81,10 +81,10 @@ final class PrehliadkaCloser
         $certs = $cert->fetch() ?: [];
         $has = static fn (mixed $v): bool => is_string($v) && trim($v) !== '';
         if ($po && !$has($certs['cert_general'] ?? null)) {
-            return ['error' => 'Protipožiarna prehliadka vyžaduje platné číslo oprávnenia Technik PO. Doplň ho v Profile technika.', 'status' => 422];
+            return ['error' => 'Protipožiarna prehliadka vyžaduje platné číslo oprávnenia Technik PO. Doplň ho v Profile technika.', 'status' => 422, 'code' => 'cert_missing', 'cert' => 'cert_general'];
         }
         if ($bozp && !$has($certs['cert_bt'] ?? null)) {
-            return ['error' => 'Prehliadka BOZP vyžaduje číslo oprávnenia bezpečnostného technika. Doplň ho v Profile technika.', 'status' => 422];
+            return ['error' => 'Prehliadka BOZP vyžaduje číslo oprávnenia bezpečnostného technika. Doplň ho v Profile technika.', 'status' => 422, 'code' => 'cert_missing', 'cert' => 'cert_bt'];
         }
 
         $items = DocumentController::loadItems($inspectionId);

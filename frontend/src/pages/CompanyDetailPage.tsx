@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMemberRights } from '@/auth/useMemberRights';
-import { Archive, ArchiveRestore, ArrowLeft, ChevronRight, ClipboardCheck, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Mail, MapPin, Phone, Plus, Route, Send, UserCheck, Warehouse } from 'lucide-react';
+import { Archive, ArchiveRestore, ArrowLeft, Building2, ChevronRight, ClipboardCheck, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Mail, MapPin, Phone, Plus, Route, Send, UserCheck, Warehouse } from 'lucide-react';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyDetail } from '@/api/companies';
 import { ApiError } from '@/lib/api';
@@ -19,6 +19,7 @@ import { CompanyStockIssues } from '@/components/stock/CompanyStockIssues';
 import { Documents, type DocumentSend, type SendableDocument } from '@/api/documents';
 import { documentDownloadUrl, INSPECTION_TYPE_LABELS } from '@/api/inspections';
 import { cn } from '@/lib/cn';
+import { ClientTypePill } from '@/components/ClientTypePill';
 import { companyRecipientEmail } from '@/lib/companyEmail';
 import { clientNouns, clientTypeIcon, clientTypeStyles, facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { InspectionTags } from '@/components/InspectionTags';
@@ -203,9 +204,9 @@ export function CompanyDetailPage() {
               <h1 className="truncate text-lg font-semibold tracking-tight text-ink-900">
                 {company.name}
               </h1>
-              <p className="text-xs text-ink-500">
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-500">
+                <ClientTypePill clientType={company.client_type} />
                 {nouns.count(facilities.length)}
-                {bytove && ' · bytové družstvo'}
               </p>
             </div>
             {canEdit && (
@@ -390,8 +391,13 @@ export function CompanyDetailPage() {
                         to={`/facilities/${f.id}`}
                         className="group flex min-w-0 flex-1 items-center gap-3"
                       >
-                        <div className="grid size-9 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-600">
-                          <Warehouse className="size-4" />
+                        <div
+                          className={cn(
+                            'grid size-9 shrink-0 place-items-center rounded-2xl',
+                            bytove ? 'bg-blue-600 text-white' : 'bg-firol-50 text-firol-600',
+                          )}
+                        >
+                          {bytove ? <Building2 className="size-4" /> : <Warehouse className="size-4" />}
                         </div>
                         <div className="min-w-0 flex-1">
                           <h3 className="truncate text-sm font-semibold text-ink-900 group-hover:text-firol-700">{f.name}</h3>

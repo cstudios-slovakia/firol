@@ -28,6 +28,7 @@ import { isSection, newInspectionPath } from '@/lib/sections';
 import { CLIENT_NEUTRAL, facilityNouns, facilityPickerNouns } from '@/lib/clientKind';
 import { inspectionCreateOptimistic } from '@/lib/offlineEntities';
 import { useToast } from '@/lib/toast';
+import { useCertMissingToast } from '@/lib/certMissing';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -63,6 +64,7 @@ function isInspectionType(s: string | undefined): s is InspectionType {
 export function InspectionStep1Page() {
   const { user, csrfToken } = useAuth();
   const toast = useToast();
+  const certMissing = useCertMissingToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { type: typeParam } = useParams<{ type?: string }>();
@@ -283,7 +285,7 @@ export function InspectionStep1Page() {
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
       setError(msg);
-      toast.error(msg);
+      if (!certMissing(err, { returnLabel: 'Späť na novú kontrolu' })) toast.error(msg);
     } finally {
       setSubmitting(false);
     }

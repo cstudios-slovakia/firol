@@ -130,7 +130,7 @@ final class PrehliadkaController
             $req->jsonBool('include_photos') ?? true,
         );
         if (isset($result['error'])) {
-            Response::error((string) $result['error'], (int) $result['status']);
+            Response::error((string) $result['error'], (int) $result['status'], Response::errorExtras($result));
         }
 
         AuditLog::record(

@@ -23,6 +23,7 @@ import { cn } from '@/lib/cn';
 import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { useCertMissingToast } from '@/lib/certMissing';
 import { useConfirm } from '@/lib/confirm';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -65,6 +66,7 @@ export function InspectionDetailPage() {
   const { csrfToken } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
+  const certMissing = useCertMissingToast();
   const confirm = useConfirm();
   const isReadOnly = useIsReadOnly();
   // „Upraviť" discards the issued protocol, so it follows the práva členov switch.
@@ -141,7 +143,9 @@ export function InspectionDetailPage() {
       }
       navigate(`/inspections/${res.inspection.id}`, { replace: false });
     } catch (err) {
-      setError(offlineMessage(err, 'Opakovať sa nepodarilo.'));
+      if (!certMissing(err, { returnLabel: 'Späť na kontrolu' })) {
+        setError(offlineMessage(err, 'Opakovať sa nepodarilo.'));
+      }
     } finally {
       setRepeating(false);
     }
@@ -259,7 +263,11 @@ export function InspectionDetailPage() {
       setDocuments(docs.items);
       window.open(documentDownloadUrl(res.document.id), '_blank', 'noopener');
     } catch (err) {
-      setPdfError(offlineMessage(err, 'PDF sa nepodarilo vygenerovať.'));
+      const kept = certMissing(err, {
+        saved: 'Nič sa nestratilo — kontrola je uložená ako koncept. Po doplnení čísla sa k nej vráť a vygeneruj PDF.',
+        returnLabel: 'Späť na kontrolu',
+      });
+      if (!kept) setPdfError(offlineMessage(err, 'PDF sa nepodarilo vygenerovať.'));
     } finally {
       setGenerating(false);
     }

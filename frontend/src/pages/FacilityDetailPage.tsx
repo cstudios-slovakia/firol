@@ -10,9 +10,10 @@ import {
     ChevronRight,
     ClipboardCheck,
     ClipboardList,
+    DoorOpen,
     Edit2,
     GraduationCap,
-
+    Layers,
     Mail,
     MapPin,
     NotebookPen,
@@ -27,6 +28,7 @@ import {
 import { useAuth } from "@/auth/AuthContext";
 import { useIsReadOnly } from "@/auth/useIsReadOnly";
 import { useToast } from "@/lib/toast";
+import { useCertMissingToast } from "@/lib/certMissing";
 import { Facilities, type Facility, type FacilityDeviceGroup } from "@/api/facilities";
 import {
     INSPECTION_TYPE_LABELS,
@@ -70,6 +72,7 @@ export function FacilityDetailPage() {
     const isReadOnly = useIsReadOnly();
     const { canDelete, canDeleteUkon } = useMemberRights();
     const toast = useToast();
+    const certMissing = useCertMissingToast();
     const restoreArchived = useRestoreArchived();
     const [facility, setFacility] = useState<Facility | null>(null);
     const [inspections, setInspections] = useState<InspectionListItem[] | null>(null);
@@ -163,6 +166,7 @@ export function FacilityDetailPage() {
             const res = await Inspections.repeat(insId, csrfToken);
             navigate(`/inspections/${res.inspection.id}`);
         } catch (err) {
+            if (certMissing(err, { returnLabel: "Späť na prevádzku" })) return;
             setError(
                 err instanceof ApiError
                     ? err.message
@@ -273,6 +277,7 @@ export function FacilityDetailPage() {
     const archived = Boolean(facility.archived_at || facility.company_archived_at);
     const nouns = facilityNouns(facility.company_client_type);
     const client = clientNouns(facility.company_client_type);
+    const showBuildingColumn = isBytoveDruzstvo(facility.company_client_type) || Boolean(facility.description);
     const canEdit = !isReadOnly && !archived;
     // A prehliadka in progress here: the draft in the list (also one created
     // offline), else what the server reported.
@@ -367,7 +372,8 @@ export function FacilityDetailPage() {
                     </div>
                 </div>
 
-                <dl className="flex flex-col divide-y divide-ink-100 px-5 py-3 text-sm">
+                <div className={cn(showBuildingColumn && "md:grid md:grid-cols-2 md:gap-x-8")}>
+                <dl className={cn("flex flex-col divide-y divide-ink-100 px-5 py-3 text-sm", showBuildingColumn && "md:pr-0")}>
                     {facility.address && (
                         <DetailRow
                             icon={<MapPin className="size-4" />}
@@ -407,6 +413,38 @@ export function FacilityDetailPage() {
                         </p>
                     )}
                 </dl>
+
+                {showBuildingColumn && (
+                    <dl className="flex flex-col divide-y divide-ink-100 border-t border-ink-100 px-5 py-3 text-sm md:border-l md:border-t-0 md:pl-8 md:pr-5">
+                        <DetailRow
+                            icon={<Building2 className="size-4" />}
+                            label="Popis objektu"
+                            value={facility.description || "Zatiaľ nevyplnený — doplníte ho cez ✎"}
+                            muted={!facility.description}
+                        />
+                        {isBytoveDruzstvo(facility.company_client_type) && (
+                            <>
+                                <DetailRow
+                                    icon={<DoorOpen className="size-4" />}
+                                    label="Vchody"
+                                    value={facility.vchody || "nevyplnené"}
+                                    muted={!facility.vchody}
+                                />
+                                <DetailRow
+                                    icon={<Layers className="size-4" />}
+                                    label="Podlažia"
+                                    value={
+                                        facility.floors_above != null
+                                            ? `${facility.floors_above} nadzemných · ${facility.floors_below ?? 0} podzemných`
+                                            : "nevyplnené"
+                                    }
+                                    muted={facility.floors_above == null}
+                                />
+                            </>
+                        )}
+                    </dl>
+                )}
+                </div>
             </Card>
 
             {/* Action card menu: only show continue banner when a draft is in progress */}
@@ -963,19 +1001,6 @@ function ObjektPanel({
 
     return (
         <section key="objekt" className="flex animate-fade-up flex-col gap-3">
-            <Card className="p-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-400">Popis objektu</p>
-                <p className={cn("mt-1.5 text-sm leading-relaxed", facility.description ? "text-ink-800" : "text-ink-400")}>
-                    {facility.description || "Zatiaľ nevyplnený. Keď ho vyplníte, tlačí sa do záznamu z prehliadky."}
-                </p>
-                <Link
-                    to={`/facilities/${facility.id}/edit#popis-objektu`}
-                    className="mt-3 inline-flex h-8 items-center rounded-xl border border-ink-200 bg-white px-3 text-xs font-medium text-ink-700 transition-all duration-200 hover:border-ink-300 hover:bg-ink-50 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
-                >
-                    Upraviť popis
-                </Link>
-            </Card>
-
             <Link
                 to={`/facilities/${facility.id}/devices`}
                 className="flex items-center gap-3 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-all duration-200 hover:bg-ink-50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"

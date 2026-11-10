@@ -58,6 +58,12 @@ import { AccountApi, type Account } from "@/api/account";
 import { DataApi, type RestoreMode, type RestoreResult } from "@/api/data";
 import { ImportApi, type ImportKind, type ImportResult } from "@/api/import";
 import { BackupReminderModal } from "@/components/BackupReminderModal";
+import {
+    CERT_HIGHLIGHT_CLASS,
+    CertFocusBanner,
+    useCertFocus,
+    useCertFocusScroll,
+} from "@/components/CertFocus";
 import { InstallAppCard } from "@/components/InstallAppCard";
 import { ClientNoticeSettingsCard } from "@/components/ClientNoticeSettingsCard";
 import { MemberRightsCard } from "@/components/MemberRightsCard";
@@ -405,6 +411,10 @@ export function InspectorProfilePage() {
 function InspectorProfileSection() {
     const { csrfToken } = useAuth();
     const toast = useToast();
+    const navigate = useNavigate();
+    // Sent here from a refused úkon („Doplniť v profile"): which number to
+    // highlight, and the screen to go back to once it is saved.
+    const { focus, back } = useCertFocus();
 
     const [profile, setProfile] = useState<InspectorProfile | null>(null);
     const [loading, setLoading] = useState(true);
@@ -493,7 +503,17 @@ function InspectorProfileSection() {
                 csrfToken,
             );
             applyProfile(res.profile);
-            toast.success("Profil revízneho technika uložený");
+            toast.success(
+                "Profil revízneho technika uložený",
+                back
+                    ? {
+                          action: {
+                              label: back.returnLabel,
+                              onClick: () => navigate(back.returnTo),
+                          },
+                      }
+                    : undefined,
+            );
         } catch (err) {
             const msg =
                 err instanceof ApiError ? err.message : "Niečo sa pokazilo.";
@@ -593,6 +613,10 @@ function InspectorProfileSection() {
                     className="flex flex-col gap-3"
                     noValidate
                 >
+                    {focus && focus !== "vv" && (
+                        <CertFocusBanner cert={focus} back={back} />
+                    )}
+
                     <p className="rounded-xl border border-ink-100 bg-ink-50/40 px-3 py-2 text-xs text-ink-500">
                         Každý typ kontroly vyžaduje iné oprávnenie. Vypíš čísla,
                         ktoré máš — do každého PDF pôjde to správne.
@@ -601,6 +625,7 @@ function InspectorProfileSection() {
                     <CertCard
                         color="firol"
                         title="Kontrola PHP"
+                        highlighted={focus === "cert_php"}
                         subtitle="Oprávnenie na kontrolu hasiacich prístrojov"
                         certValue={certPhp}
                         certPlaceholder="napr. RT-PHP-2024-0123"
@@ -614,6 +639,7 @@ function InspectorProfileSection() {
                     <CertCard
                         color="violet"
                         title="Oprava / plnenie / TS PHP"
+                        highlighted={focus === "cert_oprava"}
                         subtitle="Oprávnenie na opravu, plnenie a tlakovú skúšku PHP"
                         certValue={certOprava}
                         certPlaceholder="napr. RT-TS-2024-0456"
@@ -627,6 +653,7 @@ function InspectorProfileSection() {
                     <CertCard
                         color="blue"
                         title="Technik PO"
+                        highlighted={focus === "cert_general"}
                         subtitle="Hydranty, požiarna kniha, PU, núdzové osvetlenia, TS hadíc, školenia"
                         certValue={certGeneral}
                         certPlaceholder="napr. TPO-2024-0789"
@@ -640,6 +667,7 @@ function InspectorProfileSection() {
                     <CertCard
                         color="emerald"
                         title="Bezpečnostný technik"
+                        highlighted={focus === "cert_bt"}
                         subtitle="Úkony v oblasti BOZP"
                         certValue={certBt}
                         certPlaceholder="napr. 0123/2019-BT"
@@ -1730,6 +1758,7 @@ function certDaysLeft(validTo: string): number | null {
 
 function CertCard({
     color,
+    highlighted = false,
     title,
     subtitle,
     certValue,
@@ -1741,6 +1770,8 @@ function CertCard({
     onValidToChange,
 }: {
     color: CertCardColor;
+    /** The number a refused úkon sent the user here to fill in. */
+    highlighted?: boolean;
     title: string;
     subtitle: string;
     certValue: string;
@@ -1755,13 +1786,16 @@ function CertCard({
     const days = certDaysLeft(validTo);
     const isExpired = days !== null && days < 0;
     const isExpiringSoon = days !== null && days >= 0 && days <= 30;
+    const { blockRef, inputRef } = useCertFocusScroll<HTMLDivElement>(highlighted);
 
     return (
         <div
+            ref={blockRef}
             className={cn(
-                "rounded-2xl border p-4 flex flex-col gap-3",
+                "rounded-2xl border p-4 flex flex-col gap-3 transition-all duration-300",
                 s.border,
                 s.bg,
+                highlighted && CERT_HIGHLIGHT_CLASS,
             )}
         >
             <div className="flex items-start gap-2.5">
@@ -1785,6 +1819,7 @@ function CertCard({
                 {(p) => (
                     <Input
                         {...p}
+                        ref={inputRef}
                         leftIcon={<Hash className="size-4" />}
                         value={certValue}
                         onChange={(e) => onCertChange(e.target.value)}
