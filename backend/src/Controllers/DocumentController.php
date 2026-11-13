@@ -18,6 +18,7 @@ use Firol\Mail\Templates\DocumentEmail;
 use Firol\Pdf\PdfRenderer;
 use Firol\Storage\Storage;
 use Firol\Support\Address;
+use Firol\Support\BookEntry;
 use Firol\Support\Contractor;
 use Firol\Support\Handover;
 use Firol\Support\Periodicity;
@@ -151,8 +152,19 @@ final class DocumentController
             }
         }
 
+        // POapp 7. 11. 2026 — a new-format požiarna kniha entry is complete
+        // without any item (its items are defects, spec 8); what it needs is
+        // its date, its prevádzky and, in spôsob 1, their periodicities.
+        $bookDetails = \Firol\Support\InspectionDetails::decode($inspection['details'] ?? null);
+        $isNewBook = (string) $inspection['type'] === BookEntry::TYPE && BookEntry::isNew($bookDetails);
+
         $items = self::loadItems($inspectionId);
-        if (count($items) === 0) {
+        if ($isNewBook) {
+            $bookError = BookEntry::readyError($accountId, $inspection);
+            if ($bookError !== null) {
+                return ['error' => $bookError, 'status' => 422];
+            }
+        } elseif (count($items) === 0) {
             return ['error' => 'Pridaj aspoň jednu položku pred generovaním PDF.', 'status' => 422];
         }
         // A concept confirmed before the completeness check existed may still hold
@@ -222,6 +234,9 @@ final class DocumentController
         }
 
         $payload = self::buildPayload($accountId, $userId, $inspection, $items);
+        if ($isNewBook) {
+            self::applyBookPayload($payload, $accountId, $inspection, $items, (array) $bookDetails, false);
+        }
         $stats   = $payload['stats'];
 
         if ($isPersons) {
@@ -256,11 +271,24 @@ final class DocumentController
         // The blank form (chapter 8.1) prints no nedostatky, so it carries no
         // photo appendix of them either.
         $payload['photos'] = $includePhotos && $variantColumn !== PersonList::VARIANT_BLANK
-            ? self::buildPhotoAppendix($inspectionId, $insType, $items)
+            ? ($isNewBook ? BookEntry::photoAppendix($inspectionId, $items) : self::buildPhotoAppendix($inspectionId, $insType, $items))
             : [];
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
+
+        // Two requests for the same úkon (two devices, a double tap, the
+        // concepts batch next to the single button) must not both issue a
+        // protocol: take the row lock and look at the status again.
+        $lock = $pdo->prepare('SELECT status FROM inspections WHERE id = ? AND account_id = ? FOR UPDATE');
+        $lock->execute([$inspectionId, $accountId]);
+        if ($lock->fetchColumn() !== 'draft') {
+            $pdo->rollBack();
+            return [
+                'error' => 'Kontrola už je uzamknutá a má vystavený protokol.',
+                'status' => 409,
+            ];
+        }
 
         try {
             // A test printed blank already holds its number (chapter 8.1): the
@@ -335,7 +363,21 @@ final class DocumentController
             // number and validity from issue time, not the profile as it
             // reads by then. The firm in the Zhotoviteľ row is frozen the
             // same way, onto inspections.details.
+            //
+            // A book entry also keeps what it printed (`details.issued`). It goes
+            // into the same write: freezeInspection() rewrites the whole column
+            // from $inspection['details'], so a separate UPDATE would be lost.
+            if ($isNewBook) {
+                $bookDetails = (array) $bookDetails;
+                $bookDetails['issued'] = BookEntry::issuedFrom($payload['kniha']);
+                $inspection['details'] = \Firol\Support\InspectionDetails::encode($bookDetails);
+            }
             Contractor::freezeInspection($inspectionId, $inspection, $payload['contractor']);
+            // The term chain reads the columns: spôsob, primary prevádzka and its
+            // periodicity are derived once more from the header and the rows.
+            if ($isNewBook) {
+                BookEntry::syncHeader($pdo, $inspectionId);
+            }
             $pdo->prepare(
                 'UPDATE inspections
                  SET    status = "finalized",
@@ -858,6 +900,26 @@ final class DocumentController
             }
         }
         return $appendix;
+    }
+
+    /**
+     * The new-format book entry's part of the renderer payload: `kniha` for the
+     * template, the selected prevádzky as the object (several: names joined, no
+     * address) and the defect count as the stats.
+     *
+     * @param array<string, mixed> $payload
+     * @param array<string, mixed> $inspection
+     * @param list<array<string, mixed>> $items
+     * @param array<string, mixed> $details
+     */
+    private static function applyBookPayload(array &$payload, int $accountId, array $inspection, array $items, array $details, bool $useIssued): void
+    {
+        $payload['kniha'] = BookEntry::payload($accountId, $inspection, $items, $details, $useIssued);
+        if ($payload['kniha']['multi']) {
+            $payload['facility']['name'] = implode(', ', $payload['kniha']['objects']);
+            $payload['facility']['address'] = '';
+        }
+        $payload['stats'] = ['total' => count($items)];
     }
 
     /**
@@ -1391,6 +1453,12 @@ final class DocumentController
         $payload['photos'] = $includePhotos
             ? self::buildPhotoAppendix($inspectionId, (string) $inspection['type'], $items)
             : [];
+        // A new-format book entry prints what it printed at issue.
+        $bookDetails = \Firol\Support\InspectionDetails::decode($inspection['details'] ?? null);
+        if ((string) $inspection['type'] === BookEntry::TYPE && BookEntry::isNew($bookDetails)) {
+            self::applyBookPayload($payload, $accountId, $inspection, $items, (array) $bookDetails, true);
+            $payload['photos'] = $includePhotos ? BookEntry::photoAppendix($inspectionId, $items) : [];
+        }
         // Block 2 — a test re-rendered for a signature keeps the variant it
         // was issued as (a blank form stays blank, chapter 8.1).
         if (PersonList::isPersonType((string) $inspection['type'])) {

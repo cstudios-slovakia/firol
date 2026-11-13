@@ -272,7 +272,8 @@ final class PrehliadkaDefects
      * Each copy is a file of its own, so the past record's photos are never
      * touched by anything done to this one. Runs inside the create, on the
      * server, so a create replayed from the offline outbox copies them too.
-     * Only a prehliadka is a source of photos; an old book record has none here.
+     * A prehliadka and a new-format book entry ({@see BookEntry}) are sources of
+     * photos; an old book record has none here.
      *
      * @param array<string, mixed> $fields validated defect fields
      * @param list<string> $files absolute paths written, for cleanup on failure
@@ -294,7 +295,7 @@ final class PrehliadkaDefects
              FROM   inspection_item_photos p
              JOIN   inspections i ON i.id = p.inspection_id
              WHERE  p.inspection_id = ? AND p.item_id = ? AND p.account_id = ?
-               AND  i.type = 'preventivna_prehliadka'
+               AND  (i.type = 'preventivna_prehliadka' OR " . BookEntry::isNewSql('i') . ")
              ORDER  BY p.position ASC, p.id ASC"
         );
         $stmt->execute([$fromInspectionId, $fromItemId, $accountId]);

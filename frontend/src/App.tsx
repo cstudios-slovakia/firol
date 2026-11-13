@@ -25,6 +25,7 @@ import { PrehliadkaDefectPage } from '@/pages/prehliadka/PrehliadkaDefectPage';
 import { PrehliadkaTermsPage } from '@/pages/prehliadka/PrehliadkaTermsPage';
 import { PrehliadkaClosePage } from '@/pages/prehliadka/PrehliadkaClosePage';
 import { PrehliadkaResultPage } from '@/pages/prehliadka/PrehliadkaResultPage';
+import { PrehliadkaConceptsReviewPage } from '@/pages/prehliadka/PrehliadkaConceptsReviewPage';
 import { SectionPage, TrainingsRedirect } from '@/pages/SectionPage';
 import { VisitNewPage } from '@/pages/VisitNewPage';
 import { PersonsFillPage } from '@/pages/PersonsFillPage';
@@ -141,6 +142,8 @@ export default function App() {
         <Route path="/prehliadky/:id/terminy" element={<PrehliadkaTermsPage />} />
         <Route path="/prehliadky/:id/uzavretie" element={<PrehliadkaClosePage />} />
         <Route path="/prehliadky/:id/vysledok" element={<PrehliadkaResultPage />} />
+        {/* Spec 12.2 — review of the ticked concepts before their protocols are issued. */}
+        <Route path="/prehliadky/:id/koncepty" element={<PrehliadkaConceptsReviewPage />} />
 
         {/* The old Školenia section — its list is now the Školenia tab of OPP. */}
         <Route path="/trainings" element={<TrainingsRedirect />} />

@@ -8,8 +8,10 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Support\BookEntry;
 use Firol\Support\Deadlines;
 use Firol\Support\Defects;
+use Firol\Support\InspectionCoverage;
 use Firol\Support\Invoicing;
 use Firol\Support\PkDefects;
 use Firol\Support\PrehliadkaDefects;
@@ -353,6 +355,45 @@ final class TodayController
         $stmt = Db::pdo()->prepare($sql);
         $stmt->execute($args);
         $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($records as &$rec) {
+            $rec['book_facility_id'] = null;
+        }
+        unset($rec);
+
+        // New-format book entries (either spôsob), one row per covered
+        // prevádzka: their defects stay open there until a newer finalized
+        // prehliadka at that prevádzka has replaced them — a newer book entry
+        // replaces nothing (it never makes the technician decide on them).
+        $bookSql = "SELECT i.id AS inspection_id, ix.facility_id, i.executed_on,
+                           c.id AS company_id, c.name AS company_name, f.name AS facility_name,
+                           i.inspector_user_id AS tech_id, u.fullname AS tech_name,
+                           au.initials AS tech_initials, au.avatar_color AS tech_color
+                    FROM   inspections i
+                    JOIN   inspection_facilities ix ON ix.inspection_id = i.id
+                    JOIN   companies  c ON c.id = i.company_id   AND c.archived_at IS NULL
+                    JOIN   facilities f ON f.id = ix.facility_id AND f.archived_at IS NULL
+                    LEFT   JOIN users u ON u.id = i.inspector_user_id
+                    LEFT   JOIN account_users au ON au.account_id = i.account_id AND au.user_id = i.inspector_user_id
+                    WHERE  i.account_id = ? AND " . BookEntry::isNewSql('i') . "
+                      AND  i.archived_at IS NULL AND i.status = 'finalized'
+                      AND  NOT EXISTS (
+                               SELECT 1 FROM inspections s
+                               WHERE  s.account_id = i.account_id AND s.facility_id = ix.facility_id
+                                 AND  s.type = 'preventivna_prehliadka' AND s.archived_at IS NULL AND s.status = 'finalized'
+                                 AND  (COALESCE(s.executed_on, '1000-01-01'), s.id)
+                                    > (COALESCE(i.executed_on, '1000-01-01'), i.id)
+                           )";
+        $bookArgs = [$accountId];
+        if ($userId !== null) {
+            $bookSql .= ' AND i.inspector_user_id = ?';
+            $bookArgs[] = $userId;
+        }
+        $bookStmt = Db::pdo()->prepare($bookSql);
+        $bookStmt->execute($bookArgs);
+        foreach ($bookStmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $r['book_facility_id'] = (int) $r['facility_id'];
+            $records[] = $r;
+        }
         if ($records === []) {
             return [];
         }
@@ -371,6 +412,10 @@ final class TodayController
             $itemStmt->execute([$inspectionId]);
             foreach ($itemStmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
                 $f = json_decode((string) $item['fields'], true);
+                // A book entry's row speaks for one prevádzka: its defects only.
+                if ($r['book_facility_id'] !== null && (int) (is_array($f) ? ($f['facility_id'] ?? 0) : 0) !== $r['book_facility_id']) {
+                    continue;
+                }
                 $deadline = is_array($f) ? ($f['deadline_date'] ?? null) : null;
                 if (!is_string($deadline) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deadline)) {
                     continue; // „bezodkladne" carries no date; a finding, not a removal to wait for
@@ -392,7 +437,7 @@ final class TodayController
                     'key'           => 'nedostatok-' . $inspectionId . '-' . $key,
                     'inspection_id' => $inspectionId,
                     'defect_key'    => $key,
-                    'type'          => 'preventivna_prehliadka',
+                    'type'          => $r['book_facility_id'] !== null ? 'poziarna_kniha' : 'preventivna_prehliadka',
                     'executed_on'   => $r['executed_on'] !== null ? (string) $r['executed_on'] : null,
                     'description'   => $title !== '' ? $title : (string) ($f['description'] ?? ''),
                     'deadline'      => $deadline,
@@ -444,6 +489,9 @@ final class TodayController
                 LEFT   JOIN account_users au ON au.account_id = i.account_id AND au.user_id = i.inspector_user_id
                 WHERE  i.account_id = ? AND i.archived_at IS NULL AND i.status = 'finalized'
                   AND  (JSON_CONTAINS_PATH(ii.fields, 'one', '$.defects', '$.defect_deadline'))
+                  -- A new-format book entry's defects are listed with the
+                  -- prehliadka's (openPrehliadkaDefects).
+                  AND  NOT " . BookEntry::isNewSql('i') . "
                   -- The kniha BOZP record of a prehliadka repeats the BOZP defects the
                   -- prehliadka itself lists (openPrehliadkaDefects); count them once.
                   AND  NOT (i.type = 'kniha_bozp' AND EXISTS (
@@ -453,10 +501,13 @@ final class TodayController
                   AND  NOT EXISTS (
                            SELECT 1 FROM inspections s
                            WHERE  s.account_id  = i.account_id
-                             AND  s.facility_id = i.facility_id
+                             AND  " . InspectionCoverage::covers('s', 'i.facility_id') . "
                              AND  (s.type = i.type
                                    OR (s.type IN ('poziarna_kniha', 'preventivna_prehliadka')
                                        AND i.type IN ('poziarna_kniha', 'preventivna_prehliadka')))
+                             -- A new-format book entry replaces no defects: it has
+                             -- no step that makes the technician decide on them.
+                             AND  NOT " . BookEntry::isNewSql('s') . "
                              AND  s.archived_at IS NULL
                              AND  s.status      = 'finalized'
                              AND  s.is_preventive_inspection = 1

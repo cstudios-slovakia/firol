@@ -45,10 +45,9 @@ final class CarryOver
         'pu_udrzba'          => ['kind', 'identifier', 'manufacturer', 'location'],
         'nudzove_osvetlenie' => ['evid_number', 'floor', 'luminaire_type', 'manufacturer', 'location'],
         'ts_hadic'           => ['hose_type', 'location', 'manufacturer', 'length', 'year_of_manufacture'],
-        // Checklist type: the list of workspaces walked and the activities
-        // ticked are the "identification" — the result and the nedostatky are
-        // not (chapter 12).
-        'poziarna_kniha'     => ['is_preventive', 'workspaces', 'activities', 'custom_activities'],
+        // The požiarna kniha carries nothing over: its items are defects, and a
+        // repeated entry starts with nothing ticked (POapp 7. 11. 2026, spec 6.4;
+        // BookEntry::repeat).
         // Block 2 — single-record BOZP úkony (BozpRecords). The workplaces
         // walked, the activities ticked and the rows checked travel; every
         // result inside a row is blanked by ROW_KEEP below.
@@ -86,7 +85,6 @@ final class CarryOver
         'pu_udrzba'          => ['maintenance_work' => '', 'result' => '', 'notes' => null],
         'nudzove_osvetlenie' => ['duration_min' => null, 'result' => '', 'notes' => null],
         'ts_hadic'           => ['working_pressure' => null, 'test_pressure' => null, 'result' => '', 'notes' => null],
-        'poziarna_kniha'     => ['result' => '', 'no_defects_found' => false, 'defects' => [], 'notes' => null],
         'kniha_bozp'         => ['result' => '', 'defects' => []],
         'pracovisko'         => ['overall' => '', 'defects' => []],
         'osamele_pracovisko' => ['overall' => '', 'defects' => []],

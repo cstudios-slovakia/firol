@@ -28,7 +28,9 @@ final class InspectionDetails
             // Block 2 — the opatrenia / záver of the BOZP row types.
             || BozpItems::supports($type)
             // POapp 26. 10. 2026 — the setup of a preventívna prehliadka.
-            || PrehliadkaDetails::supports($type);
+            || PrehliadkaDetails::supports($type)
+            // POapp 7. 11. 2026 — a požiarna kniha entry is its header (BookEntry).
+            || $type === BookEntry::TYPE;
     }
 
     /**
@@ -52,6 +54,10 @@ final class InspectionDetails
         }
         if (PrehliadkaDetails::supports($type)) {
             return PrehliadkaDetails::validate($raw);
+        }
+        if ($type === BookEntry::TYPE) {
+            // The shape only; the controller completes it with BookEntry::applyContext().
+            return BookEntry::validateShape($raw);
         }
         return [];
     }

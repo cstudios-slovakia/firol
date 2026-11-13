@@ -201,6 +201,21 @@ final class Writer
             "SELECT id, inspection_id, position, fields, created_at FROM inspection_items
              WHERE  inspection_id IN ($ids) ORDER BY inspection_id, position"
         );
+        // POapp 7. 11. 2026 — the prevádzky of a new-format požiarna kniha entry,
+        // each with its periodicity. Other úkony have none and get no key.
+        $facilitiesByInspection = [];
+        $facStmt = $pdo->query(
+            "SELECT inspection_id, facility_id, periodicity_value, periodicity_unit FROM inspection_facilities
+             WHERE  inspection_id IN ($ids) ORDER BY inspection_id, id"
+        );
+        foreach ($facStmt->fetchAll(PDO::FETCH_ASSOC) as $f) {
+            $facilitiesByInspection[(int) $f['inspection_id']][] = [
+                'facility_id'       => (int) $f['facility_id'],
+                'periodicity_value' => $f['periodicity_value'] !== null ? (int) $f['periodicity_value'] : null,
+                'periodicity_unit'  => $f['periodicity_unit'],
+            ];
+        }
+
         $itemsByInspection = [];
         foreach ($itemStmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
             $item['id']       = (int) $item['id'];
@@ -226,6 +241,9 @@ final class Writer
             // Chapter 22 — fakturácia úkonu (migration 046).
             $inspection['invoiced'] = (int) $inspection['invoiced'];
             $inspection['items'] = $itemsByInspection[$inspection['id']] ?? [];
+            if (isset($facilitiesByInspection[$inspection['id']])) {
+                $inspection['facilities'] = $facilitiesByInspection[$inspection['id']];
+            }
             $out[] = $inspection;
         }
         return $out;
@@ -513,7 +531,7 @@ final class Writer
     private static function deadlineNotices(int $accountId, PDO $pdo): array
     {
         $stmt = $pdo->prepare(
-            'SELECT n.inspection_id, n.training_id, n.notice_date, n.recipient, n.sent_at
+            'SELECT n.inspection_id, n.facility_id, n.training_id, n.notice_date, n.recipient, n.sent_at
              FROM   deadline_notices n
              LEFT   JOIN inspections i ON i.id = n.inspection_id AND i.archived_at IS NULL
              LEFT   JOIN trainings   t ON t.id = n.training_id   AND t.archived_at IS NULL
@@ -524,6 +542,7 @@ final class Writer
         $stmt->execute([$accountId]);
         return array_map(static fn (array $r): array => [
             'inspection_id' => $r['inspection_id'] !== null ? (int) $r['inspection_id'] : null,
+            'facility_id'   => $r['facility_id'] !== null ? (int) $r['facility_id'] : null,
             'training_id'   => $r['training_id'] !== null ? (int) $r['training_id'] : null,
             'notice_date'   => (string) $r['notice_date'],
             'recipient'     => (string) $r['recipient'],

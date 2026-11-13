@@ -14,6 +14,7 @@ use Firol\Http\Response;
 use Firol\Support\Address;
 use Firol\Support\ClientArchive;
 use Firol\Support\ClientKind;
+use Firol\Support\InspectionCoverage;
 use Firol\Support\Periodicity;
 use PDO;
 
@@ -129,21 +130,27 @@ final class CompanyController
         // too: since block 1 a period can be days or weeks, not only months.
         // The window function picks the most recent inspection per
         // facility+type.
+        // A požiarna kniha entry counts at each prevádzka it covers, with that
+        // prevádzka's periodicity; an entry that moves no term (spôsob 2, or an
+        // old plain entry) is not a prehliadka and does not count.
         $defStmt = Db::pdo()->prepare(
             'SELECT facility_id, type, periodicity_value, periodicity_unit
              FROM (
-                 SELECT i.facility_id,
+                 SELECT ' . InspectionCoverage::facility() . ' AS facility_id,
                         IF(i.type = "poziarna_kniha", "preventivna_prehliadka", i.type) AS type,
-                        i.periodicity_value, i.periodicity_unit,
+                        ' . InspectionCoverage::periodicityValue() . ' AS periodicity_value,
+                        ' . InspectionCoverage::periodicityUnit() . ' AS periodicity_unit,
                         ROW_NUMBER() OVER (
-                            PARTITION BY i.facility_id, IF(i.type = "poziarna_kniha", "preventivna_prehliadka", i.type)
+                            PARTITION BY ' . InspectionCoverage::facility() . ', IF(i.type = "poziarna_kniha", "preventivna_prehliadka", i.type)
                             ORDER BY i.executed_on DESC, i.id DESC
                         ) AS rn
                  FROM   inspections i
-                 JOIN   facilities  f ON f.id = i.facility_id
+                 ' . InspectionCoverage::join() . '
+                 JOIN   facilities  f ON f.id = ' . InspectionCoverage::facility() . '
                  WHERE  f.company_id = ?
                    AND  i.account_id = ?
                    AND  i.archived_at IS NULL
+                   AND  NOT (i.type = "poziarna_kniha" AND i.is_preventive_inspection = 0)
              ) t
              WHERE t.rn = 1'
         );

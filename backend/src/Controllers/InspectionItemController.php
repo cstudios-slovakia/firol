@@ -10,6 +10,9 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Support\BookEntry;
+use Firol\Support\InspectionCoverage;
+use Firol\Support\InspectionDetails;
 use Firol\Support\PrehliadkaDefects;
 use Firol\Support\PrehliadkaDetails;
 use PDO;
@@ -96,6 +99,20 @@ final class InspectionItemController
             'luminaire_type' => 'Druh / typ', 'location' => 'Umiestnenie',
             'duration_min' => 'Doba svietenia v núdzovom režime', 'result' => 'Výsledok testu',
         ],
+        // The follow-ups the checklist after a prehliadka closes (spec 12.2).
+        'oprava_ts_php' => [
+            'manufacturer' => 'Výrobca', 'type' => 'Typ', 'serial' => 'Výrobné číslo / séria',
+            'year' => 'Rok výroby', 'location' => 'Umiestnenie',
+        ],
+        'vyradenie' => [
+            'manufacturer' => 'Výrobca', 'type' => 'Typ', 'serial' => 'Č. výr. série / tlak. nádoby',
+            'year' => 'Rok výroby', 'reason' => 'Dôvod vyradenia',
+        ],
+        'ts_hadic' => [
+            'hose_type' => 'Typ / priemer hadice', 'location' => 'Umiestnenie', 'manufacturer' => 'Výrobca',
+            'working_pressure' => 'Pracovný pretlak', 'test_pressure' => 'Skúšobný pretlak', 'length' => 'Dĺžka',
+            'year_of_manufacture' => 'Rok výroby', 'result' => 'Výsledok skúšky',
+        ],
     ];
 
     /**
@@ -149,7 +166,8 @@ final class InspectionItemController
         // supports many items but the domain doesn't, so block it at the
         // controller. The UI enforces this too — this is the belt-and-braces
         // server-side check.
-        if ($inspection['type'] === 'poziarna_kniha'
+        // A new-format entry's items are its defects, as many as it has.
+        if (($inspection['type'] === 'poziarna_kniha' && !self::isNewBook($inspection))
             || \Firol\Support\BozpRecords::supports((string) $inspection['type'])) {
             $existing = Db::pdo()->prepare(
                 'SELECT COUNT(*) FROM inspection_items WHERE inspection_id = ?'
@@ -182,7 +200,9 @@ final class InspectionItemController
             )->execute([$inspectionId, $position, json_encode($fields, JSON_UNESCAPED_UNICODE)]);
 
             $itemId = (int) $pdo->lastInsertId();
-            self::syncPreventiveFlag($pdo, $inspection['type'], $inspectionId, $fields);
+            if (!self::isNewBook($inspection)) {
+                self::syncPreventiveFlag($pdo, $inspection['type'], $inspectionId, $fields);
+            }
             self::rememberWalkPlaces($inspection, $fields);
             // A defect taken over from the last prehliadka starts with that
             // defect's photos (spec 12.1) — copied here, so a create replayed
@@ -229,7 +249,9 @@ final class InspectionItemController
             $inspectionId,
         ]);
 
-        self::syncPreventiveFlag(Db::pdo(), $inspection['type'], $inspectionId, $fields);
+        if (!self::isNewBook($inspection)) {
+            self::syncPreventiveFlag(Db::pdo(), $inspection['type'], $inspectionId, $fields);
+        }
         self::rememberWalkPlaces($inspection, $fields);
 
         Response::json(['item' => self::loadItem($itemId)]);
@@ -288,13 +310,21 @@ final class InspectionItemController
      */
     private static function rememberWalkPlaces(array $inspection, array $fields): void
     {
-        if (($inspection['type'] ?? '') !== PrehliadkaDetails::TYPE) {
+        // A book defect teaches the prevádzka it belongs to.
+        if (self::isNewBook($inspection)) {
+            $facilityId = (int) ($fields['facility_id'] ?? 0);
+        } elseif (($inspection['type'] ?? '') === PrehliadkaDetails::TYPE) {
+            $facilityId = (int) $inspection['facility_id'];
+        } else {
+            return;
+        }
+        if ($facilityId <= 0) {
             return;
         }
         $where = (array) ($fields['where'] ?? []);
         \Firol\Support\FacilityWalkMemory::remember(
             (int) $inspection['account_id'],
-            (int) $inspection['facility_id'],
+            $facilityId,
             isset($where['entrance']) ? (string) $where['entrance'] : null,
             isset($where['place']) ? (string) $where['place'] : null,
         );
@@ -322,10 +352,17 @@ final class InspectionItemController
                 );
                 if (isset($fields['persists_from']) && is_array($fields['persists_from'])) {
                     $srcInspId = (int) ($fields['persists_from']['inspection_id'] ?? 0);
+                    // A book entry written for several prevádzky is a source at each.
                     $check = Db::pdo()->prepare(
-                        'SELECT id FROM inspections WHERE id = ? AND account_id = ? AND facility_id = ? AND archived_at IS NULL'
+                        'SELECT s.id FROM inspections s WHERE s.id = ? AND s.account_id = ? AND '
+                        . InspectionCoverage::covers('s', '?') . ' AND s.archived_at IS NULL'
                     );
-                    $check->execute([$srcInspId, (int) $inspection['account_id'], (int) $inspection['facility_id']]);
+                    $check->execute([
+                        $srcInspId,
+                        (int) $inspection['account_id'],
+                        (int) $inspection['facility_id'],
+                        (int) $inspection['facility_id'],
+                    ]);
                     if (!$check->fetchColumn()) {
                         // The source is gone (archived, or not this prevádzka's).
                         // An answer odstránený / dôvod zanikol means nothing
@@ -352,6 +389,29 @@ final class InspectionItemController
             } catch (\InvalidArgumentException $e) {
                 self::failValidation($e->getMessage());
             }
+        }
+        // POapp 7. 11. 2026 — a defect of a new-format požiarna kniha entry: the
+        // prehliadka's defect screen (spec 8) with an optional deadline, the
+        // prevádzka chosen among the entry's (stamped when there is one), scope
+        // always po and nothing carried over (plan O3).
+        if ($type === 'poziarna_kniha' && self::isNewBook($inspection)) {
+            $facilityIds = BookEntry::facilityIds((int) $inspection['id']);
+            try {
+                $fields = PrehliadkaDefects::validate(
+                    $body,
+                    isset($inspection['executed_on']) ? (string) $inspection['executed_on'] : null,
+                    ($inspection['client_type'] ?? '') === 'bytove_druzstvo',
+                    ['deadline_optional' => true, 'facility_ids' => $facilityIds],
+                );
+            } catch (\InvalidArgumentException $e) {
+                self::failValidation($e->getMessage());
+            }
+            $fields['scope'] = 'po';
+            $fields['persists_from'] = null;
+            if (count($facilityIds) === 1) {
+                $fields['facility_id'] = $facilityIds[0];
+            }
+            return $fields;
         }
         // Block 2 — single-record BOZP úkony (kniha BOZP, pracovisko,
         // osamelé pracoviská, fajčenie): one record holds the whole úkon.
@@ -921,7 +981,8 @@ final class InspectionItemController
     /** @return array<string, mixed> */
     private static function loadInspectionOrFail(?int $accountId, int $inspectionId): array
     {
-        $sql = 'SELECT i.id, i.type, i.status, i.account_id, i.facility_id, i.executed_on, c.client_type
+        $sql = 'SELECT i.id, i.type, i.status, i.account_id, i.facility_id, i.company_id, i.executed_on,
+                       i.details, c.client_type
                 FROM   inspections i
                 JOIN   companies c ON c.id = i.company_id
                 WHERE  i.id = ? AND i.archived_at IS NULL';
@@ -937,6 +998,13 @@ final class InspectionItemController
             Response::error('Kontrola sa nenašla.', 404);
         }
         return $row;
+    }
+
+    /** @param array<string, mixed> $inspection */
+    private static function isNewBook(array $inspection): bool
+    {
+        return ($inspection['type'] ?? '') === 'poziarna_kniha'
+            && BookEntry::isNew(InspectionDetails::decode($inspection['details'] ?? null));
     }
 
     /**

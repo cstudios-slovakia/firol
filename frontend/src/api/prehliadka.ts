@@ -37,6 +37,15 @@
  *   PATCH /api/inspections/{id} (details.previous)  no longer written — the answer is the row itself
  *   The old photos are shown from their URLs: offline they appear only if the
  *   browser still holds them; the copy is made on the server either way.
+ * Checklist after a closed prehliadka (POapp 7. 11. 2026, spec 12.2):
+ *   GET   /api/inspections/{id}/prehliadka-checklist          cached; the concepts of the round and the
+ *                                                             follow-ups of its closed PHP / hydranty checks
+ *   POST  /api/inspections/{id}/prehliadka-checklist/prepare  online-only — creates the ticked follow-ups
+ *   POST  /api/inspections/{id}/prehliadka-checklist/create   online-only — the blank draft of an entry
+ *                                                             with nothing to carry
+ *   GET   /api/inspections/{id}/prehliadka-checklist/review   cached; every value of the ticked protocols
+ *   PATCH /api/inspections/{id}/items/{item}                  edits on the review screen: queued as anywhere
+ *   POST  /api/inspections/{id}/prehliadka-checklist/generate online-only — it takes the numbers
  * The entrance and the place a defect was written with are remembered by the
  * server inside the defect's own save — see FacilityWalkMemory — so there is no
  * endpoint of their own to queue.
@@ -127,7 +136,112 @@ export type PrehliadkaConcept = {
   failing: number;
 };
 
+/** The protocol carried values come from — „prevzaté z protokolu č. … zo dňa …". */
+export type ChecklistOrigin = {
+  /** Null for an úkon that has no document (old data). */
+  number: string | null;
+  executed_on: string | null;
+};
+
+/** One line of the checklist after a prehliadka (spec 12.2). */
+export type ChecklistEntry = {
+  /** `i{id}` for an existing úkon, `f{source}:{type}` for a follow-up not created yet. */
+  key: string;
+  kind: 'concept' | 'follow_up';
+  type: InspectionType;
+  inspection_id: number | null;
+  /** Null while a follow-up is not created yet. */
+  status: 'draft' | 'finalized' | null;
+  /** The closed check a follow-up arises from. */
+  follow_up_of: { inspection_id: number; type: InspectionType } | null;
+  items: number;
+  failing: number;
+  origin: ChecklistOrigin | null;
+  document: { id: number; number: string } | null;
+  /** Can be ticked for „vytvoriť a rovno uzavrieť". */
+  selectable: boolean;
+  /** What to do when it cannot be ticked. */
+  note: string | null;
+  /** A follow-up with nothing to carry — its blank draft comes from the ordinary follow-up offer. */
+  manual_create: boolean;
+};
+
+export type ChecklistHead = {
+  id: number;
+  status: 'draft' | 'finalized';
+  executed_on: string | null;
+  company_id: number;
+  company_name: string;
+  facility_id: number;
+  facility_name: string;
+};
+
+export type PrehliadkaChecklist = { prehliadka: ChecklistHead; entries: ChecklistEntry[] };
+
+export type ChecklistRefusal = { key: string; type: InspectionType | null; reason: string };
+
+export type ReviewItem = {
+  id: number;
+  position: number;
+  fields: Record<string, unknown>;
+  /** The device as the technician knows it. */
+  name: string;
+  /** Slovak names of the required fields still blank, as the item form labels them. */
+  missing: string[];
+  /** Its values were carried from `origin`. */
+  carried: boolean;
+};
+
+export type ReviewBlock = {
+  inspection_id: number;
+  type: InspectionType;
+  status: 'draft' | 'finalized';
+  executed_on: string | null;
+  visit_id: number | null;
+  origin: ChecklistOrigin | null;
+  follow_up_of: { inspection_id: number; type: InspectionType } | null;
+  document: { id: number; number: string } | null;
+  /** The technician cannot sign this kind of úkon — why. */
+  cert_missing: string | null;
+  items: ReviewItem[];
+};
+
+export type ChecklistReview = { prehliadka: ChecklistHead; blocks: ReviewBlock[] };
+
+export type ChecklistGenerateResult = {
+  generated: { inspection_id: number; type: InspectionType; document: InspectionDocument }[];
+  skipped: { inspection_id: number; type: InspectionType | null; reason: string }[];
+};
+
 export const Prehliadka = {
+  /** Everything the round gives rise to (spec 12.2). */
+  checklist: (inspectionId: number) =>
+    api<PrehliadkaChecklist>(`/api/inspections/${inspectionId}/prehliadka-checklist`),
+  /** The ticked entries as drafts — follow-ups created with their carried values. Online-only. */
+  prepareChecklist: (inspectionId: number, keys: string[], csrfToken: string | null) =>
+    api<{ inspection_ids: number[]; refused: ChecklistRefusal[] }>(
+      `/api/inspections/${inspectionId}/prehliadka-checklist/prepare`,
+      { method: 'POST', body: { keys }, csrfToken, requireOnline: true },
+    ),
+  /** The blank draft of an entry with nothing to carry (`manual_create`). Online-only. */
+  createChecklistManual: (inspectionId: number, key: string, csrfToken: string | null) =>
+    api<{ inspection_id: number }>(`/api/inspections/${inspectionId}/prehliadka-checklist/create`, {
+      method: 'POST',
+      body: { key },
+      csrfToken,
+      requireOnline: true,
+    }),
+  reviewChecklist: (inspectionId: number, ids: number[]) =>
+    api<ChecklistReview>(`/api/inspections/${inspectionId}/prehliadka-checklist/review?ids=${ids.join(',')}`),
+  /** Issues each protocol on its own. Online-only — it takes the numbers. */
+  generateChecklist: (inspectionId: number, ids: number[], executedOn: string | null, csrfToken: string | null) =>
+    api<ChecklistGenerateResult>(`/api/inspections/${inspectionId}/prehliadka-checklist/generate`, {
+      method: 'POST',
+      body: executedOn ? { ids, executed_on: executedOn } : { ids },
+      csrfToken,
+      requireOnline: true,
+    }),
+
   /** Closes the prehliadka — issues the records. Online-only. */
   close: (inspectionId: number, csrfToken: string | null) =>
     api<PrehliadkaResult>(`/api/inspections/${inspectionId}/prehliadka-close`, {

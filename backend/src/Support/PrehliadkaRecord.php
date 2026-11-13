@@ -27,8 +27,8 @@ use Firol\Db;
  * Frozen copy. A protocol re-rendered with the client's signature must say what
  * it said when it was issued, so the parts that read live data (the Termíny
  * table, the previous-defect table, the facility's description and main
- * switches) are copied into `details.issued_record` at
- * issue time ({@see ISSUED_KEY}). The key is server-owned: the header validator
+ * switches, the printed „Vykonané činnosti") are copied into
+ * `details.issued_record` at issue time ({@see ISSUED_KEY}). The key is server-owned: the header validator
  * does not keep it, so unlocking and saving drops the copy.
  */
 final class PrehliadkaRecord
@@ -53,6 +53,13 @@ final class PrehliadkaRecord
     public const RESPONSIBLE_DOM = 'správca objektu';
     public const RESPONSIBLE_FIRMA = 'prevádzkovateľ';
     public const CUSTOM_ACTIVITY_TAG = '(vlastná činnosť)';
+    /**
+     * The nine points of a firma are genitive phrases: in the record they read
+     * after this line, and the firm's own activities under the next one
+     * (POapp spec 7. 11. 2026, ch. 6.1, 6.3).
+     */
+    public const FIRMA_ACTIVITIES_LEAD = 'Obsahom prehliadky bola kontrola:';
+    public const FIRMA_ACTIVITIES_MORE = 'Ďalej vykonané';
     /** The state of a new defect removed during the walk (spec 12.1). */
     public const REMOVED_ON_SITE = 'zistený a odstránený na mieste';
 
@@ -380,7 +387,8 @@ final class PrehliadkaRecord
             $rows[] = [
                 'title'  => (string) $d['title'],
                 'meta'   => implode(' · ', $meta),
-                'date'   => $date,
+                // A defect taken over from a požiarna kniha entry carries its own source.
+                'date'   => is_string($d['source']['executed_on'] ?? null) ? $d['source']['executed_on'] : $date,
                 'status' => $state,
                 'text'   => $text,
             ];
@@ -463,12 +471,13 @@ final class PrehliadkaRecord
      * defaults come first in their own order, then the rest as ticked.
      *
      * @param array<string, mixed> $details
+     * @param list<string> $defaults the predefined PO set the order follows
      * @return list<array{label: string, custom: bool}>
      */
-    public static function poActivities(array $details): array
+    public static function poActivities(array $details, array $defaults): array
     {
         $ticked = array_values(array_filter((array) ($details['activities_po'] ?? []), 'is_string'));
-        [$defaults, $custom] = self::splitActivities($ticked, PrehliadkaActivities::defaults(PrehliadkaActivities::PO));
+        [$defaults, $custom] = self::splitActivities($ticked, $defaults);
         $out = [];
         foreach ($defaults as $label) {
             $out[] = ['label' => $label, 'custom' => false];
@@ -477,6 +486,40 @@ final class PrehliadkaRecord
             $out[] = ['label' => $label, 'custom' => true];
         }
         return $out;
+    }
+
+    /**
+     * The activity list one PO record prints.
+     *
+     *   issued with a frozen list   that list, as it was printed
+     *   issued before lists froze   ordered by the PO set of that time, so the
+     *                               record reads as it always did
+     *   being issued now            ordered by the set of the client type
+     *
+     * The second value is the lead line of the nine points of a firma
+     * ({@see FIRMA_ACTIVITIES_LEAD}), null for every other list.
+     *
+     * @param array<string, mixed> $inspection
+     * @param array<string, mixed> $details
+     * @param array<string, mixed>|null $issued the frozen block, when re-rendering
+     * @return array{0: list<array{label: string, custom: bool}>, 1: ?string}
+     */
+    private static function printedPoActivities(array $inspection, array $details, ?array $issued, string $facilityKind): array
+    {
+        if (is_array($issued) && is_array($issued['activities'] ?? null)) {
+            $frozen = array_values(array_filter(
+                $issued['activities'],
+                static fn ($a): bool => is_array($a) && is_string($a['label'] ?? null),
+            ));
+            return [$frozen, is_string($issued['activities_lead'] ?? null) ? $issued['activities_lead'] : null];
+        }
+        if (is_array($issued) || ($inspection['status'] ?? null) === 'finalized') {
+            return [self::poActivities($details, PrehliadkaActivities::legacyPoDefaults()), null];
+        }
+        $firma = $facilityKind !== 'dom';
+        $clientType = $firma ? ClientKind::FIRMA : ClientKind::BYTOVE_DRUZSTVO;
+        $activities = self::poActivities($details, PrehliadkaActivities::defaults(PrehliadkaActivities::PO, $clientType));
+        return [$activities, $firma && $activities !== [] ? self::FIRMA_ACTIVITIES_LEAD : null];
     }
 
     /**
@@ -583,6 +626,7 @@ final class PrehliadkaRecord
             );
             $facility = self::facilityBlock($accountId, $facilityId);
         }
+        [$activities, $activitiesLead] = self::printedPoActivities($inspection, $details, $issued, (string) $facility['kind']);
 
         return [
             'kind'           => $facility['kind'],
@@ -591,7 +635,8 @@ final class PrehliadkaRecord
             'lehota_zakon'   => $lehotaZakon,
             'lehota_vlastna' => $lehotaVlastna,
             'switches'       => $facility['switches'],
-            'activities'     => self::poActivities($details),
+            'activities'     => $activities,
+            'activities_lead' => $activitiesLead,
             'points'         => $points,
             'previous'       => $previous,
             'terms'          => $terms,
@@ -606,6 +651,8 @@ final class PrehliadkaRecord
                 'note'           => $note,
                 'lehota_zakon'   => $lehotaZakon,
                 'lehota_vlastna' => $lehotaVlastna,
+                'activities'     => $activities,
+                'activities_lead' => $activitiesLead,
             ],
         ];
     }

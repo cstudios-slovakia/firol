@@ -149,6 +149,12 @@ export type Inspection = InspectionListItem & {
    * without any. Validated per type on the server (Support\InspectionDetails).
    */
   details?: Record<string, unknown> | null;
+  /**
+   * Present on show() of a preventívna prehliadka only: true once it was ever
+   * closed (also after „Upraviť" made it a draft again). Such a prehliadka
+   * cannot be discarded; the server refuses the archive of a re-opened one.
+   */
+  closed_before?: boolean;
 };
 
 export type PhpStatus = 'A' | 'TS' | 'O' | 'V';

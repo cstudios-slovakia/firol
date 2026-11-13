@@ -78,23 +78,30 @@ final class Deadlines
         // Every finalized preventive úkon, in chain order per prevádzka + type.
         // The chain includes úkony without a period: done later, they still
         // supersede the previous deadline (and define none of their own).
+        // A požiarna kniha entry written as a prehliadka for several prevádzky
+        // is one row per prevádzka, each with that prevádzka's periodicity
+        // (InspectionCoverage); its planned date and notice are per prevádzka too.
+        $fac = InspectionCoverage::facility();
         $sql = 'SELECT i.id, i.account_id, i.type, i.executed_on,
-                       i.periodicity_value, i.periodicity_unit,
+                       ' . InspectionCoverage::periodicityValue() . ' AS periodicity_value,
+                       ' . InspectionCoverage::periodicityUnit() . ' AS periodicity_unit,
                        i.inspector_user_id,
                        i.company_id, c.name AS company_name, c.client_type AS company_client_type,
                        c.contact_email AS company_email,
                        c.contact AS company_contact, f.email AS facility_email,
-                       i.facility_id, f.name AS facility_name, f.city AS facility_city,
+                       ' . $fac . ' AS facility_id, i.facility_id AS primary_facility_id,
+                       f.name AS facility_name, f.city AS facility_city,
                        p.planned_date,
                        n.sent_at AS notice_sent_at,
                        u.fullname AS technician_name,
                        au.initials AS technician_initials,
                        au.avatar_color AS technician_color
                 FROM   inspections i
+                ' . InspectionCoverage::join() . '
                 JOIN   companies  c ON c.id = i.company_id  AND c.archived_at IS NULL
-                JOIN   facilities f ON f.id = i.facility_id AND f.archived_at IS NULL
-                LEFT   JOIN calendar_plans   p ON p.inspection_id = i.id
-                LEFT   JOIN deadline_notices n ON n.inspection_id = i.id
+                JOIN   facilities f ON f.id = ' . $fac . ' AND f.archived_at IS NULL
+                LEFT   JOIN calendar_plans   p ON p.inspection_id = i.id AND p.facility_id = ' . $fac . '
+                LEFT   JOIN deadline_notices n ON n.inspection_id = i.id AND n.facility_id = ' . $fac . '
                 LEFT   JOIN users u ON u.id = i.inspector_user_id
                 LEFT   JOIN account_users au ON au.account_id = i.account_id AND au.user_id = i.inspector_user_id
                 WHERE  ' . ($accountId === null ? '1 = 1' : 'i.account_id = :acct') . '
@@ -228,8 +235,14 @@ final class Deadlines
             return null;
         }
 
+        // The primary prevádzka keeps the key every úkon has always had; the
+        // other prevádzky of a book entry get their own.
+        $facilityId = (int) $r['facility_id'];
+        $primary = isset($r['primary_facility_id']) ? (int) $r['primary_facility_id'] : $facilityId;
         return array_merge($base, [
-            'key'                => 'kontrola-' . (int) $r['id'],
+            'key'                => $facilityId === $primary
+                ? 'kontrola-' . (int) $r['id']
+                : 'kontrola-' . (int) $r['id'] . '-' . $facilityId,
             'inspection_id'      => (int) $r['id'],
             'training_id'        => null,
             'type'               => (string) $r['type'],

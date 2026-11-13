@@ -15,6 +15,9 @@ use Firol\Db;
  *   last          the setup of the latest finished prehliadka („Ako naposledy"),
  *                 derived from its `details`; null on the first visit, when
  *                 nothing is preselected
+ *   last_term     the record holding the prehliadka term here (BookEntry::lastTerm):
+ *                 the last prehliadka or a newer požiarna kniha entry written as
+ *                 one; such an entry's periodicity also replaces the one in `last`
  *   open_drafts   per riadna kontrola, the unfinished draft of that type at this
  *                 prevádzka. Such a type cannot be ticked: the control the
  *                 walk-through prepares would be a second draft of the same
@@ -87,6 +90,23 @@ final class PrehliadkaContext
             ];
         }
 
+        // The record that holds the prehliadka term here — a prehliadka, or a
+        // požiarna kniha entry written as one (POapp 7. 11. 2026, K1). When such
+        // an entry is newer than the last prehliadka, its periodicity for this
+        // prevádzka is what the next prehliadka starts from; the scope, routine
+        // and defects stay the prehliadka's.
+        $lastTerm = BookEntry::lastTerm($accountId, $facilityId);
+        if ($lastSetup !== null && $lastTerm !== null && $lastTerm['kind'] === 'kniha'
+            && [(string) $lastTerm['executed_on'], $lastTerm['inspection_id']] > [(string) $lastSetup['executed_on'], $lastSetup['inspection_id']]) {
+            $lastSetup['periodicity_value'] = $lastTerm['periodicity_value'];
+            $lastSetup['periodicity_unit'] = $lastTerm['periodicity_unit'];
+            $months = BookEntry::prefillMonths($lastTerm);
+            if ($months !== null) {
+                $lastSetup['lehota_zakon'] = $months;
+            }
+            $lastSetup['lehota_vlastna'] = null;
+        }
+
         $facStmt = $pdo->prepare(
             'SELECT f.vchody, f.entrances, c.client_type
              FROM facilities f
@@ -120,6 +140,7 @@ final class PrehliadkaContext
         return [
             'draft_id'            => $draftId !== false ? (int) $draftId : null,
             'last'                => $lastSetup,
+            'last_term'           => $lastTerm,
             'open_drafts'         => $openDrafts === [] ? new \stdClass() : $openDrafts,
             'is_bytovy_dom'       => $isBytovyDom,
             'vchody'              => $isBytovyDom ? ($facRow['vchody'] ?? null) : null,

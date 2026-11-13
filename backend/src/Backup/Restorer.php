@@ -95,6 +95,8 @@ final class Restorer
     private array $prehliadkaInspectionIds = [];
     /** @var list<int> new ids of the concepts (plan 8b) this run inserted — each points at its prehliadka */
     private array $conceptInspectionIds = [];
+    /** @var list<int> new ids of the new-format požiarna kniha entries this run inserted */
+    private array $bookInspectionIds = [];
     /** @var array<int, int> old training id → new */
     private array $trainingMap = [];
     /** @var array<int, int> old own číselník item id → new (shipped ids are the same everywhere) */
@@ -209,6 +211,8 @@ final class Restorer
             $this->relinkPrehliadkaDevices();
             $this->relinkPrehliadkaPrevious();
             $this->restoreTrainings($this->list($manifest, 'trainings'));
+            // After the trainings: a book entry names attached trainings too.
+            $this->relinkBookEntries();
             // Chapter 21 — before the documents, which map výdajky onto it.
             $this->restoreStock(is_array($manifest['stock'] ?? null) ? $manifest['stock'] : []);
             $this->restoreDocuments($this->list($manifest, 'documents'));
@@ -399,6 +403,11 @@ final class Restorer
                  file_path, thumb_path, byte_size, width, height, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
+        $insertCoverage = $this->pdo->prepare(
+            'INSERT IGNORE INTO inspection_facilities
+                (account_id, inspection_id, facility_id, periodicity_value, periodicity_unit)
+             VALUES (?, ?, ?, ?, ?)'
+        );
 
         foreach ($inspections as $inspection) {
             $oldId      = (int) ($inspection['id'] ?? 0);
@@ -476,17 +485,40 @@ final class Restorer
                 $this->conceptInspectionIds[] = $inspectionId;
             }
 
+            // POapp 7. 11. 2026 — a new-format book entry: its prevádzky (onto
+            // the restored ones; one that did not come back is left out), and
+            // its defects are relinked like a prehliadka's.
+            $isBook = $type === 'poziarna_kniha' && is_array($inspection['facilities'] ?? null);
+            if ($isBook) {
+                $this->bookInspectionIds[] = $inspectionId;
+                foreach ($this->list($inspection, 'facilities') as $cov) {
+                    $newFacility = $this->facilityMap[(int) ($cov['facility_id'] ?? 0)] ?? null;
+                    if ($newFacility === null) {
+                        $this->warnings[] = "Prevádzka zápisu #$oldId sa nedala priradiť — vynechaná.";
+                        continue;
+                    }
+                    [$covValue, $covUnit] = $this->periodicity($cov);
+                    $insertCoverage->execute([$this->accountId, $inspectionId, $newFacility, $covValue, $covUnit]);
+                }
+            }
+
             foreach ($this->list($inspection, 'items') as $item) {
+                $itemFields = $this->remapCatalogId($item['fields'] ?? null);
+                // A book defect names its prevádzka; never left without one —
+                // the entry's own prevádzka when its old one did not come back.
+                if ($isBook && is_array($itemFields) && isset($itemFields['facility_id'])) {
+                    $itemFields['facility_id'] = $this->facilityMap[(int) $itemFields['facility_id']] ?? $facilityId;
+                }
                 $insertItem->execute([
                     $inspectionId,
                     (int) ($item['position'] ?? 0),
-                    (string) json_encode($this->remapCatalogId($item['fields'] ?? null) ?? new \stdClass(), JSON_UNESCAPED_UNICODE),
+                    (string) json_encode($itemFields ?? new \stdClass(), JSON_UNESCAPED_UNICODE),
                     $this->createdAt($item),
                 ]);
                 $itemId = (int) $this->pdo->lastInsertId();
                 $this->restored['items']++;
                 $this->itemMap[(int) ($item['id'] ?? 0)] = $itemId;
-                if ($type === 'preventivna_prehliadka') {
+                if ($type === 'preventivna_prehliadka' || $isBook) {
                     $this->prehliadkaItemIds[] = $itemId;
                 }
 
@@ -693,6 +725,60 @@ final class Restorer
     }
 
     /**
+     * A new-format book entry names records by id in its header: the attached
+     * ones (`zaznamy`), the paragraphs it printed and the prevádzky it printed
+     * (`issued`). They are pointed at the restored rows once every inspection
+     * and training is in; a reference that did not come back is dropped.
+     */
+    private function relinkBookEntries(): void
+    {
+        if ($this->bookInspectionIds === []) {
+            return;
+        }
+        $map = fn (string $kind, int $old): ?int => $kind === 'training'
+            ? ($this->trainingMap[$old] ?? null)
+            : ($this->inspectionMap[$old] ?? null);
+        $select = $this->pdo->prepare('SELECT details FROM inspections WHERE id = ?');
+        $update = $this->pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?');
+        foreach ($this->bookInspectionIds as $inspId) {
+            $select->execute([$inspId]);
+            $details = json_decode((string) $select->fetchColumn(), true);
+            if (!is_array($details)) {
+                continue;
+            }
+            $zaznamy = [];
+            foreach ((array) ($details['zaznamy'] ?? []) as $z) {
+                $new = is_array($z) ? $map((string) ($z['kind'] ?? ''), (int) ($z['id'] ?? 0)) : null;
+                if ($new !== null) {
+                    $zaznamy[] = ['id' => $new] + $z;
+                }
+            }
+            $details['zaznamy'] = $zaznamy;
+            if (is_array($details['issued'] ?? null)) {
+                $paragraphs = [];
+                foreach ((array) ($details['issued']['paragraphs'] ?? []) as $p) {
+                    if (!is_array($p)) {
+                        continue;
+                    }
+                    // The printed text stays as printed; only the link moves.
+                    $p['id'] = $map((string) ($p['kind'] ?? ''), (int) ($p['id'] ?? 0));
+                    $paragraphs[] = $p;
+                }
+                $details['issued']['paragraphs'] = $paragraphs;
+                $facilities = [];
+                foreach ((array) ($details['issued']['facilities'] ?? []) as $f) {
+                    if (is_array($f)) {
+                        $f['id'] = $this->facilityMap[(int) ($f['id'] ?? 0)] ?? null;
+                        $facilities[] = $f;
+                    }
+                }
+                $details['issued']['facilities'] = $facilities;
+            }
+            $update->execute([json_encode($details, JSON_UNESCAPED_UNICODE), $inspId]);
+        }
+    }
+
+    /**
      * Second pass for `source_inspection_id`: a follow-up draft can reference an
      * inspection that had not been inserted yet when the draft was written, so
      * the link is only resolvable once every id is known.
@@ -730,9 +816,10 @@ final class Restorer
     private function restoreDeadlineNotices(array $notices): void
     {
         $insert = $this->pdo->prepare(
-            'INSERT IGNORE INTO deadline_notices (account_id, inspection_id, training_id, notice_date, recipient, sent_at)
-             VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT IGNORE INTO deadline_notices (account_id, inspection_id, facility_id, training_id, notice_date, recipient, sent_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
+        $ownFacility = $this->pdo->prepare('SELECT facility_id FROM inspections WHERE id = ?');
         foreach ($notices as $notice) {
             // Exactly one of the two: a notice of a training (change request 6)
             // carries `training_id`; archives written before it have none.
@@ -746,9 +833,22 @@ final class Restorer
             if (($inspectionId === null) === ($trainingId === null) || $noticeDate === null) {
                 continue;
             }
+            // An inspection's notice is per prevádzka (a book entry covers
+            // several); an archive without it means the úkon's own prevádzka.
+            $facilityId = null;
+            if ($inspectionId !== null) {
+                $facilityId = ($notice['facility_id'] ?? null) !== null
+                    ? ($this->facilityMap[(int) $notice['facility_id']] ?? null)
+                    : null;
+                if ($facilityId === null) {
+                    $ownFacility->execute([$inspectionId]);
+                    $facilityId = (int) $ownFacility->fetchColumn();
+                }
+            }
             $insert->execute([
                 $this->accountId,
                 $inspectionId,
+                $facilityId,
                 $trainingId,
                 $noticeDate,
                 mb_substr((string) ($this->str($notice, 'recipient') ?? ''), 0, 191),

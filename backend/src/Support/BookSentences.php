@@ -8,158 +8,67 @@ use Firol\Controllers\DocumentController;
 use Firol\Pdf\ActLabels;
 
 /**
- * The sentences of a book entry (spec 9.3a, 9.3b, 9.4, 9.7).
+ * The sentences a požiarna kniha entry composes (POapp 7. 11. 2026, spec 7, 9).
  *
- * The app composes the proposed text of an entry from the date, the kind of
- * úkon, the object, the protocol number and the number of items checked, e.g.
+ * An attached record prints as one paragraph, in one of two forms:
  *
- *   Dňa 8. 7. 2026 bola vykonaná kontrola prenosných hasiacich prístrojov
- *   v objekte Výrobná hala a sklad. Protokol č. PHP-2026-013. Skontrolovaných
- *   položiek: 3.
+ *   full       „Dňa 7. 11. 2026 bola vykonaná kontrola prenosných hasiacich
+ *              prístrojov v prevádzke Výrobná hala pekárne. Skontrolovaných
+ *              5 prístrojov, z toho 3 akcieschopné, 1 odobratý na tlakovú
+ *              skúšku a 1 na opravu. Záznam č. PHP-2026-013."
+ *   reference  „Kontrola hasiacich prístrojov — viď záznam č. PHP-2026-013."
  *
- * It is only a proposal — the technician signs for what is in the book, so the
- * text is always editable before it is added. The fixed sentences (the legal
- * one and the „no defects" statement) are constants here, so the server, the
- * PDF and the screen read the same wording.
+ * and an entry written as a prehliadka prints the one fixed sentence of spec 9:
+ * „Dňa 7. 11. 2026 bola vykonaná prehliadka v prevádzke X." The technician
+ * does not rewrite any of them; what they want to add goes into their own texts.
+ *
+ * A record passed to {@see full()} is a row of {@see BookRecords}: `druh` (the
+ * úkon or training type), `date`, `number`, and either `items` (the úkon's item
+ * fields) or `attendees` (a training's head count).
  */
 final class BookSentences
 {
-    /** Spec 9.4 — never added by itself; the technician turns it on. */
-    public const LEGAL = 'Vykonaná preventívna protipožiarna prehliadka všetkých pracovísk v pôsobnosti '
-        . 'spoločnosti v zmysle zákona č. 314/2001 Z. z. v platnom znení a vyhlášky MV SR '
-        . 'č. 121/2002 Z. z. v platnom znení.';
-
-    /** Spec 9.7 — printed as the section ZISTENIA. */
-    public const NO_DEFECTS = 'V čase kontroly na kontrolovaných pracoviskách neboli zistené žiadne nedostatky';
-
-    private const FEMININE  = 'f';
-    private const NEUTER    = 'n';
-    private const MASCULINE = 'm';
-
-    /**
-     * Inspection type → [phrase, grammatical gender]. The phrases are the
-     * prototype's `KN_UKON`; rebríky and regále say „kontrola rebríkov" /
-     * „kontrola regálov" — they are BOZP, not fire protection (spec 6.6), so
-     * the prototype's „požiarnych rebríkov" does not apply. Types not listed
-     * fall back to the úkon's own name ({@see ActLabels}).
-     */
-    private const UKON = [
-        'php'                => ['kontrola prenosných hasiacich prístrojov', self::FEMININE],
-        'hydranty'           => ['kontrola hadicových zariadení', self::FEMININE],
-        'nudzove_osvetlenie' => ['kontrola núdzového osvetlenia', self::FEMININE],
-        'pu_akcieschopnost'  => ['kontrola akcieschopnosti požiarnych uzáverov', self::FEMININE],
-        'pu_udrzba'          => ['údržba požiarnych uzáverov', self::FEMININE],
-        'rebriky'            => ['kontrola rebríkov', self::FEMININE],
-        'regale'             => ['kontrola regálov', self::FEMININE],
-        'pracovisko'         => ['kontrola pracoviska', self::FEMININE],
-        'preventivna_prehliadka' => ['preventívna protipožiarna prehliadka', self::FEMININE],
-        'ts_hadic'           => ['tlaková skúška hadíc', self::FEMININE],
-        'oprava_ts_php'      => ['oprava, plnenie a tlaková skúška hasiacich prístrojov', self::FEMININE],
-        'vyradenie'          => ['vyradenie hasiacich prístrojov', self::NEUTER],
-        'kniha_bozp'         => ['kontrola stavu BOZP', self::FEMININE],
-        'osamele_pracovisko' => ['kontrola osamelých a odlúčených pracovísk', self::FEMININE],
-        'fajcenie'           => ['kontrola dodržiavania zákazu fajčenia', self::FEMININE],
-        'oopp'               => ['kontrola osobných ochranných pracovných prostriedkov', self::FEMININE],
-        'pracovne_prostriedky' => ['kontrola pracovných prostriedkov', self::FEMININE],
-        'oznacenie'          => ['kontrola bezpečnostného a zdravotného označenia', self::FEMININE],
-        'dychova_skuska'     => ['dychová skúška na alkohol', self::FEMININE],
-        'omamne_latky'       => ['kontrola omamných a psychotropných látok', self::FEMININE],
-        'skolenie_bozp'      => ['oboznámenie zamestnancov v oblasti BOZP', self::NEUTER],
-        'poziarna_kniha'     => ['zápis do požiarnej knihy', self::MASCULINE],
-    ];
-
-    /**
-     * Types whose items are things that were checked one by one, so „Skontrolovaných
-     * položiek: N" says something. A single-record úkon or a list of people has
-     * one row that is not a count of anything.
-     */
-    private const COUNTED = [
-        'php', 'hydranty', 'oprava_ts_php', 'vyradenie', 'pu_akcieschopnost', 'pu_udrzba',
-        'nudzove_osvetlenie', 'ts_hadic', 'rebriky', 'regale', 'oopp', 'pracovne_prostriedky', 'oznacenie',
-    ];
-
-    /** Trainings that read „odborná príprava" (feminine), the rest are „školenie" (neuter). */
+    /** Training types that read „odborná príprava" (feminine); the others are „školenie". */
     private const TRAINING_FEMININE = ['hliadka_oph', 'hliadka_opah'];
 
-    /** Whether an inspection type's protocol states how many items it covered. */
-    public static function isCounted(string $type): bool
+    /**
+     * @param array<string, mixed> $rec   a BookRecords row with its internal `items` / `attendees`
+     * @param string|null          $facilityName null for a training of the whole organisation
+     */
+    public static function full(array $rec, ?string $facilityName): string
     {
-        return in_array($type, self::COUNTED, true);
+        $where = $facilityName !== null && trim($facilityName) !== '' ? ' v prevádzke ' . trim($facilityName) : '';
+        $summary = self::summary($rec);
+        return 'Dňa ' . self::dateSk((string) $rec['date']) . ' ' . self::verb($rec) . $where . '.'
+            . ($summary !== '' ? ' ' . $summary : '')
+            . ' Záznam č. ' . (string) $rec['number'] . '.';
     }
 
-    /** Name of an úkon as the offer card titles it. */
-    public static function ukonTitle(string $type): string
+    /** @param array<string, mixed> $rec */
+    public static function reference(array $rec): string
     {
-        return ActLabels::for($type);
+        return self::heading($rec) . ' — viď záznam č. ' . (string) $rec['number'] . '.';
     }
 
     /**
-     * Offer text of one or several (merged) úkony of the same type and date.
+     * The fixed sentence of an entry written as a prehliadka.
      *
-     * @param list<string> $facilityNames   objects, in the order met
-     * @param list<string> $numbers         protocol numbers
-     * @param int|null     $itemCount       items of a single úkon; null for merged / uncounted
+     * @param list<string> $names the selected prevádzky
      */
-    public static function ukon(string $type, string $dateIso, array $facilityNames, array $numbers, ?int $itemCount): string
+    public static function fixed(string $dateIso, array $names): string
     {
-        [$phrase, $gender] = self::UKON[$type] ?? [self::lcfirst(ActLabels::for($type)), self::FEMININE];
-        $where = self::where($facilityNames);
-
-        if (count($numbers) > 1) {
-            $tail = ' Záznamy č. ' . implode(', ', $numbers) . '.';
-        } elseif (count($numbers) === 1) {
-            $tail = ' Protokol č. ' . $numbers[0] . '.';
-        } else {
-            $tail = '';
-        }
-        if ($itemCount !== null && $itemCount > 0 && self::isCounted($type)) {
-            $tail .= ' Skontrolovaných položiek: ' . $itemCount . '.';
-        }
-
-        return 'Dňa ' . self::dateSk($dateIso) . ' ' . self::done($gender) . ' ' . $phrase . $where . '.' . $tail;
+        $names = array_values(array_filter(array_map('trim', $names), static fn (string $n): bool => $n !== ''));
+        return 'Dňa ' . self::dateSk($dateIso) . ' bola vykonaná prehliadka '
+            . (count($names) > 1 ? 'v prevádzkach ' : 'v prevádzke ') . implode(', ', $names) . '.';
     }
 
-    /**
-     * Offer text of one or several (merged) trainings of the same type and date.
-     *
-     * @param list<string> $facilityNames
-     * @param list<string> $numbers
-     */
-    public static function training(string $type, string $dateIso, array $facilityNames, array $numbers, int $attendees): string
+    /** Title of a record — the name of its úkon or training. */
+    public static function heading(array $rec): string
     {
-        $label = self::lcfirst(DocumentController::TRAINING_TYPE_LABELS[$type] ?? $type);
-        $where = self::where($facilityNames);
-        $date = 'Dňa ' . self::dateSk($dateIso) . ' ';
-
-        if ($type === 'pokyn_zatva') {
-            $tail = $numbers !== [] ? ' Záznam č. ' . implode(', ', $numbers) . '.' : '';
-            return $date . 'bol vydaný ' . $label . $where . '.' . $tail;
-        }
-
-        $verb = in_array($type, self::TRAINING_FEMININE, true) ? 'bola vykonaná' : 'bolo vykonané';
-        $who = $attendees > 0 ? ', ' . $attendees . ' ' . self::attendees($attendees) : '';
-        if (count($numbers) > 1) {
-            $tail = ' Záznamy č. ' . implode(', ', $numbers) . '.';
-        } elseif (count($numbers) === 1) {
-            $tail = ' Záznam č. ' . $numbers[0] . '.';
-        } else {
-            $tail = '';
-        }
-        return $date . $verb . ' ' . $label . $where . $who . '.' . $tail;
-    }
-
-    /**
-     * The entry a closed preventívna prehliadka writes into a book (prototype
-     * `dokonci`): „Dňa 13. 10. 2026 bola vykonaná preventívna protipožiarna
-     * prehliadka v objekte X. Záznam č. PPP-2026-004. Zistených nedostatkov: 2."
-     * The BOZP side reads „preventívna prehliadka BOZP" and carries the number
-     * of the kniha BOZP record, which is its own record (spec 9.5a).
-     */
-    public static function prehliadka(string $book, string $dateIso, string $facilityName, string $number, int $defects): string
-    {
-        $what = $book === BookMapping::BOZP ? 'preventívna prehliadka BOZP' : 'preventívna protipožiarna prehliadka';
-        return 'Dňa ' . self::dateSk($dateIso) . ' bola vykonaná ' . $what . self::where([$facilityName]) . '.'
-            . ' Záznam č. ' . trim($number) . '. Zistených nedostatkov: ' . $defects . '.';
+        $druh = (string) $rec['druh'];
+        return ($rec['kind'] ?? 'inspection') === 'training'
+            ? (DocumentController::TRAINING_TYPE_LABELS[$druh] ?? $druh)
+            : ActLabels::for($druh);
     }
 
     /** „8. 7. 2026" of an ISO date. */
@@ -169,31 +78,212 @@ final class BookSentences
         return $ts !== false ? date('j. n. Y', $ts) : $iso;
     }
 
-    private static function done(string $gender): string
+    /** Slovak plural: one for 1, few for 2–4, many otherwise (0 included). */
+    public static function sk3(int $n, string $one, string $few, string $many): string
     {
-        return match ($gender) {
-            self::NEUTER    => 'bolo vykonané',
-            self::MASCULINE => 'bol vykonaný',
-            default         => 'bola vykonaná',
+        if ($n === 1) {
+            return $one;
+        }
+        return $n >= 2 && $n <= 4 ? $few : $many;
+    }
+
+    /**
+     * The short count shown beside a record on the screen („5 prístrojov").
+     *
+     * @param array<string, mixed> $rec
+     */
+    public static function meta(array $rec): string
+    {
+        $druh = (string) $rec['druh'];
+        if (($rec['kind'] ?? 'inspection') === 'training') {
+            if ($druh === 'pokyn_zatva') {
+                return '';
+            }
+            $n = (int) ($rec['attendees'] ?? 0);
+            return $n . ' ' . self::sk3($n, 'zamestnanec', 'zamestnanci', 'zamestnancov');
+        }
+        $items = (array) ($rec['items'] ?? []);
+        $n = count($items);
+        return match ($druh) {
+            'php', 'oprava_ts_php', 'vyradenie' => $n . ' ' . self::sk3($n, 'prístroj', 'prístroje', 'prístrojov'),
+            'hydranty'           => $n . ' ' . self::sk3($n, 'hydrant', 'hydranty', 'hydrantov'),
+            'nudzove_osvetlenie' => $n . ' ' . self::sk3($n, 'svietidlo', 'svietidlá', 'svietidiel'),
+            'pu_akcieschopnost', 'pu_udrzba' => $n . ' ' . self::sk3($n, 'uzáver', 'uzávery', 'uzáverov'),
+            'ts_hadic'           => $n . ' ' . self::sk3($n, 'hadica', 'hadice', 'hadíc'),
+            'preventivna_prehliadka' => (function () use ($items): string {
+                $d = count(PrehliadkaRecord::points($items, PrehliadkaRecord::PO));
+                return $d . ' ' . self::sk3($d, 'nedostatok', 'nedostatky', 'nedostatkov');
+            })(),
+            default => '',
         };
     }
 
-    /** ` v objekte X` / ` v objektoch X, Y`; nothing when no object is known. */
-    private static function where(array $facilityNames): string
+    /** „bola vykonaná kontrola …" — what was done, after the date. */
+    private static function verb(array $rec): string
     {
-        $names = array_values(array_unique(array_filter(array_map('trim', $facilityNames), static fn (string $n): bool => $n !== '')));
-        if ($names === []) {
-            return '';
+        $druh = (string) $rec['druh'];
+        if (($rec['kind'] ?? 'inspection') === 'training') {
+            $label = self::lcfirst(DocumentController::TRAINING_TYPE_LABELS[$druh] ?? $druh);
+            if ($druh === 'pokyn_zatva') {
+                return 'bol vydaný ' . $label;
+            }
+            return (in_array($druh, self::TRAINING_FEMININE, true) ? 'bola vykonaná ' : 'bolo vykonané ') . $label;
         }
-        return (count($names) === 1 ? ' v objekte ' : ' v objektoch ') . implode(', ', $names);
+        return match ($druh) {
+            'php'                    => 'bola vykonaná kontrola prenosných hasiacich prístrojov',
+            'hydranty'               => 'bola vykonaná kontrola požiarnych hydrantov',
+            'nudzove_osvetlenie'     => 'bola vykonaná kontrola núdzového osvetlenia',
+            'pu_akcieschopnost'      => 'bola vykonaná kontrola akcieschopnosti požiarnych uzáverov',
+            'pu_udrzba'              => 'bola vykonaná prevádzková údržba požiarnych uzáverov',
+            'ts_hadic'               => 'bola vykonaná tlaková skúška hadíc',
+            'oprava_ts_php'          => 'bola vykonaná oprava, plnenie a tlaková skúška hasiacich prístrojov',
+            'vyradenie'              => 'bolo vykonané vyradenie hasiacich prístrojov',
+            'preventivna_prehliadka' => 'bola vykonaná preventívna protipožiarna prehliadka',
+            default                  => 'bola vykonaná ' . self::lcfirst(ActLabels::for($druh)),
+        };
     }
 
-    private static function attendees(int $n): string
+    /** The second sentence of a full paragraph; '' when the record has nothing to count. */
+    private static function summary(array $rec): string
+    {
+        $druh = (string) $rec['druh'];
+        if (($rec['kind'] ?? 'inspection') === 'training') {
+            $n = (int) ($rec['attendees'] ?? 0);
+            if ($druh === 'pokyn_zatva' || $n <= 0) {
+                return '';
+            }
+            $who = $n . ' ' . self::sk3($n, 'zamestnanec', 'zamestnanci', 'zamestnancov');
+            $verb = self::sk3($n, 'zúčastnil', 'zúčastnili', 'zúčastnilo');
+            return in_array($druh, self::TRAINING_FEMININE, true)
+                ? 'Odbornej prípravy sa ' . $verb . ' ' . $who . '.'
+                : 'Školenia sa ' . $verb . ' ' . $who . '.';
+        }
+
+        $items = array_values(array_map(static fn ($f): array => is_array($f) ? $f : [], (array) ($rec['items'] ?? [])));
+        $n = count($items);
+        if ($n === 0 && $druh !== 'preventivna_prehliadka') {
+            return '';
+        }
+        $failed = count(array_filter($items, static fn (array $f): bool => ($f['result'] ?? null) === 'nevyhovuje'));
+
+        return match ($druh) {
+            'php'                => self::phpSummary($items),
+            'hydranty'           => self::sk3($n, 'Skontrolovaný', 'Skontrolované', 'Skontrolovaných') . ' ' . $n . ' '
+                . self::sk3($n, 'hydrant', 'hydranty', 'hydrantov') . self::hydrantType($items)
+                . self::passTail($n, $failed, ['vyhovel', 'nevyhovel'], ['nevyhovel', 'nevyhoveli', 'nevyhovelo']),
+            'nudzove_osvetlenie' => self::sk3($n, 'Skontrolované', 'Skontrolované', 'Skontrolovaných') . ' ' . $n . ' '
+                . self::sk3($n, 'svietidlo', 'svietidlá', 'svietidiel')
+                . self::passTail($n, $failed, ['vyhovelo', 'nevyhovelo'], ['nevyhovelo', 'nevyhoveli', 'nevyhovelo']),
+            'pu_akcieschopnost'  => self::sk3($n, 'Skontrolovaný', 'Skontrolované', 'Skontrolovaných') . ' ' . $n . ' '
+                . self::sk3($n, 'požiarny uzáver', 'požiarne uzávery', 'požiarnych uzáverov')
+                . self::passTail($n, $failed, ['vyhovel', 'nevyhovel'], ['nevyhovel', 'nevyhoveli', 'nevyhovelo']),
+            'pu_udrzba'          => ($n === 1 ? 'Údržba vykonaná na 1 požiarnom uzávere' : 'Údržba vykonaná na ' . $n . ' požiarnych uzáveroch')
+                . ($failed === 0 ? '.' : ($n === 1 ? ', nevyhovel.' : ', z toho ' . $failed . ' ' . self::sk3($failed, 'nevyhovel', 'nevyhoveli', 'nevyhovelo') . '.')),
+            'ts_hadic'           => self::sk3($n, 'Odskúšaná', 'Odskúšané', 'Odskúšaných') . ' ' . $n . ' '
+                . self::sk3($n, 'hadica', 'hadice', 'hadíc')
+                . self::passTail($n, $failed, ['vyhovela', 'nevyhovela'], ['nevyhovela', 'nevyhoveli', 'nevyhovelo']),
+            'oprava_ts_php'      => 'Spolu ' . $n . ' ' . self::sk3($n, 'prístroj', 'prístroje', 'prístrojov') . '.',
+            'vyradenie'          => self::sk3($n, 'Vyradený', 'Vyradené', 'Vyradených') . ' ' . $n . ' '
+                . self::sk3($n, 'prístroj', 'prístroje', 'prístrojov') . '.',
+            'preventivna_prehliadka' => self::prehliadkaSummary($items),
+            default              => '',
+        };
+    }
+
+    /** @param list<array<string, mixed>> $items */
+    private static function phpSummary(array $items): string
+    {
+        $n = count($items);
+        $count = ['A' => 0, 'TS' => 0, 'O' => 0, 'V' => 0];
+        foreach ($items as $f) {
+            $st = (string) ($f['status'] ?? '');
+            if (isset($count[$st])) {
+                $count[$st]++;
+            }
+        }
+        $head = self::sk3($n, 'Skontrolovaný', 'Skontrolované', 'Skontrolovaných') . ' ' . $n . ' '
+            . self::sk3($n, 'prístroj', 'prístroje', 'prístrojov');
+        if ($count['A'] === $n) {
+            return $head . ($n === 1 ? ', akcieschopný.' : ', všetky akcieschopné.');
+        }
+        if ($n === 1) {
+            // One device needs no „z toho 1" — as passTail() does for the others.
+            $state = match (true) {
+                $count['TS'] === 1 => 'odobratý na tlakovú skúšku',
+                $count['O'] === 1  => 'odobratý na opravu',
+                $count['V'] === 1  => 'vyradený',
+                default            => '',
+            };
+            return $head . ($state !== '' ? ', ' . $state : '') . '.';
+        }
+        $parts = [];
+        if ($count['A'] > 0) {
+            $parts[] = $count['A'] . ' ' . self::sk3($count['A'], 'akcieschopný', 'akcieschopné', 'akcieschopných');
+        }
+        if ($count['TS'] > 0) {
+            $parts[] = $count['TS'] . ' ' . self::sk3($count['TS'], 'odobratý', 'odobraté', 'odobratých') . ' na tlakovú skúšku';
+        }
+        if ($count['O'] > 0) {
+            $parts[] = $count['O'] . ' '
+                . ($count['TS'] > 0 ? '' : self::sk3($count['O'], 'odobratý', 'odobraté', 'odobratých') . ' ')
+                . 'na opravu';
+        }
+        if ($count['V'] > 0) {
+            $parts[] = $count['V'] . ' ' . self::sk3($count['V'], 'vyradený', 'vyradené', 'vyradených');
+        }
+        if ($parts === []) {
+            return $head . '.';
+        }
+        $last = array_pop($parts);
+        return $head . ', z toho ' . ($parts !== [] ? implode(', ', $parts) . ' a ' : '') . $last . '.';
+    }
+
+    /**
+     * @param list<array<string, mixed>> $items
+     */
+    private static function prehliadkaSummary(array $items): string
+    {
+        $points = PrehliadkaRecord::points($items, PrehliadkaRecord::PO);
+        $d = count($points);
+        if ($d === 0) {
+            return 'Neboli zistené žiadne nedostatky.';
+        }
+        $dates = array_values(array_unique(array_map(static fn (array $p): ?string => $p['deadline_date'] ?? null, $points)));
+        $same = count($dates) === 1 && is_string($dates[0]) ? ' s termínom odstránenia do ' . self::dateSk($dates[0]) : '';
+        return self::sk3($d, 'Zistený', 'Zistené', 'Zistených') . ' ' . $d . ' '
+            . self::sk3($d, 'nedostatok', 'nedostatky', 'nedostatkov') . $same . '.';
+    }
+
+    /** „ DN25" when every hydrant has the same type, else nothing. */
+    private static function hydrantType(array $items): string
+    {
+        $types = [];
+        foreach ($items as $f) {
+            $t = (string) ($f['type'] ?? '');
+            if ($t === 'other') {
+                $t = trim((string) ($f['type_other'] ?? ''));
+            }
+            $types[$t] = true;
+        }
+        $keys = array_keys($types);
+        return count($keys) === 1 && $keys[0] !== '' ? ' ' . $keys[0] : '';
+    }
+
+    /**
+     * „, vyhovel." / „, všetky vyhoveli." / „, z toho 2 nevyhoveli."
+     *
+     * @param array{0: string, 1: string} $single  pass / fail word for one item
+     * @param array{0: string, 1: string, 2: string} $failedWords fail word by count
+     */
+    private static function passTail(int $n, int $failed, array $single, array $failedWords): string
     {
         if ($n === 1) {
-            return 'účastník';
+            return ', ' . ($failed === 0 ? $single[0] : $single[1]) . '.';
         }
-        return $n >= 2 && $n <= 4 ? 'účastníci' : 'účastníkov';
+        if ($failed === 0) {
+            return ', všetky vyhoveli.';
+        }
+        return ', z toho ' . $failed . ' ' . self::sk3($failed, ...$failedWords) . '.';
     }
 
     /** Lower-cases the first letter only, so „OPP" in the middle of a label survives. */

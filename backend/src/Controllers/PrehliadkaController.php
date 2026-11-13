@@ -69,7 +69,7 @@ final class PrehliadkaController
         $accountId = Tenant::currentAccountId();
         $company = self::company($accountId, (int) $params['id']);
 
-        Response::json(PrehliadkaActivities::forCompany($accountId, $company['id']));
+        Response::json(PrehliadkaActivities::forCompany($accountId, $company['id'], $company['client_type']));
     }
 
     public static function addActivity(Request $req, array $params): void

@@ -156,6 +156,8 @@ $router->delete('/api/companies/{id}/external-terms/{term_id}',    [\Firol\Contr
 $router->get('/api/companies/{id}/sendable-documents', [DocumentSendController::class, 'available']);
 $router->get('/api/companies/{id}/sends',              [DocumentSendController::class, 'index']);
 $router->post('/api/companies/{id}/sends',             [DocumentSendController::class, 'store']);
+// POapp 7. 11. 2026 — what a požiarna kniha entry offers: prevádzky, last terms, records to attach.
+$router->get('/api/companies/{id}/kniha',              [\Firol\Controllers\KnihaController::class, 'context']);
 
 $router->get('/api/facilities/{id}/devices',        [FacilityController::class, 'devices']);
 // POapp 26. 10. 2026, phase 7a — step 1 of a preventívna prehliadka.
@@ -170,6 +172,12 @@ $router->delete('/api/companies/{id}/activities/{activity_id}', [\Firol\Controll
 $router->post('/api/inspections/{id}/prehliadka-close',  [\Firol\Controllers\PrehliadkaController::class, 'close']);
 $router->get('/api/inspections/{id}/prehliadka-result',  [\Firol\Controllers\PrehliadkaController::class, 'result']);
 $router->post('/api/inspections/{id}/confirm-concept',   [\Firol\Controllers\PrehliadkaController::class, 'confirmConcept']);
+// Spec 12.2 — the checklist after a closed prehliadka: tick, review, issue.
+$router->get('/api/inspections/{id}/prehliadka-checklist',            [\Firol\Controllers\PrehliadkaChecklistController::class, 'index']);
+$router->post('/api/inspections/{id}/prehliadka-checklist/prepare',   [\Firol\Controllers\PrehliadkaChecklistController::class, 'prepare']);
+$router->post('/api/inspections/{id}/prehliadka-checklist/create',    [\Firol\Controllers\PrehliadkaChecklistController::class, 'createManual']);
+$router->get('/api/inspections/{id}/prehliadka-checklist/review',     [\Firol\Controllers\PrehliadkaChecklistController::class, 'review']);
+$router->post('/api/inspections/{id}/prehliadka-checklist/generate',  [\Firol\Controllers\PrehliadkaChecklistController::class, 'generate']);
 $router->get('/api/facilities/{id}',                [FacilityController::class, 'show']);
 $router->patch('/api/facilities/{id}',              [FacilityController::class, 'update']);
 $router->post('/api/facilities/{id}/archive',       [FacilityController::class, 'archive']);

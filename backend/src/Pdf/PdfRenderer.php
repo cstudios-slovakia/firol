@@ -90,7 +90,9 @@ final class PdfRenderer
             'php'                => 'php.php',
             'hydranty'           => 'hydranty.php',
             'oprava_ts_php'      => 'oprava_ts_php.php',
-            'poziarna_kniha'     => 'poziarna_kniha.php',
+            // POapp 7. 11. 2026 — a new-format entry carries `kniha`; old
+            // entries keep their own template.
+            'poziarna_kniha'     => isset($payload['kniha']) ? 'poziarna_kniha_zapis.php' : 'poziarna_kniha.php',
             // POapp 26. 10. 2026 — the PO record of a preventívna prehliadka.
             'preventivna_prehliadka' => 'preventivna_prehliadka.php',
             'pu_akcieschopnost'  => 'pu_akcieschopnost.php',

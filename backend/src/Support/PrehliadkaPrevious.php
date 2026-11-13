@@ -18,6 +18,15 @@ use Firol\Db;
  * Source: the latest FINALIZED preventívna prehliadka here (both scopes). When
  * there is none but an old `poziarna_kniha` record exists, its defects are
  * offered instead — text and deadline only, which is all that record holds.
+ *
+ * Next to them, the open defects of every finalized new-format požiarna kniha
+ * entry (either spôsob, {@see BookEntry}) covering this prevádzka that is newer
+ * than that prehliadka — all of them when there is none — written for this
+ * prevádzka (POapp 7. 11. 2026, O3). A book entry replaces no defects: only a
+ * prehliadka makes the technician decide on each of them, so they are offered
+ * until a newer prehliadka has done so. Every defect row carries its own
+ * `source` (kind prehliadka | poziarna_kniha); the top-level `source` stays the
+ * prehliadka when there is one, else the newest contributing entry.
  * `source.number` is the number of the source's document (the PO record; the
  * BOZP record for a BOZP-only prehliadka; the book entry), null when none.
  * Each defect of a prehliadka carries its photos (the shape the inspection
@@ -36,22 +45,74 @@ final class PrehliadkaPrevious
      */
     public static function forFacility(int $accountId, int $facilityId, ?int $excludeInspectionId = null): array
     {
-        $source = self::latest($accountId, $facilityId, PrehliadkaDetails::TYPE, $excludeInspectionId);
-        if ($source !== null) {
-            return [
-                'source'  => self::sourceInfo('prehliadka', $source),
-                'defects' => self::fromPrehliadka($source),
-            ];
+        $source = null;
+        $defects = [];
+
+        $prehliadka = self::latest($accountId, $facilityId, PrehliadkaDetails::TYPE, $excludeInspectionId);
+        if ($prehliadka !== null) {
+            $source = self::sourceInfo('prehliadka', $prehliadka);
+            $defects = self::withSource(self::fromPrehliadka($prehliadka), $source);
         }
 
-        $legacy = self::latest($accountId, $facilityId, 'poziarna_kniha', null);
-        if ($legacy !== null) {
-            $defects = self::fromLegacy($legacy);
-            if ($defects !== []) {
-                return ['source' => self::sourceInfo('poziarna_kniha', $legacy), 'defects' => $defects];
+        foreach (BookEntry::openDefectEntries($accountId, $facilityId, $prehliadka['executed_on'] ?? null, $prehliadka['id'] ?? null) as $entry) {
+            $info = self::sourceInfo('poziarna_kniha', $entry);
+            $rows = self::fromPrehliadka($entry, $facilityId);
+            if ($rows !== []) {
+                array_push($defects, ...self::withSource($rows, $info));
+                if ($prehliadka === null) {
+                    $source = $info;
+                }
             }
         }
-        return ['source' => null, 'defects' => []];
+
+        if ($prehliadka === null) {
+            $legacy = self::latestLegacy($accountId, $facilityId);
+            if ($legacy !== null) {
+                $info = self::sourceInfo('poziarna_kniha', $legacy);
+                $rows = self::fromLegacy($legacy);
+                if ($rows !== []) {
+                    array_push($defects, ...self::withSource($rows, $info));
+                    $source ??= $info;
+                }
+            }
+        }
+        return ['source' => $source, 'defects' => $defects];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @param array{kind: string, inspection_id: int, executed_on: ?string, number: ?string} $source
+     * @return list<array<string, mixed>>
+     */
+    private static function withSource(array $rows, array $source): array
+    {
+        return array_map(static fn (array $r): array => $r + ['source' => $source], $rows);
+    }
+
+    /**
+     * The latest finalized old-format book entry here (no `format` in its header).
+     *
+     * @return array{id: int, executed_on: ?string}|null
+     */
+    private static function latestLegacy(int $accountId, int $facilityId): ?array
+    {
+        $stmt = Db::pdo()->prepare(
+            "SELECT id, executed_on FROM inspections
+             WHERE  account_id = ? AND facility_id = ? AND type = 'poziarna_kniha'
+               AND  status = 'finalized' AND archived_at IS NULL
+               AND  (details IS NULL OR JSON_VALUE(details, '$.format') IS NULL)
+             ORDER  BY COALESCE(executed_on, '1000-01-01') DESC, id DESC
+             LIMIT  1"
+        );
+        $stmt->execute([$accountId, $facilityId]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            return null;
+        }
+        return [
+            'id'          => (int) $row['id'],
+            'executed_on' => $row['executed_on'] !== null ? (string) $row['executed_on'] : null,
+        ];
     }
 
     /**
@@ -122,10 +183,13 @@ final class PrehliadkaPrevious
     }
 
     /**
+     * The open defects of a prehliadka — or of a new-format book entry, then
+     * only those written for `$facilityId` (the same row shape).
+     *
      * @param array{id: int, executed_on: ?string} $source
      * @return list<array<string, mixed>>
      */
-    private static function fromPrehliadka(array $source): array
+    private static function fromPrehliadka(array $source, ?int $facilityId = null): array
     {
         $stmt = Db::pdo()->prepare(
             'SELECT id, fields FROM inspection_items WHERE inspection_id = ? ORDER BY position ASC, id ASC'
@@ -141,6 +205,9 @@ final class PrehliadkaPrevious
             }
             // Removed, or its reason ceased: it stays in that record, it is not offered again.
             if (!PrehliadkaDefects::isOpen($f)) {
+                continue;
+            }
+            if ($facilityId !== null && (int) ($f['facility_id'] ?? 0) !== $facilityId) {
                 continue;
             }
             $where = is_array($f['where'] ?? null) ? $f['where'] : [];
