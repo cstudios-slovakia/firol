@@ -10,6 +10,7 @@ import {
   defectPath,
   deviceLine,
   effectiveDeadline,
+  isClosedCarry,
   parseDefect,
   parseDetails,
   prehliadkaResultPath,
@@ -29,7 +30,6 @@ import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { DefectScopeBadge, StepBars } from '@/components/prehliadka/ui';
 import { PreviousDefectsSection } from '@/components/prehliadka/PreviousDefects';
-import { useDetailsSaver } from '@/pages/prehliadka/useDetailsSaver';
 
 type Row = { item: InspectionItem; defect: DefectFields };
 
@@ -72,9 +72,6 @@ export function PrehliadkaWalkPage() {
     void load();
   }, [load]);
 
-  // The answers about the previous defects live in `details`; the saver keeps the latest of them.
-  const saver = useDetailsSaver(id, data ? parseDetails(data.inspection.details) : null);
-
   const rows = useMemo<Row[]>(
     () =>
       (data?.items ?? []).flatMap((item) => {
@@ -83,6 +80,7 @@ export function PrehliadkaWalkPage() {
       }),
     [data],
   );
+  const previousRows = useMemo(() => rows.map((r) => ({ itemId: r.item.id, defect: r.defect })), [rows]);
 
   if (error) {
     return (
@@ -99,27 +97,30 @@ export function PrehliadkaWalkPage() {
 
   const { inspection: i } = data;
   const nouns = facilityNouns(i.company_client_type);
-  const details = saver.details ?? parseDetails(i.details);
+  const details = parseDetails(i.details);
+  // A carried-over defect answered odstránený / dôvod zanikol is shown in the
+  // list of the previous defects only, as it prints only there.
+  const listed = rows.filter((r) => !isClosedCarry(r.defect));
   const draft = i.status === 'draft';
   const canEdit = draft && !isReadOnly;
   const executedOn = i.executed_on;
   const facilityHref = `/facilities/${i.facility_id}`;
 
   // Grouped by entrance only when at least one defect names one.
-  const anyEntrance = rows.some((r) => r.defect.where.entrance);
+  const anyEntrance = listed.some((r) => r.defect.where.entrance);
   const groups: { key: string; title: string | null; rows: Row[] }[] = [];
   if (anyEntrance) {
     const byEntrance = new Map<string, Row[]>();
     const without: Row[] = [];
-    for (const r of rows) {
+    for (const r of listed) {
       const e = r.defect.where.entrance?.trim();
       if (!e) without.push(r);
       else byEntrance.set(e, [...(byEntrance.get(e) ?? []), r]);
     }
     for (const [e, list] of byEntrance) groups.push({ key: e, title: e, rows: list });
     if (without.length > 0) groups.push({ key: '__bez', title: 'Bez vchodu', rows: without });
-  } else if (rows.length > 0) {
-    groups.push({ key: '__all', title: null, rows });
+  } else if (listed.length > 0) {
+    groups.push({ key: '__all', title: null, rows: listed });
   }
 
   return (
@@ -148,7 +149,7 @@ export function PrehliadkaWalkPage() {
           <Warehouse className="size-3" />
           {i.facility_name}
           <span className="text-ink-300">·</span>
-          {rows.length === 0 ? 'zatiaľ nič' : nedostatkyLabel(rows.length)}
+          {listed.length === 0 ? 'zatiaľ nič' : nedostatkyLabel(listed.length)}
         </p>
         <StepBars step={2} />
       </header>
@@ -204,18 +205,13 @@ export function PrehliadkaWalkPage() {
         <PreviousDefectsSection
           inspectionId={id}
           facilityId={i.facility_id}
-          executedOn={executedOn}
           details={details}
-          onChangeDetails={saver.update}
-          carried={rows.map((r) => ({ itemId: r.item.id, persistsKey: r.defect.persists_from?.key ?? null }))}
-          onItemsChanged={async () => {
-            await load();
-          }}
+          rows={previousRows}
           canEdit={canEdit}
         />
       )}
 
-      {rows.length === 0 ? (
+      {listed.length === 0 ? (
         <p className="animate-fade-in rounded-2xl border border-dashed border-ink-200 bg-white px-4 py-5 text-sm text-ink-500">
           Zatiaľ nič. Čo nezapíšeš, do záznamu nejde — záznam vypisuje len to, čo si našiel.
         </p>
@@ -264,10 +260,7 @@ export function PrehliadkaWalkPage() {
             id="pp-continue"
             className="flex-1"
             rightIcon={<ChevronRight className="size-4" />}
-            onClick={async () => {
-              await saver.flush();
-              navigate(prehliadkaTermsPath(id));
-            }}
+            onClick={() => navigate(prehliadkaTermsPath(id))}
           >
             Pokračovať
           </Button>
@@ -305,6 +298,8 @@ function DefectCard({
             </span>
           )}
           {defect.persists_from && <Badge tone="bad">Pretrváva</Badge>}
+          {!defect.persists_from && defect.status === 'odstraneny' && <Badge tone="ok">Odstránený na mieste</Badge>}
+          {!defect.persists_from && defect.status === 'zanik' && <Badge>Dôvod zanikol</Badge>}
           {devices && (
             <span className="max-w-full truncate rounded-full bg-ink-100 px-2 py-0.5 text-xs font-medium text-ink-600">
               {devices}
@@ -313,7 +308,9 @@ function DefectCard({
         </div>
         <p className="mt-1.5 text-sm font-semibold text-ink-900">{defect.title}</p>
         <p className="mt-0.5 text-xs text-ink-500">
-          {defect.where.text} · termín {deadline ? `do ${formatDateSk(deadline)}` : 'bezodkladne'}
+          {defect.status === 'odstraneny' || defect.status === 'zanik'
+            ? defect.where.text
+            : `${defect.where.text} · termín ${deadline ? `do ${formatDateSk(deadline)}` : 'bezodkladne'}`}
         </p>
       </div>
       {clickable && <ChevronRight className="mt-1 size-4 shrink-0 text-ink-300" />}

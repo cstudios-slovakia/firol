@@ -19,8 +19,11 @@ import { usePendingMutations } from '@/lib/usePendingMutations';
 import {
   ROUTINE_LABELS,
   effectiveDeadline,
+  isClosedCarry,
+  isOpenDefect,
   parseDefect,
   parseDetails,
+  previousAnswers,
   prehliadkaResultPath,
   prehliadkaTermsPath,
   scopeApplies,
@@ -153,10 +156,17 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saver.details]);
 
-  const defects = useMemo(
-    () => items.flatMap((item) => parseDefect(item.fields) ?? []),
+  const rows = useMemo(
+    () =>
+      items.flatMap((item) => {
+        const defect = parseDefect(item.fields);
+        return defect ? [{ itemId: item.id, defect }] : [];
+      }),
     [items],
   );
+  // The points of the record: a carried-over defect answered odstránený / dôvod
+  // zanikol prints only in the table of the previous defects.
+  const defects = useMemo(() => rows.map((r) => r.defect).filter((d) => !isClosedCarry(d)), [rows]);
 
   // ── Súhrn ────────────────────────────────────────────────────────────────
   // The record prints one point per „Uložiť a ďalšie zariadenie" group, so the summary counts the same.
@@ -168,17 +178,19 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
   const previousCounts = useMemo(() => {
     const counts: Record<PreviousStatus | 'waiting', number> = { ok: 0, trva: 0, zanik: 0, waiting: 0 };
     const applicable = (loaded.previous?.defects ?? []).filter((d) => scopeApplies(d.scope, details.scope));
+    // The carried-over rows are the answers; old `details.previous` entries count for drafts begun before.
+    const answers = previousAnswers(details.previous, rows);
     for (const d of applicable) {
-      const status = details.previous.find((e) => e.key === d.key)?.status ?? null;
-      // „Trvá" only counts while the defect carried over exists.
-      const carried = defects.some((x) => x.persists_from?.key === d.key);
-      const effective = status === 'trva' && !carried ? null : status;
-      counts[effective ?? 'waiting'] += 1;
+      counts[answers.get(d.key)?.status ?? 'waiting'] += 1;
     }
     return { counts, total: applicable.length };
-  }, [loaded.previous, details.previous, details.scope, defects]);
+  }, [loaded.previous, details.previous, details.scope, rows]);
 
-  const nearest = useMemo(() => nearestDeadline(defects, i.executed_on), [defects, i.executed_on]);
+  // Only what is still to be removed has a deadline that matters.
+  const nearest = useMemo(
+    () => nearestDeadline(defects.filter(isOpenDefect), i.executed_on),
+    [defects, i.executed_on],
+  );
 
   // ── S výsledkom prehliadky oboznámený ────────────────────────────────────
   const handed = details.handed_over;
@@ -192,6 +204,11 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
   const offeredPersons = loaded.persons;
 
   const missing: string[] = [];
+  if (previousCounts.counts.waiting > 0) {
+    missing.push(
+      `Pri nedostatkoch z minulej prehliadky zvoľ stav (${previousCounts.counts.waiting}) — na obchôdzke otvor každý, ktorý čaká na overenie.`,
+    );
+  }
   if (!handed?.name?.trim()) missing.push('Doplň, kto bol s výsledkom prehliadky oboznámený.');
 
   async function close() {

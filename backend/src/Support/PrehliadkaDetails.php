@@ -24,7 +24,12 @@ namespace Firol\Support;
  *                                     what became of each defect of the last
  *                                     prehliadka (spec 6.5). `trva` is only
  *                                     real while a defect with
- *                                     `persists_from.key` = the entry's key exists
+ *                                     `persists_from.key` = the entry's key exists.
+ *                                     Since spec 12.1 the app no longer writes
+ *                                     it — every answer is a defect row with
+ *                                     `persists_from` and a `status` — but it is
+ *                                     kept, validated and read for drafts begun
+ *                                     before ({@see PrehliadkaDefects::answers()})
  *     term_overrides   map<key, Y-m-d> a hand-written date over an automatic
  *                                     term (spec 6.6, Q5: print and book only)
  *     present          list<{name, role}>   who was there (§ 14 ods. 3)

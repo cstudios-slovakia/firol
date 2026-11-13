@@ -261,6 +261,12 @@ final class PrehliadkaConcepts
         $out = [];
         foreach ($items as $item) {
             $f = (array) ($item['fields'] ?? []);
+            // Only a defect still open marks its device as failing: one removed on
+            // the spot, or a carried-over one answered odstránený / dôvod zanikol
+            // (spec 12.1), leaves the device as it is.
+            if (!PrehliadkaDefects::isOpen($f)) {
+                continue;
+            }
             $text = self::defectText($f);
             foreach ((array) ($f['devices'] ?? []) as $d) {
                 if (!is_array($d) || ($d['type'] ?? null) !== $type) {

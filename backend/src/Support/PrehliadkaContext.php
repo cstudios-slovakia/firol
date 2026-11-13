@@ -56,13 +56,22 @@ final class PrehliadkaContext
         if ($lastRow) {
             $details = InspectionDetails::decode($lastRow['details']) ?? [];
             $scope = (array) ($details['scope'] ?? []);
-            $count = $pdo->prepare('SELECT COUNT(*) FROM inspection_items WHERE inspection_id = ?');
-            $count->execute([(int) $lastRow['id']]);
+            // A carried-over defect answered odstránený / dôvod zanikol is a row of
+            // its own but no defect of that record (spec 12.1): it is not counted.
+            $rows = $pdo->prepare('SELECT fields FROM inspection_items WHERE inspection_id = ?');
+            $rows->execute([(int) $lastRow['id']]);
+            $defects = 0;
+            foreach ($rows->fetchAll(\PDO::FETCH_COLUMN) as $raw) {
+                $fields = json_decode((string) $raw, true);
+                if (!is_array($fields) || !PrehliadkaDefects::isClosedCarry($fields)) {
+                    $defects++;
+                }
+            }
             $lastSetup = [
                 'inspection_id'     => (int) $lastRow['id'],
                 'executed_on'       => $lastRow['executed_on'] !== null ? (string) $lastRow['executed_on'] : null,
                 // „Posledná preventívna prehliadka · N nedostatkov" on the Objekt tab (plan 8b).
-                'defects'           => (int) $count->fetchColumn(),
+                'defects'           => $defects,
                 'periodicity_value' => $lastRow['periodicity_value'] !== null ? (int) $lastRow['periodicity_value'] : null,
                 'periodicity_unit'  => $lastRow['periodicity_unit'] !== null ? (string) $lastRow['periodicity_unit'] : null,
                 'scope'             => [

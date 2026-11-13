@@ -4,27 +4,33 @@ declare(strict_types=1);
 
 namespace Firol\Support;
 
+use Firol\Controllers\InspectionPhotoController;
 use Firol\Db;
 
 /**
- * „Nedostatky z minulej prehliadky" (spec 6.5, plan phase 7b): the defects of
- * the last finished prehliadka at a prevádzka, which the app puts in front of
- * the technician at the start of the walk-through. Each one ends in exactly one
- * of three states — odstránené, trvá, dôvod zanikol — and the first and the
- * last are never merged.
+ * „Nedostatky z minulej prehliadky" (spec 6.5, 12.1, plan phase 7b): the defects
+ * of the last finished prehliadka at a prevádzka that are still OPEN (state
+ * zistený or trvá, {@see PrehliadkaDefects::isOpen()}). Defects removed or whose
+ * reason ceased stay in that record and in history and are not offered again.
+ * Each offered one is opened on the defect screen and saved as a row of the new
+ * prehliadka with one of the four states.
  *
  * Source: the latest FINALIZED preventívna prehliadka here (both scopes). When
  * there is none but an old `poziarna_kniha` record exists, its defects are
  * offered instead — text and deadline only, which is all that record holds.
+ * `source.number` is the number of the source's document (the PO record; the
+ * BOZP record for a BOZP-only prehliadka; the book entry), null when none.
+ * Each defect of a prehliadka carries its photos (the shape the inspection
+ * detail gives them), so the defect screen can show them before they are copied.
  *
- * This class only reads. What the technician decided is stored by the
- * prehliadka itself in `details.previous` ({@see PrehliadkaDetails}).
+ * This class only reads. What the technician decided is a defect row of the
+ * new prehliadka with `persists_from` ({@see PrehliadkaDefects}).
  */
 final class PrehliadkaPrevious
 {
     /**
      * @return array{
-     *   source: array{kind: string, inspection_id: int, executed_on: ?string}|null,
+     *   source: array{kind: string, inspection_id: int, executed_on: ?string, number: ?string}|null,
      *   defects: list<array<string, mixed>>
      * }
      */
@@ -73,11 +79,46 @@ final class PrehliadkaPrevious
 
     /**
      * @param array{id: int, executed_on: ?string} $row
-     * @return array{kind: string, inspection_id: int, executed_on: ?string}
+     * @return array{kind: string, inspection_id: int, executed_on: ?string, number: ?string}
      */
     private static function sourceInfo(string $kind, array $row): array
     {
-        return ['kind' => $kind, 'inspection_id' => $row['id'], 'executed_on' => $row['executed_on']];
+        return [
+            'kind'          => $kind,
+            'inspection_id' => $row['id'],
+            'executed_on'   => $row['executed_on'],
+            'number'        => self::documentNumber($kind, $row['id']),
+        ];
+    }
+
+    /**
+     * The number the source was issued under — its latest filled-in document.
+     * A BOZP-only prehliadka issues nothing of its own; its record is the kniha
+     * BOZP child it made.
+     */
+    private static function documentNumber(string $kind, int $inspectionId): ?string
+    {
+        $pdo = Db::pdo();
+        $own = $pdo->prepare(
+            "SELECT number FROM documents
+             WHERE  parent_type = 'inspection' AND parent_id = ? AND type = ?
+               AND  (form_variant IS NULL OR form_variant = 'vyplneny')
+             ORDER  BY id DESC LIMIT 1"
+        );
+        $own->execute([$inspectionId, $kind === 'prehliadka' ? PrehliadkaDetails::TYPE : 'poziarna_kniha']);
+        $number = $own->fetchColumn();
+        if ($number === false && $kind === 'prehliadka') {
+            $child = $pdo->prepare(
+                "SELECT d.number FROM documents d
+                 JOIN   inspections c ON c.id = d.parent_id
+                 WHERE  d.parent_type = 'inspection' AND d.type = 'kniha_bozp'
+                   AND  c.source_inspection_id = ? AND c.type = 'kniha_bozp' AND c.archived_at IS NULL
+                 ORDER  BY d.id DESC LIMIT 1"
+            );
+            $child->execute([$inspectionId]);
+            $number = $child->fetchColumn();
+        }
+        return $number !== false && $number !== null ? (string) $number : null;
     }
 
     /**
@@ -90,11 +131,16 @@ final class PrehliadkaPrevious
             'SELECT id, fields FROM inspection_items WHERE inspection_id = ? ORDER BY position ASC, id ASC'
         );
         $stmt->execute([$source['id']]);
+        $photos = InspectionPhotoController::byItemForInspection($source['id']);
 
         $out = [];
         foreach ($stmt->fetchAll() as $row) {
             $f = json_decode((string) $row['fields'], true);
             if (!is_array($f) || !is_string($f['title'] ?? null)) {
+                continue;
+            }
+            // Removed, or its reason ceased: it stays in that record, it is not offered again.
+            if (!PrehliadkaDefects::isOpen($f)) {
                 continue;
             }
             $where = is_array($f['where'] ?? null) ? $f['where'] : [];
@@ -128,6 +174,7 @@ final class PrehliadkaPrevious
                 'deadline_date'   => is_string($f['deadline_date'] ?? null) ? $f['deadline_date'] : null,
                 'responsible'     => is_string($f['responsible'] ?? null) ? $f['responsible'] : null,
                 'source_item_id'  => (int) $row['id'],
+                'photos'          => $photos[(int) $row['id']] ?? [],
             ];
         }
         return $out;
@@ -174,6 +221,7 @@ final class PrehliadkaPrevious
                     'deadline_date'  => $d['deadline'],
                     'responsible'    => null,
                     'source_item_id' => (int) $row['id'],
+                    'photos'         => [],
                 ];
             }
         }

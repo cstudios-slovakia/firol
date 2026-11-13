@@ -7,6 +7,7 @@
  * its setup is `inspections.details`, every defect is one `inspection_items` row.
  */
 import { validUntil } from '@/lib/periodicity';
+import type { InspectionPhoto } from '@/api/inspections';
 
 export const PREHLIADKA_TYPE = 'preventivna_prehliadka' as const;
 
@@ -18,6 +19,9 @@ export const prehliadkaPath = (id: number): string => `/prehliadky/${id}`;
 export const prehliadkaSetupPath = (id: number): string => `/prehliadky/${id}/nastavenie`;
 export const defectNewPath = (id: number): string => `/prehliadky/${id}/nedostatok/new`;
 export const defectPath = (id: number, itemId: number): string => `/prehliadky/${id}/nedostatok/${itemId}`;
+/** The defect screen seeded from a defect of the last prehliadka (spec 12.1). */
+export const defectFromPreviousPath = (id: number, previousKey: string): string =>
+  `/prehliadky/${id}/nedostatok/new?z=${encodeURIComponent(previousKey)}`;
 /** Krok 3 — Termíny a činnosti. */
 export const prehliadkaTermsPath = (id: number): string => `/prehliadky/${id}/terminy`;
 /** Uzavretie — the summary before the prehliadka is closed. */
@@ -107,7 +111,11 @@ export const PREVIOUS_STATUS_LABELS: Record<PreviousStatus, string> = {
   zanik: 'Dôvod zanikol',
 };
 
-/** One defect of the last prehliadka and the technician's answer; `status` null = čaká na overenie. */
+/**
+ * One defect of the last prehliadka and the technician's answer; `status` null = čaká na overenie.
+ * Written by drafts begun before spec 12.1 only — since then the answer is the
+ * carried-over defect row itself (see {@see previousAnswers}).
+ */
 export type PreviousEntry = {
   key: string;
   kind: 'prehliadka' | 'poziarna_kniha';
@@ -451,7 +459,7 @@ export function effectiveDeadline(
   d: Pick<DefectFields, 'deadline_choice' | 'deadline_date'>,
   executedOn: string | null,
 ): string | null {
-  if (d.deadline_choice === 'bezodkladne') return null;
+  if (d.deadline_choice === null || d.deadline_choice === 'bezodkladne') return null;
   if (d.deadline_choice === 'custom') return d.deadline_date;
   return deadlineFor(d.deadline_choice, executedOn) ?? d.deadline_date;
 }
@@ -470,29 +478,69 @@ export type DefectFields = {
   regulation: string;
   justification: string;
   measure: string;
-  deadline_choice: DeadlineChoice;
+  /** Null only where the host makes the deadline optional (the book, spec 8). */
+  deadline_choice: DeadlineChoice | null;
   deadline_date: string | null;
   responsible: string | null;
   group_key: string | null;
-  /** Set when the defect was carried over from the last prehliadka with „Trvá" (spec 6.5). */
+  /** „Stav nedostatku" (spec 12.1). Rows written before it read via {@see defectStatus}. */
+  status: DefectStatus;
+  /** The one sentence of „dôvod zanikol"; null otherwise. */
+  reason: string | null;
+  /** Set when the defect was taken over from the last prehliadka (spec 6.5, 12.1), whatever its state. */
   persists_from: PersistsFrom | null;
+  /** The prevádzka of the defect — only when the host offers several (the book). */
+  facility_id?: number;
 };
 
 export type PersistsFrom = {
-  /** The `details.previous` entry this defect answers. */
+  /** The previous defect this row answers (`PreviousDefect.key`). */
   key: string;
   inspection_id: number;
   /** The date of the record it came from. */
   executed_on: string | null;
+  /** That record's document number; absent on rows carried over before spec 12.1. */
+  number: string | null;
+  /** The item of that record whose photos the server copies onto this row on create. */
+  source_item_id: number | null;
 };
+
+/** „Stav nedostatku" — the same four choices for a new and a carried-over defect (spec 12.1). */
+export type DefectStatus = 'zisteny' | 'odstraneny' | 'trva' | 'zanik';
+
+export const DEFECT_STATUS_OPTIONS: { value: DefectStatus; label: string }[] = [
+  { value: 'zisteny', label: 'zistený' },
+  { value: 'odstraneny', label: 'odstránený' },
+  { value: 'trva', label: 'trvá' },
+  { value: 'zanik', label: 'dôvod zanikol' },
+];
+
+/** The state a row stands for; one written before the field reads as trvá when carried over, else zistený. */
+export function defectStatus(fields: Record<string, unknown> | null | undefined): DefectStatus {
+  const s = fields?.status;
+  if (s === 'zisteny' || s === 'odstraneny' || s === 'trva' || s === 'zanik') return s;
+  return fields?.persists_from && typeof fields.persists_from === 'object' ? 'trva' : 'zisteny';
+}
+
+/** Open = still to be dealt with: offered by the next prehliadka, on Dnes, in the nearest deadline. */
+export function isOpenDefect(d: Pick<DefectFields, 'status'>): boolean {
+  return d.status === 'zisteny' || d.status === 'trva';
+}
+
+/** A carried-over defect answered odstránený / dôvod zanikol: it lives in the previous-defect list only. */
+export function isClosedCarry(d: Pick<DefectFields, 'status' | 'persists_from'>): boolean {
+  return d.persists_from !== null && !isOpenDefect(d);
+}
 
 /** Reads an item's fields as a defect; null for something that is not one. */
 export function parseDefect(fields: Record<string, unknown> | null | undefined): DefectFields | null {
   if (!fields || typeof fields.title !== 'string') return null;
   const where = (fields.where ?? {}) as Partial<DefectWhere>;
-  const choice = DEADLINE_CHOICES.some((c) => c.value === fields.deadline_choice)
+  const choice: DeadlineChoice | null = DEADLINE_CHOICES.some((c) => c.value === fields.deadline_choice)
     ? (fields.deadline_choice as DeadlineChoice)
-    : '30d';
+    : fields.deadline_choice === null && fields.deadline_date == null && 'deadline_choice' in fields
+      ? null
+      : '30d';
   const w = {
     entrance: where.entrance ?? null,
     floor: where.floor ?? null,
@@ -516,7 +564,10 @@ export function parseDefect(fields: Record<string, unknown> | null | undefined):
     deadline_date: typeof fields.deadline_date === 'string' ? fields.deadline_date : null,
     responsible: typeof fields.responsible === 'string' ? fields.responsible : null,
     group_key: typeof fields.group_key === 'string' ? fields.group_key : null,
+    status: defectStatus(fields),
+    reason: typeof fields.reason === 'string' && fields.reason.trim() !== '' ? fields.reason : null,
     persists_from: parsePersistsFrom(fields.persists_from),
+    ...(typeof fields.facility_id === 'number' ? { facility_id: fields.facility_id } : {}),
   };
 }
 
@@ -528,6 +579,8 @@ function parsePersistsFrom(raw: unknown): PersistsFrom | null {
     key: p.key,
     inspection_id: p.inspection_id,
     executed_on: typeof p.executed_on === 'string' ? p.executed_on : null,
+    number: typeof p.number === 'string' && p.number !== '' ? p.number : null,
+    source_item_id: typeof p.source_item_id === 'number' ? p.source_item_id : null,
   };
 }
 
@@ -559,7 +612,55 @@ export type PreviousDefect = {
   deadline_date: string | null;
   responsible: string | null;
   source_item_id: number;
+  /** The defect's photos in the old record (none for an old book entry). Absent on an older cached answer. */
+  photos?: InspectionPhoto[];
 };
+
+/** Where the previous defects come from — `number` is its document's, absent on an older cached answer. */
+export type PreviousSource = {
+  kind: 'prehliadka' | 'poziarna_kniha';
+  inspection_id: number;
+  executed_on: string | null;
+  number?: string | null;
+};
+
+/** What this prehliadka answered about one previous defect; `status` null = not decided yet. */
+export type PreviousAnswer = {
+  status: PreviousStatus | null;
+  reason: string | null;
+  /** The row that carries it over, when there is one. */
+  itemId: number | null;
+};
+
+/**
+ * The answers to the previous defects, keyed by the previous defect's key — the
+ * client twin of PrehliadkaDefects::answers(). A carried-over row (any state)
+ * wins over an entry a draft begun before spec 12.1 wrote into `details.previous`;
+ * such an old „trvá" counts only while its row exists.
+ */
+export function previousAnswers(
+  legacy: PreviousEntry[],
+  rows: { itemId: number; defect: DefectFields }[],
+): Map<string, PreviousAnswer> {
+  const out = new Map<string, PreviousAnswer>();
+  for (const e of legacy) {
+    const status = e.status === 'ok' || e.status === 'zanik' ? e.status : null;
+    out.set(e.key, { status, reason: status === 'zanik' ? e.reason : null, itemId: null });
+  }
+  for (const { itemId, defect } of rows) {
+    const key = defect.persists_from?.key;
+    if (!key) continue;
+    const status: PreviousStatus =
+      defect.status === 'odstraneny' ? 'ok' : defect.status === 'zanik' ? 'zanik' : 'trva';
+    out.set(key, { status, reason: status === 'zanik' ? defect.reason : null, itemId });
+  }
+  return out;
+}
+
+/** The status a previous answer stands for on the defect screen. */
+export function statusOfAnswer(s: PreviousStatus): DefectStatus {
+  return s === 'ok' ? 'odstraneny' : s === 'zanik' ? 'zanik' : 'trva';
+}
 
 /** Is a defect of this scope part of a prehliadka with this setup? `ob` fits either record. */
 export function scopeApplies(defectScope: DefectScope, scope: PrehliadkaScope): boolean {

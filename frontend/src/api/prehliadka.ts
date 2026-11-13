@@ -26,6 +26,17 @@
  * After 8b:
  *   `prehliadka-result` also lists `task_defects` — the defects of a closed prehliadka the
  *                                                   „Overiť odstránenie" task can be offered for
+ * One defect screen (POapp 7. 11. 2026, spec 12.1):
+ *   GET   /api/facilities/{id}/prehliadka-previous  still cached; now only the open defects, with
+ *                                                   `source.number` and each defect's `photos`
+ *   POST  /api/inspections/{id}/items               a carried-over defect (`persists_from`, any
+ *                                                   state) queues exactly like a new one; the
+ *                                                   server copies the old photos onto it when the
+ *                                                   create runs, so a replayed create gets them too
+ *   POST  /api/inspections/{id}/items/{item}/photos photos added on top: queued as for a new defect
+ *   PATCH /api/inspections/{id} (details.previous)  no longer written — the answer is the row itself
+ *   The old photos are shown from their URLs: offline they appear only if the
+ *   browser still holds them; the copy is made on the server either way.
  * The entrance and the place a defect was written with are remembered by the
  * server inside the defect's own save — see FacilityWalkMemory — so there is no
  * endpoint of their own to queue.
@@ -38,6 +49,7 @@ import type {
   DeviceType,
   PrehliadkaScope,
   PreviousDefect,
+  PreviousSource,
   RoutinePeriodicities,
   TermTraining,
 } from '@/lib/prehliadka';
@@ -64,9 +76,9 @@ export type PrehliadkaContext = {
   open_drafts: Partial<Record<DeviceType, number>>;
 };
 
-/** The defects of the last finished prehliadka here (or of an old požiarna kniha record). */
+/** The still open defects of the last finished prehliadka here (or of an old požiarna kniha record). */
 export type PreviousDefects = {
-  source: { kind: 'prehliadka' | 'poziarna_kniha'; inspection_id: number; executed_on: string | null } | null;
+  source: PreviousSource | null;
   defects: PreviousDefect[];
 };
 

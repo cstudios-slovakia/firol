@@ -53,6 +53,8 @@ final class PrehliadkaRecord
     public const RESPONSIBLE_DOM = 'správca objektu';
     public const RESPONSIBLE_FIRMA = 'prevádzkovateľ';
     public const CUSTOM_ACTIVITY_TAG = '(vlastná činnosť)';
+    /** The state of a new defect removed during the walk (spec 12.1). */
+    public const REMOVED_ON_SITE = 'zistený a odstránený na mieste';
 
     /** Scopes of a defect that belong to each record. */
     private const RECORD_SCOPES = [self::PO => ['po', 'ob'], self::BOZP => ['bo', 'ob']];
@@ -76,6 +78,11 @@ final class PrehliadkaRecord
         foreach ($items as $item) {
             $f = (array) ($item['fields'] ?? []);
             if (!is_string($f['title'] ?? null)) {
+                continue;
+            }
+            // A carried-over defect answered odstránený / dôvod zanikol prints in
+            // the table of the previous defects only, never twice (spec 12.1).
+            if (PrehliadkaDefects::isClosedCarry($f)) {
                 continue;
             }
             $scope = in_array($f['scope'] ?? null, PrehliadkaDefects::SCOPES, true) ? $f['scope'] : 'po';
@@ -170,6 +177,13 @@ final class PrehliadkaRecord
             $photos += $photoCounts[$id] ?? 0;
         }
 
+        // A new defect removed during the walk itself (spec 12.1) prints its state
+        // in place of the deadline; every other point has none (state null) and
+        // prints as before.
+        [$state, $stateText] = PrehliadkaDefects::statusOf($first) === 'odstraneny'
+            ? ['odstraneny', self::REMOVED_ON_SITE]
+            : [null, null];
+
         return [
             'number'        => $number,
             'title'         => (string) $first['title'],
@@ -186,6 +200,8 @@ final class PrehliadkaRecord
             'deadline_text' => $immediate ? 'bezodkladne' : ($date !== null ? 'do ' . BookSentences::dateSk($date) : ''),
             'responsible'   => $responsible,
             'item_ids'      => $itemIds,
+            'state'         => $state,
+            'state_text'    => $stateText,
         ];
     }
 
@@ -312,26 +328,21 @@ final class PrehliadkaRecord
      * The „Nedostatky z predchádzajúcej prehliadky" table of one record: every
      * defect of the last prehliadka that belongs to it, with what became of it.
      *
+     * What became of a defect is read by {@see PrehliadkaDefects::answers()}:
+     * the carried-over row (any state) or, for a draft begun before spec 12.1,
+     * the old answer in `details.previous`. „Trvá" is only real while the row
+     * that carries the defect over exists.
+     *
      * @param array<string, mixed> $details validated PrehliadkaDetails
      * @param array{source: ?array<string, mixed>, defects: list<array<string, mixed>>} $previous PrehliadkaPrevious
      * @param list<array<string, mixed>> $points the points of this record
+     * @param list<array{id: int, fields: array<string, mixed>}> $items the prehliadka's defect rows
      * @return list<array{title: string, meta: string, date: ?string, status: string, text: string}>
      */
-    public static function previousRows(array $details, array $previous, string $record, array $points): array
+    public static function previousRows(array $details, array $previous, string $record, array $points, array $items = []): array
     {
         $accepted = self::RECORD_SCOPES[$record] ?? [];
-        $answers = [];
-        foreach ((array) ($details['previous'] ?? []) as $e) {
-            if (is_array($e) && is_string($e['key'] ?? null)) {
-                $answers[$e['key']] = $e;
-            }
-        }
-        $carried = [];
-        foreach ($points as $p) {
-            foreach ($p['persists_keys'] as $key) {
-                $carried[$key] = $p['number'];
-            }
-        }
+        $answers = PrehliadkaDefects::answers($details, $items);
         $date = is_string($previous['source']['executed_on'] ?? null) ? $previous['source']['executed_on'] : null;
 
         $rows = [];
@@ -341,14 +352,6 @@ final class PrehliadkaRecord
             }
             $answer = $answers[$d['key']] ?? null;
             $status = $answer['status'] ?? null;
-            $point = null;
-            if ($status === 'trva') {
-                $point = $carried[$d['key']] ?? null;
-                if ($point === null) {
-                    // „Trvá" is only real while the defect carried over exists.
-                    $status = null;
-                }
-            }
 
             $meta = [];
             if (is_string($d['where_text'] ?? null) && $d['where_text'] !== '') {
@@ -576,6 +579,7 @@ final class PrehliadkaRecord
                 PrehliadkaPrevious::forFacility($accountId, $facilityId, (int) $inspection['id']),
                 self::PO,
                 $points,
+                $items,
             );
             $facility = self::facilityBlock($accountId, $facilityId);
         }

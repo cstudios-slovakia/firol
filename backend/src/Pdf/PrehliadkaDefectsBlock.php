@@ -13,7 +13,10 @@ namespace Firol\Pdf;
  * Every defect has the same build — ZISTENÝ STAV · PREDPIS · ODÔVODNENIE ·
  * OPATRENIE · TERMÍN · ZODPOVEDNÝ — and the PREDPIS is its own row, never part
  * of a sentence. A row whose text is empty is left out. A defect carried over
- * from the last prehliadka is tagged NEDOSTATOK PRETRVÁVA.
+ * from the last prehliadka is tagged NEDOSTATOK PRETRVÁVA. A new defect closed
+ * during the walk (spec 12.1) prints a STAV row — „zistený a odstránený na
+ * mieste" — where the TERMÍN row would be; points without `state_text` (every
+ * point of a record issued before 12.1) print exactly as before.
  *
  * Markup relies on the `<h2>` band and `table.grid` styles every
  * {@see ProtocolLayout} document has; the block adds only its own small ones.
@@ -62,6 +65,13 @@ final class PrehliadkaDefectsBlock
                 'Opatrenie'             => $p['measure'] ?? '',
                 'Termín'                => $deadline,
             ];
+            // A defect closed during the walk (removed on the spot, spec 12.1)
+            // has nothing left to be done by a date: its state stands there instead.
+            $stateText = trim((string) ($p['state_text'] ?? ''));
+            if ($stateText !== '') {
+                unset($rows['Termín']);
+                $rows['Stav'] = $stateText;
+            }
 
             $html .= '<table class="pt"><tr><td class="pt-head" colspan="2"><b>' . (int) $p['number'] . '. '
                 . self::esc((string) $p['title']) . '</b></td></tr>';
@@ -75,6 +85,7 @@ final class PrehliadkaDefectsBlock
                 }
                 $valHtml = match ($label) {
                     'Predpis' => '<span style="color:#5B3E8C; font-weight:600;">' . nl2br(self::esc($text)) . '</span>',
+                    'Stav'    => '<b>' . self::esc($text) . '</b>',
                     'Termín'  => (!empty($p['deadline_text']) ? '<b style="color:#c62828;">' . self::esc((string) $p['deadline_text']) . '</b>' : '')
                         . (!empty($p['responsible']) ? (!empty($p['deadline_text']) ? ' · ' : '') . self::esc((string) $p['responsible']) : ''),
                     default   => nl2br(self::esc($text)),

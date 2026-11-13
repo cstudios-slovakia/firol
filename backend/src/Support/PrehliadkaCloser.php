@@ -84,6 +84,14 @@ final class PrehliadkaCloser
         if ($company === null || $company['archived_at'] !== null) {
             return ['error' => 'Firma je archivovaná — prehliadku už nemožno uzavrieť.', 'status' => 409];
         }
+        // A carried-over defect cannot be closed undecided (spec 12.1).
+        $undecided = PrehliadkaDefects::undecided($details, $previous, $items);
+        if ($undecided > 0) {
+            return [
+                'error'  => "Nedostatky z minulej prehliadky čakajú na stav ($undecided). Na obchôdzke otvor každý z nich a zvoľ stav nedostatku.",
+                'status' => 422,
+            ];
+        }
 
         $files = [];
         $staleFiles = [];
@@ -108,7 +116,7 @@ final class PrehliadkaCloser
             // ── BOZP: the child record (Preventívna prehliadka BOZP) ─────────
             if ($bozp) {
                 $bozpPoints = PrehliadkaRecord::points($items, PrehliadkaRecord::BOZP, PrehliadkaRecord::photoCounts($inspectionId));
-                $bozpPrevious = PrehliadkaRecord::previousRows($details, $previous, PrehliadkaRecord::BOZP, $bozpPoints);
+                $bozpPrevious = PrehliadkaRecord::previousRows($details, $previous, PrehliadkaRecord::BOZP, $bozpPoints, $items);
                 $fields = PrehliadkaRecord::bozpFields($inspection, $details, $bozpPrevious, $bozpPoints);
 
                 $bozpInspectionId = self::upsertBozpChild($accountId, $userId, $inspection, $fields, $effectiveMonths, $isCustom);

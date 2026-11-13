@@ -166,6 +166,7 @@ final class InspectionItemController
         $fields = self::validateFields($inspection['type'], $req->json(), $inspection);
 
         $pdo = Db::pdo();
+        $copiedFiles = [];
         $pdo->beginTransaction();
         try {
             $maxStmt = $pdo->prepare(
@@ -183,9 +184,20 @@ final class InspectionItemController
             $itemId = (int) $pdo->lastInsertId();
             self::syncPreventiveFlag($pdo, $inspection['type'], $inspectionId, $fields);
             self::rememberWalkPlaces($inspection, $fields);
+            // A defect taken over from the last prehliadka starts with that
+            // defect's photos (spec 12.1) — copied here, so a create replayed
+            // from the offline outbox brings them as well.
+            if ($inspection['type'] === PrehliadkaDetails::TYPE) {
+                PrehliadkaDefects::copyCarriedPhotos((int) $inspection['account_id'], $fields, $inspectionId, $itemId, $copiedFiles);
+            }
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
+            foreach ($copiedFiles as $abs) {
+                if (is_file($abs)) {
+                    @unlink($abs);
+                }
+            }
             throw $e;
         }
 
@@ -315,7 +327,25 @@ final class InspectionItemController
                     );
                     $check->execute([$srcInspId, (int) $inspection['account_id'], (int) $inspection['facility_id']]);
                     if (!$check->fetchColumn()) {
+                        // The source is gone (archived, or not this prevádzka's).
+                        // An answer odstránený / dôvod zanikol means nothing
+                        // without it — kept, it would print as a new defect
+                        // removed on the spot. An open one stays a defect found
+                        // today, as a carried-over write always became here.
+                        if (!PrehliadkaDefects::isOpen($fields)) {
+                            throw new \InvalidArgumentException(
+                                'Minulá prehliadka, z ktorej nedostatok pochádza, už nie je k dispozícii. Vráť sa na obchôdzku.'
+                            );
+                        }
                         $fields['persists_from'] = null;
+                        $fields['status'] = 'zisteny';
+                    } elseif ($fields['persists_from']['source_item_id'] !== null) {
+                        // The item whose photos get copied must belong to that record.
+                        $item = Db::pdo()->prepare('SELECT 1 FROM inspection_items WHERE id = ? AND inspection_id = ?');
+                        $item->execute([$fields['persists_from']['source_item_id'], $srcInspId]);
+                        if (!$item->fetchColumn()) {
+                            $fields['persists_from']['source_item_id'] = null;
+                        }
                     }
                 }
                 return $fields;

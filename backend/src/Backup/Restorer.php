@@ -570,7 +570,8 @@ final class Restorer
 
     /**
      * Remaps defect references of a preventívna prehliadka:
-     *   - `inspection_items.fields.persists_from`: remaps inspection_id, item_id and key
+     *   - `inspection_items.fields.persists_from`: remaps inspection_id, source_item_id and key
+     *     (`status` and `reason` of a defect are plain values inside `fields` and need none)
      *   - `inspections.details.previous`: remaps source_inspection_id, source_item_id and key
      *   - `inspections.details.concept_from_prehliadka` of a concept (plan 8b)
      * so carried-over defects and previous-defect answers point to the restored rows.
@@ -606,6 +607,13 @@ final class Restorer
                 $oldInsp = (int) ($fields['persists_from']['inspection_id'] ?? 0);
                 if ($oldInsp > 0 && isset($this->inspectionMap[$oldInsp])) {
                     $fields['persists_from']['inspection_id'] = $this->inspectionMap[$oldInsp];
+                    $changed = true;
+                }
+                // The item of the previous record (spec 12.1); a row carried over
+                // before it has only the key, remapped below.
+                $oldSourceItem = $fields['persists_from']['source_item_id'] ?? null;
+                if (is_int($oldSourceItem) && $oldSourceItem > 0) {
+                    $fields['persists_from']['source_item_id'] = $this->itemMap[$oldSourceItem] ?? null;
                     $changed = true;
                 }
                 $oldKey = (string) ($fields['persists_from']['key'] ?? '');

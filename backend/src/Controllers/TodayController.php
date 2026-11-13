@@ -312,9 +312,10 @@ final class TodayController
     /**
      * The nedostatky of a preventívna prehliadka (POapp 26. 10. 2026, plan 8b):
      * those of the LATEST finalized prehliadka at each prevádzka (any scope)
-     * that carry a deadline, minus the ones a later prehliadka — still open as
-     * a draft — has already set to „odstránené" or „dôvod zanikol". „Trvá" stays
-     * open: the defect lives on. A newer finalized prehliadka replaces the
+     * that carry a deadline and are still open (not closed on the spot, not a
+     * carried-over one answered odstránený / dôvod zanikol — spec 12.1), minus
+     * the ones a later prehliadka — still open as a draft — has already set to
+     * „odstránené" or „dôvod zanikol". „Trvá" stays open: the defect lives on. A newer finalized prehliadka replaces the
      * older one entirely, as it does for the other úkony.
      *
      * A defect whose „Overiť odstránenie" task is done (and none still open) is
@@ -373,6 +374,11 @@ final class TodayController
                 $deadline = is_array($f) ? ($f['deadline_date'] ?? null) : null;
                 if (!is_string($deadline) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deadline)) {
                     continue; // „bezodkladne" carries no date; a finding, not a removal to wait for
+                }
+                // Removed on the spot, or carried over and answered odstránený /
+                // dôvod zanikol (spec 12.1): nothing is left to wait for.
+                if (!PrehliadkaDefects::isOpen((array) $f)) {
+                    continue;
                 }
                 if (isset($closed[$inspectionId . ':' . (int) $item['id']])) {
                     continue;
