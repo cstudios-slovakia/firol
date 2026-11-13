@@ -11,9 +11,9 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
-use Firol\Support\BookLedger;
 use Firol\Support\BookMapping;
 use Firol\Support\ClientKind;
+use Firol\Support\CompanyLookup;
 use Firol\Support\ExternalTerms;
 
 /**
@@ -149,7 +149,7 @@ final class ExternalTermController
     /** @return array{id: int, archived_at: ?string, ...} */
     private static function company(int $accountId, int $companyId): array
     {
-        $company = BookLedger::company($accountId, $companyId);
+        $company = CompanyLookup::find($accountId, $companyId);
         if ($company === null) {
             Response::error('Firma sa nenašla.', 404);
         }

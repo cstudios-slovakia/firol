@@ -91,20 +91,6 @@ final class ClientKind
         return (self::isBytovyDom($type) ? 'Bytové družstvo je archivované — ' : 'Firma je archivovaná — ') . $tail;
     }
 
-    public static function bookArchived(string $type): string
-    {
-        return self::isBytovyDom($type)
-            ? 'Bytové družstvo je archivované — do jeho knihy sa už nezapisuje.'
-            : 'Firma je archivovaná — do jej knihy sa už nezapisuje.';
-    }
-
-    public static function bookNeedsFacility(string $type): string
-    {
-        return self::isBytovyDom($type)
-            ? 'Kniha je vedená po bytových domoch — najprv pridaj bytový dom.'
-            : 'Kniha je vedená po prevádzkach — najprv pridaj prevádzku.';
-    }
-
     /** E-mail of a prevádzka / bytový dom that is not valid. */
     public static function facilityEmailInvalid(string $type): string
     {

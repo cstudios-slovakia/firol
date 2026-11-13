@@ -20,20 +20,16 @@ use Firol\Storage\Storage;
  *   BOZP chosen  a child `kniha_bozp` inspection (`source_inspection_id` = the
  *                prehliadka) filled from the walk-through and issued
  *                (BOZP-RRRR-NNN) — the zápis do knihy BOZP IS the BOZP record,
- *                there is no separate document — and a BOZP book entry, always;
- *   PO book      an entry in the požiarna kniha when `book_entry` is on, carrying
- *                the PO defects (`inspection_ids`) so its print has the table;
+ *                there is no separate document;
  *   BOZP only    no PP record: the prehliadka closes with no document of its own;
  *   routine      one concept (draft úkon) per riadna kontrola ticked in step 1,
  *                see {@see PrehliadkaConcepts} (spec 7.3).
  *
- * Re-closing after „Upraviť" issues new numbers (the old ones are never reused),
- * refills the same BOZP child, and brings the entries written by the first close
- * up to date while the vedúci zamestnanec has not signed them — a signed one
- * keeps what was signed and gets a dopísanie with the new number.
+ * Re-closing after „Upraviť" issues new numbers (the old ones are never reused)
+ * and refills the same BOZP child.
  *
  * Nothing is half done: the numbers, the PDFs written to disk, the documents
- * rows, the entries and the finalized status all happen inside one transaction
+ * rows and the finalized status all happen inside one transaction
  * and the files are removed again when it fails.
  */
 final class PrehliadkaCloser
@@ -84,7 +80,7 @@ final class PrehliadkaCloser
         $items = DocumentController::loadItems($inspectionId);
         $facts = PrehliadkaTerms::forFacility($accountId, (int) $inspection['facility_id'], (string) $inspection['executed_on']);
         $previous = PrehliadkaPrevious::forFacility($accountId, (int) $inspection['facility_id'], $inspectionId);
-        $company = BookLedger::company($accountId, (int) $inspection['company_id']);
+        $company = CompanyLookup::find($accountId, (int) $inspection['company_id']);
         if ($company === null || $company['archived_at'] !== null) {
             return ['error' => 'Firma je archivovaná — prehliadku už nemožno uzavrieť.', 'status' => 409];
         }
@@ -120,7 +116,6 @@ final class PrehliadkaCloser
                 $childItems = DocumentController::loadItems($bozpInspectionId);
 
                 $number = NumberAllocator::allocate($accountId, 'kniha_bozp', $year)['number'];
-                // BOZP inspection produces its standalone record and never creates a book_entry (spec 02.11 / decision D4)
 
                 $terms = ClientTerms::forPrehliadka(
                     $accountId,
@@ -155,27 +150,13 @@ final class PrehliadkaCloser
                 )->execute([$accountId, $inspectionId]);
             }
 
-            // ── PO: the record and the book entry ────────────────────────────
+            // ── PO: the record ───────────────────────────────────────────────
             $poDocumentId = null;
             if ($po) {
-                $poPoints = PrehliadkaRecord::points($items, PrehliadkaRecord::PO);
                 $number = NumberAllocator::allocate($accountId, PrehliadkaDetails::TYPE, $year)['number'];
 
-                $bookSeq = null;
-                if ($details['book_entry'] === true) {
-                    $entryId = self::writeEntry(
-                        $accountId, $userId, $inspection, BookMapping::PO, $inspectionId, $number,
-                        BookSentences::prehliadka(BookMapping::PO, (string) $inspection['executed_on'], (string) $inspection['facility_name'], $number, count($poPoints)),
-                        // Spec 9.7 as the plan reads it: no defect → the entry prints ZISTENIA.
-                        $poPoints === [],
-                    );
-                    $seq = $pdo->prepare('SELECT seq FROM book_entries WHERE id = ?');
-                    $seq->execute([$entryId]);
-                    $bookSeq = (int) $seq->fetchColumn();
-                }
-
                 $payload = DocumentController::buildPayload($accountId, $userId, $inspection, $items);
-                $block = PrehliadkaRecord::poBlock($accountId, $inspection, $items, $details, $includePhotos, null, $bookSeq);
+                $block = PrehliadkaRecord::poBlock($accountId, $inspection, $items, $details, $includePhotos, null);
                 $issuedCopy = $block['_issued'];
                 unset($block['_issued']);
                 $payload['prehliadka'] = $block;
@@ -320,58 +301,9 @@ final class PrehliadkaCloser
     }
 
     /**
-     * The entry a record writes into its book — a new one, or, when this
-     * prehliadka was closed before, the one it wrote then: refreshed while
-     * unsigned, otherwise left alone and followed by a dopísanie with the new
-     * number (the signed text is never edited, Q8).
-     *
-     * @param array<string, mixed> $inspection the prehliadka row
-     * @return int id of the entry
-     */
-    private static function writeEntry(
-        int $accountId,
-        int $userId,
-        array $inspection,
-        string $book,
-        int $recordInspectionId,
-        string $number,
-        string $text,
-        bool $noDefects,
-    ): int {
-        $companyId = (int) $inspection['company_id'];
-        $date = (string) $inspection['executed_on'];
-
-        $existing = BookLedger::entryOfInspection($accountId, $companyId, $book, $recordInspectionId);
-        if ($existing !== null) {
-            if (!$existing['signed_manager']) {
-                BookLedger::refreshUnsigned($accountId, $existing['id'], $date, $text, [$number], $noDefects);
-            } else {
-                BookLedger::addProtocolNumber($accountId, $existing['id'], $number);
-                BookLedger::addAddition(
-                    $accountId,
-                    $existing['id'],
-                    'Záznam z prehliadky bol po úprave vydaný znova pod číslom ' . $number . '.',
-                    $userId,
-                );
-            }
-            return $existing['id'];
-        }
-
-        $company = BookLedger::company($accountId, $companyId);
-        $facilityId = $company !== null && $company['book_scope'] === BookLedger::SCOPE_PREVADZKA
-            ? (int) $inspection['facility_id']
-            : null;
-
-        return BookLedger::create(
-            $accountId, $companyId, $facilityId, $book, $date, $text, 'ukon',
-            [$number], [$recordInspectionId], [], $noDefects, $userId,
-        );
-    }
-
-    /**
      * Render, write and register one protocol — the persisting half of
      * {@see DocumentController::generateForInspectionInternal()}, without its own
-     * transaction (the caller's covers several documents and the book entries).
+     * transaction (the caller's covers several documents).
      *
      * @param array<string, mixed> $inspection the record's row
      * @param array<string, mixed> $payload

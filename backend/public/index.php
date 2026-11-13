@@ -146,15 +146,6 @@ $router->post('/api/companies/{id}/persons',                 [CompanyPersonContr
 $router->patch('/api/companies/{id}/persons/{person_id}',    [CompanyPersonController::class, 'update']);
 $router->delete('/api/companies/{id}/persons/{person_id}',   [CompanyPersonController::class, 'destroy']);
 
-// Phase 5 — požiarna kniha and kniha BOZP as ledgers (spec 9). Writes are online-only.
-$router->get('/api/companies/{id}/book-summary',             [\Firol\Controllers\BookController::class, 'summary']);
-$router->patch('/api/companies/{id}/book-scope',             [\Firol\Controllers\BookController::class, 'setScope']);
-$router->get('/api/companies/{id}/book',                     [\Firol\Controllers\BookController::class, 'show']);
-$router->get('/api/companies/{id}/book/print',               [\Firol\Controllers\BookController::class, 'print']);
-$router->post('/api/companies/{id}/book/entries',            [\Firol\Controllers\BookController::class, 'store']);
-$router->post('/api/companies/{id}/book/mark-signed',        [\Firol\Controllers\BookController::class, 'markSigned']);
-$router->post('/api/book-entries/{id}/additions',            [\Firol\Controllers\BookController::class, 'addAddition']);
-
 // Phase 6 — termíny cudzích revízií (spec 6.6). Writes are online-only.
 $router->get('/api/companies/{id}/external-terms',                 [\Firol\Controllers\ExternalTermController::class, 'index']);
 $router->post('/api/companies/{id}/external-terms',                [\Firol\Controllers\ExternalTermController::class, 'store']);

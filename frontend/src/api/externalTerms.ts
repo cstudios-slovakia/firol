@@ -25,8 +25,6 @@ export type ExternalTerm = {
   done_on: string | null;
   valid_until: string | null;
   note: string | null;
-  /** The sentence „Do knihy" proposes — editable before it is written. */
-  book_sentence: string;
 };
 
 /** A name the form offers; the book is only a suggestion, the technician answers it. */

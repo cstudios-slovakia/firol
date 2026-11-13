@@ -1106,7 +1106,7 @@ final class DocumentController
         return $stats;
     }
 
-    public static function signatureToDataUri(?string $relativePath): ?string
+    private static function signatureToDataUri(?string $relativePath): ?string
     {
         if (!$relativePath) {
             return null;
@@ -1194,7 +1194,7 @@ final class DocumentController
      * @param array<string, mixed> $accRow Result of SELECT invoice_company_name, theme_color, logo_path
      * @return array{name: string, color: string, logo_data_uri: string|null}
      */
-    public static function buildBrand(array $accRow): array
+    private static function buildBrand(array $accRow): array
     {
         $logoUri = null;
         $logoRel = $accRow['logo_path'] ?? null;
@@ -1418,7 +1418,6 @@ final class DocumentController
                 $details,
                 $includePhotos,
                 \Firol\Support\PrehliadkaRecord::frozen($rawDetails),
-                null,
             );
             unset($block['_issued']);
             $payload['prehliadka'] = $block;

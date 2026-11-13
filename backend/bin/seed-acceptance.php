@@ -23,8 +23,8 @@ declare(strict_types=1);
  *                             each.
  *
  * The úkony are written finalized and without a document, so they feed the
- * device list and the carry-over but not the book offers; create documented
- * úkony through the app for those.
+ * device list and the carry-over; create documented úkony through the app
+ * when a PDF is needed.
  */
 
 require __DIR__ . '/../vendor/autoload.php';

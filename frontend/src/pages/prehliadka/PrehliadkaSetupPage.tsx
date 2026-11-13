@@ -685,7 +685,6 @@ function SetupForm({
                 </li>
               )}
             </ul>
-            <p className="text-xs text-ink-400">Zápis do požiarnej knihy sa ponúkne až po uzavretí prehliadky.</p>
           </Card>
 
           <Card className="animate-fade-up flex flex-col gap-4 p-4">

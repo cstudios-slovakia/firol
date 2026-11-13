@@ -52,7 +52,6 @@ export type PrehliadkaMemory = {
   periodicity_unit: PeriodicityUnit | null;
   scope: PrehliadkaScope;
   routine: DeviceType[];
-  book_entry: boolean;
   lehota_zakon?: number;
   lehota_vlastna?: number | null;
 };
@@ -82,16 +81,6 @@ export type ActivitySet = {
 };
 export type CompanyActivities = { po: ActivitySet; bozp: ActivitySet };
 
-/** An entry the closed prehliadka wrote into a book. */
-export type ResultEntry = {
-  id: number;
-  /** Poradové číslo in its ledger. */
-  seq: number;
-  signed_manager: boolean;
-  /** Set only for an entry written in a per-prevádzka book. */
-  facility_id: number | null;
-};
-
 /** What closing a prehliadka produced (prototype `scrVysledok`). */
 export type PrehliadkaResult = {
   inspection: {
@@ -108,9 +97,6 @@ export type PrehliadkaResult = {
   po: { documents: InspectionDocument[]; defects: number } | null;
   /** The kniha BOZP record, which is also the BOZP record of the prehliadka. */
   bozp: { inspection_id: number | null; documents: InspectionDocument[]; defects: number } | null;
-  entries: { po: ResultEntry | null; bozp: ResultEntry | null };
-  /** Set while the požiarna kniha has no entry for this prehliadka. */
-  offer: { text: string; protocol_numbers: string[]; has_defects: boolean; legal_sentence: string } | null;
   /** One draft úkon per riadna kontrola ticked in step 1 (spec 7.3). Absent on an older answer. */
   concepts?: PrehliadkaConcept[];
   /** Defects with a termín the „Overiť odstránenie" task can be offered for — closed prehliadka only. Absent on an older answer. */
@@ -130,7 +116,7 @@ export type PrehliadkaConcept = {
 };
 
 export const Prehliadka = {
-  /** Closes the prehliadka — issues the records and writes the book entries. Online-only. */
+  /** Closes the prehliadka — issues the records. Online-only. */
   close: (inspectionId: number, csrfToken: string | null) =>
     api<PrehliadkaResult>(`/api/inspections/${inspectionId}/prehliadka-close`, {
       method: 'POST',

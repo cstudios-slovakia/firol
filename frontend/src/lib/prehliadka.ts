@@ -22,7 +22,7 @@ export const defectPath = (id: number, itemId: number): string => `/prehliadky/$
 export const prehliadkaTermsPath = (id: number): string => `/prehliadky/${id}/terminy`;
 /** Uzavretie — the summary before the prehliadka is closed. */
 export const prehliadkaClosePath = (id: number): string => `/prehliadky/${id}/uzavretie`;
-/** What a closed prehliadka produced — documents, book entries (phase 8a). */
+/** What a closed prehliadka produced — its documents (phase 8a). */
 export const prehliadkaResultPath = (id: number): string => `/prehliadky/${id}/vysledok`;
 
 /** Start of a prehliadka at a prevádzka; `preset=bozp` is „Kniha kontrol BOZP" (D2). */
@@ -125,7 +125,6 @@ export type LehotaZakon = 12 | 6 | 3;
 export type PrehliadkaDetails = {
   scope: PrehliadkaScope;
   routine: DeviceType[];
-  book_entry: boolean;
   lehota_zakon: LehotaZakon;
   lehota_vlastna: number | null;
   new_devices: NewDevice[];
@@ -181,7 +180,6 @@ export function parseDetails(raw: Record<string, unknown> | null | undefined): P
   return {
     scope: { po: scope.po === true, bozp: scope.bozp === true },
     routine,
-    book_entry: raw?.book_entry === true,
     lehota_zakon: (raw?.lehota_zakon === 3 || raw?.lehota_zakon === 6 || raw?.lehota_zakon === 12) ? raw.lehota_zakon : 12,
     lehota_vlastna: (typeof raw?.lehota_vlastna === 'number' && Number.isInteger(raw.lehota_vlastna) && raw.lehota_vlastna >= 1 && raw.lehota_vlastna <= 120) ? raw.lehota_vlastna : null,
     new_devices: newDevices,
@@ -205,8 +203,6 @@ export function detailsPayload(d: PrehliadkaDetails): Record<string, unknown> {
   return {
     scope: d.scope,
     routine: d.routine,
-    // The checkbox is about the požiarna kniha only (spec 9.5a).
-    book_entry: Boolean(d.scope.po && d.book_entry),
     lehota_zakon: d.lehota_zakon,
     lehota_vlastna: d.lehota_vlastna ?? null,
     new_devices: d.new_devices,

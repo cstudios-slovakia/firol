@@ -187,17 +187,16 @@ def run():
         page.wait_for_selector('text=S výsledkom prehliadky oboznámený')
 
         # =========================================================================
-        # ITEM 5: Uzavretie book checkbox & Oboznámený (single person)
+        # ITEM 5: Uzavretie & Oboznámený (single person)
         # =========================================================================
-        log("\n--- ITEM 5: Uzavretie book checkbox & Oboznámený ---")
+        log("\n--- ITEM 5: Uzavretie & Oboznámený ---")
         close_content = page.content()
-        assert "Zapísať aj do požiarnej knihy" in close_content, "Book checkbox must be on Uzavretie screen"
         assert "S výsledkom prehliadky oboznámený" in close_content, "Single person Oboznámený must be present"
         assert "Prítomní pri prehliadke" not in close_content, "Old Prítomní list must be removed"
-        log("PASS 5a: Uzavretie has 'Zapísať aj do požiarnej knihy' (default unchecked) and single 'Oboznámený'")
+        log("PASS 5a: Uzavretie has a single 'Oboznámený'")
         page.screenshot(path=f"{SCREENSHOT_DIR}/05_uzavretie_screen.png")
 
-        # Close the prehliadka with book_entry UNCHECKED
+        # Close the prehliadka
         name_input = page.query_selector('input#uz-kto, input[placeholder*="Peter Správca"]')
         if name_input and not name_input.input_value():
             name_input.fill('Ing. Ján Zodpovedný')
@@ -209,102 +208,12 @@ def run():
         # =========================================================================
         log("\n--- ITEM 8: Result Screen ---")
         res_content = page.content()
-        assert "Pridať do požiarnej knihy" in res_content, "Offer to add to fire book must appear on result screen"
         assert "Kniha BOZP" not in res_content, "Kniha BOZP must not appear"
-        log("PASS 8: Result screen offers 'Pridať do požiarnej knihy'")
-        page.screenshot(path=f"{SCREENSHOT_DIR}/08_result_screen_offer.png")
-
-        # =========================================================================
-        # ITEM 6: BookPage & unified "Nový zápis" pull dialog
-        # =========================================================================
-        log("\n--- ITEM 6: BookPage & Nový zápis pull dialog ---")
-        page.goto(f"{BASE_URL}/companies/{firma_comp['id']}/kniha")
-        page.wait_for_selector('h1:has-text("Požiarna kniha")')
-        book_content = page.content()
-        # Verify no Kniha BOZP tab
-        assert "Kniha BOZP" not in book_content, "Kniha BOZP tab must be gone"
-        assert "Appka ponúka pridať" not in book_content, "Push cards 'Appka ponúka pridať' must be gone"
-        assert "Termíny cudzích revízií" not in book_content, "External terms section must be gone from book"
-        assert "Podľa čísla protokolu" not in book_content, "Zápis podľa čísla protokolu button must be gone"
-        # Verify Nový zápis card with button
-        assert "Nový zápis" in book_content
-        assert "+ Nový zápis do požiarnej knihy" in book_content
-        assert "Vytlačiť celú knihu" in book_content
-        log("PASS 6a: BookPage is strictly Požiarna kniha without push cards or BOZP tab")
-        page.screenshot(path=f"{SCREENSHOT_DIR}/06_book_page.png")
-
-        # Open + Nový zápis do požiarnej knihy modal
-        page.click('button#btn-novy-zapis')
-        page.wait_for_selector('div[role="dialog"]')
-        modal_content = page.content()
-
-        assert "Čo má ísť do zápisu" in modal_content
-        assert "Vlastný text" in modal_content
-        assert "Zistené závady a nedostatky" in modal_content
-        assert "Pridať zákonnú vetu" in modal_content
-        assert "Takto bude zápis vyzerať" in modal_content
-        assert "Zapísať do požiarnej knihy" in modal_content
-        assert "Zapísať a vytlačiť záznam" in modal_content
-        log("PASS 6b: Unified Nový zápis modal has all required sections and both submit buttons")
-        page.screenshot(path=f"{SCREENSHOT_DIR}/06_novy_zapis_modal.png")
-
-        # Test toggle zákonná veta
-        page.click('label:has-text("Pridať zákonnú vetu")')
-        time.sleep(0.3)
-        preview_text = page.text_content('div:has-text("Takto bude zápis vyzerať")')
-        assert "314/2001" in preview_text, "Preview must update with zákonná veta"
-        log("PASS 6c: Pridať zákonnú vetu updates preview text")
-
-        # Submit entry via "Zapísať do požiarnej knihy"
-        page.click('button:has-text("Zapísať do požiarnej knihy")')
-        page.wait_for_selector('text=čaká na podpis vedúceho', timeout=10000)
-        log("PASS 6d: Entry created successfully in Požiarna kniha")
-        page.screenshot(path=f"{SCREENSHOT_DIR}/06_entry_created.png")
-
-        # =========================================================================
-        # ITEM 7: PDF print outputs
-        # =========================================================================
-        log("\n--- ITEM 7: PDF print outputs ---")
-        # Verify single entry print link exists on the entry card
-        page.wait_for_selector('a:has-text("Tlač")')
-        entry_print_href = page.get_attribute('a:has-text("Tlač")', 'href')
-        assert "mode=entry" in entry_print_href, f"Entry print link must have mode=entry, got: {entry_print_href}"
-        log("PASS 7a: Single entry print link has mode=entry")
-
-        # Verify full book print link has mode=all
-        full_book_href = page.get_attribute('a:has-text("Vytlačiť celú knihu")', 'href')
-        assert "mode=all" in full_book_href, f"Full book print link must have mode=all, got: {full_book_href}"
-        log("PASS 7b: Full book print link has mode=all")
-
-        # Fetch and verify entry PDF response
-        pdf_entry_res = page.evaluate(f"""() => {{
-            return fetch('{entry_print_href}').then(r => ({{ status: r.status, type: r.headers.get('content-type') }}));
-        }}""")
-        assert pdf_entry_res['status'] == 200, f"Entry PDF returned status {pdf_entry_res['status']}"
-        assert 'pdf' in pdf_entry_res['type'], f"Entry PDF type is {pdf_entry_res['type']}"
-        log("PASS 7c: Entry PDF renders HTTP 200 application/pdf")
-
-        # Fetch and verify full book PDF response
-        pdf_all_res = page.evaluate(f"""() => {{
-            return fetch('{full_book_href}').then(r => ({{ status: r.status, type: r.headers.get('content-type') }}));
-        }}""")
-        assert pdf_all_res['status'] == 200, f"Full book PDF returned status {pdf_all_res['status']}"
-        assert 'pdf' in pdf_all_res['type'], f"Full book PDF type is {pdf_all_res['type']}"
-        log("PASS 7d: Full book PDF renders HTTP 200 application/pdf")
-
-        # Test Bytový dom scope switch on BD BookPage
-        log("\n--- BD Scope Switch verification ---")
-        page.goto(f"{BASE_URL}/companies/{bd_comp['id']}/kniha")
-        page.wait_for_selector('h1:has-text("Požiarna kniha")')
-        bd_book_content = page.content()
-        assert "Spoločná kniha za celý subjekt" in bd_book_content, "BD must show 'Spoločná kniha za celý subjekt'"
-        assert "Samostatne za každý dom" in bd_book_content, "BD must show 'Samostatne za každý dom'"
-        log("PASS: BD Scope switch labels are 'Spoločná kniha za celý subjekt' and 'Samostatne za každý dom'")
-        page.screenshot(path=f"{SCREENSHOT_DIR}/07_bd_scope_switch.png")
+        log("PASS 8: Result screen does not show 'Kniha BOZP'")
 
         browser.close()
         log("\n=======================================================")
-        log("ALL 8 E2E BROWSER CHECKLIST ITEMS VERIFIED AND PASSED!")
+        log("ALL E2E BROWSER CHECKLIST ITEMS VERIFIED AND PASSED!")
         log("=======================================================\n")
 
 if __name__ == '__main__':

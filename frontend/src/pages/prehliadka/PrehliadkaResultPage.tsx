@@ -2,21 +2,18 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
-  BookOpen,
   Building,
   CheckCircle2,
   Download,
   FileText,
   ListTodo,
   PenLine,
-  Plus,
   ShieldCheck,
   Undo2,
   Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
-import { Book, type BookView } from '@/api/book';
 import {
   INSPECTION_TYPE_LABELS,
   Inspections,
@@ -24,7 +21,7 @@ import {
   type InspectionDetail,
   type InspectionDocument,
 } from '@/api/inspections';
-import { Prehliadka, type PrehliadkaConcept, type PrehliadkaResult, type ResultEntry } from '@/api/prehliadka';
+import { Prehliadka, type PrehliadkaConcept, type PrehliadkaResult } from '@/api/prehliadka';
 import { ApiError } from '@/lib/api';
 import { facilityNouns } from '@/lib/clientKind';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
@@ -40,7 +37,6 @@ import { DEFECT_TASKS_CHANGED_EVENT, offerPrehliadkaDefectTasks } from '@/compon
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { HandoverDialog } from '@/components/HandoverDialog';
 import { VisitNextUkon } from '@/components/VisitNextUkon';
-import { NewBookEntryModal } from '@/components/book/NewBookEntryModal';
 
 type Loaded = { result: PrehliadkaResult; detail: InspectionDetail | null };
 
@@ -52,9 +48,8 @@ function nedostatkyLabel(n: number): string {
 
 /**
  * Výsledok uzavretia (prototype `scrVysledok`): the records the prehliadka
- * produced — open, hand over for the client's signature, send by e-mail — the
- * entries it wrote into the books, or, when the požiarna kniha was left out,
- * the offer to add it with the sentence ready. „Upraviť" reopens the draft.
+ * produced — open, hand over for the client's signature, send by e-mail.
+ * „Upraviť" reopens the draft.
  */
 export function PrehliadkaResultPage() {
   const { id: idStr } = useParams<{ id: string }>();
@@ -115,44 +110,16 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
   const visitId = detail?.inspection.visit_id ?? null;
 
   const [signing, setSigning] = useState<{ doc: InspectionDocument; type: string } | null>(null);
-  const [offerBusy, setOfferBusy] = useState(false);
-  const [bookView, setBookView] = useState<BookView | null>(null);
   const [unlocking, setUnlocking] = useState(false);
 
   const facilityHref = `/facilities/${i.facility_id}`;
   const backToFacility = `Späť na ${facilityNouns(detail?.inspection.company_client_type).cases.acc}`;
-  const bookHref = (book: 'po' | 'bozp', entry: ResultEntry | null): string => {
-    const q = new URLSearchParams({ book });
-    if (entry?.facility_id) q.set('facility', String(entry.facility_id));
-    return `/companies/${i.company_id}/kniha?${q.toString()}`;
-  };
-
-  /** The offer lives in the book view; open the same modal the book screen uses. */
-  async function openOffer() {
-    setOfferBusy(true);
-    try {
-      const view = await Book.show(i.company_id, 'po', i.facility_id);
-      const offer = view.offers.find((o) => o.inspection_ids.includes(id));
-      if (!offer) {
-        toast.error('Prehliadka už v požiarnej knihe je.');
-        await reload();
-        return;
-      }
-      setBookView(view);
-    } catch (err) {
-      toast.error(offlineMessage(err, 'Zápis do knihy sa nepodarilo pripraviť.'));
-    } finally {
-      setOfferBusy(false);
-    }
-  }
-
   async function unlock() {
     const ok = await confirm({
       title: 'Upraviť uzavretú prehliadku?',
       description:
         'Vydané dokumenty (záznam z prehliadky aj záznam BOZP) sa zrušia a po novom uzavretí dostanú nové čísla. ' +
-        'Pôvodné čísla sa nepoužijú znova. Zápisy v knihách sa upravia, kým ich vedúci nepodpísal — podpísaný zápis ' +
-        'dostane len dopísanie s novým číslom.',
+        'Pôvodné čísla sa nepoužijú znova.',
       confirmLabel: 'Upraviť',
     });
     if (!ok) return;
@@ -233,37 +200,6 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
         />
       )}
 
-      {/* Zápis v požiarnej knihe */}
-      {(result.entries.po || result.offer) && (
-        <section className="flex flex-col gap-2 animate-fade-up">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">Zápis v požiarnej knihe</h2>
-          {result.entries.po && (
-            <EntryLink
-              to={bookHref('po', result.entries.po)}
-              title="Zapísané do požiarnej knihy"
-              entry={result.entries.po}
-            />
-          )}
-          {result.offer && !isReadOnly && (
-            <button
-              type="button"
-              id="pp-offer-book"
-              disabled={offerBusy}
-              onClick={() => void openOffer()}
-              className="flex items-center gap-3 rounded-2xl border border-[#D8CBE8] bg-[#F7F3FC] px-4 py-3.5 text-left transition-all duration-300 hover:border-[#C4B2DD] hover:shadow-sm active:scale-[0.99] disabled:opacity-60"
-            >
-              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#EBE1F7] text-[#5B3E8C]">
-                <Plus className="size-4" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-ink-900">Pridať do požiarnej knihy</span>
-                <span className="block text-xs text-ink-500">Appka ponúkne hotový bod aj s číslom záznamu.</span>
-              </span>
-            </button>
-          )}
-        </section>
-      )}
-
       {/* Úlohy „Overiť odstránenie" — ponuka až po uzavretí, počas prehliadky by rušila (plán 8b) */}
       {taskless.length > 0 && !isReadOnly && (
         <section className="flex flex-col gap-2 animate-fade-up">
@@ -335,17 +271,6 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
           defaultDate={i.executed_on}
           onSigned={() => {
             setSigning(null);
-            void reload();
-          }}
-        />
-      )}
-
-      {bookView && (
-        <NewBookEntryModal
-          view={bookView}
-          onClose={() => setBookView(null)}
-          onSaved={() => {
-            setBookView(null);
             void reload();
           }}
         />
@@ -461,25 +386,6 @@ function ConceptLink({ concept }: { concept: PrehliadkaConcept }) {
           {concept.items} {concept.items === 1 ? 'zariadenie' : concept.items < 5 ? 'zariadenia' : 'zariadení'}
           {' · '}
           {concept.failing} nevyhovuje · {state}
-        </span>
-      </span>
-    </Link>
-  );
-}
-
-function EntryLink({ to, title, entry }: { to: string; title: string; entry: ResultEntry }) {
-  return (
-    <Link
-      to={to}
-      className="flex items-center gap-3 rounded-2xl border border-ink-200 bg-white px-4 py-3.5 transition-all duration-300 hover:border-ink-300 hover:shadow-sm active:scale-[0.99]"
-    >
-      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-firol-50 text-firol-600">
-        <BookOpen className="size-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold text-ink-900">{title}</span>
-        <span className="block text-xs text-ink-500">
-          Zápis č. {entry.seq} · {entry.signed_manager ? 'podpísané vedúcim' : 'čaká na podpis vedúceho'}
         </span>
       </span>
     </Link>

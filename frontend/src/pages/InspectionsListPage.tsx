@@ -23,7 +23,6 @@ import { periodicityShort } from "@/lib/periodicity";
 import {
     SECTION_INSPECTION_TYPES,
     SECTION_LABELS,
-    canRepeatInspection,
     type Section,
 } from "@/lib/sections";
 import { ApiError } from "@/lib/api";
@@ -85,8 +84,7 @@ const TYPE_CHIPS: [InspectionType, string][] = [
     ["hydranty", "Hydranty"],
     ["oprava_ts_php", "Oprava & TS"],
     ["preventivna_prehliadka", "Prehliadka"],
-    // Retired úkon (the book is a ledger now, phase 5) — only old records remain.
-    ["poziarna_kniha", "Pož. kniha (archív)"],
+    ["poziarna_kniha", "Pož. kniha"],
     ["pu_akcieschopnost", "PU – akciesch."],
     ["pu_udrzba", "PU – údržba"],
     ["nudzove_osvetlenie", "Nú. osvetlenie"],
@@ -648,7 +646,7 @@ function InspectionRow({
                     onDone={(next) => onInvoiced(it.id, next)}
                 />
             )}
-            {it.status === "finalized" && canRepeatInspection(it.type) && (
+            {it.status === "finalized" && (
                 <button
                     type="button"
                     title="Opakovať kontrolu"

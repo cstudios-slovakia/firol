@@ -11,7 +11,6 @@ import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { BulkSendDialog } from '@/components/BulkSendDialog';
 import { CompanyPersons } from '@/components/CompanyPersons';
-import { CompanyBookCard } from '@/components/book/CompanyBookCard';
 import { NewFacilityDialog } from '@/components/NewFacilityDialog';
 import { WorkConfirmationDialog } from '@/components/WorkConfirmationDialog';
 import { CompanyWorkConfirmations } from '@/components/CompanyWorkConfirmations';
@@ -285,9 +284,6 @@ export function CompanyDetailPage() {
               </button>
             </div>
           )}
-
-          {/* The books are a place at the firm (phase 5). */}
-          <CompanyBookCard companyId={company.id} />
         </div>
 
         <div

@@ -10,7 +10,6 @@ namespace Firol\Support;
  *
  *     scope        { po: bool, bozp: bool }   which prehliadka is being done
  *     routine      list<type>                 riadne kontroly ticked in step 1
- *     book_entry   bool                       zápis do požiarnej knihy (PO only)
  *     new_devices  list<{tmp_id, type, label, serial, description, location}>
  *                                             devices written during the walk
  *                                             that the derived list does not
@@ -131,9 +130,6 @@ final class PrehliadkaDetails
         return [
             'scope'              => ['po' => $po, 'bozp' => $bozp],
             'routine'            => $routine,
-            // The checkbox is about the požiarna kniha only; BOZP never
-            // produces a book entry (02.11 spec).
-            'book_entry'         => $po && ($raw['book_entry'] ?? false) === true,
             'lehota_zakon'       => $lehotaZakon,
             'lehota_vlastna'     => $lehotaVlastna,
             'note'               => $note,

@@ -22,10 +22,9 @@ use PDO;
 final class AccountPurge
 {
     /**
-     * Companies + facilities (client type, book scope and the prevádzka objekt
-     * columns go with those rows) + everything hanging off them (inspections,
-     * items, photos, trainings, trainees, documents, and the entries of the
-     * požiarna kniha and kniha BOZP with their additions — FK cascade).
+     * Companies + facilities (client type and the prevádzka objekt columns
+     * go with those rows) + everything hanging off them (inspections,
+     * items, photos, trainings, trainees, documents).
      *
      * @return int number of companies removed
      */
@@ -146,8 +145,6 @@ final class AccountPurge
              WHERE  account_id = ? AND parent_type IN ('inspection', 'work_confirmation')"
         )->execute([$accountId]);
         $pdo->prepare('DELETE FROM work_confirmations WHERE account_id = ?')->execute([$accountId]);
-        // Remove book entries pointing to inspections before deleting them.
-        $pdo->prepare('DELETE FROM book_entries WHERE account_id = ? AND inspection_ids IS NOT NULL')->execute([$accountId]);
         // inspection_items — and their photos — cascade with the inspections.
         $pdo->prepare('DELETE FROM inspections WHERE account_id = ?')->execute([$accountId]);
         $pdo->prepare('DELETE FROM visits WHERE account_id = ?')->execute([$accountId]);
@@ -180,8 +177,6 @@ final class AccountPurge
 
         $pdo->prepare("DELETE FROM documents WHERE account_id = ? AND parent_type = 'training'")
             ->execute([$accountId]);
-        // Remove book entries pointing to trainings before deleting them.
-        $pdo->prepare('DELETE FROM book_entries WHERE account_id = ? AND training_ids IS NOT NULL')->execute([$accountId]);
         // trainees cascade with the trainings.
         $pdo->prepare('DELETE FROM trainings WHERE account_id = ?')->execute([$accountId]);
 

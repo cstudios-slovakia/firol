@@ -10,7 +10,7 @@ import { Prehliadka, type PreviousDefects } from '@/api/prehliadka';
 import { ApiError } from '@/lib/api';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
 import { offlineMessage } from '@/lib/offline';
-import { clientNouns, facilityNouns } from '@/lib/clientKind';
+import { clientNouns } from '@/lib/clientKind';
 import { entityPendingMutations } from '@/lib/pendingEntity';
 import { responsibleForFacility } from '@/lib/responsiblePerson';
 import { useToast } from '@/lib/toast';
@@ -39,7 +39,7 @@ import { Field } from '@/components/ui/Field';
 import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
-import { CheckRow, Chip } from '@/components/prehliadka/ui';
+import { Chip } from '@/components/prehliadka/ui';
 import { cn } from '@/lib/cn';
 import { useDetailsSaver } from '@/pages/prehliadka/useDetailsSaver';
 
@@ -129,7 +129,6 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
   const pendingMutations = usePendingMutations();
   const { inspection: i, items } = loaded.detail;
   const client = clientNouns(i.company_client_type);
-  const facility = facilityNouns(i.company_client_type);
   const saver = useDetailsSaver(id, parseDetails(i.details));
   const details: PrehliadkaDetails = saver.details ?? parseDetails(i.details);
   const canEdit = i.status === 'draft' && !isReadOnly;
@@ -309,23 +308,6 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
             />
           ))}
         </ul>
-
-        {details.scope.po && (
-          <div className="mt-1 border-t border-ink-100 pt-3">
-            <CheckRow
-              id="close-book-entry"
-              checked={details.book_entry}
-              disabled={!canEdit}
-              onToggle={() => saver.update((d) => ({ ...d, book_entry: !d.book_entry }))}
-              title="Zapísať aj do požiarnej knihy"
-              sub={
-                details.book_entry
-                  ? `Zápis pristane v požiarnej knihe ${client.cases.gen} a bude citovať číslo tohto záznamu.`
-                  : `Nepovinné. Dá sa pridať kedykoľvek neskôr priamo z knihy — aj hromadne za viac ${facility.pluralGen} naraz.`
-              }
-            />
-          </div>
-        )}
 
         <p className="text-xs text-ink-400">Prehliadka: {scopeLabel(details.scope)}.</p>
       </Card>

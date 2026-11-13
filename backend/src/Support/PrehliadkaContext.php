@@ -25,7 +25,7 @@ final class PrehliadkaContext
     /**
      * @return array{
      *   draft_id: ?int,
-     *   last: ?array{inspection_id: int, executed_on: ?string, defects: int, periodicity_value: ?int, periodicity_unit: ?string, scope: array{po: bool, bozp: bool}, routine: list<string>, book_entry: bool},
+     *   last: ?array{inspection_id: int, executed_on: ?string, defects: int, periodicity_value: ?int, periodicity_unit: ?string, scope: array{po: bool, bozp: bool}, routine: list<string>},
      *   open_drafts: array<string, int>|stdClass
      * }
      */
@@ -73,7 +73,6 @@ final class PrehliadkaContext
                     (array) ($details['routine'] ?? []),
                     static fn ($t): bool => is_string($t) && in_array($t, FacilityDevices::TYPES, true),
                 )),
-                'book_entry'        => ($details['book_entry'] ?? false) === true,
                 'lehota_zakon'      => isset($details['lehota_zakon']) ? (int) $details['lehota_zakon'] : null,
                 'lehota_vlastna'    => isset($details['lehota_vlastna']) && $details['lehota_vlastna'] !== null ? (int) $details['lehota_vlastna'] : null,
             ];

@@ -112,19 +112,6 @@ final class ExternalTerms
         return self::shape($row) + ['company_id' => (int) $row['company_id']];
     }
 
-    /**
-     * The sentence „Do knihy" proposes for a term (prototype `revDoKnihy`). Only
-     * a proposal — the technician edits it before it goes into the book.
-     */
-    public static function bookSentence(string $name, ?string $validUntil): string
-    {
-        $what = mb_strtolower($name);
-        if ($validUntil === null) {
-            return 'Klient bol upozornený na termín: ' . $what . '.';
-        }
-        return 'Klient bol upozornený na termín: ' . $what . ' — vykonať do ' . self::skDate($validUntil) . '.';
-    }
-
     /** „13. 10. 2027". */
     public static function skDate(string $iso): string
     {
@@ -138,7 +125,6 @@ final class ExternalTerms
      */
     private static function shape(array $row): array
     {
-        $validUntil = $row['valid_until'] !== null ? (string) $row['valid_until'] : null;
         return [
             'id'            => (int) $row['id'],
             'facility_id'   => $row['facility_id'] !== null ? (int) $row['facility_id'] : null,
@@ -147,9 +133,8 @@ final class ExternalTerms
             'name'          => (string) $row['name'],
             'performed_by'  => $row['performed_by'] !== null ? (string) $row['performed_by'] : null,
             'done_on'       => $row['done_on'] !== null ? (string) $row['done_on'] : null,
-            'valid_until'   => $validUntil,
+            'valid_until'   => $row['valid_until'] !== null ? (string) $row['valid_until'] : null,
             'note'          => $row['note'] !== null ? (string) $row['note'] : null,
-            'book_sentence' => self::bookSentence((string) $row['name'], $validUntil),
         ];
     }
 }

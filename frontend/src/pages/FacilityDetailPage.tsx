@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
     Archive,
     ArrowLeft,
-    BookOpen,
     Building,
     Building2,
     CalendarDays,
@@ -38,8 +37,6 @@ import {
     type InspectionType,
 } from "@/api/inspections";
 import { periodicityShort } from "@/lib/periodicity";
-import { bookPath } from "@/api/book";
-import { canRepeatInspection } from "@/lib/sections";
 import { Prehliadka, type PrehliadkaMemory } from "@/api/prehliadka";
 import { PREHLIADKA_TYPE, prehliadkaPath } from "@/lib/prehliadka";
 import {
@@ -482,21 +479,6 @@ export function FacilityDetailPage() {
                 </Link>
             )}
 
-            {/* Phase 5 — „Zápis do požiarnej knihy" no longer starts an úkon, it opens the book. */}
-            <Link
-                to={bookPath(facility.company_id, "po", facility.id)}
-                className="flex items-center gap-3.5 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-all duration-200 hover:bg-ink-50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
-            >
-                <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-50">
-                    <BookOpen className="size-5 text-firol-600" />
-                </span>
-                <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-ink-900">Zápis do požiarnej knihy</p>
-                    <p className="mt-0.5 text-xs text-ink-500">Otvorí knihu {client.cases.gen} pre {nouns.demo.acc}</p>
-                </div>
-                <ChevronRight className="size-4 shrink-0 text-ink-300" />
-            </Link>
-
             {/* Tab bar */}
             <div className="relative border-b border-ink-100">
                 <nav className="flex items-center gap-0.5 overflow-x-auto [&::-webkit-scrollbar]:hidden">
@@ -623,8 +605,7 @@ export function FacilityDetailPage() {
                                                 : "bg-ink-100 text-ink-600 hover:bg-ink-200",
                                         )}
                                     >
-                                        {/* Retired úkon (phase 5): only old records remain, so say so. */}
-                                        {t === "poziarna_kniha" ? "Pož. kniha (archív)" : INSPECTION_TYPE_LABELS[t]}
+                                        {INSPECTION_TYPE_LABELS[t]}
                                     </button>
                                 ))}
                         </div>
@@ -656,8 +637,7 @@ export function FacilityDetailPage() {
                         {(filtered ?? []).map((ins) => {
                             const finalized = ins.status === "finalized";
                             // Repeating starts a new úkon — not at an archived prevádzka.
-                            // An old požiarna kniha record is no longer repeated (D2).
-                            const canRepeat = finalized && !archived && canRepeatInspection(ins.type);
+                            const canRepeat = finalized && !archived;
                             return (
                                 <li key={ins.id}>
                                     <Card className="flex items-center gap-3 px-4 py-3 transition-shadow hover:shadow-[var(--shadow-lift)]">

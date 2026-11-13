@@ -27,7 +27,7 @@ use Firol\Db;
  * Frozen copy. A protocol re-rendered with the client's signature must say what
  * it said when it was issued, so the parts that read live data (the Termíny
  * table, the previous-defect table, the facility's description and main
- * switches, the book entry number) are copied into `details.issued_record` at
+ * switches) are copied into `details.issued_record` at
  * issue time ({@see ISSUED_KEY}). The key is server-owned: the header validator
  * does not keep it, so unlocking and saving drops the copy.
  */
@@ -538,7 +538,6 @@ final class PrehliadkaRecord
      * @param list<array{id: int, fields: array<string, mixed>}> $items
      * @param array<string, mixed> $details validated PrehliadkaDetails
      * @param array<string, mixed>|null $issued the frozen block, when re-rendering an issued record
-     * @param int|null $bookSeq number of the PO book entry created together with the record
      * @return array<string, mixed>
      */
     public static function poBlock(
@@ -548,7 +547,6 @@ final class PrehliadkaRecord
         array $details,
         bool $includePhotos,
         ?array $issued,
-        ?int $bookSeq,
     ): array {
         $facilityId = (int) $inspection['facility_id'];
         $points = self::points($items, self::PO, self::photoCounts((int) $inspection['id']));
@@ -563,7 +561,6 @@ final class PrehliadkaRecord
             $note = $issued['note'] ?? $note;
             $lehotaZakon = $issued['lehota_zakon'] ?? $lehotaZakon;
             $lehotaVlastna = $issued['lehota_vlastna'] ?? $lehotaVlastna;
-            $bookSeq = isset($issued['book_seq']) && is_int($issued['book_seq']) ? $issued['book_seq'] : null;
         } else {
             $facts = PrehliadkaTerms::forFacility($accountId, $facilityId, (string) $inspection['executed_on']);
             $terms = ClientTerms::forPrehliadka(
@@ -596,7 +593,6 @@ final class PrehliadkaRecord
             'terms'          => $terms,
             'present'        => (array) ($details['present'] ?? []),
             'handed_over'    => is_array($details['handed_over'] ?? null) ? $details['handed_over'] : null,
-            'book_seq'       => $bookSeq,
             'include_photos' => $includePhotos,
             // What re-rendering needs to say the same thing again.
             '_issued'        => [
@@ -606,7 +602,6 @@ final class PrehliadkaRecord
                 'note'           => $note,
                 'lehota_zakon'   => $lehotaZakon,
                 'lehota_vlastna' => $lehotaVlastna,
-                'book_seq'       => $bookSeq,
             ],
         ];
     }
@@ -682,58 +677,6 @@ final class PrehliadkaRecord
                 'lehota_vlastna'       => $details['lehota_vlastna'] ?? null,
             ],
         ];
-    }
-
-    /**
-     * The defects a book entry written by a prehliadka carries, one short line
-     * each, for the entry's print: the PO entry shows the PO record's points, the
-     * BOZP entry those of the kniha BOZP record. Empty for any other entry.
-     *
-     * @param array<string, mixed> $entry a BookLedger entry
-     * @return list<string>
-     */
-    public static function bookLines(int $accountId, array $entry): array
-    {
-        $ids = array_values(array_filter((array) ($entry['inspection_ids'] ?? []), 'is_int'));
-        if ($ids === []) {
-            return [];
-        }
-        $record = (string) ($entry['book'] ?? '') === BookMapping::BOZP ? self::BOZP : self::PO;
-
-        $stmt = Db::pdo()->prepare(
-            'SELECT id, type, source_inspection_id FROM inspections WHERE id = ? AND account_id = ?'
-        );
-        $lines = [];
-        foreach ($ids as $id) {
-            $stmt->execute([$id, $accountId]);
-            $row = $stmt->fetch();
-            if (!$row) {
-                continue;
-            }
-            $sourceId = null;
-            if ($row['type'] === PrehliadkaDetails::TYPE && $record === self::PO) {
-                $sourceId = (int) $row['id'];
-            } elseif ($row['type'] === 'kniha_bozp' && $record === self::BOZP && $row['source_inspection_id'] !== null) {
-                $sourceId = (int) $row['source_inspection_id'];
-            }
-            if ($sourceId === null) {
-                continue;
-            }
-            $items = [];
-            $it = Db::pdo()->prepare('SELECT id, fields FROM inspection_items WHERE inspection_id = ? ORDER BY position ASC, id ASC');
-            $it->execute([$sourceId]);
-            foreach ($it->fetchAll() as $r) {
-                $items[] = ['id' => (int) $r['id'], 'fields' => json_decode((string) $r['fields'], true) ?: []];
-            }
-            foreach (self::points($items, $record) as $p) {
-                $where = array_filter([$p['where'], $p['devices']], static fn (string $s): bool => $s !== '');
-                $tail = array_filter([$p['deadline_text'], (string) ($p['responsible'] ?? '')], static fn (string $s): bool => $s !== '');
-                $lines[] = $p['number'] . '. ' . $p['title']
-                    . ($where !== [] ? ' — ' . implode(' · ', $where) : '')
-                    . ($tail !== [] ? ' (' . implode(' · ', $tail) . ')' : '');
-            }
-        }
-        return $lines;
     }
 
     /** „Ing. Peter Správca, predseda družstva" — name and role of a person of `details`. */

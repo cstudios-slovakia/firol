@@ -11,10 +11,8 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
-use Firol\Support\BookLedger;
-use Firol\Support\BookMapping;
-use Firol\Support\BookSentences;
 use Firol\Support\ClientKind;
+use Firol\Support\CompanyLookup;
 use Firol\Support\InspectionDetails;
 use Firol\Support\PrehliadkaActivities;
 use Firol\Support\PrehliadkaConcepts;
@@ -113,8 +111,8 @@ final class PrehliadkaController
     /**
      * POST /api/inspections/{id}/prehliadka-close   { include_photos? }
      *
-     * Closes the prehliadka: one transaction issues the PP record, the BOZP
-     * record and the book entries ({@see PrehliadkaCloser}). Online-only — it
+     * Closes the prehliadka: one transaction issues the PP record and the BOZP
+     * record ({@see PrehliadkaCloser}). Online-only — it
      * takes numbers — and the answer is the result screen's data.
      */
     public static function close(Request $req, array $params): void
@@ -200,8 +198,7 @@ final class PrehliadkaController
     }
 
     /**
-     * The documents, book entries and the offer of a closed prehliadka (prototype
-     * `scrVysledok`).
+     * The documents of a closed prehliadka (prototype `scrVysledok`).
      *
      * @return array<string, mixed>
      */
@@ -239,34 +236,6 @@ final class PrehliadkaController
             }
         }
 
-        $entry = static function (string $book, ?int $recordId) use ($accountId, $companyId): ?array {
-            if ($recordId === null) {
-                return null;
-            }
-            $e = BookLedger::entryOfInspection($accountId, $companyId, $book, $recordId);
-            return $e === null ? null : [
-                'id' => $e['id'], 'seq' => $e['seq'], 'signed_manager' => $e['signed_manager'], 'facility_id' => $e['facility_id'],
-            ];
-        };
-        $poEntry = $entry(BookMapping::PO, $po ? $id : null);
-
-        // The fire book was not ticked on close: the app offers the entry with its sentence ready.
-        $offer = null;
-        if ($po && $poEntry === null && $poDocs !== [] && $inspection['status'] === 'finalized') {
-            $offer = [
-                'text'             => BookSentences::prehliadka(
-                    BookMapping::PO,
-                    (string) $inspection['executed_on'],
-                    (string) $inspection['facility_name'],
-                    (string) $poDocs[0]['number'],
-                    count($poPoints),
-                ),
-                'protocol_numbers' => [(string) $poDocs[0]['number']],
-                'has_defects'      => $poPoints !== [],
-                'legal_sentence'   => BookSentences::LEGAL,
-            ];
-        }
-
         return [
             'inspection' => [
                 'id'            => $id,
@@ -280,11 +249,6 @@ final class PrehliadkaController
             ],
             'po'    => $po ? ['documents' => $poDocs, 'defects' => count($poPoints)] : null,
             'bozp'  => $bozp ? ['inspection_id' => $childId, 'documents' => $bozpDocs, 'defects' => count($bozpPoints)] : null,
-            'entries' => [
-                'po'   => $poEntry,
-                'bozp' => null,
-            ],
-            'offer' => $offer,
             // Koncepty riadnych kontrol (spec 7.3) — one draft úkon per ticked type.
             'concepts' => PrehliadkaConcepts::summary($accountId, $id),
             // Defects the „Overiť odstránenie" task can be offered for (spec 20) — after closing only.
@@ -312,7 +276,7 @@ final class PrehliadkaController
     /** @return array{id: int, archived_at: ?string, ...} */
     private static function company(int $accountId, int $companyId): array
     {
-        $company = BookLedger::company($accountId, $companyId);
+        $company = CompanyLookup::find($accountId, $companyId);
         if ($company === null) {
             Response::error('Firma sa nenašla.', 404);
         }

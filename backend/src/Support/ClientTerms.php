@@ -192,31 +192,6 @@ final class ClientTerms
     }
 
     /**
-     * What is still to come, for the „Termíny ďalších kontrol" offer of the
-     * požiarna kniha: the own úkony of the book with the date each is next due.
-     * Company-wide when `$facilityId` is null.
-     *
-     * A term the technician overrode by hand in a closed prehliadka (spec 6.6)
-     * is offered with that date — for this offer only. The calendar and the
-     * úkon's own periodicity are untouched, and a newer úkon of the same kind
-     * brings the automatic term back (see {@see prehliadkaOverrides()}).
-     *
-     * @return list<array{label: string, valid: string}> soonest first
-     */
-    public static function upcoming(int $accountId, int $companyId, ?int $facilityId, string $asOf, string $book): array
-    {
-        $out = [];
-        // Úkony only: a training is no „kontrola" (the prototype's `knihaTerminy`).
-        foreach (self::ownRaw($accountId, $companyId, $facilityId, $asOf, $book, null, false, true, true) as $r) {
-            if ($r['valid'] !== null) {
-                $out[] = ['label' => $r['label'], 'valid' => $r['valid']];
-            }
-        }
-        usort($out, static fn (array $a, array $b): int => [$a['valid'], $a['label']] <=> [$b['valid'], $b['label']]);
-        return $out;
-    }
-
-    /**
      * The úkony and trainings on record, with their raw dates.
      *
      * @return list<array{label: string, done: ?string, valid: ?string, external: bool}>
@@ -228,21 +203,15 @@ final class ClientTerms
         string $asOf,
         string $book,
         ?string $excludeType,
-        bool $withTrainings = true,
-        bool $earliestDue = false,
-        bool $followOverrides = false,
     ): array {
         $rows = [];
-        $overrides = $followOverrides
-            ? self::prehliadkaOverrides($accountId, $companyId, $facilityId, $asOf)
-            : [];
 
         // Latest finalized úkon per type per prevádzka, up to the date.
         // Plain fire-book entries and one-off documents (vyradenie) carry
         // is_preventive_inspection = 0 and are no „kontrola" of anything.
         $facilitySql = $facilityId !== null ? ' AND i.facility_id = :fac' : '';
         $stmt = Db::pdo()->prepare(
-            'SELECT i.id, i.type, i.facility_id, i.executed_on, i.periodicity_value, i.periodicity_unit
+            'SELECT i.type, i.executed_on, i.periodicity_value, i.periodicity_unit
              FROM   inspections i
              WHERE  i.account_id = :acct AND i.company_id = :comp' . $facilitySql . '
                AND  i.status = "finalized" AND i.archived_at IS NULL
@@ -275,27 +244,18 @@ final class ClientTerms
         // (the query is walked oldest first). Keyed by the printed label, not the
         // type: a legacy `poziarna_kniha` and a `preventivna_prehliadka` read the
         // same and must not print twice.
-        // With `$earliestDue` the row kept is the one due soonest instead (the
-        // „Termíny ďalších kontrol" offer: an overdue prevádzka must not hide
-        // behind a newer úkon at another one).
         $byType = [];
         foreach ($stmt->fetchAll() as $r) {
             if (BookMapping::forInspectionType((string) $r['type']) !== $book) {
                 continue;
             }
             $label = self::inspectionLabel((string) $r['type']);
-            $r['due'] = self::dueOf($r, $overrides);
-            if ($earliestDue && isset($byType[$label])) {
-                $dueNew = $r['due'];
-                $dueOld = $byType[$label]['due'];
-                if ($dueNew === null || ($dueOld !== null && $dueNew >= $dueOld)) {
-                    continue;
-                }
-            }
             unset($byType[$label]);
             $byType[$label] = $r;
         }
         foreach ($byType as $r) {
+            $value = $r['periodicity_value'] !== null ? (int) $r['periodicity_value'] : null;
+            $unit = $r['periodicity_unit'] !== null ? (string) $r['periodicity_unit'] : null;
             $rows[] = [
                 // `key` is the one step 3 of the prehliadka overrides by
                 // (PrehliadkaTerms): routine:<type>, training:skolenie_bozp, …
@@ -303,13 +263,13 @@ final class ClientTerms
                 'type'     => (string) $r['type'],
                 'label'    => self::inspectionLabel((string) $r['type']),
                 'done'     => (string) $r['executed_on'],
-                'valid'    => $r['due'],
+                'valid'    => Periodicity::validUntil((string) $r['executed_on'], $value, $unit),
                 'external' => false,
             ];
         }
 
         // Every training of the trainings table is PO ({@see BookMapping::forTraining()}).
-        if ($withTrainings && $book === BookMapping::PO) {
+        if ($book === BookMapping::PO) {
             // Latest finalized training per term chain — for this prevádzka or
             // for the whole company (facility left empty). Walked oldest first,
             // so the last one seen for a chain is its latest; Vstupné and
@@ -350,101 +310,6 @@ final class ClientTerms
         }
 
         return $rows;
-    }
-
-    /**
-     * When an úkon is next due: its date plus its own periodicity, or the date
-     * the technician wrote over it in a prehliadka that is not older than the
-     * úkon (`$overrides` from {@see prehliadkaOverrides()}, empty = ignore them).
-     *
-     * @param array<string, mixed> $inspection a row with type, facility_id, executed_on and the periodicity columns
-     * @param array<int, array<string, array{on: string, valid: string}>> $overrides
-     */
-    private static function dueOf(array $inspection, array $overrides = []): ?string
-    {
-        $type = (string) $inspection['type'];
-        // The prehliadka is its own term chain; its override key is `prehliadka_po`.
-        $key = Periodicity::inspectionChain($type) === 'preventivna_prehliadka' ? 'prehliadka_po' : self::termKey($type);
-        $override = $overrides[(int) ($inspection['facility_id'] ?? 0)][$key] ?? null;
-        // An úkon done after the prehliadka replaces its override with its own term.
-        // On the very day of the prehliadka the order they were written in decides:
-        // a routine control finalized after it (the concept the prehliadka created)
-        // keeps its own periodicity. The prehliadka's own term is governed by its
-        // own override, so that chain never yields to it.
-        if ($override !== null) {
-            $executedOn = (string) $inspection['executed_on'];
-            if ($key === 'prehliadka_po') {
-                $overrideHolds = $override['on'] >= $executedOn;
-            } else {
-                $overrideHolds = $override['on'] > $executedOn
-                    || ($override['on'] === $executedOn && (int) $override['id'] > (int) ($inspection['id'] ?? 0));
-            }
-            if ($overrideHolds) {
-                return $override['valid'];
-            }
-        }
-        $value = $inspection['periodicity_value'] !== null ? (int) $inspection['periodicity_value'] : null;
-        $unit = $inspection['periodicity_unit'] !== null ? (string) $inspection['periodicity_unit'] : null;
-        return Periodicity::validUntil((string) $inspection['executed_on'], $value, $unit);
-    }
-
-    /**
-     * The hand-written terms of the closed prehliadky (`details.term_overrides`,
-     * spec 6.6) that are still the last word, per prevádzka and term key.
-     *
-     * Prehliadky are walked oldest first and each decides, for every term it
-     * governs — its own `prehliadka_po` and each riadna kontrola it ticked —
-     * whether the term is overridden (set) or automatic (cleared), so a later
-     * prehliadka that ticks the control again without an override takes the
-     * earlier override back. Only the PO record counts: a BOZP-only prehliadka
-     * governs nothing of the požiarna kniha. Nothing is written anywhere — the
-     * override never reaches the úkon's periodicity, so the next inspection
-     * starts from the plain interval again.
-     *
-     * @return array<int, array<string, array{on: string, valid: string}>> facility id → key → override
-     */
-    private static function prehliadkaOverrides(int $accountId, int $companyId, ?int $facilityId, string $asOf): array
-    {
-        $facilitySql = $facilityId !== null ? ' AND facility_id = :fac' : '';
-        $stmt = Db::pdo()->prepare(
-            'SELECT id, facility_id, executed_on, details
-             FROM   inspections
-             WHERE  account_id = :acct AND company_id = :comp' . $facilitySql . '
-               AND  type = "preventivna_prehliadka"
-               AND  status = "finalized" AND archived_at IS NULL
-               AND  executed_on IS NOT NULL AND executed_on <= :asof
-             ORDER  BY executed_on ASC, id ASC'
-        );
-        $args = ['acct' => $accountId, 'comp' => $companyId, 'asof' => $asOf];
-        if ($facilityId !== null) {
-            $args['fac'] = $facilityId;
-        }
-        $stmt->execute($args);
-
-        $out = [];
-        foreach ($stmt->fetchAll() as $r) {
-            $details = InspectionDetails::decode($r['details']) ?? [];
-            if (($details['scope']['po'] ?? false) !== true) {
-                continue;
-            }
-            $fac = (int) $r['facility_id'];
-            $written = is_array($details['term_overrides'] ?? null) ? $details['term_overrides'] : [];
-            $governed = ['prehliadka_po'];
-            foreach ((array) ($details['routine'] ?? []) as $type) {
-                if (is_string($type)) {
-                    $governed[] = 'routine:' . $type;
-                }
-            }
-            foreach ($governed as $key) {
-                $date = $written[$key] ?? null;
-                if (is_string($date) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1) {
-                    $out[$fac][$key] = ['on' => (string) $r['executed_on'], 'id' => (int) $r['id'], 'valid' => $date];
-                } else {
-                    unset($out[$fac][$key]);
-                }
-            }
-        }
-        return $out;
     }
 
     /**
