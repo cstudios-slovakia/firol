@@ -144,14 +144,15 @@ export function visitUkonPath(visit: Visit, type: VisitType): string {
     executed_on: visit.visit_date,
   });
   // POapp 26. 10. 2026 (D2) — „Kniha kontrol BOZP" starts a preventívna
-  // prehliadka preset to BOZP; its record is the kniha BOZP entry. A prehliadka
+  // prehliadka preset to BOZP; its record is the kniha BOZP entry. The OPP item
+  // starts it preset to PO (spec 14). A prehliadka
   // already begun under the visit is continued, whichever of the two was ticked.
   if (type === PREHLIADKA_TYPE || type === 'kniha_bozp') {
     const own = visitInspectionOfType(visit, type);
     if (own) return type === PREHLIADKA_TYPE ? prehliadkaPath(own.id) : `/inspections/${own.id}`;
     const begun = visitInspectionOfType(visit, PREHLIADKA_TYPE);
     if (begun) return prehliadkaPath(begun.id);
-    if (type === 'kniha_bozp') params.set('preset', 'bozp');
+    params.set('preset', type === 'kniha_bozp' ? 'bozp' : 'po');
     return `${PREHLIADKA_NEW_PATH}?${params.toString()}`;
   }
   const existing = visitInspectionOfType(visit, type);

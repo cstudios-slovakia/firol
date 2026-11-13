@@ -56,6 +56,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
 import { DetailHeaderSkeleton, SkeletonList } from "@/components/ui/Skeleton";
 import { PendingSyncBanner } from "@/components/PendingSyncBanner";
+import { DiscardPrehliadkaButton, useDiscardPrehliadka } from "@/components/prehliadka/DiscardPrehliadka";
 import { InspectionTags } from "@/components/InspectionTags";
 import { useMemberRights } from "@/auth/useMemberRights";
 import { clientNouns, clientTypeStyles, facilityNouns, isBytoveDruzstvo } from "@/lib/clientKind";
@@ -236,6 +237,16 @@ export function FacilityDetailPage() {
         };
     }, [activeTab, devices, id]);
 
+    // A prehliadka in progress here: the draft in the list (also one created
+    // offline), else what the server reported.
+    const ppDraftId =
+        (inspections ?? []).find((i) => i.type === PREHLIADKA_TYPE && i.status === "draft")?.id ?? ppContextDraft;
+    // Spec 11.1 — a draft prehliadka that was never closed can be discarded from its banner.
+    const ppDiscard = useDiscardPrehliadka(ppDraftId, () => {
+        setInspections((prev) => prev?.filter((i) => i.id !== ppDraftId) ?? null);
+        setPpContextDraft(null);
+    });
+
     if (error) {
         return (
             <div className="flex flex-col gap-4">
@@ -276,11 +287,6 @@ export function FacilityDetailPage() {
     const client = clientNouns(facility.company_client_type);
     const showBuildingColumn = isBytoveDruzstvo(facility.company_client_type) || Boolean(facility.description);
     const canEdit = !isReadOnly && !archived;
-    // A prehliadka in progress here: the draft in the list (also one created
-    // offline), else what the server reported.
-    const ppDraftId =
-        (inspections ?? []).find((i) => i.type === PREHLIADKA_TYPE && i.status === "draft")?.id ?? ppContextDraft;
-
     return (
         <div className="flex flex-col gap-5">
             <Link
@@ -446,6 +452,7 @@ export function FacilityDetailPage() {
 
             {/* Action card menu: only show continue banner when a draft is in progress */}
             {canEdit && ppDraftId !== null && (
+                <>
                 <Link
                     id="pp-start-link"
                     to={prehliadkaPath(ppDraftId)}
@@ -462,6 +469,8 @@ export function FacilityDetailPage() {
                     </div>
                     <ChevronRight className="size-4 shrink-0 text-white/70" />
                 </Link>
+                <DiscardPrehliadkaButton action={ppDiscard} size="sm" className="-mt-3 self-end" />
+                </>
             )}
             {canEdit && (
                 <Link

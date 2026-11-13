@@ -4,7 +4,7 @@ import { ArrowLeft, Building, ChevronRight, Pencil, Plus, Trash2, Warehouse } fr
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies } from '@/api/companies';
-import { clientNouns } from '@/lib/clientKind';
+import { clientNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { ExternalTerms, termState, type ExternalTerm, type ExternalTermSuggestion } from '@/api/externalTerms';
 import { Inspections, type InspectionDetail } from '@/api/inspections';
 import { Prehliadka, type CompanyActivities, type TermFacts } from '@/api/prehliadka';
@@ -608,6 +608,8 @@ function ActivitiesCard({
   ];
   const picked = rows.filter((r) => ticked.includes(r.label)).length;
   const target = kind === 'bozp' ? 'do záznamu Preventívna prehliadka BOZP' : 'do záznamu z preventívnej prehliadky';
+  // A firma's PO set is the nine points (spec 6.1): genitive phrases read after this line.
+  const lead = kind === 'po' && clientType !== null && !isBytoveDruzstvo(clientType) ? 'Obsahom prehliadky je kontrola:' : null;
 
   return (
     <Card className="animate-fade-up flex flex-col gap-3 p-4">
@@ -620,6 +622,7 @@ function ActivitiesCard({
           medzi nedostatkami, bolo v poriadku.
         </p>
       </div>
+      {lead && defaults.length > 0 && <p className="text-sm font-medium text-ink-800">{lead}</p>}
       <ul className="flex flex-col gap-2">
         {rows.map((r) => (
           <li key={r.label} className="flex items-stretch gap-2">

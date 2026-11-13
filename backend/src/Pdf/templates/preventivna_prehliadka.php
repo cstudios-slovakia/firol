@@ -142,11 +142,31 @@ $note = trim((string) ($p['note'] ?? ($p['poznamka'] ?? ($rawDetails['note'] ?? 
 
 <?php if ($activities !== []): ?>
   <?= $doc->band('Vykonané činnosti') ?>
-  <ul style="margin:4pt 0 4pt; padding-left:18pt; line-height:1.4;">
-    <?php foreach ($activities as $a): ?>
-      <li><?= $e((string) ($a['label'] ?? $a)) ?></li>
-    <?php endforeach ?>
-  </ul>
+  <?php
+  // A firma's nine points are genitive phrases that read after a lead line;
+  // its own activities then follow under „Ďalej vykonané". Every other list
+  // (bytový dom, records issued before) prints as one plain list.
+  $activityLead = is_string($p['activities_lead'] ?? null) ? $p['activities_lead'] : null;
+  $activityGroups = [[null, $activities]];
+  if ($activityLead !== null) {
+      $listed = array_values(array_filter($activities, static fn ($a): bool => empty($a['custom'])));
+      $more = array_values(array_filter($activities, static fn ($a): bool => !empty($a['custom'])));
+      // Own activities always print under „Ďalej vykonané" (spec 6.3), also
+      // when none of the nine points is ticked; an empty group is skipped below.
+      $activityGroups = [[$activityLead, $listed], [PrehliadkaRecord::FIRMA_ACTIVITIES_MORE, $more]];
+  }
+  ?>
+  <?php foreach ($activityGroups as [$groupLead, $groupItems]): ?>
+    <?php if ($groupItems === []) continue; ?>
+    <?php if ($groupLead !== null): ?>
+      <div style="margin:4pt 0 0;"><?= $e($groupLead) ?></div>
+    <?php endif ?>
+    <ul style="margin:4pt 0 4pt; padding-left:18pt; line-height:1.4;">
+      <?php foreach ($groupItems as $a): ?>
+        <li><?= $e((string) ($a['label'] ?? $a)) ?></li>
+      <?php endforeach ?>
+    </ul>
+  <?php endforeach ?>
   <div class="small-note" style="font-style:italic; color:#6b6b75; margin-top:3pt;"><?= $e(PrehliadkaRecord::CHECKED) ?></div>
 <?php endif ?>
 

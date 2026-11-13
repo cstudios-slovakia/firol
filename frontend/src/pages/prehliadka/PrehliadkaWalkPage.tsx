@@ -30,6 +30,7 @@ import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { DefectScopeBadge, StepBars } from '@/components/prehliadka/ui';
 import { PreviousDefectsSection } from '@/components/prehliadka/PreviousDefects';
+import { DiscardPrehliadkaButton, useDiscardPrehliadka } from '@/components/prehliadka/DiscardPrehliadka';
 
 type Row = { item: InspectionItem; defect: DefectFields };
 
@@ -81,6 +82,11 @@ export function PrehliadkaWalkPage() {
     [data],
   );
   const previousRows = useMemo(() => rows.map((r) => ({ itemId: r.item.id, defect: r.defect })), [rows]);
+  const discard = useDiscardPrehliadka(
+    data?.inspection.status === 'draft' ? id : null,
+    (facilityId) => navigate(`/facilities/${facilityId}`, { replace: true }),
+    data,
+  );
 
   if (error) {
     return (
@@ -267,6 +273,7 @@ export function PrehliadkaWalkPage() {
         )}
       </div>
       <p className="-mt-2 text-center text-xs text-ink-400">Prerušenú prehliadku nájdeš na {nouns.cases.loc}.</p>
+      <DiscardPrehliadkaButton action={discard} className="self-center" size="sm" />
     </div>
   );
 }

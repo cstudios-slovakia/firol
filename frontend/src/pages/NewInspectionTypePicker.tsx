@@ -269,10 +269,11 @@ export function NewInspectionTypePicker() {
   const passthroughQs = passthrough.toString();
   const stepOnePathFor = (type: InspectionType) => {
     // The prehliadka has screens of its own; „Kniha kontrol BOZP" starts the
-    // same one preset to BOZP (D2) — its record is the kniha BOZP entry.
+    // same one preset to BOZP (D2) — its record is the kniha BOZP entry — and
+    // the OPP item preset to PO (spec 14).
     if (type === 'preventivna_prehliadka' || type === 'kniha_bozp') {
       const qs = new URLSearchParams(passthrough);
-      if (type === 'kniha_bozp') qs.set('preset', 'bozp');
+      qs.set('preset', type === 'kniha_bozp' ? 'bozp' : 'po');
       const q = qs.toString();
       return `${PREHLIADKA_NEW_PATH}${q ? `?${q}` : ''}`;
     }

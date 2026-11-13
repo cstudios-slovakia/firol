@@ -12,7 +12,9 @@ use Firol\Db;
  *
  * Two separate sets, which never mix: PO and BOZP. The defaults are code; the
  * firm's own additions are rows of `company_activities` and are offered again
- * at that firm only. The ticked ones are copied into the prehliadka's
+ * at that firm only. The PO defaults depend on the client type (POapp spec
+ * 7. 11. 2026, ch. 6.1–6.2, plan K2): a `firma` gets the nine points of
+ * {@see FirePreventionPoints::FIRMA}, a `bytove_druzstvo` keeps the list below. The ticked ones are copied into the prehliadka's
  * `details` (`activities_po`, `activities_bozp`) as plain strings, so an issued
  * record keeps its wording whatever happens to the list afterwards.
  *
@@ -26,7 +28,11 @@ final class PrehliadkaActivities
 
     public const MAX_LABEL = 191;
 
-    /** Default set of the preventívna prehliadka (spec 6.4 „Sada PO"), verbatim. */
+    /**
+     * Default set of the preventívna prehliadka (spec 6.4 „Sada PO"), verbatim —
+     * the PO set of a bytové družstvo, and the set every PO record was issued
+     * against before a firma got the nine points.
+     */
     private const PO_DEFAULTS = [
         'Kontrola únikových ciest, únikových východov a zásahových ciest',
         'Kontrola požiarnych uzáverov',
@@ -46,18 +52,37 @@ final class PrehliadkaActivities
         return $kind === self::PO || $kind === self::BOZP;
     }
 
-    /** @return list<string> */
-    public static function defaults(string $kind): array
+    /**
+     * The predefined set of one kind for a client type. Any type other than
+     * `bytove_druzstvo` reads as a firma (spec 6.2).
+     *
+     * @return list<string>
+     */
+    public static function defaults(string $kind, string $clientType): array
     {
-        return $kind === self::BOZP ? BozpRecords::knihaActivities() : self::PO_DEFAULTS;
+        if ($kind === self::BOZP) {
+            return BozpRecords::knihaActivities();
+        }
+        return ClientKind::isBytovyDom($clientType) ? self::PO_DEFAULTS : FirePreventionPoints::FIRMA;
     }
 
     /**
-     * Both sets of a firm: the defaults and its own additions.
+     * The PO set as it was for every client before the nine points: what a PO
+     * record issued without a frozen activity list was ordered by.
+     *
+     * @return list<string>
+     */
+    public static function legacyPoDefaults(): array
+    {
+        return self::PO_DEFAULTS;
+    }
+
+    /**
+     * Both sets of a firm: the defaults for its client type and its own additions.
      *
      * @return array{po: array{defaults: list<string>, custom: list<array{id: int, label: string}>}, bozp: array{defaults: list<string>, custom: list<array{id: int, label: string}>}}
      */
-    public static function forCompany(int $accountId, int $companyId): array
+    public static function forCompany(int $accountId, int $companyId, string $clientType): array
     {
         $stmt = Db::pdo()->prepare(
             'SELECT id, kind, label FROM company_activities
@@ -70,8 +95,8 @@ final class PrehliadkaActivities
             $custom[(string) $row['kind']][] = ['id' => (int) $row['id'], 'label' => (string) $row['label']];
         }
         return [
-            self::PO   => ['defaults' => self::defaults(self::PO), 'custom' => $custom[self::PO]],
-            self::BOZP => ['defaults' => self::defaults(self::BOZP), 'custom' => $custom[self::BOZP]],
+            self::PO   => ['defaults' => self::defaults(self::PO, $clientType), 'custom' => $custom[self::PO]],
+            self::BOZP => ['defaults' => self::defaults(self::BOZP, $clientType), 'custom' => $custom[self::BOZP]],
         ];
     }
 
@@ -96,8 +121,9 @@ final class PrehliadkaActivities
         }
 
         $pdo = Db::pdo();
-        // Already on offer (a default, or an earlier addition) — nothing to add.
-        foreach (self::defaults($kind) as $default) {
+        // Already on offer (a default of this client's set, or an earlier addition) — nothing to add.
+        $clientType = (string) (CompanyLookup::find($accountId, $companyId)['client_type'] ?? '');
+        foreach (self::defaults($kind, $clientType) as $default) {
             if (mb_strtolower($default) === mb_strtolower($label)) {
                 throw new \InvalidArgumentException('Táto činnosť je už v základnej sade.');
             }

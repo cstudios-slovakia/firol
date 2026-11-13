@@ -38,6 +38,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { CheckRow, Segmented, StepBars } from '@/components/prehliadka/ui';
+import { DiscardPrehliadkaButton, useDiscardPrehliadka } from '@/components/prehliadka/DiscardPrehliadka';
 
 type ScopeChoice = 'po' | 'bozp' | 'both';
 
@@ -84,8 +85,10 @@ type Loaded = {
  * of a draft that exists; it keeps the devices written during the walk.
  *
  * On the second and every later prehliadka of a prevádzka the switches arrive
- * preset from the last one, shown as „Ako naposledy" first. On the first visit
- * nothing is preselected.
+ * preset from the last one, shown as „Ako naposledy" first. The area is the
+ * exception (spec 14): it follows the entry — the OPP item opens with PO, the
+ * BOZP item (`preset=bozp`) with BOZP — and the other area is one tap away.
+ * A draft keeps its own choice. One area is always chosen.
  */
 export function PrehliadkaSetupPage() {
   const { id: idStr } = useParams<{ id?: string }>();
@@ -93,6 +96,7 @@ export function PrehliadkaSetupPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const visitId = numericParam(searchParams.get('visit_id'));
+  // Every entry other than the BOZP one is the OPP item (spec 14).
   const presetBozp = searchParams.get('preset') === 'bozp';
 
   // The prevádzka comes from the query, from the visit, or — editing — from the draft.
@@ -160,7 +164,7 @@ export function PrehliadkaSetupPage() {
 
   return (
     <SetupForm
-      key={`${editingId ?? 'new'}-${facilityId}`}
+      key={`${editingId ?? 'new'}-${facilityId}-${presetBozp ? 'bozp' : 'po'}`}
       facilityId={facilityId}
       editing={draft}
       visit={visit}
@@ -195,13 +199,17 @@ function SetupForm({
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [scope, setScope] = useState<PrehliadkaScope>({ po: false, bozp: false });
+  const details = useMemo(() => parseDetails(editing?.inspection.details), [editing]);
+
+  // The area preselected by the entry; a draft keeps what it stored (spec 14).
+  const entryScope: PrehliadkaScope = presetBozp ? { po: false, bozp: true } : { po: true, bozp: false };
+  const [scope, setScope] = useState<PrehliadkaScope>(() =>
+    editing && scopeToChoice(details.scope) !== null ? details.scope : entryScope,
+  );
   const [routine, setRoutine] = useState<DeviceType[]>([]);
   const [executedOn, setExecutedOn] = useState(
     editing?.inspection.executed_on ?? visit?.visit_date ?? presetDate ?? todayIso(),
   );
-
-  const details = useMemo(() => parseDetails(editing?.inspection.details), [editing]);
 
   const [lehotaZakon, setLehotaZakon] = useState<LehotaZakon>(() => (details.lehota_zakon as LehotaZakon) || 12);
   const [lehotaVlastna, setLehotaVlastna] = useState<number | null>(() => details.lehota_vlastna ?? null);
@@ -263,15 +271,15 @@ function SetupForm({
     setSeeded(true);
     const bd = isBytoveDruzstvo(loaded.facility.company_client_type);
     if (editing) {
-      setScope(details.scope);
+      if (scopeToChoice(details.scope) !== null) setScope(details.scope);
       setRoutine(details.routine);
       setLehotaZakon((details.lehota_zakon as LehotaZakon) || (bd ? 12 : 3));
       setLehotaVlastna(details.lehota_vlastna ?? null);
       if (details.lehota_vlastna) setCustomLehotaInput(String(details.lehota_vlastna));
       return;
     }
+    // The last prehliadka presets everything but the area, which the entry decides.
     if (memory) {
-      setScope(memory.scope);
       setRoutine(memory.routine.filter((t) => tickable(t, [])));
       if (memory.lehota_zakon === 3 || memory.lehota_zakon === 6 || memory.lehota_zakon === 12) {
         setLehotaZakon(memory.lehota_zakon as LehotaZakon);
@@ -285,14 +293,16 @@ function SetupForm({
     } else {
       setLehotaZakon(bd ? 12 : 3);
     }
-    // „Kniha kontrol BOZP" (D2) starts a prehliadka preset to BOZP.
-    if (presetBozp) {
-      setScope({ po: false, bozp: true });
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
   const showMemoryCard = editing === null && memory !== null && !changing && !presetBozp;
+
+  // A prehliadka already in progress at this prevádzka (only when starting a new one).
+  const inProgress = editing === null ? (loaded?.context?.draft_id ?? null) : null;
+  const discardInProgress = useDiscardPrehliadka(inProgress, () =>
+    setLoaded((cur) => (cur && cur.context ? { ...cur, context: { ...cur.context, draft_id: null } } : cur)),
+  );
 
   const backTo = editing
     ? prehliadkaPath(editing.inspection.id)
@@ -397,10 +407,9 @@ function SetupForm({
   if (loadError) return <ErrorCard message={loadError} to={backTo} />;
   if (!loaded) return <SetupSkeleton />;
 
-  const { facility, context } = loaded;
+  const { facility } = loaded;
   const bd = isBytoveDruzstvo(facility.company_client_type);
   const nouns = facilityNouns(facility.company_client_type);
-  const inProgress = editing === null ? (context?.draft_id ?? null) : null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -440,20 +449,25 @@ function SetupForm({
           <div>
             <p className="text-sm font-semibold text-ink-900">Prehliadka tu už prebieha</p>
             <p className="mt-0.5 text-xs text-ink-500">
-              Na {nouns.demo.loc} je rozpracovaná prehliadka. Dokonči ju, alebo ju zahoď na zozname kontrol.
+              Na {nouns.demo.loc} je rozpracovaná prehliadka.{' '}
+              {discardInProgress.allowed ? 'Pokračuj v nej, alebo ju zahoď.' : 'Dokonči ju.'}
             </p>
           </div>
-          <Link to={prehliadkaPath(inProgress)} className="self-start">
-            <Button type="button" id="pp-continue" rightIcon={<ArrowRight className="size-4" />}>
-              Pokračovať
-            </Button>
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link to={prehliadkaPath(inProgress)}>
+              <Button type="button" id="pp-continue" rightIcon={<ArrowRight className="size-4" />}>
+                Pokračovať
+              </Button>
+            </Link>
+            <DiscardPrehliadkaButton action={discardInProgress} />
+          </div>
         </Card>
       )}
 
       {inProgress === null && showMemoryCard && memory && (
         <MemoryCard
           memory={memory}
+          scope={scope}
           routine={memory.routine.filter((t) => tickable(t, []))}
           date={executedOn}
           submitting={submitting}
@@ -746,6 +760,7 @@ function SetupForm({
 
 function MemoryCard({
   memory,
+  scope,
   routine: routineTypes,
   date,
   submitting,
@@ -754,6 +769,8 @@ function MemoryCard({
   onChange,
 }: {
   memory: NonNullable<PrehliadkaContext['last']>;
+  /** The area this start uses — the entry's, not the last prehliadka's. */
+  scope: PrehliadkaScope;
   routine: DeviceType[];
   date: string;
   submitting: boolean;
@@ -774,7 +791,7 @@ function MemoryCard({
         </div>
         <ul className="flex flex-col gap-1.5 text-sm text-ink-800">
           <li>
-            • Zapisujem <b>{scopeLabel(memory.scope)}</b>
+            • Zapisujem <b>{scopeLabel(scope)}</b>
           </li>
           <li>
             • Riadne kontroly: <b>{routine.length > 0 ? routine.join(', ') : 'žiadne'}</b>
