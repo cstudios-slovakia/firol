@@ -43,7 +43,9 @@ final class ExternalTerms
         'Revízia plynového zariadenia'                         => self::BOZP,
         'Revízia zdvíhacieho zariadenia'                       => self::BOZP,
         'Kontrola elektrickej požiarnej signalizácie'          => self::PO,
-        'Iná revízia'                                          => self::PO,
+        // No catch-all „Iná revízia" (spec 11.2): a name of one's own is the
+        // sheet's free-text choice. Terms saved under that name earlier simply
+        // open as such a free name — the name is free text, nothing matches on it.
     ];
 
     /**
