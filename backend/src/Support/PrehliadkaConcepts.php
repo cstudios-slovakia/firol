@@ -32,6 +32,9 @@ use Firol\Storage\Storage;
  *     concept_built_at          datetime   when the app last filled it
  *     concept_item_count        int        how many items it had then
  *     concept_confirmed_at      datetime|null   set by the technician
+ *     carried_from              {number, executed_on}|null  the protocol the devices
+ *                               came from ({@see PrehliadkaChecklist}, spec 12.2)
+ *     carried_positions         list<int>  positions of the items carried from it
  *
  * and {@see \Firol\Controllers\DocumentController::generateForInspectionInternal()}
  * refuses it until `concept_confirmed_at` is set. `source_inspection_id` is the
@@ -158,7 +161,8 @@ final class PrehliadkaConcepts
         }
 
         $failing = self::failingDevices($items, $type);
-        $built = self::conceptItems($accountId, $facilityId, $type, $details, $failing);
+        $sourceId = null;
+        $built = self::conceptItems($accountId, $facilityId, $type, $details, $failing, $sourceId);
         if ($built === []) {
             // No devices of this type known anywhere — only a stale draft to retire.
             if ($existing !== null) {
@@ -218,11 +222,15 @@ final class PrehliadkaConcepts
         }
 
         $insert = $pdo->prepare('INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)');
+        $carriedPositions = [];
         foreach ($built as $i => $row) {
             $insert->execute([$conceptId, $i + 1, json_encode($row['fields'], JSON_UNESCAPED_UNICODE)]);
             $itemId = (int) $pdo->lastInsertId();
             if ($row['photo_items'] !== []) {
                 self::copyPhotos($accountId, $prehliadkaId, $row['photo_items'], $conceptId, $itemId, $files);
+            }
+            if ($row['carried']) {
+                $carriedPositions[] = $i + 1;
             }
         }
 
@@ -234,6 +242,14 @@ final class PrehliadkaConcepts
                 self::BUILT_KEY     => $now,
                 self::COUNT_KEY     => count($built),
                 self::CONFIRMED_KEY => null,
+                // Where the carried devices came from — shown on the checklist after
+                // the prehliadka (spec 12.2). Number and date only, no ids, so a
+                // restored backup reads the same.
+                // Null when nothing was carried (every earlier device disposed).
+                PrehliadkaChecklist::CARRIED_FROM_KEY      => $sourceId !== null && $carriedPositions !== []
+                    ? PrehliadkaChecklist::originOf($accountId, $sourceId)
+                    : null,
+                PrehliadkaChecklist::CARRIED_POSITIONS_KEY => $carriedPositions,
             ]),
             $conceptId,
             $accountId,
@@ -314,10 +330,17 @@ final class PrehliadkaConcepts
      *
      * @param array<string, mixed> $details
      * @param array<string, array{defects: list<array{item_id: int, text: string}>}> $failing
-     * @return list<array{fields: array<string, mixed>, photo_items: list<int>}>
+     * @param int|null $sourceId set to the úkon the devices were carried from, null without one
+     * @return list<array{fields: array<string, mixed>, photo_items: list<int>, carried: bool}>
      */
-    private static function conceptItems(int $accountId, int $facilityId, string $type, array $details, array $failing): array
-    {
+    private static function conceptItems(
+        int $accountId,
+        int $facilityId,
+        string $type,
+        array $details,
+        array $failing,
+        ?int &$sourceId = null,
+    ): array {
         $rows = [];
 
         $sourceId = CarryOver::latestSourceId($accountId, $facilityId, $type);
@@ -335,7 +358,7 @@ final class PrehliadkaConcepts
                 if ($carried === null) {
                     continue; // disposed last time — stays behind
                 }
-                $rows[] = self::withResult($type, $carried, $failing['s' . (int) $row['id']] ?? null);
+                $rows[] = self::withResult($type, $carried, $failing['s' . (int) $row['id']] ?? null) + ['carried' => true];
             }
         }
 
@@ -343,7 +366,8 @@ final class PrehliadkaConcepts
             if (!is_array($nd) || ($nd['type'] ?? null) !== $type || !is_string($nd['tmp_id'] ?? null)) {
                 continue;
             }
-            $rows[] = self::withResult($type, self::newDeviceFields($type, $nd), $failing['n' . $nd['tmp_id']] ?? null);
+            $rows[] = self::withResult($type, self::newDeviceFields($type, $nd), $failing['n' . $nd['tmp_id']] ?? null)
+                + ['carried' => false];
         }
         return $rows;
     }

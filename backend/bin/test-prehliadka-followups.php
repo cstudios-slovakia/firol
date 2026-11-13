@@ -213,7 +213,26 @@ try {
     // Odd legacy rows must not crash the check.
     $legacy = PrehliadkaConcepts::incompleteItems('php', [['id' => 7, 'position' => 3, 'fields' => 'not-an-object']]);
     $expect('2 a row that is not an object counts as empty', [$legacy[0]['name'], count($legacy[0]['missing'])], ['Položka č. 3', 6]);
-    $expect('2 a type without rules passes', PrehliadkaConcepts::incompleteItems('ts_hadic', [['id' => 8, 'position' => 1, 'fields' => []]]), []);
+    $expect('2 a type without rules passes', PrehliadkaConcepts::incompleteItems('poziarna_kniha', [['id' => 8, 'position' => 1, 'fields' => []]]), []);
+
+    // The follow-ups the checklist after a prehliadka closes (spec 12.2).
+    $expect('2 oprava a TS PHP carried from today is complete', $check('oprava_ts_php', [
+        'manufacturer' => 'Gloria', 'type' => 'P6', 'serial' => 'A1', 'year' => 2019, 'location' => 'Chodba', 'notes' => null,
+    ]), []);
+    $expect('2 oprava a TS PHP: séria and rok missing', $check('oprava_ts_php', [
+        'manufacturer' => 'Gloria', 'type' => 'P6', 'serial' => '', 'year' => null, 'location' => 'Chodba', 'notes' => null,
+    ]), ['Položka č. 1', ['Výrobné číslo / séria', 'Rok výroby']]);
+    $expect('2 vyradenie: dôvod missing', $check('vyradenie', [
+        'manufacturer' => 'Gloria', 'type' => 'P6', 'serial' => 'A1', 'year' => 2019, 'location' => 'Chodba', 'reason' => '',
+    ]), ['Položka č. 1', ['Dôvod vyradenia']]);
+    $expect('2 ts hadíc carried is complete, rok výroby optional', $check('ts_hadic', [
+        'hose_type' => 'C52', 'location' => 'Vchod', 'manufacturer' => 'Pyrotex', 'working_pressure' => 1.2,
+        'test_pressure' => 1.5, 'length' => 20, 'year_of_manufacture' => null, 'result' => 'vyhovuje', 'notes' => null,
+    ]), []);
+    $expect('2 ts hadíc blank hose: values and result missing', $check('ts_hadic', [
+        'hose_type' => 'C52', 'location' => 'Vchod', 'manufacturer' => '', 'working_pressure' => null,
+        'test_pressure' => null, 'length' => null, 'year_of_manufacture' => null, 'result' => '', 'notes' => null,
+    ]), ['Položka č. 1', ['Výrobca', 'Pracovný pretlak', 'Skúšobný pretlak', 'Dĺžka', 'Výsledok skúšky']]);
     $expect('2 the check is repeatable (collect mode is reset)', $check('php', ['serial' => 'X']), $check('php', ['serial' => 'X']));
 
     // The refusal names the devices; a long list is cut.

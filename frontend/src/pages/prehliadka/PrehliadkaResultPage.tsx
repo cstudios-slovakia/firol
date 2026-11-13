@@ -8,20 +8,18 @@ import {
   FileText,
   ListTodo,
   PenLine,
-  ShieldCheck,
   Undo2,
   Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import {
-  INSPECTION_TYPE_LABELS,
   Inspections,
   documentDownloadUrl,
   type InspectionDetail,
   type InspectionDocument,
 } from '@/api/inspections';
-import { Prehliadka, type PrehliadkaConcept, type PrehliadkaResult } from '@/api/prehliadka';
+import { Prehliadka, type PrehliadkaResult } from '@/api/prehliadka';
 import { ApiError } from '@/lib/api';
 import { facilityNouns } from '@/lib/clientKind';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
@@ -34,6 +32,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { DEFECT_TASKS_CHANGED_EVENT, offerPrehliadkaDefectTasks } from '@/components/DefectTaskOffer';
+import { ConceptChecklist } from '@/components/prehliadka/ConceptChecklist';
 import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { HandoverDialog } from '@/components/HandoverDialog';
 import { VisitNextUkon } from '@/components/VisitNextUkon';
@@ -223,17 +222,9 @@ function ResultView({ id, loaded, reload }: { id: number; loaded: Loaded; reload
         </section>
       )}
 
-      {/* Koncepty riadnych kontrol — rozrobené úkony, nie hotové protokoly (spec 7.3) */}
+      {/* The concepts of the routine checks and their follow-ups — one list with tick-boxes (spec 12.2) */}
       {(result.concepts ?? []).length > 0 && (
-        <section className="flex flex-col gap-2 animate-fade-up">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-500">Koncepty kontrol</h2>
-          <p className="text-xs text-ink-500">
-            Výsledky sú predvyplnené z prehliadky. Otvor koncept, dotiahni čo chýba, potvrď ho a vygeneruj protokol.
-          </p>
-          {(result.concepts ?? []).map((c) => (
-            <ConceptLink key={c.inspection_id} concept={c} />
-          ))}
-        </section>
+        <ConceptChecklist prehliadkaId={id} fallback={result.concepts ?? []} readOnly={isReadOnly} />
       )}
 
       {visitId !== null && <VisitNextUkon visitId={visitId} />}
@@ -357,38 +348,6 @@ function DocumentCard({
 
       <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} companyId={companyId} facilityId={facilityId} />
     </Card>
-  );
-}
-
-function ConceptLink({ concept }: { concept: PrehliadkaConcept }) {
-  const issued = concept.status === 'finalized';
-  const state = issued ? 'protokol vydaný' : concept.confirmed ? 'potvrdený' : 'čaká na potvrdenie';
-  return (
-    <Link
-      to={`/inspections/${concept.inspection_id}`}
-      id={`pp-concept-${concept.type}`}
-      className="flex items-center gap-3 rounded-2xl border border-ink-200 bg-white px-4 py-3.5 transition-all duration-300 hover:border-ink-300 hover:shadow-sm active:scale-[0.99]"
-    >
-      <span
-        className={
-          concept.failing > 0
-            ? 'grid size-9 shrink-0 place-items-center rounded-xl bg-status-bad-bg text-status-bad'
-            : 'grid size-9 shrink-0 place-items-center rounded-xl bg-firol-50 text-firol-600'
-        }
-      >
-        <ShieldCheck className="size-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold text-ink-900">
-          {INSPECTION_TYPE_LABELS[concept.type] ?? concept.type}
-        </span>
-        <span className="block text-xs text-ink-500">
-          {concept.items} {concept.items === 1 ? 'zariadenie' : concept.items < 5 ? 'zariadenia' : 'zariadení'}
-          {' · '}
-          {concept.failing} nevyhovuje · {state}
-        </span>
-      </span>
-    </Link>
   );
 }
 
