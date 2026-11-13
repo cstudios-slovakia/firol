@@ -28,7 +28,7 @@ import { isSection, newInspectionPath } from '@/lib/sections';
 import { CLIENT_NEUTRAL, facilityNouns, facilityPickerNouns } from '@/lib/clientKind';
 import { inspectionCreateOptimistic } from '@/lib/offlineEntities';
 import { useToast } from '@/lib/toast';
-import { useCertMissingToast } from '@/lib/certMissing';
+import { cachedCertRefusal, useCertMissingToast, warmCertProfile } from '@/lib/certMissing';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -65,6 +65,8 @@ export function InspectionStep1Page() {
   const { user, csrfToken } = useAuth();
   const toast = useToast();
   const certMissing = useCertMissingToast();
+  // Fresh `can_create` verdict for an offline start (see cachedCertRefusal).
+  useEffect(() => warmCertProfile(), []);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { type: typeParam } = useParams<{ type?: string }>();
@@ -267,6 +269,12 @@ export function InspectionStep1Page() {
         facility: { id: facilityId!, name: visit?.facility_name ?? facility?.name ?? '' },
         inspector: { id: user?.id ?? 0, name: user?.fullname ?? '' },
       });
+      // Offline the create is only parked; ask the cached profile now so a
+      // missing number is told before the work, not when the draft syncs.
+      if (!navigator.onLine) {
+        const refusal = await cachedCertRefusal([type]);
+        if (refusal) throw refusal;
+      }
       const res = await Inspections.createDraft(payload, csrfToken, optimistic);
       toast.success('Kontrola vytvorená');
       // Chapter 12 — when last time's items can be carried over, the offer

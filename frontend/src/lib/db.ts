@@ -56,6 +56,10 @@ export interface MutationEntry {
   lastError?: string;
   /** HTTP status from the last attempt, when the server responded. */
   lastStatus?: number;
+  /** Backend `code` from the last refusal, e.g. `cert_missing`. */
+  lastCode?: string;
+  /** With `cert_missing`: which number the server asked for. */
+  lastCert?: string;
   /**
    * Set on create mutations: the negative temp id this request will resolve.
    * On a successful replay the queue reads the real id from the response

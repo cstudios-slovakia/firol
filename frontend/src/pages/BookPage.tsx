@@ -168,13 +168,6 @@ export function BookPage() {
         </p>
       )}
 
-      <div className="flex flex-col gap-2 rounded-2xl bg-ink-50 px-3.5 py-3 text-xs leading-relaxed text-ink-600">
-        <p>Záznamy o dôležitých skutočnostiach — prehliadky, nedostatky, ich odstránenie.</p>
-        <p className="text-ink-500">
-          Kniha je <strong>len požiarna</strong>. Preventívna prehliadka BOZP je samostatný záznam z prehliadky, nie kniha.
-        </p>
-      </div>
-
       {view.can_switch_scope && (
         <section className="flex animate-fade-up flex-col gap-3">
           <Card className="flex flex-col gap-2.5 px-4 py-3.5">
@@ -246,14 +239,7 @@ export function BookPage() {
           {/* Nový zápis pull card */}
           <section className="flex animate-fade-up flex-col gap-2.5">
             <Card className="flex flex-col gap-3 border-firol-200 bg-firol-50/20 px-4 py-4">
-              <div>
-                <h2 className="text-base font-semibold text-ink-900">Nový zápis</h2>
-                <p className="mt-1 text-xs leading-relaxed text-ink-600">
-                  {offerCount > 0
-                    ? `Appka ponúkne posledné kontroly ako hotové odseky — čaká ${offerCount} ${plural(offerCount, 'úkon', 'úkony', 'úkonov')}.`
-                    : 'Všetky úkony už v knihe sú — zápis napíšete vlastnými slovami.'}
-                </p>
-              </div>
+              <h2 className="text-base font-semibold text-ink-900">Nový zápis</h2>
 
               {canWrite && (
                 <Button
@@ -262,13 +248,9 @@ export function BookPage() {
                   leftIcon={<Plus className="size-4" />}
                   onClick={() => setNovyZapisOpen(true)}
                 >
-                  + Nový zápis do požiarnej knihy
+                  Nový zápis do požiarnej knihy
                 </Button>
               )}
-
-              <p className="text-xs text-ink-400">
-                Úkon, ktorý v appke nie je, zapíšete vlastnými slovami priamo v zápise.
-              </p>
             </Card>
           </section>
 

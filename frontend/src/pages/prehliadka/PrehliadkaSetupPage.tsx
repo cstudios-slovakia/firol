@@ -29,7 +29,7 @@ import {
   type PrehliadkaScope,
 } from '@/lib/prehliadka';
 import { useToast } from '@/lib/toast';
-import { useCertMissingToast } from '@/lib/certMissing';
+import { cachedCertRefusal, useCertMissingToast, warmCertProfile } from '@/lib/certMissing';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -188,6 +188,8 @@ function SetupForm({
   const { user, csrfToken } = useAuth();
   const toast = useToast();
   const certMissing = useCertMissingToast();
+  // Fresh `can_create` verdict for an offline start (see cachedCertRefusal).
+  useEffect(() => warmCertProfile(), []);
   const navigate = useNavigate();
 
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -327,6 +329,18 @@ function SetupForm({
     setScopeError(null);
     setSubmitting(true);
     try {
+      // Offline the write is only parked; ask the cached profile now so a
+      // missing number is told before the walk-through, not on sync. An edit
+      // asks only about scope it switches on, as the server does.
+      if (!navigator.onLine) {
+        const was = editing ? (editing.inspection.details as PrehliadkaDetails | null)?.scope : undefined;
+        const keys = [
+          ...(effective.scope.po && !was?.po ? [`${PREHLIADKA_TYPE}.po`] : []),
+          ...(effective.scope.bozp && !was?.bozp ? [`${PREHLIADKA_TYPE}.bozp`] : []),
+        ];
+        const refusal = await cachedCertRefusal(keys);
+        if (refusal) throw refusal;
+      }
       if (editing) {
         const patch = {
           // The date of a prehliadka in a visit is the visit's; the server ignores it there.

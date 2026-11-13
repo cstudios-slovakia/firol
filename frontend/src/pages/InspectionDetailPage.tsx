@@ -228,7 +228,9 @@ export function InspectionDetailPage() {
       toast.success(res.created ? 'Koncept vytvorený' : 'Koncept už existoval — otváram ho');
       navigate(`/inspections/${res.inspection_id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Koncept sa nepodarilo vytvoriť.');
+      if (!certMissing(err, { returnLabel: 'Späť na kontrolu' })) {
+        setError(err instanceof ApiError ? err.message : 'Koncept sa nepodarilo vytvoriť.');
+      }
     } finally {
       setCreatingFollowUp(false);
     }

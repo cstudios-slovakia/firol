@@ -30,7 +30,11 @@ export function OfflineIndicator() {
   function reportSync(res: DrainResult) {
     if (res.networkError) {
       toast.error('Údaje sa nepodarilo synchronizovať — skontroluj pripojenie na internet.');
-    } else if (res.synced > 0 && res.failed === 0) {
+    } else if (res.certMissing) {
+      // The guided toast (useCertMissingSyncToast) already says what to do.
+    } else if (res.failed > 0) {
+      toast.error('Niektoré zmeny sa nepodarilo uložiť. Dôvod je pri každej v zozname.');
+    } else if (res.synced > 0) {
       toast.success('Údaje boli uložené.');
     }
   }

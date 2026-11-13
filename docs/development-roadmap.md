@@ -1531,6 +1531,26 @@ passed; the throwaway account was removed. Migration 060 is applied on the local
   Phase 8a. The BOZP "Podľa čísla" kind `bozp_ob` was dropped (not in the prototype's `KN_RUCNE`).
   "Ako naposledy" keeps reading finalized prehliadky only. (Migrations on a copy of the DB at `055` and on a fresh DB: run in phase 9.)
 
+## Missing číslo oprávnenia — guided refusal, early and offline (10. 11. 2026) ✅ built; checked in the app
+
+A refused úkon answers `422 { code: 'cert_missing', cert }`, and the UI shows a toast with „Doplniť v profile"
+that opens the field, highlighted (`lib/certMissing.ts`, `components/CertFocus.tsx`).
+
+- **One source of the rules:** `Support/CertGuard.php` (`missingForType`, `missingForPrehliadka`, `verdicts`),
+  used by create, repeat, follow-up, the prehliadka scope edit (PATCH) and `PrehliadkaCloser`.
+- **Decided 10. 11. 2026 (owner):** the check applies to **everyone**, sys-admins included. It is about the
+  signing technician (`inspector_user_id`) in the úkon's account. Consequence: an admin acting in a foreign
+  account needs a profile with the number in that account.
+- **Early:** follow-up drafts (`oprava_ts_php`, `vyradenie`, `ts_hadic`) are checked on creation. A prehliadka
+  edit is checked when it switches PO / BOZP scope **on** (scope already on is left alone).
+- **Offline (approved 10. 11. 2026):** `/api/me/inspector-profile` returns `can_create` (the server verdict per
+  type, prehliadka as `.po` / `.bozp`). The app warms it in `AppShell` and on the create screens. Offline,
+  `InspectionStep1Page` / `PrehliadkaSetupPage` refuse up front from the cache. With nothing cached the draft
+  starts and the sync decides.
+- **Outbox:** a replay refused with `cert_missing` stays `failed` with `lastCode` / `lastCert`. It is retried on
+  every drain and raises `firol:sync-cert-missing` for the guided toast. Mutations that reference the temp id of
+  any failed create are held `pending` instead of replaying into 404s. Saving the Profil technika starts a drain.
+
 ---
 
 ## Open questions (must be answered before the relevant phase starts)

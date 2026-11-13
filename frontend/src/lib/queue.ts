@@ -13,7 +13,14 @@
  *
  * Failed mutations (4xx other than 401) stay in the table with status
  * `'failed'` and a human-readable error, ready for manual retry from
- * the PendingChanges UI.
+ * the PendingChanges UI. While a create sits failed, everything that
+ * references its temp id is held back (still pending) rather than replayed
+ * into a certain 404 — it follows once the create goes through.
+ *
+ * A refusal for a missing číslo oprávnenia (`cert_missing`) is not the
+ * data's fault: it is retried on every drain, so filling in the number and
+ * syncing once sends the whole draft, and each refusal raises
+ * CERT_MISSING_SYNC_EVENT for the guided toast.
  */
 import { db, cacheKey, type MutationEntry, type SerializedFormData, type SerializedBlob } from './db';
 import { getActiveAccountId, getCsrfToken } from './session';
@@ -72,6 +79,11 @@ export async function enqueueMutation(input: EnqueueInput): Promise<number> {
   return id as number;
 }
 
+/** Raised on `window` when a replay is refused with `cert_missing`. */
+export const CERT_MISSING_SYNC_EVENT = 'firol:sync-cert-missing';
+
+export type CertMissingSyncDetail = { message: string; cert: string };
+
 let draining = false;
 
 /** Outcome summary so manual sync callers can show the right toast. */
@@ -82,12 +94,14 @@ export type DrainResult = {
   failed: number;
   /** True when the drain stopped because the network is still down. */
   networkError: boolean;
+  /** Set when a replay was refused for a missing číslo oprávnenia. */
+  certMissing: CertMissingSyncDetail | null;
 };
 
 type ReplayOutcome = 'synced' | 'failed' | 'stop-auth' | 'stop-network';
 
 export async function drainQueue(): Promise<DrainResult> {
-  const result: DrainResult = { synced: 0, failed: 0, networkError: false };
+  const result: DrainResult = { synced: 0, failed: 0, networkError: false, certMissing: null };
   if (draining) return result;
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     result.networkError = true;
@@ -95,16 +109,30 @@ export async function drainQueue(): Promise<DrainResult> {
   }
   draining = true;
   try {
+    // A missing number may have been filled in since — give those another go.
+    await db.mutations
+      .where('status')
+      .equals('failed')
+      .filter((m) => m.lastCode === 'cert_missing')
+      .modify({ status: 'pending' });
+
     while (true) {
       const next = await db.mutations
         .where('status')
         .equals('pending')
         .sortBy('createdAt');
-      const mutation = next[0];
+      const blocked = await blockedTempIds();
+      const mutation = next.find((m) => !referencesAny(m, blocked));
       if (!mutation) break;
       const outcome = await replay(mutation);
       if (outcome === 'synced') result.synced += 1;
-      else if (outcome === 'failed') result.failed += 1;
+      else if (outcome === 'failed') {
+        result.failed += 1;
+        const refused = await db.mutations.get(mutation.id!);
+        if (refused?.lastCode === 'cert_missing' && refused.lastCert && !result.certMissing) {
+          result.certMissing = { message: refused.lastError ?? '', cert: refused.lastCert };
+        }
+      }
       else if (outcome === 'stop-network') {
         result.networkError = true;
         break;
@@ -115,7 +143,47 @@ export async function drainQueue(): Promise<DrainResult> {
   } finally {
     draining = false;
   }
+  if (result.certMissing && typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent<CertMissingSyncDetail>(CERT_MISSING_SYNC_EVENT, { detail: result.certMissing }),
+    );
+  }
   return result;
+}
+
+/**
+ * Temp ids that cannot resolve right now: those of failed creates, plus —
+ * transitively — of pending creates that themselves wait on one (an item
+ * created under a refused inspection, whose photos wait on the item).
+ */
+async function blockedTempIds(): Promise<Set<number>> {
+  const all = await db.mutations.toArray();
+  const blocked = new Set<number>();
+  for (const m of all) {
+    if (m.status === 'failed' && m.clientId != null) blocked.add(m.clientId);
+  }
+  let grew = blocked.size > 0;
+  while (grew) {
+    grew = false;
+    for (const m of all) {
+      if (m.status !== 'pending' || m.clientId == null || blocked.has(m.clientId)) continue;
+      if (referencesAny(m, blocked)) {
+        blocked.add(m.clientId);
+        grew = true;
+      }
+    }
+  }
+  return blocked;
+}
+
+/** Does this mutation's path or JSON body point at any of these temp ids? */
+function referencesAny(m: MutationEntry, tempIds: Set<number>): boolean {
+  for (const tempId of tempIds) {
+    if (m.clientId === tempId) continue; // the create itself is never its own dependent
+    if (replaceIdSegment(m.path, tempId, 0) !== m.path) return true;
+    if (m.contentKind === 'json' && deepReplaceNumber(m.body, tempId, 0).replaced) return true;
+  }
+  return false;
 }
 
 /**
@@ -164,6 +232,10 @@ async function replay(m: MutationEntry, csrfRetried = false): Promise<ReplayOutc
         parsed && typeof parsed === 'object' && parsed && 'code' in parsed
           ? String((parsed as { code: unknown }).code)
           : null;
+      const cert =
+        parsed && typeof parsed === 'object' && 'cert' in parsed
+          ? String((parsed as { cert: unknown }).cert)
+          : undefined;
 
       // Stale page token, not a bad mutation — pick up the current one and
       // replay rather than parking perfectly good work as "failed".
@@ -181,6 +253,8 @@ async function replay(m: MutationEntry, csrfRetried = false): Promise<ReplayOutc
         attempts: m.attempts + 1,
         lastStatus: res.status,
         lastError: message,
+        lastCode: code ?? undefined,
+        lastCert: code === 'cert_missing' ? cert : undefined,
       });
       return 'failed';
     }
@@ -216,7 +290,13 @@ async function replay(m: MutationEntry, csrfRetried = false): Promise<ReplayOutc
 }
 
 export async function retryMutation(id: number): Promise<DrainResult> {
-  await db.mutations.update(id, { status: 'pending', lastError: undefined, lastStatus: undefined });
+  await db.mutations.update(id, {
+    status: 'pending',
+    lastError: undefined,
+    lastStatus: undefined,
+    lastCode: undefined,
+    lastCert: undefined,
+  });
   return drainQueue();
 }
 

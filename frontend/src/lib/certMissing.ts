@@ -9,9 +9,12 @@
  * that says what is kept, with one button that opens the exact field to fill
  * in, highlighted, and a way back to where they were.
  */
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ApiError } from './api';
+import { readCache } from './cache';
+import { CERT_MISSING_SYNC_EVENT, type CertMissingSyncDetail } from './queue';
+import { InspectorProfileApi, type InspectorProfile } from '@/api/inspectorProfile';
 import { useToast } from './toast';
 import { useIsMainUser } from '@/auth/useIsMainUser';
 
@@ -101,4 +104,61 @@ export function useCertMissingToast() {
     },
     [toast, navigate, location.pathname, location.search, isMainUser],
   );
+}
+
+// --- offline -------------------------------------------------------------
+
+const PROFILE_PATH = '/api/me/inspector-profile';
+
+/**
+ * Refresh the cached Profil technika — and with it the server's `can_create`
+ * verdict — while there is a connection, so an úkon started offline later
+ * can be checked. Silent: offline it simply leaves the old copy in place.
+ */
+export function warmCertProfile(): void {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+  InspectorProfileApi.show().catch(() => undefined);
+}
+
+/**
+ * The refusal the server would give a create, read from the cached profile,
+ * for use while offline — so the technician hears it before walking the
+ * building, not when the draft syncs. `keys` are `can_create` keys: the úkon
+ * type, or `preventivna_prehliadka.po` / `.bozp`.
+ *
+ * Returns null when allowed, and also when nothing is cached: a draft that
+ * cannot be checked is still started, and the sync decides (the outbox keeps
+ * it and guides the technician if the server refuses).
+ */
+export async function cachedCertRefusal(keys: string[]): Promise<ApiError | null> {
+  const cached = await readCache<{ profile: InspectorProfile }>(PROFILE_PATH).catch(() => undefined);
+  const verdicts = cached?.profile?.can_create;
+  if (!verdicts) return null;
+  for (const key of keys) {
+    const v = verdicts[key];
+    if (v && isCertKey(v.cert)) {
+      return new ApiError(422, v.error, { error: v.error, code: 'cert_missing', cert: v.cert }, 'cert_missing');
+    }
+  }
+  return null;
+}
+
+/**
+ * Mounted once (in the header): turns an outbox replay refused with
+ * `cert_missing` into the same guided toast the online flow shows. The work
+ * stays queued; the next sync after the number is filled in sends it.
+ */
+export function useCertMissingSyncToast(): void {
+  const certMissing = useCertMissingToast();
+  useEffect(() => {
+    function onRefused(e: Event) {
+      const { message, cert } = (e as CustomEvent<CertMissingSyncDetail>).detail;
+      certMissing(new ApiError(422, message, { error: message, code: 'cert_missing', cert }, 'cert_missing'), {
+        saved: 'Neodoslané zmeny zostávajú uložené v zariadení a odošlú sa, keď číslo doplníš.',
+        returnLabel: 'Späť',
+      });
+    }
+    window.addEventListener(CERT_MISSING_SYNC_EVENT, onRefused);
+    return () => window.removeEventListener(CERT_MISSING_SYNC_EVENT, onRefused);
+  }, [certMissing]);
 }

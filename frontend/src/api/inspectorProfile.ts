@@ -18,6 +18,13 @@ export type InspectorProfile = {
   valid_from_bt: string | null;
   valid_to_bt: string | null;
   is_active: boolean;
+  /**
+   * The server's verdict on starting each úkon type (the prehliadka split
+   * into `preventivna_prehliadka.po` / `.bozp`): null when allowed, else the
+   * refusal the create would answer. Read from the cache before an offline
+   * create — see `cachedCertRefusal()`.
+   */
+  can_create?: Record<string, { error: string; cert: string } | null>;
 };
 
 export type InspectorProfileUpdate = {

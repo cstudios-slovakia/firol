@@ -76,15 +76,9 @@ final class PrehliadkaCloser
         $bozp = $details['scope']['bozp'] === true;
 
         // Each record is signed under the technician's own oprávnenie, as on creation.
-        $cert = $pdo->prepare('SELECT cert_general, cert_bt FROM inspector_profiles WHERE user_id = ? AND account_id = ?');
-        $cert->execute([(int) $inspection['inspector_user_id'], $accountId]);
-        $certs = $cert->fetch() ?: [];
-        $has = static fn (mixed $v): bool => is_string($v) && trim($v) !== '';
-        if ($po && !$has($certs['cert_general'] ?? null)) {
-            return ['error' => 'Protipožiarna prehliadka vyžaduje platné číslo oprávnenia Technik PO. Doplň ho v Profile technika.', 'status' => 422, 'code' => 'cert_missing', 'cert' => 'cert_general'];
-        }
-        if ($bozp && !$has($certs['cert_bt'] ?? null)) {
-            return ['error' => 'Prehliadka BOZP vyžaduje číslo oprávnenia bezpečnostného technika. Doplň ho v Profile technika.', 'status' => 422, 'code' => 'cert_missing', 'cert' => 'cert_bt'];
+        $missing = CertGuard::missingForPrehliadka($accountId, (int) $inspection['inspector_user_id'], $po, $bozp);
+        if ($missing !== null) {
+            return ['error' => $missing['error'], 'status' => 422, 'code' => 'cert_missing', 'cert' => $missing['cert']];
         }
 
         $items = DocumentController::loadItems($inspectionId);

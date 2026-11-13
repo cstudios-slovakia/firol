@@ -38,6 +38,8 @@ export function PendingSyncBanner({ resource, id }: EntityRef) {
       const res = await drainQueue();
       if (res.networkError) {
         toast.error('Údaje sa nepodarilo synchronizovať — skontroluj pripojenie na internet.');
+      } else if (res.certMissing) {
+        // The guided toast (useCertMissingSyncToast) already says what to do.
       } else if (res.failed > 0) {
         toast.error('Niektoré zmeny sa nepodarilo uložiť. Pozri zoznam čakajúcich zmien v hlavičke.');
       } else {

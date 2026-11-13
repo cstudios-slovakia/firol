@@ -81,6 +81,7 @@ import {
 import { Select, type SelectOption } from "@/components/ui/Select";
 import { ApiError } from "@/lib/api";
 import { offlineMessage } from "@/lib/offline";
+import { drainQueue } from "@/lib/queue";
 import { useToast } from "@/lib/toast";
 import { useConfirm } from "@/lib/confirm";
 import { Card } from "@/components/ui/Card";
@@ -503,6 +504,8 @@ function InspectorProfileSection() {
                 csrfToken,
             );
             applyProfile(res.profile);
+            // Work refused on sync for a missing number goes out right away.
+            drainQueue().catch(() => undefined);
             toast.success(
                 "Profil revízneho technika uložený",
                 back

@@ -19,6 +19,7 @@ import { Billing } from "@/api/billing";
 import { ApiError } from "@/lib/api";
 import { offlineMessage } from "@/lib/offline";
 import { useToast } from "@/lib/toast";
+import { useCertMissingSyncToast, warmCertProfile } from "@/lib/certMissing";
 import { periodPriceLabel, usePricing } from "@/lib/pricing";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { OfflineIndicator } from "./OfflineIndicator";
@@ -189,10 +190,18 @@ const MOBILE_MORE_TABS: Tab[] = [
 ];
 
 export function AppShell() {
-    const { logout } = useAuth();
+    const { logout, activeAccountId } = useAuth();
     const toast = useToast();
     const location = useLocation();
     const navigate = useNavigate();
+
+    // A sync refused for a missing číslo oprávnenia gets the guided toast,
+    // wherever the technician happens to be when the outbox drains.
+    useCertMissingSyncToast();
+    // Keep the profile's `can_create` verdict cached for offline úkony.
+    useEffect(() => {
+        if (activeAccountId !== null) warmCertProfile();
+    }, [activeAccountId]);
 
     // Logout hits the server (POST /api/auth/logout) and isn't queueable, so
     // offline the request just rejects and nothing visible happens. Guard it

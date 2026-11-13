@@ -14,6 +14,7 @@ use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Storage\Storage;
 use Firol\Support\CarryOver;
+use Firol\Support\CertGuard;
 use Firol\Support\InspectionDetails;
 use Firol\Support\Periodicity;
 use Firol\Support\PrehliadkaConcepts;
@@ -75,7 +76,7 @@ final class InspectionController
      *
      * @var list<string>
      */
-    private const TYPES = [
+    public const TYPES = [
         'php', 'hydranty', 'oprava_ts_php', 'poziarna_kniha',
         'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'ts_hadic',
         // Pokyn — žatevné práce is not here: it is a document issued to the
@@ -400,6 +401,10 @@ final class InspectionController
             Response::json(['inspection_id' => (int) $existingId, 'created' => false], 200);
         }
 
+        // The follow-up is a new úkon signed by the same technician — refuse
+        // it now, as on creation, rather than when its protocol is issued.
+        self::assertCanInspect($accountId, (int) $source['inspector_user_id'], $targetType);
+
         // Follow-up drafts start from the target type's recommended period;
         // the technician revisits it in Step 1 like any other úkon.
         $recommended = Periodicity::RECOMMENDED_MONTHS[$targetType] ?? [];
@@ -638,14 +643,13 @@ final class InspectionController
         }
 
         // Block creation when the executing technician has no own cert AND
-        // no usable fallback. Admins are exempt (they manage other accounts'
-        // data without their own profile).
-        if (!$isAdmin) {
-            if ($type === PrehliadkaDetails::TYPE) {
-                self::assertCanDoPrehliadka($accountId, $inspectorUserId, (array) $details);
-            } else {
-                self::assertCanInspect($accountId, $inspectorUserId, $type);
-            }
+        // no usable fallback. Admins included: the check is about who signs
+        // the protocol, not who creates the draft — and the close would refuse
+        // it anyway, only after the whole walk-through.
+        if ($type === PrehliadkaDetails::TYPE) {
+            self::assertCanDoPrehliadka($accountId, $inspectorUserId, (array) $details);
+        } else {
+            self::assertCanInspect($accountId, $inspectorUserId, $type);
         }
 
         // A visit (chapter 9) collects several úkony under one trip; the
@@ -782,6 +786,16 @@ final class InspectionController
         // expressible, so there is no field-by-field COALESCE here.
         if (array_key_exists('details', $body)) {
             $details = self::readDetails($req, (string) $row['type']);
+            // Switching on PO or BOZP scope asks for that oprávnenie now, as
+            // on creation — not only when the prehliadka is closed.
+            if ($row['type'] === PrehliadkaDetails::TYPE && is_array($details)) {
+                self::assertCanDoPrehliadka(
+                    $scopeAccountId,
+                    (int) $row['inspector_user_id'],
+                    $details,
+                    InspectionDetails::decode($row['details'] ?? null) ?? [],
+                );
+            }
             if ($row['type'] === PrehliadkaDetails::TYPE && is_array($details) && !empty($details['previous'])) {
                 $validSourceIds = Db::pdo()->prepare(
                     'SELECT id FROM inspections WHERE account_id = ? AND facility_id = ? AND archived_at IS NULL'
@@ -1006,14 +1020,12 @@ final class InspectionController
 
         // Same cert guard as fresh creation — if the original inspector
         // lost their cert and no fallback is set, refuse to clone now
-        // rather than at PDF time.
-        if (!$isAdmin) {
-            self::assertCanInspect(
-                $accountId,
-                (int) $source['inspector_user_id'],
-                (string) $source['type'],
-            );
-        }
+        // rather than at PDF time. Admins included, as on creation.
+        self::assertCanInspect(
+            $accountId,
+            (int) $source['inspector_user_id'],
+            (string) $source['type'],
+        );
 
         $type = (string) $source['type'];
         $sourceItems = self::loadItemFields($sourceId);
@@ -1314,118 +1326,42 @@ final class InspectionController
     }
 
     /**
-     * A prehliadka is signed twice over: the PO record by a technik PO
-     * (cert_general), the BOZP record by a bezpečnostný technik (cert_bt).
-     * Only what the chosen scope needs is required. No borrowing, as for the
-     * single úkony of those sections.
+     * Refuse a prehliadka whose scope the technician cannot sign — the rules
+     * live in CertGuard. `$onlyAdded` limits the check to scope switched on
+     * by this request, so a draft that predates a lost number stays editable
+     * (the close refuses it, as before).
      *
      * @param array<string, mixed> $details validated PrehliadkaDetails
+     * @param array<string, mixed>|null $before details as stored, for an edit
      */
-    private static function assertCanDoPrehliadka(int $accountId, int $inspectorUserId, array $details): void
-    {
-        $stmt = Db::pdo()->prepare(
-            'SELECT cert_general, cert_bt FROM inspector_profiles WHERE user_id = ? AND account_id = ?'
-        );
-        $stmt->execute([$inspectorUserId, $accountId]);
-        $own = $stmt->fetch() ?: [];
-        $has = static fn ($v): bool => is_string($v) && trim($v) !== '';
-
+    private static function assertCanDoPrehliadka(
+        int $accountId,
+        int $inspectorUserId,
+        array $details,
+        ?array $before = null,
+    ): void {
         $scope = (array) ($details['scope'] ?? []);
-        if (($scope['po'] ?? false) === true && !$has($own['cert_general'] ?? null)) {
-            Response::error(
-                'Protipožiarna prehliadka vyžaduje platné číslo oprávnenia Technik PO. Doplň ho v Profile technika.',
-                422,
-                ['code' => 'cert_missing', 'cert' => 'cert_general'],
-            );
-        }
-        if (($scope['bozp'] ?? false) === true && !$has($own['cert_bt'] ?? null)) {
-            Response::error(
-                'Prehliadka BOZP vyžaduje číslo oprávnenia bezpečnostného technika. Doplň ho v Profile technika.',
-                422,
-                ['code' => 'cert_missing', 'cert' => 'cert_bt'],
-            );
-        }
+        $was = (array) ($before['scope'] ?? []);
+        $po = ($scope['po'] ?? false) === true && ($was['po'] ?? false) !== true;
+        $bozp = ($scope['bozp'] ?? false) === true && ($was['bozp'] ?? false) !== true;
+        self::refuseMissing(CertGuard::missingForPrehliadka($accountId, $inspectorUserId, $po, $bozp));
     }
 
     /**
-     * Refuse to create an inspection the executor can't legitimately
-     * sign. Technik PO types (everything except php and oprava_ts_php)
-     * require the executor's own cert_general — no borrowing. For PHP /
-     * Oprava the executor may borrow the account-default technician's
-     * cert; only when neither own nor default cert is available do we
-     * block. Errors carry a `code` so the UI can show a useful hint.
+     * Refuse to create an inspection the executor can't legitimately sign —
+     * the rules live in CertGuard. The refusal carries `code` / `cert` so the
+     * UI can open the right field.
      */
     private static function assertCanInspect(int $accountId, int $inspectorUserId, string $type): void
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT cert_php, cert_oprava, cert_general, cert_bt
-             FROM   inspector_profiles
-             WHERE  user_id = ? AND account_id = ?'
-        );
-        $stmt->execute([$inspectorUserId, $accountId]);
-        $own = $stmt->fetch()
-            ?: ['cert_php' => null, 'cert_oprava' => null, 'cert_general' => null, 'cert_bt' => null];
+        self::refuseMissing(CertGuard::missingForType($accountId, $inspectorUserId, $type));
+    }
 
-        $has = static fn($v) => is_string($v) && trim($v) !== '';
-
-        // Oboznámenie BOZP is signed under the account's own oprávnenie na
-        // výchovu a vzdelávanie (`vv`, chapter 5.3) — a company certificate,
-        // not a personal one — so nothing on the technician's profile is
-        // required to create it. Its presence is checked when the protocol is
-        // issued (DocumentController).
-        if ($type === 'skolenie_bozp') {
-            return;
-        }
-
-        // Every other BOZP úkon is signed as a bezpečnostný technik, not as a
-        // technik PO — chapter 26, „číslo oprávnenia na protokole MUSÍ
-        // zodpovedať typu úkonu". There is no
-        // borrowing here: the oprávnenie is personal, and the protocol says
-        // who did the work.
-        if (\Firol\Support\Sections::forInspectionType($type) === \Firol\Support\Sections::BOZP) {
-            if (!$has($own['cert_bt'] ?? null)) {
-                Response::error(
-                    'Tento úkon BOZP vyžaduje číslo oprávnenia bezpečnostného technika. Doplň ho v Profile technika.',
-                    422,
-                    ['code' => 'cert_missing', 'cert' => 'cert_bt'],
-                );
-            }
-            return;
-        }
-
-        if ($type === 'php' || $type === 'oprava_ts_php') {
-            $certKey = $type === 'php' ? 'cert_php' : 'cert_oprava';
-            $defaultCol = $type === 'php' ? 'default_php_user_id' : 'default_oprava_user_id';
-            if ($has($own[$certKey] ?? null)) {
-                return;
-            }
-            $defaultStmt = Db::pdo()->prepare(
-                'SELECT ip.' . $certKey . '
-                 FROM   accounts a
-                 LEFT JOIN inspector_profiles ip
-                        ON ip.user_id = a.' . $defaultCol . ' AND ip.account_id = a.id
-                 WHERE  a.id = ?'
-            );
-            $defaultStmt->execute([$accountId]);
-            $defaultCert = $defaultStmt->fetchColumn();
-            if ($has($defaultCert)) {
-                return;
-            }
-            $label = $type === 'php' ? 'Kontrola PHP' : 'Oprava / plnenie / TS PHP';
-            Response::error(
-                'Pre ' . $label . ' potrebuješ vlastné číslo oprávnenia, alebo nech správca účtu nastaví predvoleného technika so zadaným číslom.',
-                422,
-                ['code' => 'cert_missing', 'cert' => $certKey],
-            );
-        }
-
-        // All other types print cert_general (Technik PO). No fallback.
-        if (!$has($own['cert_general'] ?? null)) {
-            Response::error(
-                'Tento typ kontroly vyžaduje platné číslo oprávnenia Technik PO. Doplň ho v Profile revízneho technika.',
-                422,
-                ['code' => 'cert_missing', 'cert' => 'cert_general'],
-            );
+    /** @param array{error: string, cert: string}|null $missing */
+    private static function refuseMissing(?array $missing): void
+    {
+        if ($missing !== null) {
+            Response::error($missing['error'], 422, ['code' => 'cert_missing', 'cert' => $missing['cert']]);
         }
     }
 

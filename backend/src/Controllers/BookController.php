@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Firol\Controllers;
 
 use Firol\Audit\AuditLog;
+use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
@@ -48,7 +49,7 @@ final class BookController
      */
     public static function summary(Request $req, array $params): void
     {
-        $accountId = Tenant::currentAccountId();
+        $accountId = self::accountFor((int) $params['id']);
         $company = self::company($accountId, (int) $params['id']);
 
         Response::json([
@@ -65,7 +66,7 @@ final class BookController
      */
     public static function show(Request $req, array $params): void
     {
-        $accountId = Tenant::currentAccountId();
+        $accountId = self::accountFor((int) $params['id']);
         $company = self::company($accountId, (int) $params['id']);
         $book = self::readBook($req->query('book'));
 
@@ -124,7 +125,7 @@ final class BookController
     public static function store(Request $req, array $params): void
     {
         Csrf::require($req);
-        $accountId = Tenant::currentAccountId();
+        $accountId = self::accountFor((int) $params['id']);
         $userId = Tenant::currentUserId();
         $company = self::writableCompany($accountId, (int) $params['id']);
         $body = $req->json();
@@ -237,7 +238,7 @@ final class BookController
     public static function addAddition(Request $req, array $params): void
     {
         Csrf::require($req);
-        $accountId = Tenant::currentAccountId();
+        $accountId = self::accountForEntry((int) $params['id']);
         $entry = BookLedger::entry($accountId, (int) $params['id']);
         if ($entry === null) {
             Response::error('Zápis sa nenašiel.', 404);
@@ -271,7 +272,7 @@ final class BookController
     public static function markSigned(Request $req, array $params): void
     {
         Csrf::require($req);
-        $accountId = Tenant::currentAccountId();
+        $accountId = self::accountFor((int) $params['id']);
         $company = self::writableCompany($accountId, (int) $params['id']);
         $body = $req->json();
         $book = self::readBook(is_string($body['book'] ?? null) ? $body['book'] : null);
@@ -311,7 +312,7 @@ final class BookController
     public static function setScope(Request $req, array $params): void
     {
         Csrf::require($req);
-        $accountId = Tenant::currentAccountId();
+        $accountId = self::accountFor((int) $params['id']);
         $company = self::writableCompany($accountId, (int) $params['id']);
 
         $scope = $req->jsonString('book_scope');
@@ -343,7 +344,7 @@ final class BookController
      */
     public static function print(Request $req, array $params): void
     {
-        $accountId = Tenant::currentAccountId();
+        $accountId = self::accountFor((int) $params['id']);
         $userId = Tenant::currentUserId();
         $company = self::company($accountId, (int) $params['id']);
         $book = self::readBook($req->query('book'));
@@ -535,6 +536,39 @@ final class BookController
             Response::error(ClientKind::bookArchived((string) $company['client_type']), 409);
         }
         return $company;
+    }
+
+    /**
+     * The account whose data a book request works on. A normal user always
+     * works in the active account. A platform admin sees every firm in the
+     * company list, so the book of a firm in another account opens too — it is
+     * read and written under that firm's own account, never the admin's.
+     * An unknown firm falls back to the active account and so ends in the
+     * regular "Firma sa nenašla." 404.
+     */
+    private static function accountFor(int $companyId): int
+    {
+        $accountId = Tenant::currentAccountId();
+        if (!Admin::isAdmin(Tenant::currentUserId())) {
+            return $accountId;
+        }
+        $stmt = Db::pdo()->prepare('SELECT account_id FROM companies WHERE id = ?');
+        $stmt->execute([$companyId]);
+        $found = $stmt->fetchColumn();
+        return $found === false ? $accountId : (int) $found;
+    }
+
+    /** Same as accountFor(), starting from a book entry (additions). */
+    private static function accountForEntry(int $entryId): int
+    {
+        $accountId = Tenant::currentAccountId();
+        if (!Admin::isAdmin(Tenant::currentUserId())) {
+            return $accountId;
+        }
+        $stmt = Db::pdo()->prepare('SELECT account_id FROM book_entries WHERE id = ?');
+        $stmt->execute([$entryId]);
+        $found = $stmt->fetchColumn();
+        return $found === false ? $accountId : (int) $found;
     }
 
     private static function companyIdOfEntry(int $accountId, int $entryId): int
