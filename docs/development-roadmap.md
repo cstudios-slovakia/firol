@@ -1323,6 +1323,12 @@ Points 11, 12 and 13 of the 2. 10. report (cancelled then for budget) are back i
 | 8b | Concept checks, visits, Dnes, backup | 🟨 built, API + backup round trip + 360 px checked; not accepted |
 | 9 | Acceptance pass, manual | ✅ all 19 criteria checked; two bugs fixed; manual updated; see "Phase 9" below |
 
+**Superseded (13. 11. 2026):** the ledger of phase 5 (both books, the offers, signature states,
+the whole-book print, the scope switch) and the book parts of phases 6 and 8a („Do knihy" from an
+external term, „Termíny ďalších kontrol", book entries written on closing) were withdrawn by
+FIROL's zadanie of 7. 11. 2026 and removed. See "Požiarna kniha rework" below. Everything else in
+this section stands.
+
 **Phases 1, 3 and 4 accepted (30. 10. 2026).** Checked in the browser at 360 px and on the
 API: 7-digit IČO at the field, new firm opens Pridať prevádzku, seat-address button (hidden with
 no address), Paušál, the documentation rename, training hint, approver hint, bulk paste of 20
@@ -1550,6 +1556,124 @@ that opens the field, highlighted (`lib/certMissing.ts`, `components/CertFocus.t
 - **Outbox:** a replay refused with `cert_missing` stays `failed` with `lastCode` / `lastCert`. It is retried on
   every drain and raises `firol:sync-cert-missing` for the guided toast. Mutations that reference the temp id of
   any failed create are held `pending` instead of replaying into 404s. Saving the Profil technika starts a drain.
+
+---
+
+## Požiarna kniha rework (zadanie 7. 11. 2026) 🟨 built on `poapp-oct-2026` (13.–14. 11. 2026); owner acceptance and FIROL's answers pending
+
+Package: `POapp_poziarna_kniha/` (binding spec `POapp_kniha_zadanie_pre_AI.md`, untracked like the
+earlier packages). Plan, decisions K1–K7 and open points O1–O5:
+`docs/implementation-plan-2026-11-07-kniha.md`. Commits `4db77bf`..`16dc401`. Not on `main`;
+deployed nowhere yet. Verification (build, migrations, spec 15 criteria at 360 px, backup round
+trip) is tracked in the hand-back report to the owner, not here.
+
+**Removed** (`4db77bf`):
+- ✅ The požiarna kniha ledger: `BookPage`, „Nový zápis", the company book card, book offers,
+  signature states („Vytlačiť nepodpísané" / „Označiť ako podpísané"), the whole-book print, the
+  „Rozsah knihy" switch and the book API routes. The kniha BOZP ledger went with it (the BOZP
+  record of a prehliadka stays). Migration `076_drop_book_ledger.sql` drops `book_entries`,
+  `book_entry_additions` and `companies.book_scope`; test-server rows are discarded, nothing is
+  carried over.
+- ✅ In-app signing and handover for the book: no handover step, no „čaká na podpis";
+  `POST /api/documents/{id}/handover` answers 422 for any `poziarna_kniha` document. The entry is
+  signed by hand on the printed document. Signing in every other úkon is unchanged.
+- ✅ The closing checkbox „Zapísať aj do požiarnej knihy" and the book offer on the prehliadka
+  result screen (K7). „Do knihy" from an external term and „Termíny ďalších kontrol" are gone.
+- ✅ The book úkon `poziarna_kniha` is back in the type picker, the visit planner and Opakovať.
+
+**Built — the book as an ordinary úkon** (`ff11628` backend, `16dc401` screens):
+- ✅ One entry for one or more prevádzky: migration `077_kniha_facilities.php` adds
+  `inspection_facilities` (one row per prevádzka with its own periodicity) and `facility_id` on
+  `calendar_plans` / `deadline_notices` (unique per entry + prevádzka). New-format entries carry
+  `details.format = "pk2"`. One entry = one document and one number.
+- ✅ Step 1 (`/kniha/new`, `/kniha/:id/krok-1`): prevádzky („Označiť všetky"; each row shows the
+  records to attach and until when its prehliadka is valid), spôsob, date. Default spôsob by
+  count (one → 1, several → 2); a manual choice sticks until „Vrátiť na predvolené".
+- ✅ **Spôsob 1** „Zápis je zároveň preventívkou": the entry is the preventívna prehliadka of each
+  selected prevádzka (K1). Each has its own periodicity 12 / 6 / 3, prefilled from its last
+  prehliadka or empty, with „Po vykonaní platí…". Only generating the PDF moves the deadlines;
+  unselected prevádzky, drafts and spôsob 2 move nothing. Every reader of the term chain
+  (Deadlines, calendar, Dnes, notices, facility history, prehliadka context, company periodicities,
+  work confirmation) sees the entry per prevádzka.
+- ✅ **Spôsob 2** „Preventívky sú priložené": prehliadky are attached, the deadline does not change,
+  no periodicity is shown anywhere. Switching spôsob deletes nothing.
+- ✅ Step 2 (`/kniha/:id`): spôsob 1 Úvod (prefilled once with the legal sentence) → Vykonané
+  činnosti (firma: the nine points of § 14 ods. 2; bytový dom: the 13 items; nothing pre-ticked;
+  own activities) → Priložiť záznamy → Nedostatky → Doplňujúci text → Na záver. Spôsob 2: Text
+  zápisu → Priložiť záznamy → Nedostatky → Na záver. „Na záver" has two insert buttons that never
+  insert a sentence twice.
+- ✅ Records to attach (`GET /api/companies/{id}/kniha`, `BookRecords`): only records of the selected
+  prevádzky, grouped by prevádzka when several, company-wide trainings in one group
+  „Celá organizácia"; newest of each kind, „Zobraziť aj staršie" for the rest; per record
+  „Celým textom" / „Len odkaz" with the composed paragraph right below (`BookSentences`).
+- ✅ Defects on the shared defect screen (`DefectForm`): prevádzka chooser when several, deadline
+  optional, no device card, photos as before; „Overiť odstránenie" offered after saving a defect
+  with a date (online).
+- ✅ Step 3 (`/kniha/:id/suhrn`): deadlines per prevádzka, counts, the composed text, „Schválil za
+  klienta" (prefilled, editable), photos, fakturácia, „Generovať PDF protokol", „Zahodiť zápis".
+- ✅ The new entry document `poziarna_kniha_zapis.php` (Zápis, Priložené záznamy, Doplňujúci text,
+  Zistené nedostatky only when there are any, Na záver, Podpisy with printed names and blank
+  lines). The issued text and paragraphs are frozen in `details.issued`.
+- ✅ Old-format entries (one prevádzka, old items) stay listed, readable and downloadable through
+  the old template; Opakovať on any book entry makes a new-format draft on step 1.
+- ✅ Offline: the kniha context is warmed on the facility, company and visit pages; a draft can be
+  started and edited offline; generating needs the connection.
+
+**Built — prehliadka** (`689e4c5`, `864709f`, `b38a4b3`, `e2f9969`, lock in `ff11628`):
+- ✅ One defect screen for new and carried-over defects with „Stav nedostatku" (zistený ·
+  odstránený · trvá · dôvod zanikol), a note on top naming the case, past photos copied onto the
+  new record, the past record never changed. Undecided carried-over defects block closing; only
+  open defects are offered next time. No migration (state in `inspection_items.fields`).
+- ✅ The nine points of § 14 ods. 2 as the PO activity list for a firma (bytový dom keeps its 11);
+  records issued earlier keep the text they were issued with.
+- ✅ The area follows the entry button: „Preventívna prehliadka" presets PO, „Preventívna
+  prehliadka BOZP" presets BOZP; memory no longer presets the area.
+- ✅ A draft prehliadka that was never closed can be discarded („Zahodiť prehliadku") from the
+  walk, the setup's in-progress card and the prevádzka banner (online only).
+- ✅ Concepts after a prehliadka in one checklist („Vytvoriť a rovno uzavrieť") with a review screen
+  (`/prehliadky/:id/koncepty`) to see and edit the values, then generate together; tlaková skúška
+  hadíc takes its values and result from the last protocol.
+- ✅ Row lock on protocol generation: two requests for the same úkon cannot both issue a protocol.
+
+**Findings (spec 11):**
+- ✅ 11.2 „Iná revízia" removed from the external-term suggestions; existing terms keep the name as
+  a custom one. No migration was needed.
+- ✅ 11.3 Signature pad: one smooth line, denser sampling, cropped output.
+- ⬜ 11.5 Not reproducible: the text in the code is correct („podľa objektu a prostredia"). Needs a
+  screenshot from FIROL showing where the truncated form appears.
+- ✅ 11.6 Misdiagnosed: all 27 items exist; the counter shows the items of the chosen area. The
+  customer accepted leaving it as it is.
+- ✅ 11.4 went with `BookPage`.
+
+**Customer decisions (13. 11. 2026):**
+- The concepts checklist lists the routine concepts plus the follow-ups.
+- Oprava / vyradenie devices come from today's PHP check.
+- A result is carried from the last protocol only for TS hadíc.
+- Protocols carry the prehliadka date, editable.
+- The catalogue counter stays as it is.
+- Company-wide trainings in Priložiť záznamy form one group headed „Celá organizácia" (not „Celá
+  firma" — more general; the client may be an obec or a school).
+
+**Open points for FIROL / the owner:**
+- ⏸ **O1 numbering — undecided, blocker for the merge to `main`.** The app numbers `PK-RRRR-NNN`
+  per account and year (`NumberAllocator`); the spec asks for a series per firma that never resets
+  or skips. `documents` has `UNIQUE (account_id, number)`, so the format cannot carry a per-firma
+  series. Unlock + regenerate also leaves a gap.
+- ⏸ An attached prehliadka with no defects prints „Neboli zistené žiadne nedostatky." — check
+  against criterion 13.
+- ⏸ Wording „Nedostatok zo zápisu do požiarnej knihy č. …" (note on a carried-over defect).
+- ⏸ The fixed sentence says „v prevádzke / v prevádzkach" also for bytové domy.
+- ⏸ R3: a book entry does not close earlier defects; defects written in a book entry feed the next
+  prehliadka at that prevádzka (both spôsoby).
+- ⏸ Opakovať lands on the default spôsob for the number of prevádzky (criterion 3 over O5).
+- ⏸ Excel import of book rows still creates old-format entries.
+- ⏸ A new defect set to „dôvod zanikol" prints as an ordinary point with its deadline.
+- ⏸ A firma prehliadka record prints the lead line „Obsahom prehliadky bola kontrola:" and
+  „Ďalej vykonané" above custom activities.
+- ⏸ Date arithmetic differs between client and server elsewhere in the app (the client clamps to
+  the month's end, PHP rolls over); the book screens use the server rule.
+- ⏸ Discarding a book entry or a prehliadka is the usual soft archive: items and photos stay with
+  the archived row.
 
 ---
 
