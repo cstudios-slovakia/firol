@@ -181,7 +181,15 @@ export type ComposedBlock =
   | { kind: 'list'; heading: string; items: string[] }
   | { kind: 'defects'; rows: ComposedDefect[]; multi: boolean };
 
-export type ComposedDefect = { n: number; title: string; facility: string; deadline: string; removedOnSite: boolean };
+export type ComposedDefect = {
+  n: number;
+  title: string;
+  facility: string;
+  deadline: string;
+  removedOnSite: boolean;
+  /** The one sentence of „dôvod zanikol"; null for any other state. */
+  reasonGone: string | null;
+};
 
 /**
  * The whole entry as it will be printed, section by section: Zápis (spôsob 1
@@ -254,13 +262,18 @@ export function composedDefects(
   primaryId: number,
   executedOn: string | null,
 ): ComposedDefect[] {
-  return rows.map(({ defect }, i) => ({
-    n: i + 1,
-    title: defect.title,
-    facility: names.get(defect.facility_id ?? primaryId) ?? '',
-    deadline: deadlineText(defect, executedOn),
-    removedOnSite: defect.status === 'odstraneny' && defect.persists_from === null,
-  }));
+  return rows.map(({ defect }, i) => {
+    // A defect closed on the spot prints its state instead of a deadline (BookEntry::payload).
+    const closed = defect.status === 'odstraneny' || defect.status === 'zanik';
+    return {
+      n: i + 1,
+      title: defect.title,
+      facility: names.get(defect.facility_id ?? primaryId) ?? '',
+      deadline: closed ? '' : deadlineText(defect, executedOn),
+      removedOnSite: defect.status === 'odstraneny' && defect.persists_from === null,
+      reasonGone: defect.status === 'zanik' ? (defect.reason ?? '').trim() : null,
+    };
+  });
 }
 
 // ─── Paths ──────────────────────────────────────────────────────────────────

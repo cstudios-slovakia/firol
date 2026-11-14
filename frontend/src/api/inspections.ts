@@ -575,7 +575,7 @@ export const Inspections = {
       csrfToken,
     }),
   archive: (id: number, csrfToken: string | null) =>
-    api<void>(`/api/inspections/${id}`, { method: 'DELETE', csrfToken }),
+    api<void>(`/api/inspections/${id}`, { method: 'DELETE', csrfToken, label: 'Odstránenie úkonu' }),
 
   /**
    * Create (or return the existing) pre-filled follow-up draft from this

@@ -58,6 +58,9 @@ final class Writer
             // Chapter 11.3 — which deadlines already had their automatic
             // client notice, so a restore does not send it a second time.
             'deadline_notices' => self::deadlineNotices($accountId, $pdo),
+            // The planned visit dates of the deadlines (calendar) — per
+            // (úkon, prevádzka), since a book entry covers several prevádzky.
+            'calendar_plans' => self::calendarPlans($accountId, $pdo),
         ];
 
         $manifest['counts'] = [
@@ -547,6 +550,32 @@ final class Writer
             'notice_date'   => (string) $r['notice_date'],
             'recipient'     => (string) $r['recipient'],
             'sent_at'       => (string) $r['sent_at'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Planned visit dates (`calendar_plans`): one per inspection and
+     * prevádzka, or per training (exactly one of the two ids is set).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function calendarPlans(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT p.inspection_id, p.facility_id, p.training_id, p.planned_date
+             FROM   calendar_plans p
+             LEFT   JOIN inspections i ON i.id = p.inspection_id AND i.archived_at IS NULL
+             LEFT   JOIN trainings   t ON t.id = p.training_id   AND t.archived_at IS NULL
+             WHERE  p.account_id = ?
+               AND  (i.id IS NOT NULL OR t.id IS NOT NULL)
+             ORDER  BY p.id'
+        );
+        $stmt->execute([$accountId]);
+        return array_map(static fn (array $r): array => [
+            'inspection_id' => $r['inspection_id'] !== null ? (int) $r['inspection_id'] : null,
+            'facility_id'   => $r['facility_id'] !== null ? (int) $r['facility_id'] : null,
+            'training_id'   => $r['training_id'] !== null ? (int) $r['training_id'] : null,
+            'planned_date'  => (string) $r['planned_date'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 

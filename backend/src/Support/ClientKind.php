@@ -91,6 +91,15 @@ final class ClientKind
         return (self::isBytovyDom($type) ? 'Bytové družstvo je archivované — ' : 'Firma je archivovaná — ') . $tail;
     }
 
+    /** The facility noun as a label, by count: Prevádzka / Prevádzky, Bytový dom / Bytové domy. */
+    public static function facilityLabel(string $type, int $count): string
+    {
+        if (self::isBytovyDom($type)) {
+            return $count > 1 ? 'Bytové domy' : 'Bytový dom';
+        }
+        return $count > 1 ? 'Prevádzky' : 'Prevádzka';
+    }
+
     /** E-mail of a prevádzka / bytový dom that is not valid. */
     public static function facilityEmailInvalid(string $type): string
     {

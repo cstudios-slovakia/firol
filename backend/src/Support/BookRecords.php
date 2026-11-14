@@ -126,7 +126,9 @@ final class BookRecords
                 'facility_id'   => $companyLevel ? null : (int) $t['facility_id'],
                 'facility_name' => $companyLevel ? null : (string) $t['facility_name'],
                 'druh'          => (string) $t['type'],
-                'tag'           => 'skolenie',
+                // The žatva pokyn is a document for the employees, not a training
+                // session (change request 2.3): it gets no „Školenie" tag.
+                'tag'           => $t['type'] === 'pokyn_zatva' ? null : 'skolenie',
                 'date'          => (string) $t['date'],
                 'number'        => (string) $t['number'],
                 'attendees'     => (int) $t['attendees'],

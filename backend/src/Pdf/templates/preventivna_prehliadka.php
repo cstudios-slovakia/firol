@@ -177,13 +177,8 @@ $note = trim((string) ($p['note'] ?? ($p['poznamka'] ?? ($rawDetails['note'] ?? 
 
 <?php
 $prevRows = (array) ($p['previous'] ?? []);
-$prevDate = '';
-if ($prevRows !== []) {
-    $firstDate = $prevRows[0]['date'] ?? null;
-    $prevDate = $firstDate ? ' ' . ProtocolLayout::date($firstDate) : '';
-}
 ?>
-<?= PrehliadkaDefectsBlock::previous($prevRows, 'Stav nedostatkov z prehliadky' . $prevDate) ?>
+<?= PrehliadkaDefectsBlock::previous($prevRows, PrehliadkaDefectsBlock::previousTitle($prevRows)) ?>
 
 <?php if ($terms !== []): ?>
   <?= $doc->band('Termíny') ?>

@@ -5,6 +5,7 @@ import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
 import { lockScroll } from '@/lib/scrollLock';
 import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
+import { cropToInk } from '@/lib/signatureImage';
 
 type Mode = 'draw' | 'upload';
 
@@ -42,7 +43,7 @@ export function SignaturePickerModal({ onClose, onSave, saving }: Props) {
     if (mode === 'draw') {
       const blob = await padRef.current?.toBlob();
       if (!blob) return;
-      onSave(blob);
+      onSave(await cropToInk(blob));
     } else {
       if (!pickedFile) return;
       onSave(pickedFile);

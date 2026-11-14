@@ -115,8 +115,12 @@ final class ProtocolLayout
 CSS;
     }
 
-    /** Header: client left, odbor tag + title (+ optional subtitle) + number + date right. */
-    public function header(string $title, ?string $subtitle = null): string
+    /**
+     * Header: client left, odbor tag + title (+ optional subtitle) + number + date right.
+     * `$facilityLabel` names the facility line („Prevádzka" unless the template
+     * knows better — a book entry for bytové domy or several prevádzky).
+     */
+    public function header(string $title, ?string $subtitle = null, string $facilityLabel = 'Prevádzka'): string
     {
         $brand = (array) ($this->v['brand'] ?? []);
         $company = (array) ($this->v['company'] ?? []);
@@ -137,7 +141,7 @@ CSS;
             . '<td width="48%"><table class="hdr-inner"><tr>'
             . '<td width="50pt" style="padding-right:7pt;">' . $logo . '</td>'
             . '<td><div class="hdr-company">' . self::esc((string) ($company['name'] ?? '')) . '</div>'
-            . '<div class="hdr-sub">Prevádzka: ' . self::esc((string) ($facility['name'] ?? '')) . ' | IČO: '
+            . '<div class="hdr-sub">' . self::esc($facilityLabel) . ': ' . self::esc((string) ($facility['name'] ?? '')) . ' | IČO: '
             . self::esc((string) ($company['ico'] ?? '—')) . '</div>' . $address . '</td>'
             . '</tr></table></td>'
             . '<td width="52%" class="hdr-right">'
@@ -281,19 +285,26 @@ CSS;
             . '</tr></table>';
     }
 
-    /** Pätička: „Vypracoval: meno | č. oprávnenia: X" plus an optional count. */
+    /**
+     * Pätička: „Vypracoval: meno | č. oprávnenia: X" plus an optional count on
+     * the left, the software credit on the right. Two table cells, because
+     * mPDF ignores `float` on an inline span and ran the two strings together.
+     */
     public function footer(string $extra = ''): string
     {
         $inspector = (array) ($this->v['inspector'] ?? []);
-        $html = '<div class="footer">Vypracoval: ' . self::esc((string) ($inspector['fullname'] ?? ''));
+        $left = 'Vypracoval: ' . self::esc((string) ($inspector['fullname'] ?? ''));
         if (!empty($inspector['certification_number'])) {
-            $html .= ' | č. oprávnenia: ' . self::esc((string) $inspector['certification_number']);
+            $left .= ' | č. oprávnenia: ' . self::esc((string) $inspector['certification_number']);
         }
         if ($extra !== '') {
-            $html .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' . self::esc($extra);
+            $left .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' . self::esc($extra);
         }
-        $html .= '<span style="float:right; font-size:8pt; color:#6b6b75;">Tento dokument bol vytvorený pomocou softvéru poapp.sk</span>';
-        return $html . '</div>';
+        return '<div class="footer"><table width="100%" style="border-collapse:collapse;"><tr>'
+            . '<td style="padding:0; font-size:8pt; color:#6b6b75; vertical-align:top;">' . $left . '</td>'
+            . '<td style="padding:0 0 0 8pt; font-size:8pt; color:#6b6b75; text-align:right; vertical-align:top; white-space:nowrap;">'
+            . 'Tento dokument bol vytvorený pomocou softvéru poapp.sk</td>'
+            . '</tr></table></div>';
     }
 
     /** „j. n. Y" for an ISO date, „—" for none. */

@@ -163,13 +163,8 @@ $switches = (array) ($fromPrehliadka['switches'] ?? []);
 
   <?php
   $prevRows = (array) ($fromPrehliadka['previous'] ?? []);
-  $prevDate = '';
-  if ($prevRows !== []) {
-      $firstDate = $prevRows[0]['date'] ?? null;
-      $prevDate = $firstDate ? ' ' . ProtocolLayout::date($firstDate) : '';
-  }
   ?>
-  <?= PrehliadkaDefectsBlock::previous($prevRows, 'Stav nedostatkov z prehliadky' . $prevDate) ?>
+  <?= PrehliadkaDefectsBlock::previous($prevRows, PrehliadkaDefectsBlock::previousTitle($prevRows)) ?>
 <?php else: ?>
   <?= DefectsTable::render(Defects::collect($items), ['photo_note' => !empty($photos)]) ?>
 <?php endif ?>

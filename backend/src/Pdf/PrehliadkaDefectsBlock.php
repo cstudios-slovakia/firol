@@ -132,6 +132,24 @@ final class PrehliadkaDefectsBlock
         return $html . '</tbody></table>';
     }
 
+    /**
+     * Heading of {@see previous()}: the record the first row came from, by its
+     * kind and date — „Stav nedostatkov z prehliadky 7. 11. 2026", or „… zo
+     * zápisu do požiarnej knihy …" when that record is a book entry (a spôsob 1
+     * entry is the prehliadka of its prevádzky). Rows issued before
+     * `source_kind` existed read as a prehliadka.
+     *
+     * @param list<array<string, mixed>> $rows
+     */
+    public static function previousTitle(array $rows): string
+    {
+        $first = $rows[0] ?? [];
+        $date = is_string($first['date'] ?? null) && $first['date'] !== '' ? ' ' . self::date($first['date']) : '';
+        return (($first['source_kind'] ?? null) === 'poziarna_kniha'
+            ? 'Stav nedostatkov zo zápisu do požiarnej knihy'
+            : 'Stav nedostatkov z prehliadky') . $date;
+    }
+
     /** „1 foto", „2 foto". */
     public static function photos(int $n): string
     {

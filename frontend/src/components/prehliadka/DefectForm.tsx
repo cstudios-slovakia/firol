@@ -499,7 +499,9 @@ export function DefectForm({
 
       {/* 1 · Fotky */}
       <Card className="flex flex-col gap-3 p-4">
-        {state.carriedPhotos.length > 0 && <CarriedPhotos photos={state.carriedPhotos} />}
+        {state.carriedPhotos.length > 0 && (
+          <CarriedPhotos photos={state.carriedPhotos} kind={originKind(state.persistsFrom, from, host)} />
+        )}
         <ItemPhotoField photos={photos} helpText="" />
       </Card>
 
@@ -902,12 +904,14 @@ function originNote(pf: PersistsFrom | null, source: PreviousSource | null, kind
  * They are not removable here — the server copies them onto the new row when
  * it is saved; new photos are added next to them below.
  */
-function CarriedPhotos({ photos }: { photos: InspectionPhoto[] }) {
+function CarriedPhotos({ photos, kind }: { photos: InspectionPhoto[]; kind: PreviousSource['kind'] }) {
   const lightbox = usePhotoLightbox();
   const viewable = photos.map((p) => ({ src: photoSrc(p, 'full') }));
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Fotky z minulej prehliadky</span>
+      <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+        {kind === 'poziarna_kniha' ? 'Fotky zo zápisu do požiarnej knihy' : 'Fotky z minulej prehliadky'}
+      </span>
       <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4">
         {photos.map((p, i) => (
           <li key={p.id} className="group relative aspect-square overflow-hidden rounded-xl border border-ink-200 bg-ink-50">

@@ -22,6 +22,7 @@
  * @var array  $kniha        Firol\Support\BookEntry::payload()
  */
 use Firol\Pdf\ProtocolLayout;
+use Firol\Support\ClientKind;
 use Firol\Support\Contractor;
 use Firol\Support\Sections;
 
@@ -49,7 +50,11 @@ $multi = !empty($k['multi']);
   div.kn-lead { margin: 6pt 0 0; font-weight: bold; }
   ul.kn { margin: 3pt 0 0; padding-left: 18pt; line-height: 1.4; }
 </style>
-<?= $doc->header('Zápis do požiarnej knihy') ?>
+<?= $doc->header(
+    'Zápis do požiarnej knihy',
+    null,
+    ClientKind::facilityLabel((string) ($company['client_type'] ?? ''), max(1, count((array) ($k['objects'] ?? [])))),
+) ?>
 
 <?= $doc->band('Základné údaje') ?>
 <table class="grid" style="margin-top:0;">
@@ -138,6 +143,7 @@ $multi = !empty($k['multi']);
             <?php if ($text($d['description'] ?? '') !== ''): ?><br><?= $para((string) $d['description']) ?><?php endif ?>
             <?php if ($meta !== ''): ?><br><span class="muted"><?= $e($meta) ?></span><?php endif ?>
             <?php if (!empty($d['removed_on_site'])): ?><br>Zistený a odstránený na mieste.<?php endif ?>
+            <?php if (($d['status'] ?? null) === 'zanik'): ?><br>Dôvod zanikol<?= $text($d['reason'] ?? '') !== '' ? ': ' . $e($text($d['reason'])) : '.' ?><?php endif ?>
           </td>
           <?php if ($multi): ?><td><?= $e((string) ($d['facility_name'] ?? '')) ?></td><?php endif ?>
           <td><?= $e((string) ($d['deadline_text'] ?? '')) ?></td>

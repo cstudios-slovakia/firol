@@ -29,6 +29,7 @@ import {
 import { offlineMessage } from '@/lib/offline';
 import { entityPendingMutations } from '@/lib/pendingEntity';
 import { useToast } from '@/lib/toast';
+import { useOnlineStatus } from '@/lib/useOnlineStatus';
 import { usePendingMutations } from '@/lib/usePendingMutations';
 import { visitTrail } from '@/lib/visits';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
@@ -102,6 +103,7 @@ function SummaryForm({
   const isReadOnly = useIsReadOnly();
   const { canDeleteUkon } = useMemberRights();
   const pendingMutations = usePendingMutations();
+  const online = useOnlineStatus();
 
   const i = detail.inspection;
   const initial = useMemo(() => parseKnihaDetails(i.details), [i.details]);
@@ -172,6 +174,13 @@ function SummaryForm({
   }
 
   async function discard() {
+    // Online only, as the prehliadka (DiscardPrehliadka): a discarded draft must
+    // vanish at once, and an entry made offline would otherwise replay its
+    // create, edits and the delete after the sync.
+    if (!online) {
+      toast.error('Zahodiť zápis sa dá len s pripojením na internet.');
+      return;
+    }
     const ok = await confirm({
       title: 'Zahodiť rozpracovaný zápis?',
       description: 'Zápis sa zahodí aj so zapísanými nedostatkami a fotkami.',
@@ -462,6 +471,11 @@ export function ComposedText({ blocks }: { blocks: ComposedBlock[] }) {
                     </span>
                   )}
                   {d.removedOnSite && <span className="block text-xs text-ink-500">Zistený a odstránený na mieste.</span>}
+                  {d.reasonGone !== null && (
+                    <span className="block break-words text-xs text-ink-500">
+                      {d.reasonGone !== '' ? `Dôvod zanikol: ${d.reasonGone}` : 'Dôvod zanikol.'}
+                    </span>
+                  )}
                 </span>
               </li>
             ))}

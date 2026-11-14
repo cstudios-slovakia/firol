@@ -690,6 +690,14 @@ final class BookEntry
                 ? 'bezodkladne'
                 : ($date !== null ? BookSentences::dateSk($date) : '');
             $fid = (int) ($f['facility_id'] ?? 0);
+            $status = PrehliadkaDefects::statusOf($f);
+            $reason = $status === 'zanik' && is_string($f['reason'] ?? null) ? trim($f['reason']) : '';
+            // A defect closed on the spot (odstránený, dôvod zanikol) has nothing
+            // left to remove by a date: its state prints instead, as in the
+            // prehliadka record (spec 12.1 — it stays in the protocol).
+            if ($status === 'odstraneny' || $status === 'zanik') {
+                $deadline = '';
+            }
             $defects[] = [
                 'n'               => ++$n,
                 'item_id'         => (int) $item['id'],
@@ -699,7 +707,9 @@ final class BookEntry
                 'devices_text'    => implode(', ', $devices),
                 'facility_name'   => $namesForDefects[$fid] ?? '',
                 'deadline_text'   => $deadline,
-                'removed_on_site' => PrehliadkaDefects::statusOf($f) === 'odstraneny' && !is_array($f['persists_from'] ?? null),
+                'removed_on_site' => $status === 'odstraneny' && !is_array($f['persists_from'] ?? null),
+                'status'          => $status,
+                'reason'          => $reason,
             ];
         }
 

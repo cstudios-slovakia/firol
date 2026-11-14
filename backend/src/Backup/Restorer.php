@@ -226,6 +226,8 @@ final class Restorer
             $this->restoreTasks($this->list($manifest, 'tasks'));
             // Chapter 11.3 — after the inspections, whose ids it maps onto.
             $this->restoreDeadlineNotices($this->list($manifest, 'deadline_notices'));
+            // After the inspections and trainings, whose ids it maps onto.
+            $this->restoreCalendarPlans($this->list($manifest, 'calendar_plans'));
 
             $this->pdo->commit();
         } catch (\Throwable $e) {
@@ -854,6 +856,46 @@ final class Restorer
                 mb_substr((string) ($this->str($notice, 'recipient') ?? ''), 0, 191),
                 $this->dateTime($notice, 'sent_at') ?? date('Y-m-d H:i:s'),
             ]);
+        }
+    }
+
+    /**
+     * Planned visit dates of the deadlines. A plan whose úkon was not restored
+     * has nothing to attach to; INSERT IGNORE keeps an existing plan on a
+     * merge. Archives written before plans were backed up have none.
+     *
+     * @param list<array<string, mixed>> $plans
+     */
+    private function restoreCalendarPlans(array $plans): void
+    {
+        $insert = $this->pdo->prepare(
+            'INSERT IGNORE INTO calendar_plans (account_id, inspection_id, facility_id, training_id, planned_date)
+             VALUES (?, ?, ?, ?, ?)'
+        );
+        $ownFacility = $this->pdo->prepare('SELECT facility_id FROM inspections WHERE id = ?');
+        foreach ($plans as $plan) {
+            $inspectionId = ($plan['inspection_id'] ?? null) !== null
+                ? ($this->inspectionMap[(int) $plan['inspection_id']] ?? null)
+                : null;
+            $trainingId = ($plan['training_id'] ?? null) !== null
+                ? ($this->trainingMap[(int) $plan['training_id']] ?? null)
+                : null;
+            $plannedDate = $this->date($plan, 'planned_date');
+            if (($inspectionId === null) === ($trainingId === null) || $plannedDate === null) {
+                continue;
+            }
+            // An inspection's plan is per prevádzka (a book entry covers several).
+            $facilityId = null;
+            if ($inspectionId !== null) {
+                $facilityId = ($plan['facility_id'] ?? null) !== null
+                    ? ($this->facilityMap[(int) $plan['facility_id']] ?? null)
+                    : null;
+                if ($facilityId === null) {
+                    $ownFacility->execute([$inspectionId]);
+                    $facilityId = (int) $ownFacility->fetchColumn();
+                }
+            }
+            $insert->execute([$this->accountId, $inspectionId, $facilityId, $trainingId, $plannedDate]);
         }
     }
 

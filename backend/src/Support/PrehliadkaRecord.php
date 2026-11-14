@@ -344,7 +344,7 @@ final class PrehliadkaRecord
      * @param array{source: ?array<string, mixed>, defects: list<array<string, mixed>>} $previous PrehliadkaPrevious
      * @param list<array<string, mixed>> $points the points of this record
      * @param list<array{id: int, fields: array<string, mixed>}> $items the prehliadka's defect rows
-     * @return list<array{title: string, meta: string, date: ?string, status: string, text: string}>
+     * @return list<array{title: string, meta: string, date: ?string, source_kind: string, status: string, text: string}>
      */
     public static function previousRows(array $details, array $previous, string $record, array $points, array $items = []): array
     {
@@ -389,6 +389,8 @@ final class PrehliadkaRecord
                 'meta'   => implode(' · ', $meta),
                 // A defect taken over from a požiarna kniha entry carries its own source.
                 'date'   => is_string($d['source']['executed_on'] ?? null) ? $d['source']['executed_on'] : $date,
+                // prehliadka | poziarna_kniha — the heading of the table names the record by its kind.
+                'source_kind' => (string) ($d['source']['kind'] ?? ($previous['source']['kind'] ?? 'prehliadka')),
                 'status' => $state,
                 'text'   => $text,
             ];

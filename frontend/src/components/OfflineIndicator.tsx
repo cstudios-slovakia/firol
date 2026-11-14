@@ -56,12 +56,15 @@ export function OfflineIndicator() {
 
   const tone = online ? 'amber' : 'red';
   return (
-    <div ref={wrapperRef} className="relative">
+    // Not `relative`: the panel anchors to the header row (AppShell), so at
+    // 360 px it opens under the whole header instead of running off the left
+    // edge from the pill.
+    <div ref={wrapperRef} className="shrink-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          'inline-flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5 text-xs font-medium transition-colors',
+          'inline-flex items-center gap-1.5 whitespace-nowrap rounded-2xl px-2.5 py-1.5 text-xs font-medium transition-colors',
           tone === 'red'
             ? 'bg-red-50 text-red-700 hover:bg-red-100'
             : 'bg-amber-50 text-amber-700 hover:bg-amber-100',
@@ -78,7 +81,7 @@ export function OfflineIndicator() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-30 mt-2 w-80 rounded-2xl border border-ink-100 bg-white p-3 shadow-2xl">
+        <div className="absolute right-4 top-full z-30 mt-1 w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-ink-100 bg-white p-3 shadow-2xl">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm font-semibold text-ink-900">
               {online ? 'Čakajúce zmeny' : 'Si offline'}

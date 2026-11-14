@@ -256,25 +256,27 @@ export function AppShell() {
                 <SubscriptionBanner />
                 <TrialBanner />
                 <header className="border-b border-ink-100/80 bg-white/80 backdrop-blur">
-                    <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
+                    <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
                         <Link
                             to="/"
                             aria-label="Domov"
-                            className="group flex items-center gap-2.5 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
+                            className="group flex shrink-0 items-center gap-2.5 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
                         >
                             <BrandMark className="size-9 text-firol-600 transition-transform group-hover:scale-105" />
                             <span className="font-bold tracking-tight text-ink-900 transition-colors group-hover:text-firol-700">
                                 PO<span className="text-firol-600">app</span>
                             </span>
                         </Link>
-                        <div className="flex items-center gap-2">
+                        {/* min-w-0: at 360 px the account card gives way (truncates) so the
+                            Offline pill and the logout button stay on screen. */}
+                        <div className="flex min-w-0 items-center gap-2">
                             <OfflineIndicator />
                             <AccountSwitcher />
                             <button
                                 type="button"
                                 onClick={handleLogout}
                                 aria-label="Odhlásiť"
-                                className="grid size-9 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700"
+                                className="grid size-9 shrink-0 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700"
                             >
                                 <LogOut className="size-4" />
                             </button>
