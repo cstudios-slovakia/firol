@@ -8,7 +8,7 @@ import type { Facility } from '@/api/facilities';
 import { ApiError, OfflineQueuedError } from '@/lib/api';
 import { writeCache } from '@/lib/cache';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
-import { isBytoveDruzstvo } from '@/lib/clientKind';
+import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/Badge';
 import { useConfirm } from '@/lib/confirm';
@@ -94,8 +94,16 @@ export type DefectFormHost = {
   responsibleDefault: string;
   /** The source of the previous defects, to name an edited carried-over row written before its number was stored. */
   previousSource: PreviousSource | null;
+  /** The previous defects on offer, to tell which record an edited carried-over row came from. */
+  previousDefects?: PreviousDefect[];
   /** A prevádzka learned an entrance or a place — the host keeps its copy current. */
   onFacilityChange: (f: Facility) => void;
+  /**
+   * Called after a save went through (or was queued): the item's id — negative
+   * for a queued create — and what was saved. Optional; the book offers the
+   * „Overiť odstránenie" task from here.
+   */
+  onSaved?: (itemId: number, fields: DefectFields) => void;
 };
 
 export type DefectDevicesHost = {
@@ -346,6 +354,7 @@ export function DefectForm({
         photos,
       });
       await rememberLocally(fields);
+      if (result.itemId !== null) host.onSaved?.(result.itemId, fields);
       if (chain) {
         toast.success('Zapísané. Vyber ďalšie zariadenie.');
         // The prototype's reset: the device, the entrance and the free text go, the photos too (new form);
@@ -424,7 +433,7 @@ export function DefectForm({
           )}
         >
           {state.persistsFrom && <History className="size-3.5 shrink-0" />}
-          {originNote(state.persistsFrom, host.previousSource)}
+          {originNote(state.persistsFrom, host.previousSource, originKind(state.persistsFrom, from, host))}
         </p>
         {state.groupKey && item === null && (
           <p className="mt-2 rounded-xl bg-firol-50 px-3 py-2 text-xs text-firol-700">
@@ -475,7 +484,9 @@ export function DefectForm({
       {/* Prevádzka — only when the host offers several */}
       {host.facilities.length > 1 && (
         <Card className="flex flex-col gap-2.5 p-4">
-          <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Prevádzka</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+            {facilityNouns(facility.company_client_type).singular}
+          </span>
           <div className="flex flex-wrap gap-2">
             {host.facilities.map((f) => (
               <Chip key={f.id} active={state.facilityId === f.id} onClick={() => patch({ facilityId: f.id })}>
@@ -861,12 +872,24 @@ export function DefectForm({
 
 // ─── Pôvod a fotky z minula ─────────────────────────────────────────────────
 
+/** The kind of record a carried-over defect came from — a prehliadka or a požiarna kniha entry. */
+function originKind(pf: PersistsFrom | null, from: DefectFromPrevious | null, host: DefectFormHost): PreviousSource['kind'] {
+  if (!pf) return 'prehliadka';
+  const candidates = [
+    from?.defect.source,
+    from?.source,
+    host.previousDefects?.find((d) => d.key === pf.key)?.source,
+    host.previousSource,
+  ];
+  return candidates.find((s) => s && s.inspection_id === pf.inspection_id)?.kind ?? 'prehliadka';
+}
+
 /** The note on top: which of the two cases this is (spec 12.1). */
-function originNote(pf: PersistsFrom | null, source: PreviousSource | null): string {
+function originNote(pf: PersistsFrom | null, source: PreviousSource | null, kind: PreviousSource['kind']): string {
   if (!pf) return 'Nový nedostatok — zistený dnes';
   const number = pf.number ?? (source && source.inspection_id === pf.inspection_id ? (source.number ?? null) : null);
   return [
-    'Nedostatok z prehliadky',
+    kind === 'poziarna_kniha' ? 'Nedostatok zo zápisu do požiarnej knihy' : 'Nedostatok z prehliadky',
     number ? `č. ${number}` : null,
     pf.executed_on ? `zo dňa ${formatDateSk(pf.executed_on)}` : null,
   ]
@@ -1429,9 +1452,10 @@ function initialState(
       facilityId,
       persistsFrom: {
         key: d.key,
-        inspection_id: from.source.inspection_id,
-        executed_on: from.source.executed_on,
-        number: from.source.number ?? null,
+        // A defect written in a požiarna kniha entry names that entry, not the list's source.
+        inspection_id: (d.source ?? from.source).inspection_id,
+        executed_on: (d.source ?? from.source).executed_on,
+        number: (d.source ?? from.source).number ?? null,
         source_item_id: d.legacy ? null : d.source_item_id,
       },
       carriedPhotos: d.photos ?? [],

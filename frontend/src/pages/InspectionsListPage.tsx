@@ -49,6 +49,12 @@ import {
     isUninvoiced,
     type InvoicingFields,
 } from "@/api/invoicing";
+import { repeatPath } from "@/lib/kniha";
+
+/** The prevádzka of a row — every prevádzka of a požiarna kniha entry written for several. */
+function facilityLabel(it: InspectionListItem): string {
+    return it.facilities && it.facilities.length > 0 ? it.facilities.map((f) => f.name).join(", ") : it.facility_name;
+}
 
 const PAGE_SIZE = 10;
 
@@ -228,7 +234,7 @@ export function InspectionsListPage({
             if (!q) return true;
             return (
                 it.company_name.toLowerCase().includes(q) ||
-                it.facility_name.toLowerCase().includes(q) ||
+                facilityLabel(it).toLowerCase().includes(q) ||
                 it.inspector_name.toLowerCase().includes(q) ||
                 (it.effective_inspector_name?.toLowerCase().includes(q) ?? false) ||
                 INSPECTION_TYPE_LABELS[it.type].toLowerCase().includes(q)
@@ -342,7 +348,7 @@ export function InspectionsListPage({
         setRepeatingId(insId);
         try {
             const res = await Inspections.repeat(insId, csrfToken);
-            navigate(`/inspections/${res.inspection.id}`);
+            navigate(repeatPath(res.inspection.type, res.inspection.id));
         } catch (err) {
             if (certMissing(err, { returnLabel: "Späť na zoznam kontrol" })) return;
             toast.error(
@@ -713,7 +719,7 @@ function InspectionRow({
                         {it.company_name}
                         <span className="mx-1.5 text-ink-300">·</span>
                         <Warehouse className="-mt-0.5 mr-1 inline size-3" />
-                        {it.facility_name}
+                        {facilityLabel(it)}
                     </p>
                     <p className="mt-0.5 text-[11px] text-ink-400">
                         <CalendarDays className="-mt-0.5 mr-1 inline size-3" />

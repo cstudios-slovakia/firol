@@ -4,6 +4,7 @@ import { useMemberRights } from '@/auth/useMemberRights';
 import { Archive, ArchiveRestore, ArrowLeft, Building2, ChevronRight, ClipboardCheck, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Mail, MapPin, Phone, Plus, Route, Send, UserCheck, Warehouse } from 'lucide-react';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyDetail } from '@/api/companies';
+import { Kniha } from '@/api/kniha';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { ArchiveDialog, ArchivedNotice, formatDay, useRestoreArchived } from '@/components/ClientArchive';
@@ -109,6 +110,8 @@ export function CompanyDetailPage() {
     Companies.show(id)
       .then((res) => {
         if (!cancelled) setData(res);
+        // Warms what a požiarna kniha entry starts from, so it can be begun offline.
+        void Kniha.context(id).catch(() => undefined);
       })
       .catch((err: unknown) => {
         if (cancelled) return;

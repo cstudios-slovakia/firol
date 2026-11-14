@@ -46,11 +46,17 @@
  *   GET   /api/inspections/{id}/prehliadka-checklist/review   cached; every value of the ticked protocols
  *   PATCH /api/inspections/{id}/items/{item}                  edits on the review screen: queued as anywhere
  *   POST  /api/inspections/{id}/prehliadka-checklist/generate online-only — it takes the numbers
+ * Požiarna kniha entries (POapp 7. 11. 2026, the new format):
+ *   GET   /api/facilities/{id}/prehliadka-context   still cached; adds `last_term` — the newest
+ *                                                   prehliadka or spôsob 1 entry holding the term
+ *   GET   /api/facilities/{id}/prehliadka-previous  still cached; each defect carries its own
+ *                                                   `source` (a book entry's defects come along)
  * The entrance and the place a defect was written with are remembered by the
  * server inside the defect's own save — see FacilityWalkMemory — so there is no
  * endpoint of their own to queue.
  */
 import { api } from '@/lib/api';
+import type { KnihaLastTerm } from '@/api/kniha';
 import type { PrehliadkaTaskDefect } from '@/components/DefectTaskOffer';
 import type { InspectionDocument, InspectionType } from '@/api/inspections';
 import type { PeriodicityUnit } from '@/lib/periodicity';
@@ -81,6 +87,11 @@ export type PrehliadkaContext = {
   /** A prehliadka in progress at this prevádzka. */
   draft_id: number | null;
   last: PrehliadkaMemory | null;
+  /**
+   * The newest finalized prehliadka or spôsob 1 požiarna kniha entry covering
+   * this prevádzka (it holds the term). Absent on a context cached before it existed.
+   */
+  last_term?: KnihaLastTerm | null;
   /** Unfinished draft per riadna kontrola — that type cannot be ticked. */
   open_drafts: Partial<Record<DeviceType, number>>;
 };

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { PREHLIADKA_TYPE, prehliadkaPath } from '@/lib/prehliadka';
+import { KNIHA_TYPE, isKnihaV2, knihaPath, repeatPath } from '@/lib/kniha';
 import {
   ArrowLeft, ArrowRight, Building, CalendarDays, ClipboardList, CopyPlus, Download,
   FileText, GitBranch, History, Images, Link2, Lock, LockOpen, NotebookPen, Pencil,
@@ -141,7 +142,8 @@ export function InspectionDetailPage() {
       if (res.disposed_skipped > 0) {
         toast.success(disposedNotice(res.disposed_skipped));
       }
-      navigate(`/inspections/${res.inspection.id}`, { replace: false });
+      // A požiarna kniha entry (old or new) is repeated as a new-format draft on its step 1.
+      navigate(repeatPath(data.inspection.type, res.inspection.id), { replace: false });
     } catch (err) {
       if (!certMissing(err, { returnLabel: 'Späť na kontrolu' })) {
         setError(offlineMessage(err, 'Opakovať sa nepodarilo.'));
@@ -386,6 +388,10 @@ export function InspectionDetailPage() {
   // link here, so the redirect is the one place that knows).
   if (data.inspection.type === PREHLIADKA_TYPE) {
     return <Navigate to={prehliadkaPath(id)} replace />;
+  }
+  // So has a požiarna kniha entry of the new format; an old one stays here.
+  if (data.inspection.type === KNIHA_TYPE && isKnihaV2(data.inspection.details)) {
+    return <Navigate to={knihaPath(id)} replace />;
   }
 
   const { inspection: i, items } = data;
@@ -1251,7 +1257,13 @@ function DocumentsBlock({
               </div>
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
-            <HandoverRow doc={doc} canSign={canSign} onSign={() => onSign(doc)} />
+            {/* Nothing is signed in the app for the požiarna kniha (spec 2 rule 7) — an old
+                document shows only a handover it already has. */}
+            {doc.type === 'poziarna_kniha' ? (
+              doc.handover && <HandoverRow doc={doc} canSign={false} onSign={() => undefined} />
+            ) : (
+              <HandoverRow doc={doc} canSign={canSign} onSign={() => onSign(doc)} />
+            )}
             <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} companyId={companyId} facilityId={facilityId} />
           </li>
         ))}

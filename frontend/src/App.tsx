@@ -26,6 +26,10 @@ import { PrehliadkaTermsPage } from '@/pages/prehliadka/PrehliadkaTermsPage';
 import { PrehliadkaClosePage } from '@/pages/prehliadka/PrehliadkaClosePage';
 import { PrehliadkaResultPage } from '@/pages/prehliadka/PrehliadkaResultPage';
 import { PrehliadkaConceptsReviewPage } from '@/pages/prehliadka/PrehliadkaConceptsReviewPage';
+import { KnihaStep1Page } from '@/pages/kniha/KnihaStep1Page';
+import { KnihaEntryPage } from '@/pages/kniha/KnihaEntryPage';
+import { KnihaSummaryPage } from '@/pages/kniha/KnihaSummaryPage';
+import { KnihaDefectPage } from '@/pages/kniha/KnihaDefectPage';
 import { SectionPage, TrainingsRedirect } from '@/pages/SectionPage';
 import { VisitNewPage } from '@/pages/VisitNewPage';
 import { PersonsFillPage } from '@/pages/PersonsFillPage';
@@ -144,6 +148,16 @@ export default function App() {
         <Route path="/prehliadky/:id/vysledok" element={<PrehliadkaResultPage />} />
         {/* Spec 12.2 — review of the ticked concepts before their protocols are issued. */}
         <Route path="/prehliadky/:id/koncepty" element={<PrehliadkaConceptsReviewPage />} />
+
+        {/* POapp 7. 11. 2026 — a požiarna kniha entry (new format): step 1, the
+            entry itself (step 2 while a draft, read-only once issued), the
+            summary and its defects. Old entries keep the generic screens. */}
+        <Route path="/kniha/new" element={<KnihaStep1Page />} />
+        <Route path="/kniha/:id" element={<KnihaEntryPage />} />
+        <Route path="/kniha/:id/krok-1" element={<KnihaStep1Page />} />
+        <Route path="/kniha/:id/suhrn" element={<KnihaSummaryPage />} />
+        <Route path="/kniha/:id/nedostatok/new" element={<KnihaDefectPage />} />
+        <Route path="/kniha/:id/nedostatok/:itemId" element={<KnihaDefectPage />} />
 
         {/* The old Školenia section — its list is now the Školenia tab of OPP. */}
         <Route path="/trainings" element={<TrainingsRedirect />} />

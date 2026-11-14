@@ -35,21 +35,22 @@ export function deadlineFacilityName(
 
 /** Set the planned visit date on whichever úkon defines the deadline. */
 export function setDeadlinePlan(
-  d: Pick<CalendarDeadline, 'inspection_id' | 'training_id'>,
+  d: Pick<CalendarDeadline, 'inspection_id' | 'training_id' | 'facility_id'>,
   plannedDate: string,
   csrfToken: string | null,
 ) {
+  // A požiarna kniha entry has one term per prevádzka; the plan goes to this one.
   return d.training_id !== null
     ? Calendar.setTrainingPlan(d.training_id, plannedDate, csrfToken)
-    : Calendar.setPlan(d.inspection_id as number, plannedDate, csrfToken);
+    : Calendar.setPlan(d.inspection_id as number, plannedDate, csrfToken, d.facility_id);
 }
 
 /** Clear the planned visit date, falling the deadline back to its due date. */
 export function clearDeadlinePlan(
-  d: Pick<CalendarDeadline, 'inspection_id' | 'training_id'>,
+  d: Pick<CalendarDeadline, 'inspection_id' | 'training_id' | 'facility_id'>,
   csrfToken: string | null,
 ) {
   return d.training_id !== null
     ? Calendar.clearTrainingPlan(d.training_id, csrfToken)
-    : Calendar.clearPlan(d.inspection_id as number, csrfToken);
+    : Calendar.clearPlan(d.inspection_id as number, csrfToken, d.facility_id);
 }

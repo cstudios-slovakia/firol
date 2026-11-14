@@ -130,6 +130,30 @@ export type InspectionListItem = InvoicingFields & {
   concept_state?: ConceptState | null;
   /** PO / BOZP / PO + BOZP — only for a preventívna prehliadka. */
   prehliadka_scope?: PrehliadkaScopeLabel | null;
+  /**
+   * The prevádzky of a new-format požiarna kniha entry (lib/kniha.ts), one row
+   * each with its own periodicity. Absent on every other úkon and on old entries.
+   */
+  facilities?: InspectionFacility[];
+};
+
+/** One prevádzka of a požiarna kniha entry (GET /api/inspections[/{id}]). */
+export type InspectionFacility = {
+  facility_id: number;
+  name: string;
+  /** The stored choice, also while the entry is spôsob 2 (the screens hide it there). */
+  periodicity_value: number | null;
+  periodicity_unit: PeriodicityUnit | null;
+  /** Null while spôsob 2. */
+  valid_until: string | null;
+  is_superseded: boolean;
+};
+
+/** The prevádzky a požiarna kniha entry is written for (create / PATCH body). */
+export type InspectionFacilityInput = {
+  facility_id: number;
+  periodicity_value: number | null;
+  periodicity_unit: PeriodicityUnit | null;
 };
 
 export type ConceptState = 'pending' | 'confirmed';
@@ -480,6 +504,8 @@ export type InspectionDraftPayload = {
   visit_id?: number;
   /** Header data — required for a preventívna prehliadka (its setup). */
   details?: Record<string, unknown>;
+  /** Požiarna kniha (new format) — the selected prevádzky, required there. */
+  facilities?: InspectionFacilityInput[];
 };
 
 export type InspectionUpdatePayload = {
@@ -494,6 +520,11 @@ export type InspectionUpdatePayload = {
   notes?: string;
   /** Replaces the whole header object (see `Inspection.details`). */
   details?: Record<string, unknown>;
+  /**
+   * Požiarna kniha (new format) — the whole set of prevádzky. `name` is not
+   * read by the server; it lets a queued edit show the names offline.
+   */
+  facilities?: (InspectionFacilityInput & { name?: string })[];
 };
 
 export type InspectionListFilters = {

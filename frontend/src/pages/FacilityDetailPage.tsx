@@ -37,7 +37,9 @@ import {
     type InspectionType,
 } from "@/api/inspections";
 import { periodicityShort } from "@/lib/periodicity";
-import { Prehliadka, type PrehliadkaMemory } from "@/api/prehliadka";
+import { Prehliadka } from "@/api/prehliadka";
+import { Kniha, type KnihaLastTerm } from "@/api/kniha";
+import { repeatPath } from "@/lib/kniha";
 import { PREHLIADKA_TYPE, prehliadkaPath } from "@/lib/prehliadka";
 import {
     TRAINING_TYPE_LABELS,
@@ -86,7 +88,8 @@ export function FacilityDetailPage() {
     const [activeTab, setActiveTab] = useState<"inspections" | "trainings" | "objekt">("inspections");
     const [devices, setDevices] = useState<FacilityDeviceGroup[] | null>(null);
     const [ppContextDraft, setPpContextDraft] = useState<number | null>(null);
-    const [lastPrehliadka, setLastPrehliadka] = useState<PrehliadkaMemory | null>(null);
+    // The newest prehliadka or spôsob 1 požiarna kniha entry holding the term here.
+    const [lastPrehliadka, setLastPrehliadka] = useState<KnihaLastTerm | null>(null);
     const [trainingQuery, setTrainingQuery] = useState("");
     const [trainingTypeFilter, setTrainingTypeFilter] = useState<TrainingType | "">("");
 
@@ -162,7 +165,7 @@ export function FacilityDetailPage() {
         setRepeatingId(insId);
         try {
             const res = await Inspections.repeat(insId, csrfToken);
-            navigate(`/inspections/${res.inspection.id}`);
+            navigate(repeatPath(res.inspection.type, res.inspection.id));
         } catch (err) {
             if (certMissing(err, { returnLabel: "Späť na prevádzku" })) return;
             setError(
@@ -190,11 +193,28 @@ export function FacilityDetailPage() {
                 // context) so it can be started offline from here, and tells
                 // whether one is already in progress.
                 void Facilities.devices(id).catch(() => undefined);
+                // … and the context a požiarna kniha entry starts from.
+                void Kniha.context(f.facility.company_id).catch(() => undefined);
                 Prehliadka.context(id)
                     .then((c) => {
                         if (cancelled) return;
                         setPpContextDraft(c.draft_id);
-                        setLastPrehliadka(c.last);
+                        // A context cached before `last_term` existed still names the prehliadka.
+                        setLastPrehliadka(
+                            c.last_term !== undefined
+                                ? c.last_term
+                                : c.last
+                                  ? {
+                                        kind: "prehliadka",
+                                        inspection_id: c.last.inspection_id,
+                                        executed_on: c.last.executed_on,
+                                        periodicity_value: c.last.periodicity_value,
+                                        periodicity_unit: c.last.periodicity_unit,
+                                        valid_until: null,
+                                        defects: c.last.defects ?? 0,
+                                    }
+                                  : null,
+                        );
                     })
                     .catch(() => undefined);
                 const [ins, trs] = await Promise.all([
@@ -980,7 +1000,7 @@ function ObjektPanel({
 }: {
     facility: Facility;
     devices: FacilityDeviceGroup[] | null;
-    lastPrehliadka: PrehliadkaMemory | null;
+    lastPrehliadka: KnihaLastTerm | null;
 }) {
     const total = (devices ?? []).reduce((sum, g) => sum + g.items.length, 0);
     const meta = (devices ?? [])
@@ -1010,7 +1030,11 @@ function ObjektPanel({
 
             {lastPrehliadka && (
                 <Link
-                    to={prehliadkaPath(lastPrehliadka.inspection_id)}
+                    to={
+                        lastPrehliadka.kind === "prehliadka"
+                            ? prehliadkaPath(lastPrehliadka.inspection_id)
+                            : `/inspections/${lastPrehliadka.inspection_id}`
+                    }
                     id="objekt-last-prehliadka"
                     className="flex items-center gap-3 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-all duration-200 hover:bg-ink-50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
                 >

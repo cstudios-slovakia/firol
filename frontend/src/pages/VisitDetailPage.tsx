@@ -8,6 +8,7 @@ import { useAuth } from '@/auth/AuthContext';
 import { documentDownloadUrl } from '@/api/inspections';
 import { Visits, type Visit, type VisitType } from '@/api/visits';
 import { Companies } from '@/api/companies';
+import { Kniha } from '@/api/kniha';
 import { ApiError } from '@/lib/api';
 import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
@@ -64,6 +65,8 @@ export function VisitDetailPage() {
     load()
       .then(async (v) => {
         if (cancelled) return;
+        // Warms what a požiarna kniha entry of the visit starts from (offline start).
+        void Kniha.context(v.company_id).catch(() => undefined);
         // The client's recorded address, prefilled as the recipient of the
         // bulk send so the common case needs no typing.
         const company = await Companies.show(v.company_id).catch(() => null);

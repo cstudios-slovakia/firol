@@ -2,10 +2,11 @@ import { INSPECTION_TYPE_LABELS, type InspectionType } from '@/api/inspections';
 import { SKOLENIE_PO, type Visit, type VisitInspection, type VisitTraining, type VisitType } from '@/api/visits';
 import type { Crumb } from '@/components/ui/Breadcrumb';
 import { PREHLIADKA_NEW_PATH, PREHLIADKA_TYPE, prehliadkaPath } from '@/lib/prehliadka';
+import { KNIHA_TYPE, knihaNewPath } from '@/lib/kniha';
 
 /** „1 položka", „2 položky", „5 položiek" — Slovak plural of a count. */
 function plural(n: number, one: string, few: string, many: string): string {
-  return `${n} ${n === 1 ? one : n < 5 ? few : many}`;
+  return `${n} ${n === 1 ? one : n >= 2 && n <= 4 ? few : many}`;
 }
 
 /**
@@ -101,7 +102,11 @@ export function visitUkonState(
     }
     return { started: true, done: false, text: `Rozpracované · ${defects}`, documentId: null };
   }
-  const items = plural(inspection.item_count, 'položka', 'položky', 'položiek');
+  // A požiarna kniha entry's items are its defects (an old entry has its one record).
+  const items =
+    inspection.type === KNIHA_TYPE
+      ? plural(inspection.item_count, 'nedostatok', 'nedostatky', 'nedostatkov')
+      : plural(inspection.item_count, 'položka', 'položky', 'položiek');
   const done = inspection.status === 'finalized';
   // A concept from a prehliadka is not a protocol: it waits for the technician, and
   // holding it for the end of the visit would only make „generovať všetky" skip it.
@@ -156,7 +161,10 @@ export function visitUkonPath(visit: Visit, type: VisitType): string {
     return `${PREHLIADKA_NEW_PATH}?${params.toString()}`;
   }
   const existing = visitInspectionOfType(visit, type);
+  // An existing požiarna kniha entry opens through /inspections/{id}, which
+  // sends a new-format entry on to its own screens; a new one starts there.
   if (existing) return `/inspections/${existing.id}`;
+  if (type === KNIHA_TYPE) return knihaNewPath(params);
   return `/inspections/new/${type}/step-1?${params.toString()}`;
 }
 

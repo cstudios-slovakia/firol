@@ -614,6 +614,11 @@ export type PreviousDefect = {
   source_item_id: number;
   /** The defect's photos in the old record (none for an old book entry). Absent on an older cached answer. */
   photos?: InspectionPhoto[];
+  /**
+   * The record this defect was written in — the prehliadka, or a požiarna kniha
+   * entry newer than it. Absent on an older cached answer (then the list's `source`).
+   */
+  source?: PreviousSource;
 };
 
 /** Where the previous defects come from — `number` is its document's, absent on an older cached answer. */

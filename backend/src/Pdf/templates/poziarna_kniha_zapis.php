@@ -43,6 +43,12 @@ $defects = (array) ($k['defects'] ?? []);
 $multi = !empty($k['multi']);
 ?>
 <?= $doc->styles() ?>
+<style>
+  /* Running text of the entry: tighter than the browser default, as the other OPP records read. */
+  p.kn { margin: 5pt 0 0; line-height: 1.4; }
+  div.kn-lead { margin: 6pt 0 0; font-weight: bold; }
+  ul.kn { margin: 3pt 0 0; padding-left: 18pt; line-height: 1.4; }
+</style>
 <?= $doc->header('Zápis do požiarnej knihy') ?>
 
 <?= $doc->band('Základné údaje') ?>
@@ -70,20 +76,20 @@ $multi = !empty($k['multi']);
 <?php if ($sposob === 1): ?>
   <?= $doc->band('Zápis') ?>
   <?php if ($text($k['uvod'] ?? '') !== ''): ?>
-    <p><?= $para((string) $k['uvod']) ?></p>
+    <p class="kn"><?= $para((string) $k['uvod']) ?></p>
   <?php endif ?>
-  <p><?= $e((string) ($k['fixed_sentence'] ?? '')) ?></p>
+  <p class="kn"><?= $e((string) ($k['fixed_sentence'] ?? '')) ?></p>
   <?php if (!empty($k['cinnosti'])): ?>
-    <p><b><?= $e((string) ($k['activities_heading'] ?? '')) ?></b></p>
-    <ul>
+    <div class="kn-lead"><?= $e((string) ($k['activities_heading'] ?? '')) ?></div>
+    <ul class="kn">
       <?php foreach ((array) $k['cinnosti'] as $c): ?>
         <li><?= $e((string) $c) ?></li>
       <?php endforeach ?>
     </ul>
   <?php endif ?>
   <?php if (!empty($k['vlastne'])): ?>
-    <p><b>Ďalej vykonané:</b></p>
-    <ul>
+    <div class="kn-lead">Ďalej vykonané:</div>
+    <ul class="kn">
       <?php foreach ((array) $k['vlastne'] as $c): ?>
         <li><?= $e((string) $c) ?></li>
       <?php endforeach ?>
@@ -91,19 +97,19 @@ $multi = !empty($k['multi']);
   <?php endif ?>
 <?php elseif ($text($k['text_zapisu'] ?? '') !== ''): ?>
   <?= $doc->band('Zápis') ?>
-  <p><?= $para((string) $k['text_zapisu']) ?></p>
+  <p class="kn"><?= $para((string) $k['text_zapisu']) ?></p>
 <?php endif ?>
 
 <?php if (!empty($k['paragraphs'])): ?>
   <?= $doc->band('Priložené záznamy') ?>
   <?php foreach ((array) $k['paragraphs'] as $p): ?>
-    <p><?= $e((string) $p) ?></p>
+    <p class="kn"><?= $e((string) $p) ?></p>
   <?php endforeach ?>
 <?php endif ?>
 
 <?php if ($sposob === 1 && $text($k['doplnujuci_text'] ?? '') !== ''): ?>
   <?= $doc->band('Doplňujúci text') ?>
-  <p><?= $para((string) $k['doplnujuci_text']) ?></p>
+  <p class="kn"><?= $para((string) $k['doplnujuci_text']) ?></p>
 <?php endif ?>
 
 <?php if ($defects !== []): ?>
@@ -142,7 +148,7 @@ $multi = !empty($k['multi']);
 <?php endif ?>
 
 <?php if ($text($k['zaver'] ?? '') !== ''): ?>
-  <p><?= $para((string) $k['zaver']) ?></p>
+  <p class="kn" style="margin-top:8pt;"><?= $para((string) $k['zaver']) ?></p>
 <?php endif ?>
 
 <?= $doc->band('Podpisy') ?>

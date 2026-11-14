@@ -27,6 +27,7 @@ import type {
   Inspection,
   InspectionDetail,
   InspectionDraftPayload,
+  InspectionFacility,
   InspectionItem,
   InspectionListItem,
   InspectionPhoto,
@@ -99,9 +100,22 @@ export function inspectionCreateOptimistic(args: {
   company: { id: number; name: string; ico: string | null; billing_mode?: CompanyBillingMode | null };
   facility: { id: number; name: string };
   inspector: { id: number; name: string };
+  /** Požiarna kniha (new format) — the names of `payload.facilities`, by id. */
+  facilityNames?: Record<number, string>;
 }): OptimisticSpec {
   const id = mintTempId();
   const ts = nowIso();
+  // A new-format požiarna kniha entry is a preventívna prehliadka only in spôsob 1
+  // and carries its prevádzky as rows (lib/kniha.ts, design A.3).
+  const knihaSposob = bookSposob(args.payload.details);
+  const facilities: InspectionFacility[] | undefined = args.payload.facilities?.map((f) => ({
+    facility_id: f.facility_id,
+    name: args.facilityNames?.[f.facility_id] ?? (f.facility_id === args.facility.id ? args.facility.name : ''),
+    periodicity_value: f.periodicity_value,
+    periodicity_unit: f.periodicity_unit,
+    valid_until: null,
+    is_superseded: false,
+  }));
   const inspection: Inspection = {
     id,
     type: args.payload.type,
@@ -137,7 +151,7 @@ export function inspectionCreateOptimistic(args: {
     is_superseded: false,
     // Defaults to a preventive inspection; the record form flips this to false
     // for a plain fire-book entry once it is saved.
-    is_preventive_inspection: true,
+    is_preventive_inspection: knihaSposob === null ? true : knihaSposob === 1,
     // A manually created inspection has no source; follow-up drafts are made
     // server-side (change request 2.1).
     source_inspection_id: null,
@@ -147,13 +161,14 @@ export function inspectionCreateOptimistic(args: {
     // The setup of a preventívna prehliadka rides along, so its screens work
     // from the very first moment of an offline draft.
     details: args.payload.details ?? null,
+    ...(facilities ? { facilities } : {}),
   };
   const detail: InspectionDetail = { inspection, items: [] };
   const listRow: InspectionListItem = { ...inspection };
   return {
     returns: detail,
     create: { clientId: id, idPath: 'inspection.id' },
-    label: 'Nová kontrola',
+    label: knihaSposob !== null ? 'Nový zápis do požiarnej knihy' : 'Nová kontrola',
     detail: `${args.company.name} · ${args.facility.name}`,
     patches: [
       seed(`/api/inspections/${id}`, detail),
@@ -378,6 +393,53 @@ export function facilityCreateOptimistic(args: {
   };
 }
 
+/** The spôsob of a new-format požiarna kniha entry (lib/kniha.ts), or null for anything else. */
+function bookSposob(details: unknown): 1 | 2 | null {
+  if (!details || typeof details !== 'object') return null;
+  const d = details as { format?: unknown; sposob?: unknown };
+  if (d.format !== 'pk2') return null;
+  return d.sposob === 1 ? 1 : 2;
+}
+
+/**
+ * A queued edit of a požiarna kniha entry, applied to a cached row the way the
+ * server applies it (design A.3): the prevádzky set (names kept from the cache,
+ * else taken from the body), the primary prevádzka (kept while selected, else
+ * the first by name), `is_preventive_inspection` = spôsob 1 and the primary
+ * row's periodicity at the top level — none while spôsob 2.
+ */
+function applyBookEdit(next: Record<string, unknown>, f: Record<string, unknown>): void {
+  const before = Array.isArray(next.facilities) ? (next.facilities as InspectionFacility[]) : [];
+  if (Array.isArray(f.facilities)) {
+    const byId = new Map(before.map((r) => [r.facility_id, r]));
+    next.facilities = (f.facilities as Record<string, unknown>[])
+      .filter((r) => typeof r.facility_id === 'number')
+      .map((r): InspectionFacility => {
+        const old = byId.get(r.facility_id as number);
+        return {
+          facility_id: r.facility_id as number,
+          name: old?.name ?? (typeof r.name === 'string' ? r.name : ''),
+          periodicity_value: (r.periodicity_value as number | null | undefined) ?? null,
+          periodicity_unit: (r.periodicity_unit as InspectionFacility['periodicity_unit'] | undefined) ?? null,
+          valid_until: null,
+          is_superseded: old?.is_superseded ?? false,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, 'sk'));
+  }
+  const sposob = bookSposob(next.details);
+  if (sposob === null) return;
+  const rows = Array.isArray(next.facilities) ? (next.facilities as InspectionFacility[]) : [];
+  const primary = rows.find((r) => r.facility_id === next.facility_id) ?? rows[0];
+  if (primary) {
+    next.facility_id = primary.facility_id;
+    next.facility_name = primary.name || next.facility_name;
+  }
+  next.is_preventive_inspection = sposob === 1;
+  next.periodicity_value = sposob === 1 ? (primary?.periodicity_value ?? null) : null;
+  next.periodicity_unit = sposob === 1 ? (primary?.periodicity_unit ?? null) : null;
+}
+
 // --- nested writes (items / trainees) -----------------------------------
 
 const ITEMS_RE = /^\/api\/inspections\/(-?\d+)\/items(?:\/(-?\d+))?$/;
@@ -544,13 +606,16 @@ function topLevelEditOptimistic(pathOnly: string, body: unknown): OptimisticSpec
     // `details` — the úkon's header data (block 2, inspections.details).
     const keys = ['executed_on', 'notes', 'periodicity_value', 'periodicity_unit', 'details'];
     const mergedInspection = <T extends Record<string, unknown>>(row: T): T => {
-      const next = mergeFields(row, f, keys) as Record<string, unknown>;
+      // A požiarna kniha entry ignores a top-level periodicity; it follows its rows.
+      const book = bookSposob(row.details) !== null || bookSposob(f.details) !== null;
+      const next = mergeFields(row, f, book ? ['executed_on', 'notes', 'details'] : keys) as Record<string, unknown>;
       if (f.details && typeof f.details === 'object' && !Array.isArray(f.details)) {
         next.details = {
           ...((row.details as Record<string, unknown> | null | undefined) ?? {}),
           ...(f.details as Record<string, unknown>),
         };
       }
+      if (book) applyBookEdit(next, f);
       return next as unknown as T;
     };
     return {

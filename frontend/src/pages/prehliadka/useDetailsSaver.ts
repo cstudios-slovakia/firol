@@ -90,6 +90,13 @@ export function useDetailsSaver(inspectionId: number, initial: PrehliadkaDetails
       latest.current = next;
       setDetails(next);
       void syncCacheDetails(inspectionId, next);
+      // A write is running: mark it dirty and keep the promise of the loop
+      // that is really in flight (replacing it with an already settled one
+      // would make flush() spin without ever yielding to the network).
+      if (running.current) {
+        dirty.current = true;
+        return;
+      }
       inFlightPromise.current = run();
     },
     [inspectionId, run],
@@ -98,9 +105,8 @@ export function useDetailsSaver(inspectionId: number, initial: PrehliadkaDetails
   /** Awaits any in-flight or dirty writes before navigating to the next step. */
   const flush = useCallback(async (): Promise<void> => {
     while (running.current || dirty.current) {
-      if (inFlightPromise.current) {
-        await inFlightPromise.current;
-      } else {
+      await (inFlightPromise.current ?? Promise.resolve());
+      if (running.current || dirty.current) {
         await new Promise((r) => setTimeout(r, 20));
       }
     }

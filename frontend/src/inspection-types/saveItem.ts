@@ -26,6 +26,8 @@ export type SaveItemResult = {
   queued: boolean;
   /** Photos that could not be stored — the item itself is saved regardless. */
   photosFailed: number;
+  /** The saved item: the server's id, or the temp (negative) id of a queued create. */
+  itemId: number | null;
 };
 
 export async function saveItemWithPhotos(args: {
@@ -79,7 +81,7 @@ export async function saveItemWithPhotos(args: {
   // of a follow-up task. Every form with nedostatky saves through here.
   offerDefectTasks(inspectionId, fields as unknown as Record<string, unknown>);
 
-  return { queued, photosFailed };
+  return { queued, photosFailed, itemId: targetId };
 }
 
 /**

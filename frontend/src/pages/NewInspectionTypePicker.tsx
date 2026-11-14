@@ -7,6 +7,7 @@ import {
 // Block 2 — single-record BOZP úkony.
 import { BookCheck, CigaretteOff, ClipboardCheck, Factory, PhoneCall } from 'lucide-react';
 import { PREHLIADKA_NEW_PATH } from '@/lib/prehliadka';
+import { knihaNewPath } from '@/lib/kniha';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import {
@@ -277,6 +278,8 @@ export function NewInspectionTypePicker() {
       const q = qs.toString();
       return `${PREHLIADKA_NEW_PATH}${q ? `?${q}` : ''}`;
     }
+    // A požiarna kniha entry starts with its prevádzky (POapp 7. 11. 2026, spec 4).
+    if (type === 'poziarna_kniha') return knihaNewPath(passthrough);
     return `/inspections/new/${type}/step-1${passthroughQs ? `?${passthroughQs}` : ''}`;
   };
 

@@ -249,6 +249,7 @@ export function PrehliadkaDefectPage() {
     deadline: 'required',
     responsibleDefault: loaded.responsibleDefault,
     previousSource: loaded.previous?.source ?? null,
+    previousDefects: loaded.previous?.defects,
     onFacilityChange: (facility) => setLoaded((cur) => (cur ? { ...cur, facility } : cur)),
   };
 
