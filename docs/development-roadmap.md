@@ -1673,8 +1673,8 @@ trip) is tracked in the hand-back report to the owner, not here.
   „Ďalej vykonané" above custom activities.
 - ⏸ Date arithmetic differs between client and server elsewhere in the app (the client clamps to
   the month's end, PHP rolls over); the book screens use the server rule.
-- ⏸ Discarding a book entry or a prehliadka is the usual soft archive: items and photos stay with
-  the archived row.
+- ✅ Discarding a draft book entry or prehliadka that was never issued deletes it for good, items
+  and photos included (owner decision of 17. 11. 2026, replaces the soft archive — see round 3).
 
 ### Fix list of 16. 11. 2026 (`POapp_opravy_2026-11-16.pdf`) — ✅ built
 
@@ -1794,6 +1794,64 @@ labels). The four part-1 failures were a stale fixture, fixed in round 2.
 - ⏸ Doba svietenia on the núdzové osvetlenie protocol — print it or not (mockup has no column).
 - ⏸ The núdzové osvetlenie item form requires the evidenčné číslo while the server and the import
   treat it as optional; an imported svietidlo cannot be saved from its form without one.
+
+### Fix list of 16. 11. 2026 — round 3 (review of round 2, permanent delete, staging build) — ✅ built
+
+**Review findings fixed**
+- **Completeness check** (`CarryOver::checksCompleteness(row)`): every draft with `carried_from`,
+  whatever its type (an oprava / vyradenie follow-up included), and an Opakovať draft from before
+  round 1 (`carried_over_from_id`, never issued). Unlocked old protocols, typed and imported drafts
+  generate as before. The follow-up button now records the origin for oprava / vyradenie too, as
+  the checklist does, and prefills today's date.
+- **„Issued before" for good**: migration 078 adds `inspections.issued_before`, set on every issue
+  (`Contractor::freezeInspection`), by „Upraviť" and by „Doplniť výsledky", and backfilled from
+  status, the contractor snapshot, documents rows and the audit log.
+- Item refusals in Slovak („Pole „Vykonané práce" je povinné.", „Pole „HS" musí byť číslo od 0 do
+  50.", the year range too); the old-format book has refusal labels without joining the
+  completeness check.
+- **Excel import**: an impossible date is a row error on every sheet (`checkdate()`); IČO columns
+  are text and a short all-digit IČO is padded to 8 digits; the spôsob-1 periodicity check uses the
+  deduplicated prevádzky; a repeated entry number is reported after a failed row; a „Druh klienta"
+  that differs from the stored firma is a row error (the stored type is never changed);
+  `companyClientType` filters by account; an entry stores only the fields of its spôsob, as the UI
+  does (spôsob 1: úvod, činnosti, vlastné činnosti, doplňujúci text; spôsob 2: text zápisu; both:
+  na záver, schválil) and the headers, Pokyny and manual say so.
+- Smaller: `facilityPlace()` matches the city as a whole word; the calendar list by firma prints
+  „Celá firma" / „Celé bytové družstvo" for a whole-client training; the six fire item forms save an
+  edited existing item on „na súhrn" when its values changed (`sameFormValues`); „2 kontrolované
+  hydranty"; the timezone is set to Europe/Bratislava in `src/bootstrap.php` (Composer
+  `autoload.files`), so a server on UTC no longer writes yesterday's date after midnight.
+
+**Discarding an úkon (owner decision of 17. 11. 2026, `UkonDiscard`)**
+- A draft that was **never issued** (no `issued_before`, no contractor snapshot, no documents row,
+  no unlock / fill-results in the audit log) and that **nothing was made from** (tasks, úkony with
+  `source_inspection_id`, material issues, a potvrdenie listing it) is **deleted for good**: the row
+  in one transaction (items, photo rows, `inspection_facilities`, calendar plans and deadline
+  notices by CASCADE), then its photo folder; audit row `inspection.delete`.
+- Refused with 409 and no button: a draft issued before, a draft something was made from, a
+  prehliadka closed before, the kniha BOZP record of a prehliadka on its own.
+- An **issued** úkon is archived as before; its dialog says „Kontrola sa archivuje a zmizne zo
+  zoznamov. Vystavený protokol sa nezmaže." The system's own archiving (stale concepts, the BOZP
+  record of a prehliadka closed again) is unchanged.
+- List rows and `show()` carry `discard` (`delete` / `archive` / null). Every permanent delete asks
+  first („Natrvalo zmazať", „Túto akciu nemožno vrátiť späť.") and is online only — it never waits
+  in the offline queue; a queued archive says so instead of reporting a failure. A queued change
+  that meets a deleted úkon (404) explains it in the pending-changes panel.
+
+**Staging build**
+- Source maps are opt-in (`VITE_BUILD_SOURCEMAP=1`, hidden maps); the default build has none.
+- `npm run build:safe` builds into `dist-next/` and swaps it in only after a successful build
+  (`scripts/swap-dist.mjs`, keeps `dist-prev/`); the deploy workflow still runs `npm run build`.
+
+**Open for the owner**
+- ⏸ Imported úkony (book entries included) get no `billing_mode` and no `created_by_user_id`, so a
+  draft finished later never shows in „Nevyfakturované". Unchanged; decide whether the import should
+  set them.
+- ⏸ Not approved, not built: a list of archived úkony on the prevádzka with „Obnoviť"; a one-off
+  hard delete of the archived never-issued drafts already in the database; the same delete rule for
+  školenia (today `TrainingController::archive` hard-deletes a training of any status and leaves
+  its documents rows and PDFs behind).
+- ⏸ Switch the deploy workflow to `npm run build:safe` on servers where the build may be killed.
 
 ---
 
