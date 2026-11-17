@@ -76,7 +76,7 @@ const TYPES: TypeMeta[] = [
   {
     type: 'poziarna_kniha',
     shortLabel: 'Požiarna kniha',
-    description: 'Periodický záznam o stave protipožiarnej ochrany.',
+    description: 'Periodický záznam o stave ochrany pred požiarmi.',
     intervalLabel: '3 / 6 / 12 mes.',
     icon: <BookOpen className="size-5" />,
     enabled: true,

@@ -421,5 +421,4 @@ $statusLabels = ['A' => 'Akcieschopný', 'TS' => 'Tlaková skúška', 'O' => 'Vy
 <div class="footer">
   Vypracoval: <?= $h($inspector['fullname']) ?><?php if (!empty($inspector['certification_number'])): ?> | č.
     oprávnenia: <?= $h($inspector['certification_number']) ?><?php endif ?>
-  <span style="float:right; font-size:8pt; color:#6b6b75;">Tento dokument bol vytvorený pomocou softvéru poapp.sk</span>
 </div>

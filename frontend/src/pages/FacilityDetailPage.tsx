@@ -39,7 +39,7 @@ import {
 import { periodicityShort } from "@/lib/periodicity";
 import { Prehliadka } from "@/api/prehliadka";
 import { Kniha, type KnihaLastTerm } from "@/api/kniha";
-import { repeatPath } from "@/lib/kniha";
+import { repeatPath, sk3 } from "@/lib/kniha";
 import { PREHLIADKA_TYPE, prehliadkaPath } from "@/lib/prehliadka";
 import {
     TRAINING_TYPE_LABELS,
@@ -458,7 +458,7 @@ export function FacilityDetailPage() {
                                     label="Podlažia"
                                     value={
                                         facility.floors_above != null
-                                            ? `${facility.floors_above} nadzemných · ${facility.floors_below ?? 0} podzemných`
+                                            ? `${facility.floors_above} ${sk3(facility.floors_above, "nadzemné", "nadzemné", "nadzemných")} · ${facility.floors_below ?? 0} ${sk3(facility.floors_below ?? 0, "podzemné", "podzemné", "podzemných")}`
                                             : "nevyplnené"
                                     }
                                     muted={facility.floors_above == null}

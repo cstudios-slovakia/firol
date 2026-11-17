@@ -286,9 +286,10 @@ CSS;
     }
 
     /**
-     * Pätička: „Vypracoval: meno | č. oprávnenia: X" plus an optional count on
-     * the left, the software credit on the right. Two table cells, because
-     * mPDF ignores `float` on an inline span and ran the two strings together.
+     * Pätička: „Vypracoval: meno | č. oprávnenia: X" plus an optional count.
+     * The software credit is not repeated here: {@see PdfRenderer::buildPdf()}
+     * prints it at the bottom of every page (fix list of 16. 11. 2026 — it
+     * appeared twice on the last page).
      */
     public function footer(string $extra = ''): string
     {
@@ -300,11 +301,7 @@ CSS;
         if ($extra !== '') {
             $left .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' . self::esc($extra);
         }
-        return '<div class="footer"><table width="100%" style="border-collapse:collapse;"><tr>'
-            . '<td style="padding:0; font-size:8pt; color:#6b6b75; vertical-align:top;">' . $left . '</td>'
-            . '<td style="padding:0 0 0 8pt; font-size:8pt; color:#6b6b75; text-align:right; vertical-align:top; white-space:nowrap;">'
-            . 'Tento dokument bol vytvorený pomocou softvéru poapp.sk</td>'
-            . '</tr></table></div>';
+        return '<div class="footer">' . $left . '</div>';
     }
 
     /** „j. n. Y" for an ISO date, „—" for none. */

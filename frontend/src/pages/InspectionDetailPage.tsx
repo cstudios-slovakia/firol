@@ -637,7 +637,7 @@ export function InspectionDetailPage() {
         <Card className="flex items-start gap-2.5 bg-ink-50 px-4 py-3 text-xs text-ink-600">
           <History className="mt-0.5 size-4 shrink-0 text-ink-400" />
           <p>
-            Túto kontrolu už nahradila novšia kontrola {isBytoveDruzstvo(i.company_client_type) ? 'toho istého' : 'tej istej'} {facilityN.cases.gen}
+            Túto kontrolu už nahradila novšia kontrola {isBytoveDruzstvo(i.company_client_type) ? 'toho istého' : 'tej istej'} {facilityN.cases.gen}{' '}
             a typu, preto sa neoznačuje ako „po termíne". Stále ju môžeš
             zobraziť aj znova opakovať.
           </p>
