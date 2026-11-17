@@ -373,8 +373,12 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
   `invoice.payment_succeeded` webhook, idempotent on stripe_invoice_id.
   First payment per account auto-creates an iDoklad Contact from the
   `accounts.invoice_*` fields and persists `idoklad_contact_id`.
-  `IDOKLAD_DRAFT_MODE` env (default true) keeps faktúry as Draft until
-  production. Frontend shows „História faktúr" in BillingSection.
+  ~~`IDOKLAD_DRAFT_MODE` env (default true) keeps faktúry as Draft until
+  production.~~ **Corrected 17. 11. 2026:** that flag never created drafts —
+  it posted a normal, numbered invoice and only labelled the local row
+  „draft". It is no longer read; `IDOKLAD_ISSUE_MODE` / IssuePolicy now
+  decide whether anything is sent (see „Billing fixes (17. 11. 2026)").
+  Frontend shows „História faktúr" in BillingSection.
   Migration 006 adds `accounts.idoklad_contact_id` and the `invoices`
   mirror table.
 - ✅ **Phase 6d — Billing screen + invoice details + admin knobs**:
@@ -1852,6 +1856,91 @@ labels). The four part-1 failures were a stale fixture, fixed in round 2.
   školenia (today `TrainingController::archive` hard-deletes a training of any status and leaves
   its documents rows and PDFs behind).
 - ⏸ Switch the deploy workflow to `npm run build:safe` on servers where the build may be killed.
+
+---
+
+## Billing fixes (17. 11. 2026) 🟨 built on `poapp-oct-2026`, checked in Stripe test mode; owner decisions pending
+
+Source: `docs/prompts/billing-fixes-2026-11.md` (a Stripe test-clock experiment, a replay of the
+captured events and three code audits). Migration 079.
+
+**What was wrong**
+- The first extra technician on a live subscription was never billed: subscription items do not
+  accept `price_data.product_data` (Stripe 400), the error was only logged and the next
+  `customer.subscription.updated` reset `extra_technicians` to 0. The extra item was also found as
+  „any price that is not the base price", so a changed `STRIPE_PRICE_*` made the base item the
+  „extra" one.
+- Nothing repaired a failed seat sync; two roster changes in the same second could create two
+  extra items; deleting a user in the admin panel did not re-sync seats.
+- iDoklad: one line with `amount_paid` and the period of `lines[0]` — 0 € invoices issued,
+  prorations and credits merged, wrong periods, credit-paid invoices invoiced at the card amount.
+  `IDOKLAD_DRAFT_MODE` never created drafts (normal numbered invoices, local label „draft").
+  A failed issue was never retried; the fallback e-mail promised an admin action that did not exist.
+- Webhook: the event id was stored before handling (a failure was skipped on retry); payloads were
+  trusted as they came (order, API version, a foreign/old subscription overwriting the current one);
+  up to five slow iDoklad calls before answering Stripe.
+- A `past_due` account could start a second subscription; any team member could cancel; admin
+  account deletion left Stripe charging; admin date edits were overwritten by the next webhook;
+  the screens showed today's extra price and the base price only.
+
+**What changed**
+- ✅ Extra item under the fixed product `STRIPE_PRODUCT_EXTRA_TECHNICIAN` (new env; Checkout uses it
+  too). Items are recognised by that product, by `metadata.firol_line_kind`, by the legacy inline
+  product name „POapp — extra technik", and only last by the recorded id — never the base item.
+- ✅ `SeatSync::reconcile` reads the subscription from Stripe and pushes the wanted quantity
+  (`extra_technicians` is the wanted count, never copied back from Stripe), merges duplicate items,
+  under a per-account `GET_LOCK` held across the Stripe calls. It runs after every roster change,
+  every `customer.subscription.*` / `checkout.session.completed` event, checkout-sync and daily
+  (`bin/billing-daily.php`, cron line in the README). Paths that change active technicians and call
+  it: invite accept, team activate/deactivate/remove, admin activate/deactivate, admin user delete
+  (new), admin included-count change, registration claiming a pending user. Excel import adds
+  members inactive (no seat).
+- ✅ Report only: `bin/billing-seat-report.php` („NOT CHARGED", overcharged, duplicates, legacy items,
+  more than one live subscription).
+- ✅ iDoklad: `IssuePolicy` — `IDOKLAD_ISSUE_MODE` (default `send` only in production, else
+  `prepare`: payload stored on the row, nothing sent) and test-mode Stripe invoices never sent
+  unless `IDOKLAD_ALLOW_TEST_EVENTS`. One item per Stripe line, period from the first non-proration
+  subscription line, all lines loaded (`has_more`), taxing date = payment date. 0 € invoices are not
+  recorded; a credit (negative total or line, part paid from balance), a discount or mismatched
+  totals → `needs_review` with the Stripe numbers in the admin panel, never issued automatically.
+- ✅ Issuing runs after the webhook answered (`fastcgi_finish_request`); `pending`/`error` rows are
+  retried daily (3 automatic attempts), then the operator (`ADMIN_EMAIL`) is e-mailed; an iDoklad
+  POST without a definite answer (timeout, 5xx, crash in `sending`) → `needs_review/uncertain_send`,
+  never re-sent blindly. Admin „Vystaviť znova". Fallback e-mail text corrected.
+- ✅ Webhook events have a status (`processing`/`done`/`failed`); a failed one is handled again on
+  retry. Subscription events re-read the subscription from Stripe; events of a subscription that is
+  not the account's current one are ignored (a new one is taken over only after the old one ended);
+  fields read for both the pinned version and `2026-04-22.dahlia` (`StripeShape`, captured fixtures).
+- ✅ Checkout refused for `past_due`/`unpaid` (Billing page shows the state and „Zaplatiť" via the
+  portal), checks Stripe for a live subscription, expires the customer's open sessions, one at a time
+  per account; `billing_period` is stored from the subscription, not at checkout.
+- ✅ Checkout, cancel, resume, portal and checkout-sync need the main user (403 otherwise); the UI
+  hides the actions for other members.
+- ✅ Admin: deleting an account with a live subscription asks to cancel it in Stripe first; the end
+  date of a live subscription cannot be edited (Stripe controls it); „Kontrola fakturácie" block.
+- ✅ Screens show the extra price on the customer's Stripe item and the next charge with extras.
+  `reprice-yearly-extra-seats.php`: strict options, no increase without `--allow-increase`, skips
+  cancelled / ending subscriptions, lists „NOT CHARGED".
+- ✅ Checks: `bin/test-billing-invoices.php` (policy, dahlia payloads, recorded iDoklad payload,
+  retries, 403, failed-event retry) and `bin/test-billing-stripe.php` (test clocks: scenarios A–G,
+  webhook replay R, failed renewal P).
+
+**Waits for owner decisions (not built)**
+- ⏸ VAT in Stripe (tax rate / Stripe Tax, reverse charge) and what the iDoklad line carries.
+- ⏸ When an added technician is charged (`always_invoice` vs at renewal as today).
+- ⏸ Failed renewal: `subscription_end_date` still follows `current_period_end` while `past_due`;
+  grace period, notice e-mail and banner to be decided. Test clock (default retry settings of the
+  test account): the renewal fails → `past_due` at once, `current_period_end` moves a full period
+  ahead anyway, Stripe retries (9 attempts) and cancels the subscription about 3 weeks after the
+  renewal; the app kept access until the new period end — a free period.
+- ⏸ Credits on tax documents (negative line or dobropis) — those invoices wait in `needs_review`;
+  unused credit at cancellation (kept on the Stripe customer today).
+- ⏸ iDoklad invoice e-mailed to the customer and marked paid.
+- ⏸ Monthly ↔ yearly switch with extra technicians.
+- ⏸ Registration claiming a pending imported technician (security question, unchanged).
+- ⏸ Before deploying: run `bin/billing-seat-report.php` on live; „NOT CHARGED" accounts start being
+  charged from the first sync after the deploy. Create the live `STRIPE_PRODUCT_EXTRA_TECHNICIAN`
+  product, add the daily cron, remove `IDOKLAD_DRAFT_MODE`.
 
 ---
 

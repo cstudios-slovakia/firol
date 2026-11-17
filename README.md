@@ -81,6 +81,41 @@ tree exists.
   deploy workflow still runs the plain `npm run build`; switch it to
   `build:safe` on a server where the build may be killed.
 
+### Billing (Stripe + iDoklad)
+
+- **New env variable `STRIPE_PRODUCT_EXTRA_TECHNICIAN`** (`backend/.env`, test
+  and live): the Stripe product (`prod_…`) every extra-technician item is
+  created under. Create it once in the Stripe dashboard (name e.g.
+  „POapp — extra technik", no price — the app sends the price). Without it no
+  extra technician can be added to a subscription or a Checkout, and
+  Admin → „Kontrola fakturácie" reports an error.
+- **iDoklad sending is opt-in outside production.** `IDOKLAD_ISSUE_MODE`
+  defaults to `send` only with `APP_ENV=production` and to `prepare`
+  elsewhere (payload built and stored on the `invoices` row, nothing sent).
+  A Stripe test-mode invoice is never sent unless `IDOKLAD_ALLOW_TEST_EVENTS=true`.
+  `IDOKLAD_DRAFT_MODE` is no longer read — remove it.
+- **Daily billing run** — add this cron line on the server (the deploy
+  workflow does not install it):
+
+  ```
+  30 5 * * * php /path/to/firol/backend/bin/billing-daily.php >> /path/to/backups/billing-daily.log 2>&1
+  ```
+
+  It pushes the wanted extra-technician quantity to Stripe for every live
+  subscription (and merges duplicate items), retries failed or stuck iDoklad
+  invoices (at most 3 automatic attempts, then an e-mail to `ADMIN_EMAIL`)
+  and stamps its run; Admin → „Kontrola fakturácie" warns when it has not run
+  for 36 hours. `--dry-run` lists what it would do without changing anything.
+- **Before the first deploy of the 17. 11. 2026 billing fixes**, run the
+  read-only report `php backend/bin/billing-seat-report.php` against live
+  Stripe. It lists accounts that use more technicians than their
+  subscription charges for („NOT CHARGED"). From the first webhook, roster
+  change or daily run after the deploy these accounts are charged from that
+  moment on (prorated); the past stays the owner's decision.
+- Test scripts (test mode only, refuse a live key / production):
+  `bin/test-billing-invoices.php` (no Stripe clock, no iDoklad) and
+  `bin/test-billing-stripe.php` (Stripe test clocks, deleted at the end).
+
 ### GitHub Secrets required for deploy workflow
 - `PROD_SSH_HOST`
 - `PROD_SSH_PORT`
