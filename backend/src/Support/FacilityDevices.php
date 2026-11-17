@@ -69,7 +69,7 @@ final class FacilityDevices
             if (CarryOver::mapItem($type, $fields) === null) {
                 continue;
             }
-            $shaped = self::shape($type, $fields);
+            $shaped = self::shape($type, $fields, true);
             if ($shaped === null) {
                 continue;
             }
@@ -79,12 +79,38 @@ final class FacilityDevices
         return $out;
     }
 
+    /** What a device is called when its úkon gave it no label at all. */
+    private const NOUNS = [
+        'php'                => 'Hasiaci prístroj',
+        'hydranty'           => 'Hydrant',
+        'pu_akcieschopnost'  => 'Požiarny uzáver',
+        'pu_udrzba'          => 'Požiarny uzáver',
+        'nudzove_osvetlenie' => 'Svietidlo',
+        'rebriky'            => 'Rebrík',
+        'regale'             => 'Regál',
+    ];
+
     /**
+     * How the walk-through and the checklist name a device.
+     *
+     * In the device list (`$alwaysLabel`) a device is never dropped for want of
+     * a label (fix list of 16. 11. 2026, point 4): the evidenčné číslo of a
+     * svietidlo is optional and an Excel import writes it empty, which once hid
+     * núdzové osvetlenie from step 1 of the prehliadka. Without its own label a
+     * device is named by what else describes it, then by its place, then by the
+     * kind of device — so the count in step 1 equals the items its concept
+     * gets. A svietidlo is named by its type before anything else, everywhere.
+     * Without `$alwaysLabel` an item with no label at all gives null, and the
+     * caller names it by its position.
+     *
      * @param array<string, mixed> $fields
      * @return array{label: string, serial: ?string, description: ?string, location: ?string}|null
      */
-    public static function shape(string $type, array $fields): ?array
+    public static function shape(string $type, array $fields, bool $alwaysLabel = false): ?array
     {
+        if (!isset(self::NOUNS[$type])) {
+            return null;
+        }
         $label = null;
         $serial = null;
         $description = null;
@@ -111,12 +137,19 @@ final class FacilityDevices
                 break;
             case 'nudzove_osvetlenie':
                 $label = self::text($fields, 'evid_number');
-                $description = self::join([
-                    self::text($fields, 'luminaire_type'),
-                    self::text($fields, 'manufacturer'),
-                ]);
+                $luminaire = self::text($fields, 'luminaire_type');
+                if ($label === null && $luminaire !== null) {
+                    // Named by its type, which then need not be repeated below.
+                    $label = $luminaire;
+                    $luminaire = null;
+                }
+                $description = self::join([$luminaire, self::text($fields, 'manufacturer')]);
                 $floor = self::text($fields, 'floor');
                 $location = self::join([$floor, $location]);
+                // Spec order of the fallback: evidenčné číslo, typ svietidla, umiestnenie, „Svietidlo".
+                if ($alwaysLabel) {
+                    $label ??= $location ?? self::NOUNS[$type];
+                }
                 break;
             case 'rebriky':
                 $label = self::text($fields, 'inventory_number');
@@ -129,7 +162,10 @@ final class FacilityDevices
         }
 
         if ($label === null || $label === '') {
-            return null;
+            if (!$alwaysLabel) {
+                return null;
+            }
+            $label = $description ?? $location ?? self::NOUNS[$type];
         }
         return [
             'label'       => $label,

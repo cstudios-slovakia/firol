@@ -194,6 +194,21 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
         valid_until: t.valid_until,
       });
     }
+    // Everything else the record prints from what is on record — an úkon not
+    // ticked today keeps the term of its last protocol (spec 6.6: every term
+    // filled in automatically can be overwritten, fix list of 16. 11. 2026).
+    const listed = new Set(rows.map((r) => r.key));
+    for (const t of loaded.facts?.recorded ?? []) {
+      if (!books.includes(t.book) || listed.has(t.key)) continue;
+      listed.add(t.key);
+      rows.push({
+        key: t.key,
+        label: t.label,
+        book: t.book,
+        source: t.done_on ? `z poslednej kontroly ${formatDateSk(t.done_on)}` : 'z poslednej kontroly',
+        valid_until: t.valid_until,
+      });
+    }
     return rows;
     // `books` is derived from details.scope, listed through it.
     // eslint-disable-next-line react-hooks/exhaustive-deps

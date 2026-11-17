@@ -132,6 +132,7 @@ final class PrehliadkaCloser
                     (string) $inspection['executed_on'],
                     BookMapping::BOZP,
                     PrehliadkaRecord::autoTerms($inspection, $details, PrehliadkaRecord::BOZP, $facts),
+                    (array) ($details['term_overrides'] ?? []),
                 );
                 // Frozen on the item, where a re-render for the client's signature reads it.
                 $frozenFields = (array) $childItems[0]['fields'];

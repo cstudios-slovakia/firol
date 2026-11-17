@@ -102,9 +102,24 @@ export type PreviousDefects = {
   defects: PreviousDefect[];
 };
 
+/**
+ * A term on record that the prehliadka's record prints besides its own rows —
+ * an úkon of either book not ticked today, a training. Keyed like the rest, so
+ * an override in `term_overrides` reaches the printed row.
+ */
+export type RecordedTerm = {
+  key: string;
+  label: string;
+  book: 'po' | 'bozp';
+  done_on: string | null;
+  valid_until: string | null;
+};
+
 export type TermFacts = {
   trainings: TermTraining[];
   routine_periodicities: RoutinePeriodicities;
+  /** Absent on facts cached before the fix list of 16. 11. 2026. */
+  recorded?: RecordedTerm[];
 };
 
 export type ActivitySet = {

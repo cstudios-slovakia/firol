@@ -136,7 +136,13 @@ final class ClientTerms
      * prehliadka chain itself is never read from the record: the new row stands
      * for it, so the table never lists this prehliadka's predecessor.
      *
+     * Step 3 lists the on-record rows too ({@see recorded()}) and each can be
+     * overwritten there like the others (spec 6.6: „Každý automaticky doplnený
+     * termín sa musí dať prepísať", fix list of 16. 11. 2026): `$overrides` —
+     * the prehliadka's `term_overrides` — puts the hand-written date on them.
+     *
      * @param list<array{key: string, label: string, done: ?string, valid: ?string, overridden: bool}> $auto
+     * @param array<string, string> $overrides term key → Y-m-d
      * @return list<array{label: string, done: string, valid_until: string, state: string|null, state_tone: string|null, overridden: bool}>
      */
     public static function forPrehliadka(
@@ -146,18 +152,18 @@ final class ClientTerms
         string $asOf,
         string $book,
         array $auto,
+        array $overrides = [],
     ): array {
         $autoKeys = array_column($auto, 'key');
         $raw = [];
-        // The BOZP side's own term chain is the kniha_bozp úkon; the „Preventívna
-        // prehliadka BOZP" row of $auto stands for it, as the PO row does for its chain.
-        $exclude = $book === BookMapping::BOZP ? 'kniha_bozp' : null;
-        foreach (self::ownRaw($accountId, $companyId, $facilityId, $asOf, $book, $exclude) as $r) {
-            if (Periodicity::inspectionChain((string) $r['type']) === 'preventivna_prehliadka') {
-                continue;
-            }
+        foreach (self::recordedRaw($accountId, $companyId, $facilityId, $asOf, $book) as $r) {
             if (in_array($r['key'], $autoKeys, true)) {
                 continue;
+            }
+            $override = $overrides[$r['key']] ?? null;
+            if (is_string($override)) {
+                $r['valid'] = $override;
+                $r['overridden'] = true;
             }
             $raw[] = $r;
         }
@@ -189,6 +195,48 @@ final class ClientTerms
             $row['overridden'] = !empty($r['overridden']);
             return $row;
         }, $raw);
+    }
+
+    /**
+     * The terms on record that a prehliadka's record prints besides its own
+     * rows — what step 3 lists next to the ones the walk-through fills in, so
+     * the technician sees, and can overwrite, every automatic term that will be
+     * printed. A row whose key the walk-through fills in itself (a riadna
+     * kontrola ticked today, a training of the firm) replaces it there, as on
+     * the record.
+     *
+     * @return list<array{key: string, label: string, book: string, done_on: ?string, valid_until: ?string}>
+     */
+    public static function recorded(int $accountId, int $companyId, int $facilityId, string $asOf, string $book): array
+    {
+        return array_map(static fn (array $r): array => [
+            'key'         => (string) $r['key'],
+            'label'       => (string) $r['label'],
+            'book'        => $book,
+            'done_on'     => $r['done'],
+            'valid_until' => $r['valid'],
+        ], self::recordedRaw($accountId, $companyId, $facilityId, $asOf, $book));
+    }
+
+    /**
+     * {@see ownRaw()} as a prehliadka's record reads it: the prehliadka chain is
+     * left out (the new prehliadka stands for it) and, on the BOZP side, the
+     * kniha_bozp úkon — its own term chain, which the „Preventívna prehliadka
+     * BOZP" row stands for.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function recordedRaw(int $accountId, int $companyId, int $facilityId, string $asOf, string $book): array
+    {
+        $exclude = $book === BookMapping::BOZP ? 'kniha_bozp' : null;
+        $out = [];
+        foreach (self::ownRaw($accountId, $companyId, $facilityId, $asOf, $book, $exclude) as $r) {
+            if (Periodicity::inspectionChain((string) $r['type']) === 'preventivna_prehliadka') {
+                continue;
+            }
+            $out[] = $r;
+        }
+        return $out;
     }
 
     /**

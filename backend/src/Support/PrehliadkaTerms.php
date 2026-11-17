@@ -18,6 +18,11 @@ use Firol\Db;
  *   routine_periodicities  per riadna kontrola, the periodicity its úkon was
  *                          last done with at this prevádzka, else the first
  *                          recommended one; null = „bez opakovania"
+ *   recorded               the terms on record the record prints besides its
+ *                          own rows — úkony of either book not ticked today,
+ *                          the trainings ({@see ClientTerms::recorded()}) — so
+ *                          step 3 lists, and can override, every automatic term
+ *                          that gets printed (fix list of 16. 11. 2026)
  *
  * The next prehliadka and each ticked riadna kontrola are computed by the
  * client from the prehliadka's own date and these periodicities; what the
@@ -28,7 +33,8 @@ final class PrehliadkaTerms
     /**
      * @return array{
      *   trainings: list<array{key: string, label: string, book: string, done_on: string, valid_until: ?string, overridden: bool}>,
-     *   routine_periodicities: array<string, array{value: ?int, unit: ?string}>
+     *   routine_periodicities: array<string, array{value: ?int, unit: ?string}>,
+     *   recorded: list<array{key: string, label: string, book: string, done_on: ?string, valid_until: ?string}>
      * }
      */
     public static function forFacility(int $accountId, int $facilityId, string $asOf): array
@@ -38,7 +44,7 @@ final class PrehliadkaTerms
         $facility->execute([$facilityId, $accountId]);
         $companyId = $facility->fetchColumn();
         if ($companyId === false) {
-            return ['trainings' => [], 'routine_periodicities' => []];
+            return ['trainings' => [], 'routine_periodicities' => [], 'recorded' => []];
         }
         $companyId = (int) $companyId;
 
@@ -104,6 +110,10 @@ final class PrehliadkaTerms
         return [
             'trainings'             => $trainings,
             'routine_periodicities' => self::routinePeriodicities($accountId, $facilityId),
+            'recorded'              => array_merge(
+                ClientTerms::recorded($accountId, $companyId, $facilityId, $asOf, BookMapping::PO),
+                ClientTerms::recorded($accountId, $companyId, $facilityId, $asOf, BookMapping::BOZP),
+            ),
         ];
     }
 

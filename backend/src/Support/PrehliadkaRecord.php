@@ -618,6 +618,7 @@ final class PrehliadkaRecord
                 (string) $inspection['executed_on'],
                 BookMapping::PO,
                 self::autoTerms($inspection, $details, self::PO, $facts),
+                (array) ($details['term_overrides'] ?? []),
             );
             $previous = self::previousRows(
                 $details,
