@@ -186,9 +186,11 @@ final class TodayController
                 'training_id'   => $d['training_id'],
                 'company_id'    => $d['company_id'],
                 'company_name'  => $d['company_name'],
-                // Null for a training of the whole firma.
+                // Null for a training of the whole firma — the row then names
+                // the client („Celá firma" / „Celé bytové družstvo") by its type.
                 'facility_name' => $d['facility_name'],
                 'city'          => $d['facility_city'],
+                'company_client_type' => $d['company_client_type'] ?? null,
                 'types'         => [$d['type']],
                 'title'         => null,
                 'status'        => $d['state'],

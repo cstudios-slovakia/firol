@@ -39,6 +39,7 @@ import {
     clearDeadlinePlan,
     deadlineHref,
     deadlineLabel,
+    facilityPlace,
     setDeadlinePlan,
 } from "@/lib/deadlines";
 import { ApiError } from "@/lib/api";
@@ -795,7 +796,7 @@ function TerminRow({
     const title = d ? deadlineLabel(d) : (e?.title ?? "");
     const where =
         groupBy === "firma"
-            ? [t.facility_name, t.city].filter(Boolean).join(" · ")
+            ? (facilityPlace(t.facility_name, t.city) ?? "")
             : [t.company_name, t.facility_name].filter(Boolean).join(" — ");
 
     return (

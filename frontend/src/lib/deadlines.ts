@@ -33,6 +33,21 @@ export function deadlineFacilityName(
   return cap(d.company_client_type ? clientNouns(d.company_client_type).whole.nom : CLIENT_NEUTRAL.whole.nom);
 }
 
+/**
+ * „prevádzka · mesto" — how a row names its place, so three prevádzky of one
+ * firma in one town read apart. The name first; the city after it when there
+ * is one and the name does not already contain it; the city alone when there
+ * is no name. A training of the whole client passes the whole-client label
+ * ({@link deadlineFacilityName}) as its name. Null when there is neither.
+ */
+export function facilityPlace(name: string | null | undefined, city: string | null | undefined): string | null {
+  const n = (name ?? '').trim();
+  const c = (city ?? '').trim();
+  if (n === '') return c === '' ? null : c;
+  if (c === '' || n.toLocaleLowerCase('sk').includes(c.toLocaleLowerCase('sk'))) return n;
+  return `${n} · ${c}`;
+}
+
 /** Set the planned visit date on whichever úkon defines the deadline. */
 export function setDeadlinePlan(
   d: Pick<CalendarDeadline, 'inspection_id' | 'training_id' | 'facility_id'>,

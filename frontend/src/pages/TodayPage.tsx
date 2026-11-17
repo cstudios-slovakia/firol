@@ -40,7 +40,7 @@ import { Today, type FieldRow, type OpenDefect, type TodayData, type TodayScope,
 import { useUpcomingTasks, type Task } from '@/api/tasks';
 import { INSPECTION_TYPE_LABELS, type InspectionType } from '@/api/inspections';
 import { visitTypeLabel } from '@/lib/visits';
-import { deadlineFacilityName, deadlineHref, deadlineLabel } from '@/lib/deadlines';
+import { deadlineFacilityName, deadlineHref, deadlineLabel, facilityPlace } from '@/lib/deadlines';
 import { TRAINING_TYPE_SHORT, type TrainingType } from '@/api/trainings';
 import { ZDROJ_LABELS, formatEventTime, type CalendarDeadline, type OwnTerm, type TerminTechnician } from '@/api/calendar';
 import { UNINVOICED_PARAM } from '@/api/invoicing';
@@ -467,7 +467,13 @@ function buildCards(
 
 function fieldRow(r: FieldRow, who: (t: TerminTechnician | null) => TerminTechnician | null): CardRow {
   const types = r.types.map((t) => visitTypeLabel(t)).join(', ');
-  const place = r.city ?? r.facility_name;
+  // A plan row of a training of the whole firma has no prevádzka: the client is the place.
+  const place = facilityPlace(
+    r.kind === 'plan' && r.facility_name === null
+      ? deadlineFacilityName({ facility_name: null, company_client_type: r.company_client_type })
+      : r.facility_name,
+    r.city,
+  );
   if (r.kind === 'navsteva') {
     return {
       key: r.key,
@@ -509,7 +515,7 @@ function overdueRow(d: CalendarDeadline, who: (t: TerminTechnician | null) => Te
     key: d.key,
     href: deadlineHref(d),
     title: d.company_name,
-    sub: [deadlineLabel(d), d.facility_city ?? deadlineFacilityName(d)].join(' · '),
+    sub: [deadlineLabel(d), facilityPlace(deadlineFacilityName(d), d.facility_city)].filter(Boolean).join(' · '),
     meta: `−${late} ${dayWord(late)}`,
     metaTone: 'bad',
     section: d.section,
