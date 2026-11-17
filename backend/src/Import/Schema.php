@@ -40,7 +40,7 @@ final class Schema
                 'title' => 'Firmy',
                 'columns' => [
                     ['header' => 'Názov firmy *', 'key' => 'name', 'hint' => 'Acme s.r.o.'],
-                    ['header' => 'IČO *', 'key' => 'ico', 'hint' => '12345678'],
+                    ['header' => 'IČO *', 'key' => 'ico', 'hint' => '12345678', 'text' => true, 'pokyny_note' => self::ICO_NOTE],
                     ['header' => 'Adresa', 'key' => 'address', 'hint' => 'Hlavná 1, 010 01 Žilina'],
                     ['header' => 'Kontakt', 'key' => 'contact', 'hint' => 'Ján Vedúci · +421 900 000 000 · jan@acme.sk'],
                     // Appended last: the importer reads columns by position, so a
@@ -62,7 +62,7 @@ final class Schema
             'Prevadzky' => [
                 'title' => 'Prevádzky',
                 'columns' => [
-                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678'],
+                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678', 'text' => true, 'pokyny_note' => self::ICO_NOTE],
                     ['header' => 'Názov prevádzky *', 'key' => 'name', 'hint' => 'Sklad Žilina'],
                     ['header' => 'Adresa prevádzky', 'key' => 'address', 'hint' => 'Priemyselná 5, Žilina'],
                     ['header' => 'Kontaktná osoba', 'key' => 'contact_person', 'hint' => 'Peter Skladník'],
@@ -89,7 +89,7 @@ final class Schema
                         'prompt' => 'Zadaj ľubovoľné číslo (napr. 1, 2, 3…). To isté číslo zopakuj na hárku „Účastníci" v stĺpci „Číslo školenia z hárku Školenia", aby sa účastníci priradili k tomuto školeniu.',
                     ],
                     ['header' => 'Názov firmy *', 'key' => 'company_name', 'hint' => 'Acme s.r.o.'],
-                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678'],
+                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678', 'text' => true, 'pokyny_note' => self::ICO_NOTE],
                     ['header' => 'Prevádzka', 'key' => 'facility_name', 'hint' => 'Sklad Žilina'],
                     [
                         'header' => 'Typ školenia *',
@@ -174,6 +174,12 @@ final class Schema
     /** Units a period can be expressed in (chapter 5). */
     public const PERIODICITY_UNITS = ['mesiac', 'tyzden', 'den'];
 
+    /**
+     * Pokyny line of every IČO column. The cells are text, so leading zeros
+     * stay; a number Excel already stripped is padded back to 8 digits.
+     */
+    private const ICO_NOTE = 'Zadaj všetkých 8 číslic vrátane núl na začiatku (napr. 00169803). Kratšie IČO z číslic sa doplní nulami zľava.';
+
     /** Values of the optional „Druh klienta" column (companies.client_type); empty = firma. */
     public const CLIENT_TYPES = ['firma', 'bytove_druzstvo'];
 
@@ -184,6 +190,12 @@ final class Schema
         'trva'       => 'trvá',
         'zanik'      => 'dôvod zanikol',
     ];
+
+    /**
+     * Pokyny line of the Kniha_zapisy columns the app shows only in spôsob 1
+     * (step 2 of the entry): an import stores them only for a spôsob-1 entry.
+     */
+    private const SPOSOB_1_ONLY = 'Len pri spôsobe 1 — pri spôsobe 2 sa neuloží.';
 
     /** Fixed deadline choices of the „Lehota" column; a date is the fifth possibility. */
     public const BOOK_DEADLINE_CHOICES = ['bezodkladne', '30d', '3m', '6m'];
@@ -257,7 +269,7 @@ final class Schema
                         'prompt' => 'Zadaj ľubovoľné číslo (napr. 1, 2, 3…). To isté číslo zopakuj na hárkoch s položkami v stĺpci „Číslo kontroly z hárku Kontroly", aby sa položky priradili k tejto kontrole.',
                     ],
                     ['header' => 'Názov firmy *', 'key' => 'company_name', 'hint' => 'Acme s.r.o.'],
-                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678'],
+                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678', 'text' => true, 'pokyny_note' => self::ICO_NOTE],
                     ['header' => 'Prevádzka *', 'key' => 'facility_name', 'hint' => 'Sklad Žilina'],
                     [
                         'header' => 'Typ kontroly *',
@@ -556,7 +568,7 @@ final class Schema
                         'prompt' => 'Zadaj ľubovoľné číslo (napr. 1, 2, 3…). To isté číslo zopakuj na hárkoch „Kniha_prevadzky" a „Kniha_nedostatky", aby sa prevádzky a nedostatky priradili k tomuto zápisu.',
                     ],
                     ['header' => 'Názov firmy *', 'key' => 'company_name', 'hint' => 'Acme s.r.o.'],
-                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678'],
+                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678', 'text' => true, 'pokyny_note' => self::ICO_NOTE],
                     ['header' => 'Dátum zápisu (DD-MM-RRRR) *', 'key' => 'executed_on', 'hint' => '10-01-2026', 'date' => true],
                     [
                         'header' => 'Spôsob zápisu',
@@ -570,7 +582,7 @@ final class Schema
                         'pokyny_note' => 'Prázdne pole: 1 pri jednej prevádzke, 2 pri viacerých.',
                     ],
                     [
-                        'header' => 'Vykonané činnosti (čísla bodov, oddeľ čiarkou)',
+                        'header' => 'Vykonané činnosti — spôsob 1 (čísla bodov, oddeľ čiarkou)',
                         'key' => 'cinnosti',
                         'hint' => '1,3,5',
                         'text' => true,
@@ -578,13 +590,14 @@ final class Schema
                         'prompt' => 'Čísla bodov zo zoznamu činností oddelené čiarkou (napr. 1,3,5). Firma má zoznam s 9 bodmi, bytové družstvo s 13 bodmi — oba nájdeš na hárku „Pokyny".',
                         'pokyny_type' => 'Čísla bodov (oddeľ čiarkou)',
                         'pokyny_values' => self::activityLegend(),
+                        'pokyny_note' => self::SPOSOB_1_ONLY,
                     ],
-                    ['header' => 'Vlastné činnosti (oddeľ |)', 'key' => 'vlastne_cinnosti', 'hint' => 'Kontrola skladu | Kontrola kotolne'],
-                    ['header' => 'Úvod (prázdne = zákonná veta)', 'key' => 'uvod', 'hint' => ''],
-                    ['header' => 'Text zápisu (spôsob 2)', 'key' => 'text_zapisu', 'hint' => ''],
-                    ['header' => 'Doplňujúci text (spôsob 1)', 'key' => 'doplnujuci_text', 'hint' => ''],
-                    ['header' => 'Na záver', 'key' => 'zaver', 'hint' => \Firol\Support\BookEntry::NA_ZAVER[0]],
-                    ['header' => 'Schválil za klienta', 'key' => 'schvalil', 'hint' => 'Ján Vedúci, konateľ'],
+                    ['header' => 'Vlastné činnosti — spôsob 1 (oddeľ |)', 'key' => 'vlastne_cinnosti', 'hint' => 'Kontrola skladu | Kontrola kotolne', 'pokyny_note' => self::SPOSOB_1_ONLY],
+                    ['header' => 'Úvod — spôsob 1 (prázdne = zákonná veta)', 'key' => 'uvod', 'hint' => '', 'pokyny_note' => self::SPOSOB_1_ONLY . ' Pri spôsobe 2 zostane zákonná veta, ako v aplikácii.'],
+                    ['header' => 'Text zápisu — spôsob 2', 'key' => 'text_zapisu', 'hint' => '', 'pokyny_note' => 'Len pri spôsobe 2 — pri spôsobe 1 sa neuloží.'],
+                    ['header' => 'Doplňujúci text — spôsob 1', 'key' => 'doplnujuci_text', 'hint' => '', 'pokyny_note' => self::SPOSOB_1_ONLY],
+                    ['header' => 'Na záver', 'key' => 'zaver', 'hint' => \Firol\Support\BookEntry::NA_ZAVER[0], 'pokyny_note' => 'Pri oboch spôsoboch.'],
+                    ['header' => 'Schválil za klienta', 'key' => 'schvalil', 'hint' => 'Ján Vedúci, konateľ', 'pokyny_note' => 'Pri oboch spôsoboch.'],
                     ['header' => 'E-mail technika', 'key' => 'inspector_email', 'hint' => 'technik@firma.sk'],
                 ],
             ],
