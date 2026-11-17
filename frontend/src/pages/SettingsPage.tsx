@@ -2019,7 +2019,7 @@ const IMPORT_DEFS: ImportSectionDef[] = [
         kind: "companies",
         title: "Firmy a prevádzky",
         description: "Importuj firmy aj ich prevádzky naraz. Prevádzky sa naviažu na firmu cez IČO.",
-        hint: 'Sheet „Firmy" — Názov je povinný. Sheet „Prevadzky" — IČO firmy musí existovať (buď v sheete vyššie, alebo už v aplikácii).',
+        hint: 'Sheet „Firmy" — Názov je povinný. Posledný stĺpec „Druh klienta" (firma / bytove_druzstvo) je nepovinný, prázdny znamená firmu; podľa neho zápis do požiarnej knihy ponúkne zoznam činností. Sheet „Prevadzky" — IČO firmy musí existovať (buď v sheete vyššie, alebo už v aplikácii).',
         Icon: Building,
         color: "text-blue-600",
         bg: "bg-blue-50",
@@ -2028,12 +2028,12 @@ const IMPORT_DEFS: ImportSectionDef[] = [
     {
         kind: "inspections",
         title: "Kontroly",
-        description: "Hlavičky kontrol aj ich položky. Každý typ má vlastný sheet s položkami (Polozky_php, Polozky_hydranty, …).",
-        hint: 'Sheet „Kontroly" — # riadok je tvoje vlastné poradie (1, 2, 3…). Polozky_* odkazujú na toto # cez stĺpec „# kontrola". Firma sa hľadá podľa IČO — ak ešte neexistuje, vytvorí sa automaticky pod zadaným názvom (IČO má prednosť pred názvom). Prevádzka sa rovnako vytvorí, ak chýba. E-mail technika, ktorý ešte nemá konto, sa predvytvorí a pridá do tvojho tímu; kontroly sa mu priradia, keď sa zaregistruje.',
+        description: "Hlavičky kontrol aj ich položky. Každý typ má vlastný sheet s položkami (Polozky_php, Polozky_hydranty, …). Zápisy do požiarnej knihy majú vlastné tri sheety (Kniha_zapisy, Kniha_prevadzky, Kniha_nedostatky).",
+        hint: 'Sheet „Kontroly" — # riadok je tvoje vlastné poradie (1, 2, 3…). Polozky_* odkazujú na toto # cez stĺpec „# kontrola". Požiarna kniha: jeden riadok v „Kniha_zapisy" je jeden zápis, „Kniha_prevadzky" a „Kniha_nedostatky" naň odkazujú cez číslo zápisu; vykonané činnosti sa zadávajú číslami bodov zo zoznamu na hárku „Pokyny". Súbor zo staršej šablóny so sheetom „Polozky_poziarna_kniha" sa naimportuje ako doteraz. Firma sa hľadá podľa IČO — ak ešte neexistuje, vytvorí sa automaticky pod zadaným názvom (IČO má prednosť pred názvom). Prevádzka sa rovnako vytvorí, ak chýba. E-mail technika, ktorý ešte nemá konto, sa predvytvorí a pridá do tvojho tímu; kontroly sa mu priradia, keď sa zaregistruje. Všetko sa naimportuje ako rozpracované, bez čísla a dokumentu.',
         Icon: ClipboardList,
         color: "text-firol-600",
         bg: "bg-firol-50",
-        createdLabels: { inspections: "kontrol", items: "položiek", technicians: "nových technikov", companies: "nových firiem", facilities: "nových prevádzok" },
+        createdLabels: { inspections: "kontrol", items: "položiek", book_entries: "zápisov do požiarnej knihy", book_defects: "nedostatkov v zápisoch", technicians: "nových technikov", companies: "nových firiem", facilities: "nových prevádzok" },
     },
     {
         kind: "trainings",
@@ -2499,7 +2499,7 @@ function DataSection() {
                             Import z Excelu
                         </h2>
                         <p className="text-xs text-ink-500">
-                            Hromadný import firiem, kontrol a školení zo vzorovej Excel šablóny.
+                            Hromadný import firiem, kontrol, zápisov do požiarnej knihy a školení zo vzorovej Excel šablóny.
                         </p>
                     </div>
                 </div>
