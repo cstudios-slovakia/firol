@@ -157,26 +157,55 @@ final class CarryOver
 
     /**
      * Whether a draft's items must be checked for empty required fields before
-     * its protocol is issued (fix list of 16. 11. 2026, review of round 1).
+     * its protocol is issued (fix list of 16. 11. 2026, rounds 2 and 3).
      *
      * The check exists to stop a protocol carrying values nobody typed, so it
      * runs only on a draft whose items were inserted without the item validator:
-     * a concept of a prehliadka (any type), and a fire-protection draft with a
-     * recorded origin (`carried_from` — Opakovať, „Prevziať položky", the
-     * follow-ups built from another úkon, the checklist). A draft typed through
-     * the forms, an Excel import (a draft, `''` for an empty cell) and an issued
-     * protocol opened again with „Upraviť" generate as they always did.
      *
-     * @param array<string, mixed>|null $details the úkon's decoded `details`
+     *  - a concept of a prehliadka (any type);
+     *  - a draft with a recorded origin (`carried_from` — Opakovať, „Prevziať
+     *    položky", the follow-ups built from another úkon, the checklist),
+     *    whatever its type: an oprava / vyradenie follow-up included;
+     *  - a draft made with Opakovať before the origin was recorded: it has
+     *    `carried_over_from_id` and was never issued.
+     *
+     * A draft typed through the forms, an Excel import (a draft, `''` for an
+     * empty cell) and an issued protocol opened again with „Upraviť" (it keeps
+     * its `carried_over_from_id`) generate as they always did.
+     *
+     * @param array<string, mixed> $row the úkon: `details` (raw JSON or decoded),
+     *        `carried_over_from_id` and `issued_before` when known
      */
-    public static function checksCompleteness(string $type, ?array $details): bool
+    public static function checksCompleteness(array $row): bool
     {
+        $details = $row['details'] ?? null;
+        if (!is_array($details)) {
+            $details = InspectionDetails::decode($details);
+        }
         if (PrehliadkaConcepts::isConcept($details)) {
             return true;
         }
-        return self::carriesValues($type)
-            && is_array($details)
-            && array_key_exists(PrehliadkaChecklist::CARRIED_FROM_KEY, $details);
+        if (is_array($details) && array_key_exists(PrehliadkaChecklist::CARRIED_FROM_KEY, $details)) {
+            return true;
+        }
+        return !empty($row['carried_over_from_id']) && !self::wasIssued($row, $details);
+    }
+
+    /**
+     * Whether the úkon was ever issued: it is finalized, or a draft that was
+     * issued and opened again („Upraviť", „Doplniť výsledky"). `issued_before`
+     * (migration 078) is set on every issue and reopen; the contractor snapshot
+     * written at issue time backs it up for a row read without the column.
+     *
+     * @param array<string, mixed> $row
+     * @param array<string, mixed>|null $details decoded `details`
+     */
+    public static function wasIssued(array $row, ?array $details): bool
+    {
+        if (($row['status'] ?? null) === 'finalized' || !empty($row['issued_before'])) {
+            return true;
+        }
+        return is_array($details) && array_key_exists(Contractor::SNAPSHOT_KEY, $details);
     }
 
     /**

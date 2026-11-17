@@ -33,6 +33,7 @@ import type {
   Step2FormProps,
   SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
 import { NextRecordedButton } from './NextRecordedButton';
 
 function isHydrantType(s: unknown): s is HydrantTypeKind {
@@ -40,6 +41,25 @@ function isHydrantType(s: unknown): s is HydrantTypeKind {
 }
 function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
+}
+
+/** What the form opens with for a stored item. */
+function hydrantyValues(f: Partial<HydrantItemFields>) {
+  return {
+    hydrantType: isHydrantType(f.type) ? f.type : 'DN52',
+    typeOther: typeof f.type_other === 'string' ? f.type_other : '',
+    location: typeof f.location === 'string' ? f.location : '',
+    // An item that arrives without a hose count (a device the walk wrote down,
+    // an import) shows the field empty — „1" is presumed for a new item only.
+    hoseCount: typeof f.hose_count === 'number' ? String(f.hose_count) : '',
+    hs: typeof f.hs === 'number' ? String(f.hs) : '',
+    hd: typeof f.hd === 'number' ? String(f.hd) : '',
+    q: typeof f.q === 'number' ? String(f.q) : '',
+    defects: typeof f.defects === 'string' ? f.defects : '',
+    // A result the item arrived without (a hose with no match in the last
+    // protocol) stays unpicked: it is the technician's to choose, never presumed.
+    result: (isPassFail(f.result) ? f.result : '') as PassFailResult | '',
+  };
 }
 
 /**
@@ -71,20 +91,16 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<HydrantItemFields>;
-      setHydrantType(isHydrantType(f.type) ? f.type : 'DN52');
-      setTypeOther(typeof f.type_other === 'string' ? f.type_other : '');
-      setLocation(typeof f.location === 'string' ? f.location : '');
-      // An item that arrives without a hose count (a device the walk wrote down,
-      // an import) shows the field empty — „1" is presumed for a new item only.
-      setHoseCount(typeof f.hose_count === 'number' ? String(f.hose_count) : '');
-      setHs(typeof f.hs === 'number' ? String(f.hs) : '');
-      setHd(typeof f.hd === 'number' ? String(f.hd) : '');
-      setQ(typeof f.q === 'number' ? String(f.q) : '');
-      setDefects(typeof f.defects === 'string' ? f.defects : '');
-      // A result the item arrived without (a hose with no match in the last
-      // protocol) stays unpicked: it is the technician's to choose, never presumed.
-      setResult(isPassFail(f.result) ? f.result : '');
+      const v = hydrantyValues(initialItem.fields as Partial<HydrantItemFields>);
+      setHydrantType(v.hydrantType);
+      setTypeOther(v.typeOther);
+      setLocation(v.location);
+      setHoseCount(v.hoseCount);
+      setHs(v.hs);
+      setHd(v.hd);
+      setQ(v.q);
+      setDefects(v.defects);
+      setResult(v.result);
     } else {
       // "Ďalší rovnaký": carry type + hose count only; measured HS/HD/Q and
       // defects/result always start fresh (2.4.2).
@@ -102,6 +118,10 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
   }, [initialItem, inspectionId]);
 
   function isPristine() {
+    // An existing item: nothing to save only while nothing was changed.
+    if (initialItem) {
+      return sameFormValues(hydrantyValues(initialItem.fields as Partial<HydrantItemFields>), { hydrantType, typeOther, location, hoseCount, hs, hd, q, defects, result });
+    }
     return (
       hydrantType === 'DN52' && !typeOther && !location && hoseCount === '1' &&
       !hs && !hd && !q && !defects && result === 'vyhovuje'

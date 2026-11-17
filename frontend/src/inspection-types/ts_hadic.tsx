@@ -29,6 +29,7 @@ import type {
   Step2FormProps,
   SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
 import { NextRecordedButton } from './NextRecordedButton';
 
 const TS_HADIC_RESULT_LABELS: Record<PassFailResult, string> = {
@@ -38,6 +39,23 @@ const TS_HADIC_RESULT_LABELS: Record<PassFailResult, string> = {
 
 function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
+}
+
+/** What the form opens with for a stored item. */
+function tsHadicValues(f: Partial<TsHadicItemFields>) {
+  return {
+    hoseType: typeof f.hose_type === 'string' ? f.hose_type : '',
+    location: typeof f.location === 'string' ? f.location : '',
+    manufacturer: typeof f.manufacturer === 'string' ? f.manufacturer : '',
+    workingPressure: typeof f.working_pressure === 'number' ? String(f.working_pressure) : '',
+    testPressure: typeof f.test_pressure === 'number' ? String(f.test_pressure) : '',
+    length: typeof f.length === 'number' ? String(f.length) : '',
+    yearOfManufacture: typeof f.year_of_manufacture === 'number' ? String(f.year_of_manufacture) : '',
+    // A result the item arrived without (a hose with no match in the last
+    // protocol) stays unpicked: it is the technician's to choose, never presumed.
+    result: (isPassFail(f.result) ? f.result : '') as PassFailResult | '',
+    notes: typeof f.notes === 'string' ? f.notes : '',
+  };
 }
 
 /**
@@ -74,18 +92,16 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<TsHadicItemFields>;
-      setHoseType(typeof f.hose_type === 'string' ? f.hose_type : '');
-      setLocation(typeof f.location === 'string' ? f.location : '');
-      setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
-      setWorkingPressure(typeof f.working_pressure === 'number' ? String(f.working_pressure) : '');
-      setTestPressure(typeof f.test_pressure === 'number' ? String(f.test_pressure) : '');
-      setLength(typeof f.length === 'number' ? String(f.length) : '');
-      setYearOfManufacture(typeof f.year_of_manufacture === 'number' ? String(f.year_of_manufacture) : '');
-      // A result the item arrived without (a hose with no match in the last
-      // protocol) stays unpicked: it is the technician's to choose, never presumed.
-      setResult(isPassFail(f.result) ? f.result : '');
-      setNotes(typeof f.notes === 'string' ? f.notes : '');
+      const v = tsHadicValues(initialItem.fields as Partial<TsHadicItemFields>);
+      setHoseType(v.hoseType);
+      setLocation(v.location);
+      setManufacturer(v.manufacturer);
+      setWorkingPressure(v.workingPressure);
+      setTestPressure(v.testPressure);
+      setLength(v.length);
+      setYearOfManufacture(v.yearOfManufacture);
+      setResult(v.result);
+      setNotes(v.notes);
     } else {
       // "Ďalší rovnaký": carry the hose description (type, manufacturer,
       // length, year); the pressures, location and result always start
@@ -103,6 +119,10 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
   }
 
   function isPristine() {
+    // An existing item: nothing to save only while nothing was changed.
+    if (initialItem) {
+      return sameFormValues(tsHadicValues(initialItem.fields as Partial<TsHadicItemFields>), { hoseType, location, manufacturer, workingPressure, testPressure, length, yearOfManufacture, result, notes });
+    }
     return !hoseType && !location && !manufacturer && !workingPressure &&
       !testPressure && !length && !yearOfManufacture && !notes &&
       result === 'vyhovuje';

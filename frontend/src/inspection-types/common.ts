@@ -105,3 +105,13 @@ export type InspectionTypeModule = {
    */
   DetailsBlock?: React.ComponentType<DetailsBlockProps>;
 };
+
+/**
+ * Whether a form's values still equal what it opened with — the test of
+ * „na súhrn" without a save for an existing item (round 3 of the fix list of
+ * 16. 11. 2026): an imported item whose only text was cleared with the „X" has
+ * changed although every field now looks like a new item's defaults.
+ */
+export function sameFormValues<T extends Record<string, unknown>>(opened: T, now: T): boolean {
+  return (Object.keys(opened) as (keyof T)[]).every((k) => opened[k] === now[k]);
+}

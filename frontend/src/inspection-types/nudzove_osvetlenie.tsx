@@ -30,10 +30,27 @@ import type {
   Step2FormProps,
   SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
 import { NextRecordedButton } from './NextRecordedButton';
 
 function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
+}
+
+/** What the form opens with for a stored item. */
+function nudzoveOsvetlenieValues(f: Partial<NudzoveOsvetlenieItemFields>) {
+  return {
+    evidNumber: typeof f.evid_number === 'string' ? f.evid_number : '',
+    floor: typeof f.floor === 'string' ? f.floor : '',
+    luminaireType: typeof f.luminaire_type === 'string' ? f.luminaire_type : '',
+    manufacturer: typeof f.manufacturer === 'string' ? f.manufacturer : '',
+    location: typeof f.location === 'string' ? f.location : '',
+    durationMin: typeof f.duration_min === 'number' ? String(f.duration_min) : '',
+    // A result the item arrived without (a hose with no match in the last
+    // protocol) stays unpicked: it is the technician's to choose, never presumed.
+    result: (isPassFail(f.result) ? f.result : '') as PassFailResult | '',
+    notes: typeof f.notes === 'string' ? f.notes : '',
+  };
 }
 
 /** Carried into the next luminaire by "Ďalší rovnaký" — never evid. number. */
@@ -60,17 +77,15 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<NudzoveOsvetlenieItemFields>;
-      setEvidNumber(typeof f.evid_number === 'string' ? f.evid_number : '');
-      setFloor(typeof f.floor === 'string' ? f.floor : '');
-      setLuminaireType(typeof f.luminaire_type === 'string' ? f.luminaire_type : '');
-      setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
-      setLocation(typeof f.location === 'string' ? f.location : '');
-      setDurationMin(typeof f.duration_min === 'number' ? String(f.duration_min) : '');
-      // A result the item arrived without (a hose with no match in the last
-      // protocol) stays unpicked: it is the technician's to choose, never presumed.
-      setResult(isPassFail(f.result) ? f.result : '');
-      setNotes(typeof f.notes === 'string' ? f.notes : '');
+      const v = nudzoveOsvetlenieValues(initialItem.fields as Partial<NudzoveOsvetlenieItemFields>);
+      setEvidNumber(v.evidNumber);
+      setFloor(v.floor);
+      setLuminaireType(v.luminaireType);
+      setManufacturer(v.manufacturer);
+      setLocation(v.location);
+      setDurationMin(v.durationMin);
+      setResult(v.result);
+      setNotes(v.notes);
     } else {
       // "Ďalší rovnaký": carry floor + luminaire type + manufacturer; the
       // evidence number, location and measured duration always start fresh.
@@ -87,6 +102,10 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
   }, [initialItem, inspectionId]);
 
   function isPristine() {
+    // An existing item: nothing to save only while nothing was changed.
+    if (initialItem) {
+      return sameFormValues(nudzoveOsvetlenieValues(initialItem.fields as Partial<NudzoveOsvetlenieItemFields>), { evidNumber, floor, luminaireType, manufacturer, location, durationMin, result, notes });
+    }
     return (
       !evidNumber && !floor && !luminaireType && !manufacturer && !location &&
       !durationMin && !notes && result === 'vyhovuje'

@@ -22,7 +22,10 @@
     "autoload": {
         "psr-4": {
             "Firol\\": "src/"
-        }
+        },
+        "files": [
+            "src/bootstrap.php"
+        ]
     },
     "scripts": {
         "stan": "phpstan analyse --memory-limit=512M",

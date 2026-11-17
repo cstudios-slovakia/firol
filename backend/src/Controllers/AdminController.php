@@ -37,7 +37,7 @@ final class AdminController
         // in the base plan for fresh accounts. Existing accounts keep their
         // per-account value; admins override individually if needed.
         'default_included_technicians'     => ['type' => 'int', 'min' => 1, 'max' => 100],
-        // Per-extra-technician monthly price in cents. Yearly = ×12.
+        // Per-extra-technician monthly price in cents. Yearly = ×SeatSync::EXTRA_YEARLY_MONTHS (10).
         'price_per_extra_technician_cents' => ['type' => 'int', 'min' => 0, 'max' => 100000],
         // Above this total technician count the account is steered toward a
         // custom quote — UI hides self-service and shows a contact-us hint.

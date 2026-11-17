@@ -33,6 +33,7 @@ import type {
   Step2FormProps,
   SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
 import { NextRecordedButton } from './NextRecordedButton';
 
 function isPuKind(s: unknown): s is PuKind {
@@ -40,6 +41,20 @@ function isPuKind(s: unknown): s is PuKind {
 }
 function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
+}
+
+/** What the form opens with for a stored item. */
+function puAkcieschopnostValues(f: Partial<PuAkcieschopnostItemFields>) {
+  return {
+    kind: (isPuKind(f.kind) ? f.kind : 'dvere') as PuKind,
+    identifier: typeof f.identifier === 'string' ? f.identifier : '',
+    manufacturer: typeof f.manufacturer === 'string' ? f.manufacturer : '',
+    location: typeof f.location === 'string' ? f.location : '',
+    // A result the item arrived without (a hose with no match in the last
+    // protocol) stays unpicked: it is the technician's to choose, never presumed.
+    result: (isPassFail(f.result) ? f.result : '') as PassFailResult | '',
+    notes: typeof f.notes === 'string' ? f.notes : '',
+  };
 }
 
 /** Carried into the next uzáver by "Ďalší rovnaký" — never the identifier. */
@@ -64,15 +79,13 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<PuAkcieschopnostItemFields>;
-      setKind(isPuKind(f.kind) ? f.kind : 'dvere');
-      setIdentifier(typeof f.identifier === 'string' ? f.identifier : '');
-      setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
-      setLocation(typeof f.location === 'string' ? f.location : '');
-      // A result the item arrived without (a hose with no match in the last
-      // protocol) stays unpicked: it is the technician's to choose, never presumed.
-      setResult(isPassFail(f.result) ? f.result : '');
-      setNotes(typeof f.notes === 'string' ? f.notes : '');
+      const v = puAkcieschopnostValues(initialItem.fields as Partial<PuAkcieschopnostItemFields>);
+      setKind(v.kind);
+      setIdentifier(v.identifier);
+      setManufacturer(v.manufacturer);
+      setLocation(v.location);
+      setResult(v.result);
+      setNotes(v.notes);
     } else {
       // "Ďalší rovnaký": carry kind + manufacturer; identifier/location fresh.
       const seed = peekDuplicateSeed<PuAkSeed>(inspectionId);
@@ -86,6 +99,10 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
   }, [initialItem, inspectionId]);
 
   function isPristine() {
+    // An existing item: nothing to save only while nothing was changed.
+    if (initialItem) {
+      return sameFormValues(puAkcieschopnostValues(initialItem.fields as Partial<PuAkcieschopnostItemFields>), { kind, identifier, manufacturer, location, result, notes });
+    }
     return (
       kind === 'dvere' && !identifier && !manufacturer && !location && !notes &&
       result === 'vyhovuje'

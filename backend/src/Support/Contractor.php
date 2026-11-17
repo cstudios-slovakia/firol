@@ -113,7 +113,9 @@ final class Contractor
     {
         $details = InspectionDetails::decode($inspection['details'] ?? null) ?? [];
         $details[self::SNAPSHOT_KEY] = self::snapshot($contractor);
-        Db::pdo()->prepare('UPDATE inspections SET details = ? WHERE id = ?')
+        // `issued_before` remembers for good that the úkon was issued (round 3 of
+        // the fix list of 16. 11. 2026) — a draft with it set may not be deleted.
+        Db::pdo()->prepare('UPDATE inspections SET details = ?, issued_before = 1 WHERE id = ?')
             ->execute([InspectionDetails::encode($details), $inspectionId]);
     }
 

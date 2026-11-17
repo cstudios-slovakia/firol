@@ -42,6 +42,7 @@ import { InspectionTags } from '@/components/InspectionTags';
 import { HandoverDialog } from '@/components/HandoverDialog';
 import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStatusBadge';
 import { carriedOriginOf, carriesValues, originText } from '@/lib/carryOver';
+import { plural } from '@/lib/text';
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { periodicityLabel, type Periodicity } from '@/lib/periodicity';
 import { sectionPathForType } from '@/lib/sections';
@@ -1090,7 +1091,7 @@ function FollowUpBlock({
     candidates.push({
       targetType: 'ts_hadic',
       qualifying: items.length,
-      offerText: `${items.length} ${items.length === 1 ? 'kontrolovaný hydrant' : 'kontrolovaných hydrantov'}`,
+      offerText: plural(items.length, 'kontrolovaný hydrant', 'kontrolované hydranty', 'kontrolovaných hydrantov'),
     });
   }
 

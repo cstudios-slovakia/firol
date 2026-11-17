@@ -406,11 +406,11 @@ final class InspectionController
         if ($row['status'] === 'draft' && $isConcept) {
             $conceptIncomplete = PrehliadkaConcepts::incompleteItems((string) $row['type'], $items);
         }
-        // A fire-protection draft with carried items: the same check holds its
-        // protocol back (CarryOver::checksCompleteness()), so the summary marks
-        // the items. Any other draft gets null — nothing is held back.
+        // A draft with carried items: the same check holds its protocol back
+        // (CarryOver::checksCompleteness()), so the summary marks the items.
+        // Any other draft gets null — nothing is held back.
         $incomplete = $conceptIncomplete;
-        if ($row['status'] === 'draft' && !$isConcept && CarryOver::checksCompleteness((string) $row['type'], $rowDetails)) {
+        if ($row['status'] === 'draft' && !$isConcept && CarryOver::checksCompleteness(['details' => $rowDetails] + $row)) {
             $incomplete = PrehliadkaConcepts::incompleteItems((string) $row['type'], $items);
         }
 
@@ -491,6 +491,16 @@ final class InspectionController
             $mapped = $targetType === 'oprava_ts_php'
                 ? self::mapPhpToOprava($sourceItems)
                 : self::mapPhpToVyradenie($sourceItems);
+            // Oprava and vyradenie take today's devices as they are; the origin is
+            // recorded as the checklist after a prehliadka records it, so the
+            // completeness check holds the protocol back while a value the source
+            // lacked is still empty (round 3 of the fix list of 16. 11. 2026).
+            if ($mapped !== []) {
+                $carriedDetails = [
+                    PrehliadkaChecklist::CARRIED_FROM_KEY      => PrehliadkaChecklist::originOf($accountId, $sourceId),
+                    PrehliadkaChecklist::CARRIED_POSITIONS_KEY => range(1, count($mapped)),
+                ];
+            }
         }
 
         if ($mapped === []) {
@@ -530,7 +540,7 @@ final class InspectionController
                     (account_id, company_id, facility_id, source_inspection_id, type,
                      periodicity_value, periodicity_unit, executed_on, inspector_user_id,
                      status, notes, is_preventive_inspection, created_by_user_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", NULL, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", NULL, ?, ?)'
             )->execute([
                 $accountId,
                 $source['company_id'],
@@ -539,6 +549,9 @@ final class InspectionController
                 $targetType,
                 $fuValue,
                 $fuUnit,
+                // Prefilled with today and editable, as for Opakovať (project rule;
+                // POapp spec ch. 6) — „Generovať" is not held back by an empty date.
+                date('Y-m-d'),
                 $source['inspector_user_id'],
                 in_array($targetType, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
                 Tenant::currentUserId(),
@@ -1126,6 +1139,7 @@ final class InspectionController
             $pdo->prepare(
                 "UPDATE inspections
                  SET    status = 'draft',
+                        issued_before               = 1,
                         protocol_deferred_at        = NULL,
                         effective_inspector_user_id = NULL,
                         effective_cert_number       = NULL,
@@ -1403,7 +1417,7 @@ final class InspectionController
         // The summary marks the carried items that lack a required value at once,
         // with the same rule as show() — not only after a reload.
         $fresh = self::loadOrFail($accountId, $id);
-        $incomplete = CarryOver::checksCompleteness($type, InspectionDetails::decode($fresh['details'] ?? null))
+        $incomplete = CarryOver::checksCompleteness($fresh)
             ? PrehliadkaConcepts::incompleteItems($type, DocumentController::loadItems($id))
             : null;
 
@@ -1780,7 +1794,7 @@ final class InspectionController
                        i.periodicity_value, i.periodicity_unit, i.periodicity_is_custom,
                        i.is_preventive_inspection, i.source_inspection_id,
                        i.carried_over_from_id, i.visit_id,
-                       i.executed_on, i.status, i.notes, i.details,
+                       i.executed_on, i.status, i.issued_before, i.notes, i.details,
                        i.created_at, i.updated_at,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.client_type AS company_client_type,

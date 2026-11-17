@@ -44,8 +44,18 @@ export function facilityPlace(name: string | null | undefined, city: string | nu
   const n = (name ?? '').trim();
   const c = (city ?? '').trim();
   if (n === '') return c === '' ? null : c;
-  if (c === '' || n.toLocaleLowerCase('sk').includes(c.toLocaleLowerCase('sk'))) return n;
+  if (c === '' || containsWord(n, c)) return n;
   return `${n} · ${c}`;
+}
+
+/**
+ * Whether `word` occurs in `text` as a whole word (or phrase), case-insensitive:
+ * the city „Lom" is in „Sklad Lom" but not in „Lomnica sklad".
+ */
+function containsWord(text: string, word: string): boolean {
+  const t = text.toLocaleLowerCase('sk');
+  const w = word.toLocaleLowerCase('sk').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${w}(?![\\p{L}\\p{N}])`, 'u').test(t);
 }
 
 /** Set the planned visit date on whichever úkon defines the deadline. */

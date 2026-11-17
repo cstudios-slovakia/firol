@@ -39,6 +39,7 @@ import {
     clearDeadlinePlan,
     deadlineHref,
     deadlineLabel,
+    deadlineFacilityName,
     facilityPlace,
     setDeadlinePlan,
 } from "@/lib/deadlines";
@@ -796,7 +797,9 @@ function TerminRow({
     const title = d ? deadlineLabel(d) : (e?.title ?? "");
     const where =
         groupBy === "firma"
-            ? (facilityPlace(t.facility_name, t.city) ?? "")
+            ? // A termín of a whole-client training has no prevádzka — „Celá firma"
+              // / „Celé bytové družstvo", as on Dnes and the timeline.
+              (facilityPlace(d && !t.facility_name ? deadlineFacilityName(d) : t.facility_name, t.city) ?? "")
             : [t.company_name, t.facility_name].filter(Boolean).join(" — ");
 
     return (

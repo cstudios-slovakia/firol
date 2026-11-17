@@ -161,8 +161,23 @@ final class InspectionItemController
      */
     private static function labelOf(string $key): string
     {
-        return self::FIELD_LABELS[self::$labelType ?? ''][$key] ?? $key;
+        return self::FIELD_LABELS[self::$labelType ?? ''][$key]
+            ?? self::REFUSAL_LABELS[self::$labelType ?? ''][$key]
+            ?? $key;
     }
+
+    /**
+     * Names for refusals only, of a type kept out of {@see self::FIELD_LABELS}
+     * on purpose: a type listed there is checked for completeness before issue.
+     * The old-format požiarna kniha record (its Step 2 form labels).
+     *
+     * @var array<string, array<string, string>>
+     */
+    private const REFUSAL_LABELS = [
+        'poziarna_kniha' => [
+            'workspaces' => 'Prehliadnuté pracoviská', 'notes' => 'Text zápisu',
+        ],
+    ];
 
     /** @return list<string> */
     private static function collectedProblems(): array
@@ -512,7 +527,7 @@ final class InspectionItemController
             $year = (int) $year;
         }
         if (!is_int($year) || $year < 1900 || $year > 2200) {
-            self::failValidation('Field year must be an integer year (1900–2200).', 'year');
+            self::failValidation('Pole „' . self::labelOf('year') . '" musí byť rok od 1900 do 2200.', 'year');
         }
 
         $status = $body['status'] ?? null;
@@ -554,7 +569,7 @@ final class InspectionItemController
             $year = (int) $year;
         }
         if (!is_int($year) || $year < 1900 || $year > 2200) {
-            self::failValidation('Field year must be an integer year (1900–2200).', 'year');
+            self::failValidation('Pole „' . self::labelOf('year') . '" musí byť rok od 1900 do 2200.', 'year');
         }
 
         return [
@@ -589,7 +604,7 @@ final class InspectionItemController
             $year = (int) $year;
         }
         if (!is_int($year) || $year < 1900 || $year > 2200) {
-            self::failValidation('Field year must be an integer year (1900–2200).', 'year');
+            self::failValidation('Pole „' . self::labelOf('year') . '" musí byť rok od 1900 do 2200.', 'year');
         }
 
         return [
@@ -949,10 +964,16 @@ final class InspectionItemController
             $raw = (int) $raw;
         }
         if (!is_int($raw) || $raw < 0 || $raw > $max) {
-            self::failValidation("Field $key must be an integer between 0 and $max.", $key);
+            self::failValidation('Pole „' . self::labelOf($key) . '" musí byť celé číslo od 0 do ' . $max . '.', $key);
             return 0; // only reached while collecting missing fields
         }
         return $raw;
+    }
+
+    /** A bound of a range as the Slovak UI writes it: „0", „0,5". */
+    private static function number(float $n): string
+    {
+        return str_replace('.', ',', rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.'));
     }
 
     /** @param array<string, mixed> $body */
@@ -966,7 +987,10 @@ final class InspectionItemController
             $raw = (float) $raw;
         }
         if (!is_float($raw) || $raw < $min || $raw > $max) {
-            self::failValidation("Field $key must be a number between $min and $max.", $key);
+            self::failValidation(
+                'Pole „' . self::labelOf($key) . '" musí byť číslo od ' . self::number($min) . ' do ' . self::number($max) . '.',
+                $key,
+            );
             return 0.0; // only reached while collecting missing fields
         }
         return $raw;
@@ -984,14 +1008,14 @@ final class InspectionItemController
         $raw = $body[$key] ?? null;
         if (!is_string($raw)) {
             if ($required) {
-                self::failValidation("Field required: $key", $key);
+                self::failValidation('Pole „' . self::labelOf($key) . '" je povinné.', $key);
             }
             return null;
         }
         $value = trim($raw);
         if ($value === '') {
             if ($required) {
-                self::failValidation("Field required: $key", $key);
+                self::failValidation('Pole „' . self::labelOf($key) . '" je povinné.', $key);
             }
             return null;
         }

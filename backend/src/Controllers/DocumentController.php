@@ -169,15 +169,15 @@ final class DocumentController
         }
         // A concept confirmed before the completeness check existed may still hold
         // an item with required fields blank — the same check as at confirmation.
-        // A fire-protection draft whose items were carried from another protocol
-        // gets the same check (fix list of 16. 11. 2026): one the technician never
+        // A draft whose items were carried from another úkon gets the same check
+        // (fix list of 16. 11. 2026, rounds 2 and 3): one the technician never
         // opened must not be issued with a required value empty. Items typed
         // through the forms passed the item validator already; an Excel import and
         // a protocol opened again with „Upraviť" are drafts too and generate as
         // before (CarryOver::checksCompleteness()).
         $genDetails = \Firol\Support\InspectionDetails::decode($inspection['details'] ?? null);
         $isConcept = \Firol\Support\PrehliadkaConcepts::isConcept($genDetails);
-        if (\Firol\Support\CarryOver::checksCompleteness((string) $inspection['type'], $genDetails)) {
+        if (\Firol\Support\CarryOver::checksCompleteness(['details' => $genDetails] + $inspection)) {
             $incomplete = \Firol\Support\PrehliadkaConcepts::incompleteItems((string) $inspection['type'], $items);
             if ($incomplete !== []) {
                 return ['error' => \Firol\Support\PrehliadkaConcepts::incompleteMessage($incomplete, $isConcept), 'status' => 422];
@@ -736,7 +736,8 @@ final class DocumentController
         // `source_number` is the protocol number of the inspection this one grew
         // out of (change request 2.1) — printed as "Nadväzuje na kontrolu" on the
         // vyraďovací protokol. NULL for documents created standalone.
-        $sql = 'SELECT i.id, i.account_id, i.type, i.executed_on, i.status,
+        $sql = 'SELECT i.id, i.account_id, i.type, i.executed_on, i.status, i.issued_before,
+                       i.carried_over_from_id,
                        i.periodicity_value, i.periodicity_unit,
                        i.notes, i.details, i.inspector_user_id, i.source_inspection_id,
                        i.effective_inspector_user_id, i.effective_cert_number,

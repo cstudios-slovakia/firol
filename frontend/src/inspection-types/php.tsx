@@ -32,10 +32,25 @@ import type {
   Step2FormProps,
   SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
 import { NextRecordedButton } from './NextRecordedButton';
 
 function isPhpStatus(s: unknown): s is PhpStatus {
   return s === 'A' || s === 'TS' || s === 'O' || s === 'V';
+}
+
+/** What the form opens with for a stored item. */
+function phpValues(f: Partial<PhpItemFields>) {
+  return {
+    manufacturer: typeof f.manufacturer === 'string' ? f.manufacturer : '',
+    extType: typeof f.type === 'string' ? f.type : '',
+    serial: typeof f.serial === 'string' ? f.serial : '',
+    year: typeof f.year === 'number' ? String(f.year) : '',
+    location: typeof f.location === 'string' ? f.location : '',
+    // A stav the item arrived without stays unpicked — never presumed „A".
+    status: (isPhpStatus(f.status) ? f.status : '') as PhpStatus | '',
+    notes: typeof f.notes === 'string' ? f.notes : '',
+  };
 }
 
 /** Fields carried into the next item by "Ďalší rovnaký" — never serial/location. */
@@ -61,15 +76,14 @@ function RphpStep2Form({ inspectionId, facilityId, clientType, initialItem, csrf
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<PhpItemFields>;
-      setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
-      setExtType(typeof f.type === 'string' ? f.type : '');
-      setSerial(typeof f.serial === 'string' ? f.serial : '');
-      setYear(typeof f.year === 'number' ? String(f.year) : '');
-      setLocation(typeof f.location === 'string' ? f.location : '');
-      // A stav the item arrived without stays unpicked — never presumed „A".
-      setStatus(isPhpStatus(f.status) ? f.status : '');
-      setNotes(typeof f.notes === 'string' ? f.notes : '');
+      const v = phpValues(initialItem.fields as Partial<PhpItemFields>);
+      setManufacturer(v.manufacturer);
+      setExtType(v.extType);
+      setSerial(v.serial);
+      setYear(v.year);
+      setLocation(v.location);
+      setStatus(v.status);
+      setNotes(v.notes);
     } else {
       // Carry over identification from the previous item when the technician
       // used "Ďalší rovnaký" — serial and location always start blank (2.4.2).
@@ -85,6 +99,12 @@ function RphpStep2Form({ inspectionId, facilityId, clientType, initialItem, csrf
   }, [initialItem, inspectionId]);
 
   function isPristine() {
+    // An existing item: nothing to save only while nothing was changed.
+    if (initialItem) {
+      return sameFormValues(phpValues(initialItem.fields as Partial<PhpItemFields>), {
+        manufacturer, extType, serial, year, location, status, notes,
+      });
+    }
     return (
       !manufacturer && !extType && !serial && !year && !location && !notes &&
       status === 'A'

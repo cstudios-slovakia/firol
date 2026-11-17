@@ -225,7 +225,7 @@ final class PersonListController
         }
 
         Db::pdo()->prepare(
-            'UPDATE inspections SET status = "draft" WHERE id = ? AND account_id = ?'
+            'UPDATE inspections SET status = "draft", issued_before = 1 WHERE id = ? AND account_id = ?'
         )->execute([(int) $inspection['id'], (int) $inspection['account_id']]);
 
         AuditLog::record(
