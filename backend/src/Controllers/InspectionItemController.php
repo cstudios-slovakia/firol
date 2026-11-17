@@ -71,6 +71,9 @@ final class InspectionItemController
      */
     private static ?array $problems = null;
 
+    /** The item type being validated, so a refusal names a field by its label. */
+    private static ?string $labelType = null;
+
     /**
      * Slovak names of the fields of the types a prehliadka can prepare a concept
      * for — the labels of their Step 2 forms, so the technician finds the field
@@ -82,22 +85,27 @@ final class InspectionItemController
         'php' => [
             'manufacturer' => 'Výrobca', 'type' => 'Typ', 'serial' => 'Výrobné číslo / séria',
             'year' => 'Rok výroby', 'location' => 'Umiestnenie', 'status' => 'Stav',
+            'notes' => 'Poznámky / závady',
         ],
         'hydranty' => [
             'type' => 'Typ hydrantu', 'type_other' => 'Označenie typu', 'location' => 'Umiestnenie',
             'hose_count' => 'Počet hadíc', 'hs' => 'HS', 'hd' => 'HD', 'q' => 'Q', 'result' => 'Výsledok kontroly',
+            'defects' => 'Zistené závady',
         ],
         'pu_akcieschopnost' => [
             'kind' => 'Druh uzáveru', 'identifier' => 'Číslo / označenie', 'manufacturer' => 'Výrobca',
-            'location' => 'Umiestnenie', 'result' => 'Výsledok kontroly',
+            'location' => 'Umiestnenie', 'result' => 'Výsledok kontroly', 'notes' => 'Poznámky / závady',
         ],
         'pu_udrzba' => [
-            'kind' => 'Druh uzáveru', 'identifier' => 'Číslo / označenie', 'location' => 'Umiestnenie',
-            'maintenance_work' => 'Vykonané práce', 'result' => 'Výsledok',
+            'kind' => 'Druh uzáveru', 'identifier' => 'Číslo / označenie', 'manufacturer' => 'Výrobca',
+            'location' => 'Umiestnenie', 'maintenance_work' => 'Vykonané práce', 'result' => 'Výsledok',
+            'notes' => 'Poznámky / závady',
         ],
         'nudzove_osvetlenie' => [
-            'luminaire_type' => 'Druh / typ', 'location' => 'Umiestnenie',
+            'evid_number' => 'Evid. č. svietidla', 'floor' => 'Podlažie', 'luminaire_type' => 'Druh / typ',
+            'manufacturer' => 'Výrobca', 'location' => 'Umiestnenie',
             'duration_min' => 'Doba svietenia v núdzovom režime', 'result' => 'Výsledok testu',
+            'notes' => 'Poznámky / závady',
         ],
         // The follow-ups the checklist after a prehliadka closes (spec 12.2).
         'oprava_ts_php' => [
@@ -112,6 +120,7 @@ final class InspectionItemController
             'hose_type' => 'Typ / priemer hadice', 'location' => 'Umiestnenie', 'manufacturer' => 'Výrobca',
             'working_pressure' => 'Pracovný pretlak', 'test_pressure' => 'Skúšobný pretlak', 'length' => 'Dĺžka',
             'year_of_manufacture' => 'Rok výroby', 'result' => 'Výsledok skúšky',
+            'notes' => 'Poznámky / závady',
         ],
     ];
 
@@ -144,6 +153,15 @@ final class InspectionItemController
             $names[] = array_key_exists($k, self::FIELD_LABELS[$type]) ? self::FIELD_LABELS[$type][$k] : $k;
         }
         return array_values(array_unique($names));
+    }
+
+    /**
+     * The Slovak name of a field of the type being validated, the key itself
+     * for a field (or type) without one.
+     */
+    private static function labelOf(string $key): string
+    {
+        return self::FIELD_LABELS[self::$labelType ?? ''][$key] ?? $key;
     }
 
     /** @return list<string> */
@@ -200,6 +218,8 @@ final class InspectionItemController
             )->execute([$inspectionId, $position, json_encode($fields, JSON_UNESCAPED_UNICODE)]);
 
             $itemId = (int) $pdo->lastInsertId();
+            // A new device is typed here — never „prevzaté" (fix list of 16. 11.).
+            \Firol\Support\PrehliadkaChecklist::dropCarriedPosition($pdo, $inspectionId, $position);
             if (!self::isNewBook($inspection)) {
                 self::syncPreventiveFlag($pdo, $inspection['type'], $inspectionId, $fields);
             }
@@ -270,9 +290,25 @@ final class InspectionItemController
 
         self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
-        Db::pdo()->prepare(
-            'DELETE FROM inspection_items WHERE id = ? AND inspection_id = ?'
-        )->execute([$itemId, $inspectionId]);
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            $pos = $pdo->prepare('SELECT position FROM inspection_items WHERE id = ? AND inspection_id = ?');
+            $pos->execute([$itemId, $inspectionId]);
+            $position = $pos->fetchColumn();
+            $pdo->prepare(
+                'DELETE FROM inspection_items WHERE id = ? AND inspection_id = ?'
+            )->execute([$itemId, $inspectionId]);
+            // Its position leaves the list of carried items with it, so the next
+            // device added (MAX(position)+1) does not inherit „prevzaté".
+            if ($position !== false) {
+                \Firol\Support\PrehliadkaChecklist::dropCarriedPosition($pdo, $inspectionId, (int) $position);
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
 
         // Positions stay sparse after deletes — that's fine for ordering.
         // PDF generation later will renumber on render rather than rewriting
@@ -440,6 +476,7 @@ final class InspectionItemController
                 self::failValidation($e->getMessage());
             }
         }
+        self::$labelType = $type;
         $fields = match ($type) {
             'php'                => self::validatePhpFields($body),
             'hydranty'           => self::validateHydrantyFields($body),
@@ -959,7 +996,10 @@ final class InspectionItemController
             return null;
         }
         if (mb_strlen($value) > $max) {
-            self::failValidation("Field too long: $key (max $max chars)", $key);
+            self::failValidation(
+                'Pole „' . self::labelOf($key) . '" je príliš dlhé — najviac ' . $max . ' znakov.',
+                $key,
+            );
         }
         return $value;
     }

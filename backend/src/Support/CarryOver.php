@@ -156,6 +156,30 @@ final class CarryOver
     }
 
     /**
+     * Whether a draft's items must be checked for empty required fields before
+     * its protocol is issued (fix list of 16. 11. 2026, review of round 1).
+     *
+     * The check exists to stop a protocol carrying values nobody typed, so it
+     * runs only on a draft whose items were inserted without the item validator:
+     * a concept of a prehliadka (any type), and a fire-protection draft with a
+     * recorded origin (`carried_from` — Opakovať, „Prevziať položky", the
+     * follow-ups built from another úkon, the checklist). A draft typed through
+     * the forms, an Excel import (a draft, `''` for an empty cell) and an issued
+     * protocol opened again with „Upraviť" generate as they always did.
+     *
+     * @param array<string, mixed>|null $details the úkon's decoded `details`
+     */
+    public static function checksCompleteness(string $type, ?array $details): bool
+    {
+        if (PrehliadkaConcepts::isConcept($details)) {
+            return true;
+        }
+        return self::carriesValues($type)
+            && is_array($details)
+            && array_key_exists(PrehliadkaChecklist::CARRIED_FROM_KEY, $details);
+    }
+
+    /**
      * The latest finalized úkon of this type at this prevádzka — the source a
      * repeat and the device list both draw from. `$exceptId` leaves the draft
      * being filled out of the search.

@@ -24,9 +24,10 @@ use Firol\Storage\Storage;
  *     hasiaci prístroj (decision D3), „nevyhovuje" for the others — with the
  *     defect text in the item's own note field and the photos of those defects
  *     copied onto the item: today's finding wins over what was carried;
- *   - a carried fire-protection device without a defect keeps what it carried;
- *     every other device (a new one, a BOZP row, a carried item whose result
- *     was empty) gets the passing result.
+ *   - a carried fire-protection device without a defect keeps what it carried,
+ *     an empty result included — nobody decided it, so the technician sets it
+ *     and the item is marked „Chýba" until then; every other device (a new
+ *     one, a BOZP row) gets the passing result.
  *
  * A concept is NOT a protocol (spec 7.3: the app must not issue for a control
  * something the technician did not confirm). It is marked in `details`:
@@ -385,13 +386,13 @@ final class PrehliadkaConcepts
     {
         $fail = $hit !== null;
         // A fire-protection device with no defect today keeps the result, values
-        // and texts it carried (fix list of 16. 11. 2026). Only an item whose
-        // result was empty — nothing to keep — falls through to the passing one.
+        // and texts it carried (fix list of 16. 11. 2026). An empty carried
+        // result stays empty — nobody decided it, so the technician sets it, as
+        // for a hose with no match — and the carried notes stay with it. Only a
+        // device with nothing carried (written down on the walk) gets the
+        // passing result.
         if (!$fail && $carried && CarryOver::carriesValues($type)) {
-            $result = $type === 'php' ? ($fields['status'] ?? '') : ($fields['result'] ?? '');
-            if (is_string($result) && $result !== '') {
-                return ['fields' => $fields, 'photo_items' => []];
-            }
+            return ['fields' => $fields, 'photo_items' => []];
         }
         $note = null;
         if ($hit !== null) {
@@ -630,8 +631,9 @@ final class PrehliadkaConcepts
      * Devices the walk-through wrote down start with the fields it did not ask
      * for blank (year, výrobca, druh uzáveru, HS / HD / Q, trvanie svietenia, …);
      * a device carried over from the last protocol brings its values along
-     * and is complete unless that protocol lacked one. Also run on every draft
-     * of a fire-protection type before its protocol is issued. A row whose
+     * and is complete unless that protocol lacked one. Also run before issuing a
+     * fire-protection draft with carried items
+     * ({@see CarryOver::checksCompleteness()}). A row whose
      * `fields` is not an object (odd legacy data) counts as having nothing filled in.
      *
      * @param list<array<string, mixed>> $items each with `id`, `position` and `fields`
@@ -648,7 +650,7 @@ final class PrehliadkaConcepts
             }
             // The label alone does not tell devices apart (every DN52 hydrant reads „DN52"),
             // so the place goes with it.
-            $shaped = FacilityDevices::shape($type, $fields);
+            $shaped = FacilityDevices::shape($type, $fields, true);
             $name = $shaped === null
                 ? 'Položka č. ' . (int) ($item['position'] ?? 0)
                 : $shaped['label'] . ($shaped['location'] !== null ? ' · ' . $shaped['location'] : '');

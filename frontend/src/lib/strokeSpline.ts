@@ -16,8 +16,14 @@ export type StrokePoint = { x: number; y: number };
 /** Longest straight chord drawn for one subdivision step, in CSS px. */
 export const MAX_CHORD = 2;
 
-/** Upper bound of subdivision steps for one piece (a 96 px gap at 2 px). */
-const MAX_STEPS = 48;
+/**
+ * Safety bound of subdivision steps for one piece — 4096 chords of 2 px cover
+ * a curve of 8000 px, far beyond any gap a pointer leaves on a phone screen.
+ */
+const MAX_STEPS = 4096;
+
+/** Points of the coarse polyline that estimates a piece's length. */
+const LENGTH_PROBES = 16;
 
 /** Centripetal parameterisation. */
 const ALPHA = 0.5;
@@ -48,8 +54,6 @@ export function splinePiece(
   p2: StrokePoint,
   p3: StrokePoint,
 ): StrokePoint[] {
-  const span = dist(p1, p2);
-  const steps = Math.max(1, Math.min(MAX_STEPS, Math.ceil(span / MAX_CHORD)));
   // Knot spacing; a zero gap (a repeated sample) is nudged so no division is by zero.
   const knot = (a: StrokePoint, b: StrokePoint) => Math.max(Math.pow(dist(a, b), ALPHA), 1e-4);
   const t0 = 0;
@@ -57,17 +61,40 @@ export function splinePiece(
   const t2 = t1 + knot(p1, p2);
   const t3 = t2 + knot(p2, p3);
 
-  const out: StrokePoint[] = [{ x: p1.x, y: p1.y }];
-  for (let k = 1; k < steps; k++) {
-    // Barry–Goldman pyramid evaluation of the centripetal Catmull–Rom piece.
-    const t = t1 + ((t2 - t1) * k) / steps;
+  // Barry–Goldman pyramid evaluation of the centripetal Catmull–Rom piece, u in [0, 1].
+  const at = (u: number): StrokePoint => {
+    const t = t1 + (t2 - t1) * u;
     const a1 = lerp(p0, p1, t0, t1, t);
     const a2 = lerp(p1, p2, t1, t2, t);
     const a3 = lerp(p2, p3, t2, t3, t);
     const b1 = lerp(a1, a2, t0, t2, t);
     const b2 = lerp(a2, a3, t1, t3, t);
-    out.push(lerp(b1, b2, t1, t2, t));
+    return lerp(b1, b2, t1, t2, t);
+  };
+  const sample = (steps: number): StrokePoint[] => {
+    const out: StrokePoint[] = [{ x: p1.x, y: p1.y }];
+    for (let k = 1; k < steps; k++) out.push(at(k / steps));
+    out.push({ x: p2.x, y: p2.y });
+    return out;
+  };
+  const longest = (pts: StrokePoint[]): number => {
+    let max = 0;
+    for (let i = 1; i < pts.length; i++) max = Math.max(max, dist(pts[i - 1], pts[i]));
+    return max;
+  };
+
+  // The step count comes from the length of the CURVE (a coarse polyline of it),
+  // not the straight gap — a bend is longer than its chord. The parameter does
+  // not run at even speed along the curve, so the count is doubled until no
+  // chord is longer than MAX_CHORD (or the safety bound is reached).
+  const probe = sample(LENGTH_PROBES);
+  let length = 0;
+  for (let i = 1; i < probe.length; i++) length += dist(probe[i - 1], probe[i]);
+  let steps = Math.max(1, Math.min(MAX_STEPS, Math.ceil(length / MAX_CHORD)));
+  let out = sample(steps);
+  while (longest(out) > MAX_CHORD && steps < MAX_STEPS) {
+    steps = Math.min(MAX_STEPS, steps * 2);
+    out = sample(steps);
   }
-  out.push({ x: p2.x, y: p2.y });
   return out;
 }

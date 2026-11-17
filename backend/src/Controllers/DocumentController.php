@@ -169,13 +169,15 @@ final class DocumentController
         }
         // A concept confirmed before the completeness check existed may still hold
         // an item with required fields blank — the same check as at confirmation.
-        // Every draft of a fire-protection type gets the same check (fix list of
-        // 16. 11. 2026): its items arrive with last protocol's values, and one the
-        // technician never opened must not be issued with a required value empty.
-        // Only drafts get here — an issued protocol (an import or an old-format
-        // úkon among them) is never generated again (the 409 above).
-        $isConcept = \Firol\Support\PrehliadkaConcepts::isConcept(\Firol\Support\InspectionDetails::decode($inspection['details'] ?? null));
-        if ($isConcept || \Firol\Support\CarryOver::carriesValues((string) $inspection['type'])) {
+        // A fire-protection draft whose items were carried from another protocol
+        // gets the same check (fix list of 16. 11. 2026): one the technician never
+        // opened must not be issued with a required value empty. Items typed
+        // through the forms passed the item validator already; an Excel import and
+        // a protocol opened again with „Upraviť" are drafts too and generate as
+        // before (CarryOver::checksCompleteness()).
+        $genDetails = \Firol\Support\InspectionDetails::decode($inspection['details'] ?? null);
+        $isConcept = \Firol\Support\PrehliadkaConcepts::isConcept($genDetails);
+        if (\Firol\Support\CarryOver::checksCompleteness((string) $inspection['type'], $genDetails)) {
             $incomplete = \Firol\Support\PrehliadkaConcepts::incompleteItems((string) $inspection['type'], $items);
             if ($incomplete !== []) {
                 return ['error' => \Firol\Support\PrehliadkaConcepts::incompleteMessage($incomplete, $isConcept), 'status' => 422];

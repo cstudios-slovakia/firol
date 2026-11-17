@@ -45,7 +45,8 @@ const HAS_RAW_UPDATE = typeof window !== 'undefined' && 'onpointerrawupdate' in 
  * resizes for HiDPI displays so the exported PNG is sharp on retina.
  *
  * Every sample the browser has is used: `pointerrawupdate` where it exists
- * (samples as they arrive instead of one per frame), and the coalesced
+ * and fires (samples as they arrive instead of one per frame; `pointermove`
+ * until the first raw event of a stroke), and the coalesced
  * events of each move. The line is a centripetal Catmull–Rom spline through
  * the samples ({@link splinePiece}), subdivided into chords of 2 px at most,
  * so a fast stroke whose samples are 20–40 px apart — or a browser without
@@ -183,15 +184,23 @@ export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function Signa
   }
 
   // Where the browser has pointerrawupdate, the samples come from it (as they
-  // arrive) and pointermove is ignored, so no sample is taken twice. React has
+  // arrive) and pointermove is ignored, so no sample is taken twice — but only
+  // once the first raw event of the current stroke has arrived: a browser can
+  // expose the event and not fire it (for touch, say), and pointermove then
+  // keeps drawing. React has
   // no prop for the event, hence the native listener; the handler reads refs
   // only, through a ref that always points at the current render's function.
   const takeSamplesRef = useRef(takeSamples);
+  /** A pointerrawupdate of the current stroke has arrived. */
+  const rawSeenRef = useRef(false);
   takeSamplesRef.current = takeSamples;
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !HAS_RAW_UPDATE) return;
-    const onRaw = (ev: Event) => takeSamplesRef.current(ev as PointerEvent, canvas);
+    const onRaw = (ev: Event) => {
+      if ((ev as PointerEvent).pointerId === pointerRef.current) rawSeenRef.current = true;
+      takeSamplesRef.current(ev as PointerEvent, canvas);
+    };
     canvas.addEventListener('pointerrawupdate', onRaw);
     return () => canvas.removeEventListener('pointerrawupdate', onRaw);
   }, []);
@@ -202,6 +211,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function Signa
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     pointerRef.current = e.pointerId;
+    rawSeenRef.current = false;
 
     const p = localPoint(e, e.currentTarget.getBoundingClientRect());
     pointsRef.current = [p];
@@ -215,7 +225,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function Signa
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (HAS_RAW_UPDATE) return; // taken from pointerrawupdate instead
+    if (HAS_RAW_UPDATE && rawSeenRef.current) return; // taken from pointerrawupdate instead
     takeSamples(e.nativeEvent, e.currentTarget);
   }
 

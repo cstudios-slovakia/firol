@@ -168,7 +168,13 @@ export function InspectionDetailPage() {
       const res = await Inspections.carryOver(id, csrfToken);
       setData((prev) =>
         prev
-          ? { ...prev, inspection: res.inspection, items: res.items, carry_over: null }
+          ? {
+              ...prev,
+              inspection: res.inspection,
+              items: res.items,
+              carry_over: null,
+              incomplete_items: res.incomplete_items ?? null,
+            }
           : prev,
       );
       // A single-record úkon (požiarna kniha, block 2 BOZP records) carries
@@ -499,7 +505,7 @@ export function InspectionDetailPage() {
               onClick={handleRepeat}
               loading={repeating}
               leftIcon={<Repeat className="size-4" />}
-              title="Vytvorí novú kontrolu s tými istými položkami a prázdnym dátumom"
+              title="Vytvorí novú kontrolu s tými istými položkami a dnešným dátumom (dá sa zmeniť)"
             >
               Opakovať
             </Button>
@@ -527,7 +533,7 @@ export function InspectionDetailPage() {
               </p>
               <p className="mt-0.5">
                 {conceptPending
-                  ? carriesValues(i.type)
+                  ? carriesValues(i.type) && carried !== null
                     ? 'Zariadenia s nedostatkom z prehliadky nevyhovujú (aj s fotkami), ostatné majú hodnoty a výsledok z posledného protokolu. Prejdi si ich a doplň, čo chýba. Kým ich nepotvrdíš, protokol sa nedá vygenerovať.'
                     : 'Výsledky sú predvyplnené z prehliadky: zariadenia s nedostatkom nevyhovujú (aj s fotkami), ostatné vyhovujú. Prejdi si ich a doplň, čo chýba. Kým ich nepotvrdíš, protokol sa nedá vygenerovať.'
                   : conceptIncomplete
@@ -792,7 +798,10 @@ export function InspectionDetailPage() {
           {carried && (
             <p className="border-b border-ink-100 bg-firol-50/50 px-4 py-2 text-xs text-ink-600" data-carried-origin>
               {allCarried ? 'Položky ' : 'Označené položky '}
-              {originText(carried.origin)} — skontroluj ich a prepíš, čo sa zmenilo.
+              {originText(carried.origin)}
+              {/* Only a fire-protection type carries values and results; a BOZP
+                  concept carries the devices, its results are entered anew. */}
+              {carriesValues(i.type) ? ' — skontroluj ich a prepíš, čo sa zmenilo.' : '.'}
             </p>
           )}
           {module ? (

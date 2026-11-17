@@ -13,7 +13,11 @@ declare(strict_types=1);
  *   3. carrying items over (fix list of 16. 11. 2026): a fire-protection type
  *      takes every field of the last protocol, values and result included, a
  *      BOZP row its identification only; and the device list of a prevádzka
- *      never drops a device for want of a label.
+ *      never drops a device for want of a label;
+ *   4. the review of round 1: what a concept does with a carried result, the
+ *      tlaková skúška hadíc rows of the checklist and of the follow-up button,
+ *      the recorded origin, which drafts the completeness check holds back,
+ *      and the carried positions when items are deleted.
  *
  *     docker compose exec php php bin/test-prehliadka-followups.php
  *
@@ -29,8 +33,10 @@ if (is_file(__DIR__ . '/../.env')) {
 
 use Firol\Controllers\TodayController;
 use Firol\Db;
+use Firol\Controllers\InspectionController;
 use Firol\Support\CarryOver;
 use Firol\Support\FacilityDevices;
+use Firol\Support\PrehliadkaChecklist;
 use Firol\Support\PrehliadkaConcepts;
 use Firol\Support\PrehliadkaDefects;
 
@@ -131,8 +137,10 @@ try {
 
     $draft = $prehliadka($f1, '2026-11-20', 'draft', [
         'previous' => [
-            ['source_inspection_id' => $p, 'source_item_id' => $c, 'status' => 'zanik'],
-            ['source_inspection_id' => $p, 'source_item_id' => $d, 'status' => 'trva'], // „Trvá" stays open
+            // Every row of `previous` has its key: PrehliadkaDetails refuses a row
+            // without one, and PrehliadkaDefects::answers() skips it.
+            ['key' => 'p' . $p . '-' . $c, 'source_inspection_id' => $p, 'source_item_id' => $c, 'status' => 'zanik'],
+            ['key' => 'p' . $p . '-' . $d, 'source_inspection_id' => $p, 'source_item_id' => $d, 'status' => 'trva'], // „Trvá" stays open
         ],
     ]);
     $cands = PrehliadkaDefects::taskCandidates($accountId, $p, $header($p), $items($p));
@@ -220,7 +228,7 @@ try {
 
     // Odd legacy rows must not crash the check.
     $legacy = PrehliadkaConcepts::incompleteItems('php', [['id' => 7, 'position' => 3, 'fields' => 'not-an-object']]);
-    $expect('2 a row that is not an object counts as empty', [$legacy[0]['name'], count($legacy[0]['missing'])], ['Položka č. 3', 6]);
+    $expect('2 a row that is not an object counts as empty', [$legacy[0]['name'], count($legacy[0]['missing'])], ['Hasiaci prístroj', 6]);
     $expect('2 a type without rules passes', PrehliadkaConcepts::incompleteItems('poziarna_kniha', [['id' => 8, 'position' => 1, 'fields' => []]]), []);
 
     // The follow-ups the checklist after a prehliadka closes (spec 12.2).
@@ -316,6 +324,87 @@ try {
     $expect('3 svietidlo with nothing: „Svietidlo"', $label('nudzove_osvetlenie', []), 'Svietidlo');
     $expect('3 a nameless hasiaci prístroj is still listed', $label('php', ['serial' => '', 'location' => 'Sklad']), 'Sklad');
     $expect('3 outside the device list a nameless item stays unnamed', FacilityDevices::shape('php', []), null);
+    $shape = static fn (string $type, array $f): ?array => FacilityDevices::shape($type, $f, true);
+    $expect('3 a place that became the name is not repeated as the place',
+        array_intersect_key((array) $shape('nudzove_osvetlenie', ['floor' => '1.NP', 'location' => 'Chodba 3']), ['label' => 1, 'location' => 1]),
+        ['label' => '1.NP · Chodba 3', 'location' => null]);
+    $expect('3 a fallback label is cut to 80 characters',
+        mb_strlen((string) ($shape('nudzove_osvetlenie', ['location' => str_repeat('Dlhá chodba ', 12)])['label'] ?? '')), 80);
+    $expect('3 incompleteness names a svietidlo as step 1 does',
+        $check('nudzove_osvetlenie', ['floor' => '1.NP', 'location' => 'Chodba 3', 'luminaire_type' => '', 'result' => 'vyhovuje', 'duration_min' => 60], 3)[0] ?? null,
+        '1.NP · Chodba 3');
+
+    // ── Part 4 — review of round 1 ───────────────────────────────────────────
+    $ukonInsert = $pdo->prepare(
+        'INSERT INTO inspections (account_id, company_id, facility_id, type, executed_on, inspector_user_id, status, created_by_user_id, details)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    /** @param array<string, mixed>|null $details */
+    $ukon = static function (int $facilityId, string $type, ?string $on, string $status, ?array $details = null) use ($ukonInsert, $pdo, $accountId, $companyId, $userId): int {
+        $ukonInsert->execute([$accountId, $companyId, $facilityId, $type, $on, $userId, $status, $userId,
+            $details === null ? null : json_encode($details, JSON_UNESCAPED_UNICODE)]);
+        return (int) $pdo->lastInsertId();
+    };
+
+    // A — what a concept makes of a carried device (PrehliadkaConcepts::withResult).
+    $withResult = new ReflectionMethod(PrehliadkaConcepts::class, 'withResult');
+    $hit = ['defects' => [['item_id' => 7, 'text' => 'Chýba plomba']]];
+    $carriedPhp = ['manufacturer' => 'Hasma', 'type' => 'P6', 'serial' => 'X1', 'year' => 2019, 'location' => 'Sklad', 'status' => 'TS', 'notes' => 'TS 2026'];
+    $r = $withResult->invoke(null, 'php', $carriedPhp, $hit, true);
+    $expect('4 a defect of today wins over the carried stav', [$r['fields']['status'], $r['fields']['notes'], $r['photo_items']], ['O', 'Chýba plomba', [7]]);
+    $r = $withResult->invoke(null, 'php', $carriedPhp, null, true);
+    $expect('4 without a defect the carried stav and note are kept', $r['fields'], $carriedPhp);
+    $r = $withResult->invoke(null, 'hydranty', ['result' => ''] + $hydrant, null, true);
+    $expect('4 an empty carried result stays empty, the texts stay', [$r['fields']['result'], $r['fields']['defects']], ['', 'Nízky prietok']);
+    $expect('4 … and the item is reported as missing its result', $check('hydranty', $r['fields'])[1] ?? null, ['Výsledok kontroly']);
+    $r = $withResult->invoke(null, 'hydranty', ['type' => 'other', 'type_other' => 'H-1', 'location' => 'Dvor'] + CarryOver::blank('hydranty'), null, false);
+    $expect('4 a device written down on the walk gets the passing result', $r['fields']['result'], 'vyhovuje');
+    $r = $withResult->invoke(null, 'rebriky', $ladder, null, true);
+    $expect('4 a BOZP row still gets the passing result', $r['fields']['result'], 'vyhovuje');
+
+    // B — the ts_hadic rows of the checklist and of the follow-up button (tsHadicRows).
+    $f4 = $newFacility('Hadice');
+    $hydrants = [['type' => 'C52', 'location' => 'Vchod', 'hose_count' => 1], ['type' => 'DN25', 'location' => 'Dvor', 'hose_count' => 1]];
+    $built = PrehliadkaChecklist::tsHadicRows($accountId, $f4, $hydrants);
+    $expect('4 no earlier ts hadíc: rows blank, result not presumed, no origin',
+        [array_column($built['rows'], 'result'), $built['carried'], $built['origin']], [['', ''], [], null]);
+    $lastTs = $ukon($f4, 'ts_hadic', '2025-10-01', 'finalized');
+    $item($lastTs, 1, $hose);
+    $built = PrehliadkaChecklist::tsHadicRows($accountId, $f4, $hydrants);
+    $expect('4 the matching hose takes values and result',
+        [$built['rows'][0]['test_pressure'], $built['rows'][0]['result'], $built['rows'][0]['manufacturer']], [1.5, 'vyhovuje', 'Pyrotex']);
+    $expect('4 a hose with no match stays blank', [$built['rows'][1]['result'], $built['rows'][1]['test_pressure']], ['', null]);
+    $expect('4 only the matched row is carried, the origin is named', [$built['carried'], $built['origin']['executed_on'] ?? null], [[0], '2025-10-01']);
+    $expect('4 the follow-up button maps hydrants without a presumed result',
+        array_column(InspectionController::mapHydrantyToTsHadic($hydrants), 'result'), ['', '']);
+
+    // C — the recorded origin of Opakovať / „Prevziať položky".
+    $origin = new ReflectionMethod(InspectionController::class, 'carriedOrigin');
+    $expect('4 a fire type records where its values came from', $origin->invoke(null, $accountId, 'ts_hadic', $lastTs, 2), [
+        PrehliadkaChecklist::CARRIED_FROM_KEY      => ['number' => null, 'executed_on' => '2025-10-01'],
+        PrehliadkaChecklist::CARRIED_POSITIONS_KEY => [1, 2],
+    ]);
+    $expect('4 a BOZP type records no origin', $origin->invoke(null, $accountId, 'rebriky', $lastTs, 2), null);
+    $expect('4 nothing carried, no origin', $origin->invoke(null, $accountId, 'hydranty', $lastTs, 0), null);
+
+    // D — which drafts the completeness check holds back (CarryOver::checksCompleteness).
+    $carriedDetails = [PrehliadkaChecklist::CARRIED_FROM_KEY => null, PrehliadkaChecklist::CARRIED_POSITIONS_KEY => [1]];
+    $expect('4 checked: a fire draft with a recorded origin', CarryOver::checksCompleteness('hydranty', $carriedDetails), true);
+    $expect('4 checked: a concept of any type', CarryOver::checksCompleteness('rebriky', [PrehliadkaConcepts::KEY => 5]), true);
+    $expect('4 not checked: a draft typed through the forms or imported', CarryOver::checksCompleteness('hydranty', null), false);
+    $expect('4 not checked: an unlocked protocol without an origin', CarryOver::checksCompleteness('php', ['some' => 'header']), false);
+    $expect('4 not checked: a BOZP draft with an origin key', CarryOver::checksCompleteness('rebriky', $carriedDetails), false);
+
+    // E — carried positions follow deletes (PrehliadkaChecklist::dropCarriedPosition).
+    $rep = $ukon($f4, 'hydranty', '2026-11-17', 'draft', [PrehliadkaChecklist::CARRIED_FROM_KEY => null, PrehliadkaChecklist::CARRIED_POSITIONS_KEY => [1, 2, 3, 4, 5]]);
+    $positions = static fn (): array => json_decode((string) $pdo->query('SELECT details FROM inspections WHERE id = ' . $rep)->fetchColumn(), true)[PrehliadkaChecklist::CARRIED_POSITIONS_KEY];
+    PrehliadkaChecklist::dropCarriedPosition($pdo, $rep, 5);
+    $expect('4 a deleted carried item leaves the list', $positions(), [1, 2, 3, 4]);
+    PrehliadkaChecklist::dropCarriedPosition($pdo, $rep, 9);
+    $expect('4 a position not on the list changes nothing', $positions(), [1, 2, 3, 4]);
+    $plain = $ukon($f4, 'hydranty', '2026-11-17', 'draft');
+    PrehliadkaChecklist::dropCarriedPosition($pdo, $plain, 1);
+    $expect('4 a draft without a list is left alone', $pdo->query('SELECT details FROM inspections WHERE id = ' . $plain)->fetchColumn(), null);
 } finally {
     $pdo->rollBack();
 }

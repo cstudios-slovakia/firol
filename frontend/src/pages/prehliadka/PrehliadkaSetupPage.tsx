@@ -27,6 +27,7 @@ import {
   type LehotaZakon,
   type PrehliadkaDetails,
   type PrehliadkaScope,
+  routineTermKey,
 } from '@/lib/prehliadka';
 import { useToast } from '@/lib/toast';
 import { cachedCertRefusal, useCertMissingToast, warmCertProfile } from '@/lib/certMissing';
@@ -320,12 +321,20 @@ function SetupForm({
     if (!loaded) return;
     // The rest of `details` (devices, ticked activities, answers about the previous
     // defects …) belongs to the later steps; a PATCH replaces the object, so it travels along.
+    // One override key per routine type serves both today's term and the term
+    // of the last protocol (step 3) — a type ticked or unticked here changes
+    // which of the two the row means, so a date written for the other is dropped.
+    const termOverrides = { ...details.term_overrides };
+    for (const type of new Set([...details.routine, ...routine])) {
+      if (details.routine.includes(type) !== routine.includes(type)) delete termOverrides[routineTermKey(type)];
+    }
     const effective: PrehliadkaDetails = {
       ...details,
       scope,
       routine,
       lehota_zakon: lehotaZakon,
       lehota_vlastna: lehotaVlastna,
+      term_overrides: termOverrides,
     };
     if (!effective.scope.po && !effective.scope.bozp) {
       setScopeError('Vyber, akú prehliadku robíš.');

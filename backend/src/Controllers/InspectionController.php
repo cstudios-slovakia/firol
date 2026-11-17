@@ -400,15 +400,17 @@ final class InspectionController
 
         // A concept from a prehliadka: the items that still lack a required field
         // (what keeps it from being confirmed), so the list can mark them.
-        $isConcept = PrehliadkaConcepts::isConcept(InspectionDetails::decode($row['details'] ?? null));
+        $rowDetails = InspectionDetails::decode($row['details'] ?? null);
+        $isConcept = PrehliadkaConcepts::isConcept($rowDetails);
         $conceptIncomplete = null;
         if ($row['status'] === 'draft' && $isConcept) {
             $conceptIncomplete = PrehliadkaConcepts::incompleteItems((string) $row['type'], $items);
         }
-        // Every draft of a fire-protection type: the same check holds its protocol
-        // back (fix list of 16. 11. 2026, decision 7), so the summary marks the items.
+        // A fire-protection draft with carried items: the same check holds its
+        // protocol back (CarryOver::checksCompleteness()), so the summary marks
+        // the items. Any other draft gets null — nothing is held back.
         $incomplete = $conceptIncomplete;
-        if ($row['status'] === 'draft' && !$isConcept && CarryOver::carriesValues((string) $row['type'])) {
+        if ($row['status'] === 'draft' && !$isConcept && CarryOver::checksCompleteness((string) $row['type'], $rowDetails)) {
             $incomplete = PrehliadkaConcepts::incompleteItems((string) $row['type'], $items);
         }
 
@@ -1256,9 +1258,10 @@ final class InspectionController
         $pdo = Db::pdo();
         $pdo->beginTransaction();
         try {
-            // executed_on is intentionally NULL — Step 3 forces the
-            // technician to enter a fresh date before generating PDF.
-            // The periodicity travels: it was the technician's decision for
+            // The date is prefilled with today and stays editable on the
+            // summary (CLAUDE.md, user decision 23. 9. 2026 — as for a new
+            // úkon and a repeated book entry); the protocol carries whatever
+            // date is saved there. The periodicity travels: it was the technician's decision for
             // this prevádzka and there is no reason to make them repeat it.
             $pdo->prepare(
                 'INSERT INTO inspections
@@ -1266,7 +1269,7 @@ final class InspectionController
                      periodicity_value, periodicity_unit, periodicity_is_custom,
                      is_preventive_inspection, executed_on, inspector_user_id,
                      status, notes, carried_over_from_id, created_by_user_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?)'
             )->execute([
                 $accountId,
                 $source['company_id'],
@@ -1276,6 +1279,7 @@ final class InspectionController
                 $source['periodicity_unit'],
                 !empty($source['periodicity_is_custom']) ? 1 : 0,
                 !empty($source['is_preventive_inspection']) ? 1 : 0,
+                date('Y-m-d'),
                 $source['inspector_user_id'],
                 $source['notes'],
                 $sourceId,
@@ -1361,6 +1365,11 @@ final class InspectionController
         if ((string) $source['type'] !== $type || (int) $source['facility_id'] !== (int) $row['facility_id']) {
             Response::error('Prevziať položky možno len z kontroly rovnakého typu na tej istej prevádzke.', 422);
         }
+        // Values and results travel with a fire-protection item: only an issued
+        // protocol is a source, never another draft.
+        if ((string) $source['status'] !== 'finalized') {
+            Response::error('Prevziať položky možno len z ukončenej kontroly (s vystaveným PDF).', 422);
+        }
 
         $carried = self::carryItems($type, self::loadItemFields($sourceId));
         if ($carried['items'] === []) {
@@ -1391,11 +1400,19 @@ final class InspectionController
             throw $e;
         }
 
+        // The summary marks the carried items that lack a required value at once,
+        // with the same rule as show() — not only after a reload.
+        $fresh = self::loadOrFail($accountId, $id);
+        $incomplete = CarryOver::checksCompleteness($type, InspectionDetails::decode($fresh['details'] ?? null))
+            ? PrehliadkaConcepts::incompleteItems($type, DocumentController::loadItems($id))
+            : null;
+
         Response::json([
-            'inspection' => self::shapeRow(self::loadOrFail($accountId, $id)),
+            'inspection' => self::shapeRow($fresh),
             'items' => self::loadItemsForResponse($id),
             'source_id' => $sourceId,
             'disposed_skipped' => $carried['disposed'],
+            'incomplete_items' => $incomplete,
         ]);
     }
 

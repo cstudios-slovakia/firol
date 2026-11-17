@@ -81,12 +81,20 @@ export function PrehliadkaTermsPage() {
         const i = detail.inspection;
         const asOf = i.executed_on ?? todayIso();
         // Everything beyond the prehliadka itself is optional: the step still works without it.
-        const [facts, activities, external, company] = await Promise.all([
+        const [cachedFacts, activities, external, company] = await Promise.all([
           Prehliadka.terms(i.facility_id, asOf).catch(() => null),
           Prehliadka.activities(i.company_id).catch(() => null),
           ExternalTerms.list(i.company_id, undefined, i.facility_id).catch(() => null),
           Companies.show(i.company_id).catch(() => null),
         ]);
+        // A GET falls back to the offline cache when the network fails, and facts
+        // cached before the fix list of 16. 11. 2026 have no `recorded` list (the
+        // terms of úkony not ticked today). Ask once more — a connection that is
+        // back by now answers in full; otherwise the cached answer is all there is.
+        const facts =
+          cachedFacts && cachedFacts.recorded === undefined
+            ? await Prehliadka.terms(i.facility_id, asOf).catch(() => cachedFacts)
+            : cachedFacts;
         if (cancelled) return;
         setLoaded({
           detail,
@@ -406,7 +414,15 @@ function TermsForm({ id, loaded }: { id: number; loaded: Loaded }) {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-ink-900">{t.label}</p>
                   <p className="mt-0.5 text-xs text-ink-500">
-                    ďalšia do <b className="text-ink-700">{date ? formatDateSk(date) : 'podľa potreby'}</b>
+                    {date ? (
+                      <>
+                        ďalšia do <b className="text-ink-700">{formatDateSk(date)}</b>
+                      </>
+                    ) : (
+                      <>
+                        ďalšia <b className="text-ink-700">podľa potreby</b>
+                      </>
+                    )}
                     {' · '}
                     {override ? 'prepísané rukou' : t.source}
                     {' · '}

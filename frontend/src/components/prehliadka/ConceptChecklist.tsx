@@ -26,6 +26,7 @@ import { cn } from '@/lib/cn';
 import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { originText } from '@/lib/carryOver';
+import { sk3 } from '@/lib/kniha';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 
@@ -202,7 +203,7 @@ function EntryRow({
   const title = INSPECTION_TYPE_LABELS[e.type] ?? e.type;
   const facts = [
     devicesLabel(e.items),
-    !NO_RESULT.has(e.type) && !issued ? `${e.failing} nevyhovuje` : null,
+    !NO_RESULT.has(e.type) && !issued ? failingLabel(e.failing) : null,
     issued && e.document ? `protokol ${e.document.number}` : null,
   ].filter(Boolean).join(' · ');
 
@@ -301,9 +302,14 @@ function FallbackLink({ concept }: { concept: PrehliadkaConcept }) {
           {INSPECTION_TYPE_LABELS[concept.type] ?? concept.type}
         </span>
         <span className="block text-xs text-ink-500">
-          {devicesLabel(concept.items)} · {concept.failing} nevyhovuje · {state}
+          {devicesLabel(concept.items)} · {failingLabel(concept.failing)} · {state}
         </span>
       </span>
     </Link>
   );
+}
+
+/** „1 nevyhovuje", „2 nevyhovujú", „5 nevyhovuje". */
+function failingLabel(n: number): string {
+  return `${n} ${sk3(n, 'nevyhovuje', 'nevyhovujú', 'nevyhovuje')}`;
 }

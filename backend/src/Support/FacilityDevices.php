@@ -79,6 +79,9 @@ final class FacilityDevices
         return $out;
     }
 
+    /** Longest device label a defect of the prehliadka accepts. */
+    private const MAX_LABEL = 80;
+
     /** What a device is called when its úkon gave it no label at all. */
     private const NOUNS = [
         'php'                => 'Hasiaci prístroj',
@@ -146,9 +149,11 @@ final class FacilityDevices
                 $description = self::join([$luminaire, self::text($fields, 'manufacturer')]);
                 $floor = self::text($fields, 'floor');
                 $location = self::join([$floor, $location]);
-                // Spec order of the fallback: evidenčné číslo, typ svietidla, umiestnenie, „Svietidlo".
-                if ($alwaysLabel) {
-                    $label ??= $location ?? self::NOUNS[$type];
+                // Spec order of the fallback: evidenčné číslo, typ svietidla, umiestnenie,
+                // „Svietidlo" — a place that became the name is not repeated as the place.
+                if ($alwaysLabel && $label === null) {
+                    $label = $location ?? self::NOUNS[$type];
+                    $location = null;
                 }
                 break;
             case 'rebriky':
@@ -165,7 +170,21 @@ final class FacilityDevices
             if (!$alwaysLabel) {
                 return null;
             }
-            $label = $description ?? $location ?? self::NOUNS[$type];
+            // The text that became the name is not printed a second time.
+            if ($description !== null) {
+                $label = $description;
+                $description = null;
+            } elseif ($location !== null) {
+                $label = $location;
+                $location = null;
+            } else {
+                $label = self::NOUNS[$type];
+            }
+        }
+        // A defect stores the device label in 80 characters at most
+        // (PrehliadkaDefects::devices()); a long place or description is cut.
+        if (mb_strlen($label) > self::MAX_LABEL) {
+            $label = rtrim(mb_substr($label, 0, self::MAX_LABEL - 1)) . '…';
         }
         return [
             'label'       => $label,

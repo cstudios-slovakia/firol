@@ -250,7 +250,10 @@ export function AppShell() {
     }, []);
 
     return (
-        <div className="bg-app relative min-h-screen pb-20 sm:pb-0">
+        // pb-36 on a phone: room for the bottom tab bar (80 px) and the
+        // „Spätná väzba" tab above it (bottom-24, ~40 px tall), so the last
+        // button of a page can be scrolled clear of both.
+        <div className="bg-app relative min-h-screen pb-36 sm:pb-0">
             <AuroraBackground />
             <div ref={topBarRef} className="sticky top-0 z-20">
                 <SubscriptionBanner />

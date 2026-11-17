@@ -732,6 +732,32 @@ final class PrehliadkaChecklist
     }
 
     /**
+     * Take one position off a draft's `carried_positions` — called when the item
+     * at that position is deleted, and for the position a new item gets, so a
+     * device the technician adds is never shown as „prevzaté z protokolu …"
+     * (positions are not reused while the item exists, but a deleted last item
+     * frees its MAX(position)+1). A draft that records no list is left alone.
+     * Runs inside the caller's transaction.
+     */
+    public static function dropCarriedPosition(\PDO $pdo, int $inspectionId, int $position): void
+    {
+        $stmt = $pdo->prepare('SELECT details FROM inspections WHERE id = ? FOR UPDATE');
+        $stmt->execute([$inspectionId]);
+        $details = InspectionDetails::decode(($raw = $stmt->fetchColumn()) === false ? null : $raw);
+        if (!is_array($details) || !is_array($details[self::CARRIED_POSITIONS_KEY] ?? null)) {
+            return;
+        }
+        $list = $details[self::CARRIED_POSITIONS_KEY];
+        $kept = array_values(array_filter($list, static fn (mixed $p): bool => $p !== $position));
+        if (count($kept) === count($list)) {
+            return;
+        }
+        $details[self::CARRIED_POSITIONS_KEY] = $kept;
+        $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
+            ->execute([InspectionDetails::encode($details), $inspectionId]);
+    }
+
+    /**
      * Positions of the items that carry values from elsewhere. Oprava and
      * vyradenie made on the check's own screen hold nothing but today's devices.
      *
@@ -764,7 +790,8 @@ final class PrehliadkaChecklist
             'oprava_ts_php', 'vyradenie' => $join([$text('serial'), trim($text('manufacturer') . ' ' . $text('type')), $text('location')]),
             'ts_hadic'                   => $join([$text('hose_type'), $text('location')]),
             default                      => (static function () use ($type, $fields, $join): string {
-                $shaped = FacilityDevices::shape($type, $fields);
+                // Named as in step 1 of the prehliadka and in the „Chýba" messages.
+                $shaped = FacilityDevices::shape($type, $fields, true);
                 return $shaped === null ? '' : $join([(string) $shaped['label'], (string) ($shaped['description'] ?? ''), (string) ($shaped['location'] ?? '')]);
             })(),
         };
