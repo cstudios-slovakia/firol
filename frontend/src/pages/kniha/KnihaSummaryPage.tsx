@@ -7,7 +7,8 @@ import { useMemberRights } from '@/auth/useMemberRights';
 import { Inspections, documentDownloadUrl, type InspectionDetail } from '@/api/inspections';
 import { invoicingOf } from '@/api/invoicing';
 import { Kniha, type KnihaContext } from '@/api/kniha';
-import { ApiError, OfflineQueuedError } from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import { PERMANENT_SENTENCE } from '@/lib/discard';
 import { useCertMissingToast } from '@/lib/certMissing';
 import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
@@ -183,21 +184,22 @@ function SummaryForm({
     }
     const ok = await confirm({
       title: 'Zahodiť rozpracovaný zápis?',
-      description: 'Zápis sa zahodí aj so zapísanými nedostatkami a fotkami.',
-      confirmLabel: 'Zahodiť',
+      description: `Zápis sa natrvalo zmaže aj so zapísanými nedostatkami a fotkami. ${PERMANENT_SENTENCE}`,
+      confirmLabel: 'Natrvalo zmazať',
     });
     if (!ok) return;
     setDiscarding(true);
     try {
-      await Inspections.archive(id, csrfToken);
+      // A permanent delete never waits in the offline queue.
+      await Inspections.archive(id, csrfToken, { requireOnline: true });
     } catch (err) {
-      if (!(err instanceof OfflineQueuedError)) {
-        toast.error(err instanceof ApiError ? err.message : 'Zápis sa nepodarilo zahodiť.');
-        setDiscarding(false);
-        return;
-      }
+      toast.error(
+        err instanceof ApiError ? err.message : offlineMessage(err, 'Zahodiť zápis sa dá len s pripojením na internet.'),
+      );
+      setDiscarding(false);
+      return;
     }
-    toast.success('Zápis zahodený');
+    toast.success('Zápis natrvalo zmazaný');
     navigate(
       i.visit_id !== null ? `/visits/${i.visit_id}` : rows.length > 1 ? `/companies/${i.company_id}` : `/facilities/${i.facility_id}`,
       { replace: true },
@@ -384,7 +386,10 @@ function SummaryForm({
       />
 
       <div className="flex flex-col items-center gap-2">
-        {canEdit && canDeleteUkon(i, i.inspector_user_id) && (
+        {/* A draft never issued is deleted for good; one issued before (opened
+            again with „Upraviť") or one something was made from is refused by
+            the server, which says so in `discard`. */}
+        {canEdit && i.discard !== null && i.discard !== 'archive' && canDeleteUkon(i, i.inspector_user_id) && (
           <Button
             type="button"
             id="kn-discard"

@@ -1,7 +1,8 @@
 /**
  * Zahodiť rozrobenú prehliadku (POapp spec 7. 11. 2026, ch. 11.1).
  *
- * Discarding is the archive every other úkon uses (DELETE /api/inspections/{id}).
+ * Discarding deletes the draft for good with its defects and photos (owner
+ * decision of 17. 11. 2026; DELETE /api/inspections/{id}, `discard: 'delete'`).
  * It is offered only for a draft that was never closed: a prehliadka closed
  * once and reopened with „Upraviť" issued records before (the PP record, the
  * kniha BOZP record, concepts, tasks), and discarding the draft would leave
@@ -21,7 +22,8 @@ import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { useMemberRights } from '@/auth/useMemberRights';
 import { Inspections, type InspectionDetail } from '@/api/inspections';
 import { Tasks } from '@/api/tasks';
-import { OfflineQueuedError } from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import { PERMANENT_SENTENCE } from '@/lib/discard';
 import { cn } from '@/lib/cn';
 import { useConfirm } from '@/lib/confirm';
 import { offlineMessage } from '@/lib/offline';
@@ -32,6 +34,8 @@ import { Button } from '@/components/ui/Button';
 
 /** True when the prehliadka was never closed and nothing issued points back at it. */
 function neverClosed(detail: InspectionDetail, taskCount: number): boolean {
+  // The server's verdict (UkonDiscard) when it sent one; the checks below agree with it.
+  if (detail.inspection.discard !== undefined && detail.inspection.discard !== 'delete') return false;
   return detail.inspection.closed_before === false && (detail.follow_ups ?? []).length === 0 && taskCount === 0;
 }
 
@@ -100,21 +104,20 @@ export function useDiscardPrehliadka(
     }
     const ok = await confirm({
       title: 'Zahodiť rozrobenú prehliadku?',
-      description: 'Prehliadka sa zahodí aj so zapísanými nedostatkami. Nevznikne z nej žiadny záznam.',
-      confirmLabel: 'Zahodiť',
+      description: `Prehliadka sa natrvalo zmaže aj so zapísanými nedostatkami a fotkami. Nevznikne z nej žiadny záznam. ${PERMANENT_SENTENCE}`,
+      confirmLabel: 'Natrvalo zmazať',
     });
     if (!ok) return;
     setDiscarding(true);
     try {
-      await Inspections.archive(checked.id, csrfToken);
+      // A permanent delete never waits in the offline queue.
+      await Inspections.archive(checked.id, csrfToken, { requireOnline: true });
     } catch (err) {
-      // The connection dropped between the check and the request: the outbox
-      // took the archive and sends it on reconnect.
-      if (!(err instanceof OfflineQueuedError)) {
-        toast.error(offlineMessage(err, 'Prehliadku sa nepodarilo zahodiť.'));
-        setDiscarding(false);
-        return;
-      }
+      toast.error(
+        err instanceof ApiError ? err.message : offlineMessage(err, 'Zahodiť prehliadku sa dá len s pripojením na internet.'),
+      );
+      setDiscarding(false);
+      return;
     }
     setDiscarding(false);
     toast.success('Prehliadka zahodená');

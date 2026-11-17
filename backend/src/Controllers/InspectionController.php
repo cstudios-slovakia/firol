@@ -23,6 +23,7 @@ use Firol\Support\PrehliadkaChecklist;
 use Firol\Support\PrehliadkaConcepts;
 use Firol\Support\PrehliadkaDefects;
 use Firol\Support\PrehliadkaDetails;
+use Firol\Support\UkonDiscard;
 
 final class InspectionController
 {
@@ -149,7 +150,7 @@ final class InspectionController
                        i.periodicity_is_custom,
                        i.is_preventive_inspection, i.source_inspection_id,
                        i.carried_over_from_id, i.visit_id,
-                       i.status, i.notes, i.created_at,
+                       i.status, i.issued_before, i.notes, i.created_at, i.account_id,
                        i.company_id, c.name AS company_name, c.client_type AS company_client_type,
                        ' . ($fac ? InspectionCoverage::facility() : 'i.facility_id') . ' AS facility_id,
                        f.name AS facility_name,
@@ -211,8 +212,11 @@ final class InspectionController
             }
         }
         $coverage = InspectionCoverage::forInspections($isAdmin ? null : $accountId, $bookIds);
+        // What the trash icon does to each row (UkonDiscard): delete / archive / none.
+        $discard = UkonDiscard::decideMany($isAdmin ? null : $accountId, $rows);
         $items = array_map(
-            static fn (array $r): array => self::withFacilities(self::shapeRow($r), $coverage, !$fac),
+            static fn (array $r): array => self::withFacilities(self::shapeRow($r), $coverage, !$fac)
+                + ['discard' => $discard[(int) $r['id']]['mode'] ?? null],
             $rows,
         );
 
@@ -420,6 +424,9 @@ final class InspectionController
         if ($row['type'] === PrehliadkaDetails::TYPE) {
             $shapedDetail['closed_before'] = self::prehliadkaClosedBefore($row);
         }
+        // What „zahodiť" does to it: 'delete' (a never-issued draft, for good),
+        // 'archive' (an issued úkon) or null (refused — the screen offers nothing).
+        $shapedDetail['discard'] = UkonDiscard::decide((int) $row['account_id'], $row)['mode'];
 
         Response::json([
             'inspection' => $shapedDetail,
@@ -997,14 +1004,22 @@ final class InspectionController
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
         MemberRights::requireDeleteUkon($existing, (int) $existing['inspector_user_id']);
 
-        // Only a prehliadka that was never closed may be discarded as a draft:
-        // a re-opened one issued records before, which would lose their source.
-        if (
-            $existing['type'] === PrehliadkaDetails::TYPE
-            && $existing['status'] === 'draft'
-            && self::prehliadkaClosedBefore($existing)
-        ) {
-            Response::error('Prehliadka už bola uzavretá, zahodiť sa nedá. Dokonči ju a uzavri znova.', 409);
+        // Owner decision of 17. 11. 2026: an issued úkon is archived (hidden,
+        // nothing removed); a draft that was never issued and that nothing was
+        // made from is deleted for good; any other draft is refused
+        // (UkonDiscard).
+        $decision = UkonDiscard::decide($scopeAccountId, $existing);
+        if ($decision['mode'] === null) {
+            Response::error((string) $decision['reason'], 409);
+        }
+        if ($decision['mode'] === UkonDiscard::DELETE) {
+            try {
+                UkonDiscard::delete($scopeAccountId, $existing);
+            } catch (\RuntimeException) {
+                // Issued, reopened or followed up between the check and the lock.
+                Response::error(UkonDiscard::REFUSE_MADE_FROM, 409);
+            }
+            Response::noContent();
         }
 
         Db::pdo()->prepare(
@@ -1024,25 +1039,7 @@ final class InspectionController
      */
     private static function prehliadkaClosedBefore(array $row): bool
     {
-        if (($row['status'] ?? '') === 'finalized') {
-            return true;
-        }
-        $id = (int) $row['id'];
-        $audit = Db::pdo()->prepare(
-            "SELECT 1 FROM audit_log
-             WHERE  target_type = 'inspections' AND target_id = ?
-               AND  action IN ('prehliadka.close', 'inspection.unlock')
-             LIMIT  1"
-        );
-        $audit->execute([$id]);
-        if ($audit->fetchColumn() !== false) {
-            return true;
-        }
-        $issued = Db::pdo()->prepare(
-            'SELECT 1 FROM inspections WHERE account_id = ? AND source_inspection_id = ? LIMIT 1'
-        );
-        $issued->execute([(int) $row['account_id'], $id]);
-        return $issued->fetchColumn() !== false;
+        return UkonDiscard::prehliadkaClosedBefore($row);
     }
 
     /**

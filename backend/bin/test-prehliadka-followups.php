@@ -17,7 +17,10 @@ declare(strict_types=1);
  *   4. the review of round 1: what a concept does with a carried result, the
  *      tlaková skúška hadíc rows of the checklist and of the follow-up button,
  *      the recorded origin, which drafts the completeness check holds back,
- *      and the carried positions when items are deleted.
+ *      and the carried positions when items are deleted;
+ *   5. round 3: the completeness rule for follow-ups of other types and for old
+ *      Opakovať drafts, and what discarding an úkon does — a never-issued draft
+ *      deleted for good, an issued úkon archived, the rest refused.
  *
  *     docker compose exec php php bin/test-prehliadka-followups.php
  *
@@ -39,6 +42,7 @@ use Firol\Support\FacilityDevices;
 use Firol\Support\PrehliadkaChecklist;
 use Firol\Support\PrehliadkaConcepts;
 use Firol\Support\PrehliadkaDefects;
+use Firol\Support\UkonDiscard;
 
 if (($_ENV['APP_ENV'] ?? getenv('APP_ENV') ?: '') === 'production') {
     fwrite(STDERR, "Refusing to run in production.\n");
@@ -387,13 +391,28 @@ try {
     $expect('4 a BOZP type records no origin', $origin->invoke(null, $accountId, 'rebriky', $lastTs, 2), null);
     $expect('4 nothing carried, no origin', $origin->invoke(null, $accountId, 'hydranty', $lastTs, 0), null);
 
-    // D — which drafts the completeness check holds back (CarryOver::checksCompleteness).
+    // D — which drafts the completeness check holds back (CarryOver::checksCompleteness,
+    // rounds 2 and 3).
     $carriedDetails = [PrehliadkaChecklist::CARRIED_FROM_KEY => null, PrehliadkaChecklist::CARRIED_POSITIONS_KEY => [1]];
-    $expect('4 checked: a fire draft with a recorded origin', CarryOver::checksCompleteness('hydranty', $carriedDetails), true);
-    $expect('4 checked: a concept of any type', CarryOver::checksCompleteness('rebriky', [PrehliadkaConcepts::KEY => 5]), true);
-    $expect('4 not checked: a draft typed through the forms or imported', CarryOver::checksCompleteness('hydranty', null), false);
-    $expect('4 not checked: an unlocked protocol without an origin', CarryOver::checksCompleteness('php', ['some' => 'header']), false);
-    $expect('4 not checked: a BOZP draft with an origin key', CarryOver::checksCompleteness('rebriky', $carriedDetails), false);
+    $row = static fn (string $type, ?array $details, ?int $from = null, int $issued = 0): array => [
+        'type' => $type, 'status' => 'draft', 'details' => $details, 'carried_over_from_id' => $from, 'issued_before' => $issued,
+    ];
+    $expect('4 checked: a fire draft with a recorded origin', CarryOver::checksCompleteness($row('hydranty', $carriedDetails)), true);
+    $expect('4 checked: a concept of any type', CarryOver::checksCompleteness($row('rebriky', [PrehliadkaConcepts::KEY => 5])), true);
+    $expect('4 not checked: a draft typed through the forms or imported', CarryOver::checksCompleteness($row('hydranty', null)), false);
+    $expect('4 not checked: an unlocked protocol without an origin', CarryOver::checksCompleteness($row('php', ['some' => 'header'])), false);
+    // Round 3, A1.
+    $expect('5 checked: an oprava follow-up with a recorded origin', CarryOver::checksCompleteness($row('oprava_ts_php', $carriedDetails)), true);
+    $expect('5 checked: a vyradenie follow-up with a recorded origin', CarryOver::checksCompleteness($row('vyradenie', $carriedDetails)), true);
+    $expect('5 checked: an Opakovať draft from before round 1 (no origin key, never issued)',
+        CarryOver::checksCompleteness($row('php', null, 468)), true);
+    $expect('5 not checked: an unlocked old protocol (carried_over_from_id, issued_contractor)',
+        CarryOver::checksCompleteness($row('php', ['issued_contractor' => ['name' => 'X']], 455)), false);
+    $expect('5 not checked: an unlocked old protocol (carried_over_from_id, issued_before)',
+        CarryOver::checksCompleteness($row('php', null, 455, 1)), false);
+    $expect('5 the oprava follow-up refuses a missing Rok výroby',
+        PrehliadkaConcepts::incompleteItems('oprava_ts_php', [['id' => 1, 'position' => 1, 'fields' => ['manufacturer' => 'Hasma', 'type' => 'P6', 'serial' => 'X1', 'year' => null, 'location' => 'Sklad']]])[0]['missing'] ?? null,
+        ['Rok výroby']);
 
     // E — carried positions follow deletes (PrehliadkaChecklist::dropCarriedPosition).
     $rep = $ukon($f4, 'hydranty', '2026-11-17', 'draft', [PrehliadkaChecklist::CARRIED_FROM_KEY => null, PrehliadkaChecklist::CARRIED_POSITIONS_KEY => [1, 2, 3, 4, 5]]);
@@ -405,6 +424,52 @@ try {
     $plain = $ukon($f4, 'hydranty', '2026-11-17', 'draft');
     PrehliadkaChecklist::dropCarriedPosition($pdo, $plain, 1);
     $expect('4 a draft without a list is left alone', $pdo->query('SELECT details FROM inspections WHERE id = ' . $plain)->fetchColumn(), null);
+
+    // ── Part 5 — discarding an úkon (owner decision of 17. 11. 2026) ─────────
+    $f5 = $newFacility('Zahodiť');
+    $load = static fn (int $id): array => (array) $pdo->query(
+        'SELECT id, account_id, type, status, details, issued_before, source_inspection_id FROM inspections WHERE id = ' . $id
+    )->fetch(PDO::FETCH_ASSOC);
+    $mode = static fn (int $id): array => UkonDiscard::decide($accountId, $load($id));
+
+    $typed = $ukon($f5, 'hydranty', '2026-11-17', 'draft');
+    $expect('5 a draft never issued is deleted for good', $mode($typed)['mode'], UkonDiscard::DELETE);
+    $issued = $ukon($f5, 'hydranty', '2026-11-17', 'finalized');
+    $expect('5 an issued úkon is archived', $mode($issued)['mode'], UkonDiscard::ARCHIVE);
+
+    $unlocked = $ukon($f5, 'php', '2026-11-17', 'draft');
+    $pdo->exec('UPDATE inspections SET issued_before = 1 WHERE id = ' . $unlocked);
+    $expect('5 refused: a draft opened again with „Upraviť" (issued_before)', $mode($unlocked), ['mode' => null, 'reason' => UkonDiscard::REFUSE_ISSUED]);
+    $snap = $ukon($f5, 'php', '2026-11-17', 'draft', ['issued_contractor' => ['name' => 'X']]);
+    $expect('5 refused: a draft with the issue-time snapshot', $mode($snap)['mode'], null);
+    $blank = $ukon($f5, 'dychova_skuska', '2026-11-17', 'draft');
+    $pdo->prepare("INSERT INTO documents (account_id, parent_type, parent_id, type, number, form_variant, file_path) VALUES (?, 'inspection', ?, 'dychova_skuska', ?, 'prazdny', 'x.pdf')")
+        ->execute([$accountId, $blank, 'R3-T-' . $blank]);
+    $expect('5 refused: a test reopened with „Doplniť výsledky" (live document)', $mode($blank)['mode'], null);
+
+    $withTask = $ukon($f5, 'hydranty', '2026-11-17', 'draft');
+    $task->execute([$accountId, 'Úloha', $companyId, $f5, null, 0, $withTask, null, $userId]);
+    $expect('5 refused: a draft a task was made from', $mode($withTask), ['mode' => null, 'reason' => UkonDiscard::REFUSE_MADE_FROM]);
+    $withFollowUp = $ukon($f5, 'php', '2026-11-17', 'draft');
+    $child = $ukon($f5, 'oprava_ts_php', '2026-11-17', 'draft');
+    $pdo->exec("UPDATE inspections SET source_inspection_id = $withFollowUp WHERE id = $child");
+    $expect('5 refused: a draft a follow-up was made from', $mode($withFollowUp)['mode'], null);
+    $expect('5 … the follow-up itself may be deleted', $mode($child)['mode'], UkonDiscard::DELETE);
+
+    $openPp = $prehliadka($f5, '2026-11-17', 'draft');
+    $expect('5 a prehliadka never closed is deleted for good', $mode($openPp)['mode'], UkonDiscard::DELETE);
+    $reopened = $prehliadka($f5, '2026-11-17', 'draft');
+    $bozp = $ukon($f5, 'kniha_bozp', '2026-11-17', 'draft');
+    $pdo->exec("UPDATE inspections SET source_inspection_id = $reopened WHERE id = $bozp");
+    $expect('5 refused: a reopened prehliadka (its BOZP record exists)', $mode($reopened), ['mode' => null, 'reason' => UkonDiscard::REFUSE_PREHLIADKA_CLOSED]);
+    $expect('5 refused: the kniha BOZP record of a prehliadka on its own', $mode($bozp), ['mode' => null, 'reason' => UkonDiscard::REFUSE_BOZP_CHILD]);
+    $expect('5 the reopened prehliadka counts as closed before', UkonDiscard::prehliadkaClosedBefore($load($reopened)), true);
+    $expect('5 the open one does not', UkonDiscard::prehliadkaClosedBefore($load($openPp)), false);
+
+    $many = UkonDiscard::decideMany($accountId, [$load($typed), $load($issued), $load($withTask)]);
+    $expect('5 the list decides every row at once', [$many[$typed]['mode'], $many[$issued]['mode'], $many[$withTask]['mode']],
+        [UkonDiscard::DELETE, UkonDiscard::ARCHIVE, null]);
+    $expect('5 another account sees nothing to delete', UkonDiscard::decideMany($otherAccountId, [$load($typed)])[$typed]['mode'], null);
 } finally {
     $pdo->rollBack();
 }

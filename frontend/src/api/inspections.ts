@@ -72,8 +72,18 @@ export type InspectionStatus = 'draft' | 'finalized';
  * Chapter 22 — fakturácia úkonu (`billing_mode`, `invoiced`, `invoiced_at`,
  * `billing_note`) rides along on every row; see api/invoicing.ts.
  */
+export type DiscardMode = 'delete' | 'archive';
+
 export type InspectionListItem = InvoicingFields & {
   id: number;
+  /**
+   * What „zahodiť" / the trash icon does to the úkon (17. 11. 2026): `delete`
+   * — a draft never issued, deleted for good; `archive` — an issued úkon,
+   * hidden from the lists with its protocol kept; null — refused (issued
+   * before, something was made from it), no button. Absent on rows cached
+   * before the field existed and on offline-created drafts.
+   */
+  discard?: DiscardMode | null;
   type: InspectionType;
   /**
    * Periodicity as chosen for THIS úkon (chapter 5) — value plus unit, both
@@ -580,8 +590,18 @@ export const Inspections = {
       body,
       csrfToken,
     }),
-  archive: (id: number, csrfToken: string | null) =>
-    api<void>(`/api/inspections/${id}`, { method: 'DELETE', csrfToken, label: 'Odstránenie úkonu' }),
+  /**
+   * „Zahodiť" — deletes a never-issued draft for good, archives an issued úkon
+   * (the server decides, see `discard`). A permanent delete never waits in the
+   * offline queue: pass `requireOnline` for a draft.
+   */
+  archive: (id: number, csrfToken: string | null, opts: { requireOnline?: boolean } = {}) =>
+    api<void>(`/api/inspections/${id}`, {
+      method: 'DELETE',
+      csrfToken,
+      label: 'Archivovanie úkonu',
+      requireOnline: opts.requireOnline,
+    }),
 
   /**
    * Create (or return the existing) pre-filled follow-up draft from this

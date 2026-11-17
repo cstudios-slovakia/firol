@@ -61,6 +61,14 @@ import { PendingSyncBanner } from "@/components/PendingSyncBanner";
 import { DiscardPrehliadkaButton, useDiscardPrehliadka } from "@/components/prehliadka/DiscardPrehliadka";
 import { InspectionTags } from "@/components/InspectionTags";
 import { useMemberRights } from "@/auth/useMemberRights";
+import {
+    DISCARD_DIALOG,
+    discardDoneMessage,
+    discardErrorMessage,
+    discardModeOf,
+    discardUkon,
+    type DiscardMode,
+} from "@/lib/discard";
 import { clientNouns, clientTypeStyles, facilityNouns, isBytoveDruzstvo } from "@/lib/clientKind";
 
 export function FacilityDetailPage() {
@@ -79,7 +87,7 @@ export function FacilityDetailPage() {
     const [trainings, setTrainings] = useState<TrainingListItem[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [repeatingId, setRepeatingId] = useState<number | null>(null);
-    const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+    const [pendingDelete, setPendingDelete] = useState<{ id: number; mode: DiscardMode } | null>(null);
     const [deleting, setDeleting] = useState(false);
     const [pendingDeleteTrainingId, setPendingDeleteTrainingId] = useState<number | null>(null);
     const [deletingTraining, setDeletingTraining] = useState(false);
@@ -132,15 +140,16 @@ export function FacilityDetailPage() {
     }
 
     async function handleDelete() {
-        if (pendingDeleteId === null) return;
+        if (pendingDelete === null) return;
+        const { id, mode } = pendingDelete;
         setDeleting(true);
         try {
-            await Inspections.archive(pendingDeleteId, csrfToken);
-            setInspections((prev) => prev?.filter((i) => i.id !== pendingDeleteId) ?? null);
-            setPendingDeleteId(null);
-            toast.success("Kontrola odstránená");
+            const outcome = await discardUkon(id, mode, csrfToken);
+            setInspections((prev) => prev?.filter((i) => i.id !== id) ?? null);
+            setPendingDelete(null);
+            toast.success(discardDoneMessage(mode, outcome));
         } catch (err) {
-            toast.error(err instanceof ApiError ? err.message : "Nepodarilo sa odstrániť kontrolu.");
+            toast.error(discardErrorMessage(err, mode));
         } finally {
             setDeleting(false);
         }
@@ -726,12 +735,12 @@ export function FacilityDetailPage() {
                                                 >
                                                     <Edit2 className="size-4" />
                                                 </Link>
-                                                {canDeleteUkon(ins, ins.inspector_user_id) && (
+                                                {discardModeOf(ins) !== null && canDeleteUkon(ins, ins.inspector_user_id) && (
                                                     <button
                                                         type="button"
-                                                        title="Odstrániť"
-                                                        aria-label="Odstrániť"
-                                                        onClick={() => setPendingDeleteId(ins.id)}
+                                                        title={discardModeOf(ins) === "delete" ? "Natrvalo zmazať" : "Archivovať"}
+                                                        aria-label={discardModeOf(ins) === "delete" ? "Natrvalo zmazať" : "Archivovať"}
+                                                        onClick={() => setPendingDelete({ id: ins.id, mode: discardModeOf(ins) as DiscardMode })}
                                                         className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
                                                     >
                                                         <Trash2 className="size-4" />
@@ -902,17 +911,17 @@ export function FacilityDetailPage() {
             )}
 
             <Dialog
-                open={pendingDeleteId !== null}
-                onClose={() => { if (!deleting) setPendingDeleteId(null); }}
-                title="Odstrániť kontrolu?"
-                description="Táto akcia je nevratná. Kontrola bude trvalo odstránená spolu so všetkými položkami."
+                open={pendingDelete !== null}
+                onClose={() => { if (!deleting) setPendingDelete(null); }}
+                title={pendingDelete ? DISCARD_DIALOG[pendingDelete.mode].title : ""}
+                description={pendingDelete ? DISCARD_DIALOG[pendingDelete.mode].description : ""}
                 dismissible={!deleting}
             >
                 <div className="flex justify-end gap-2">
                     <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setPendingDeleteId(null)}
+                        onClick={() => setPendingDelete(null)}
                         disabled={deleting}
                     >
                         Zrušiť
@@ -923,7 +932,7 @@ export function FacilityDetailPage() {
                         loading={deleting}
                         onClick={handleDelete}
                     >
-                        Odstrániť
+                        {pendingDelete ? DISCARD_DIALOG[pendingDelete.mode].confirmLabel : ""}
                     </Button>
                 </div>
             </Dialog>

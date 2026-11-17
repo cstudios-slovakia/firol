@@ -153,6 +153,16 @@ final class Storage
         self::removeTree(self::root() . "/photos/$accountId");
     }
 
+    /**
+     * Delete one úkon's photo folder — a never-issued draft discarded for good
+     * (round 3 of the fix list of 16. 11. 2026). No photo file is shared
+     * between úkony, so the whole folder goes.
+     */
+    public static function purgeInspectionPhotos(int $accountId, int $inspectionId): void
+    {
+        self::removeTree(self::photoDir($accountId, $inspectionId));
+    }
+
     private static function removeTree(string $dir): void
     {
         if (!is_dir($dir)) {

@@ -138,7 +138,13 @@ export function OfflineIndicator() {
                         {m.attempts > 0 && ` · ${m.attempts} pokus${m.attempts > 1 ? 'y' : ''}`}
                       </div>
                       {m.lastError && (
-                        <div className="mt-1 text-[11px] text-red-700">{m.lastError}</div>
+                        <div className="mt-1 text-[11px] text-red-700">
+                          {m.lastError}
+                          {/* A zmena of an úkon or item that no longer exists — a discarded
+                              draft is deleted for good (17. 11. 2026); retrying cannot help. */}
+                          {m.lastStatus === 404 &&
+                            ' Úkon alebo položku medzitým niekto zmazal, zmenu už nie je kam uložiť — zahoď ju.'}
+                        </div>
                       )}
                     </div>
                     <div className="flex shrink-0 gap-1">

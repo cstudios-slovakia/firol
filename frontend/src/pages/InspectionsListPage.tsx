@@ -42,6 +42,14 @@ import { Pagination } from "@/components/ui/Pagination";
 import { SkeletonList } from "@/components/ui/Skeleton";
 import { Spinner } from "@/components/ui/Spinner";
 import { InvoiceTickButton } from "@/components/InvoicingBlock";
+import {
+    DISCARD_DIALOG,
+    discardDoneMessage,
+    discardErrorMessage,
+    discardModeOf,
+    discardUkon,
+    type DiscardMode,
+} from "@/lib/discard";
 import { useMemberRights } from "@/auth/useMemberRights";
 import {
     UNINVOICED_LABEL,
@@ -135,7 +143,7 @@ export function InspectionsListPage({
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState<InspectionType | "">("");
     const [statusFilter, setStatusFilter] = useState<GroupKey | "">("");
-    const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+    const [pendingDelete, setPendingDelete] = useState<{ id: number; mode: DiscardMode } | null>(null);
     const [deleting, setDeleting] = useState(false);
     const [repeatingId, setRepeatingId] = useState<number | null>(null);
     const [page, setPage] = useState(1);
@@ -324,21 +332,16 @@ export function InspectionsListPage({
     }, [grouped, pageIds]);
 
     async function handleDelete() {
-        if (pendingDeleteId === null) return;
+        if (pendingDelete === null) return;
+        const { id, mode } = pendingDelete;
         setDeleting(true);
         try {
-            await Inspections.archive(pendingDeleteId, csrfToken);
-            setAllItems(
-                (prev) => prev?.filter((i) => i.id !== pendingDeleteId) ?? null,
-            );
-            setPendingDeleteId(null);
-            toast.success("Kontrola odstránená");
+            const outcome = await discardUkon(id, mode, csrfToken);
+            setAllItems((prev) => prev?.filter((i) => i.id !== id) ?? null);
+            setPendingDelete(null);
+            toast.success(discardDoneMessage(mode, outcome));
         } catch (err) {
-            toast.error(
-                err instanceof ApiError
-                    ? err.message
-                    : "Nepodarilo sa odstrániť kontrolu.",
-            );
+            toast.error(discardErrorMessage(err, mode));
         } finally {
             setDeleting(false);
         }
@@ -574,7 +577,7 @@ export function InspectionsListPage({
                                     <ul className="flex flex-col gap-2">
                                         {pagedGroups[key].map((it) => (
                                             <li key={it.id}>
-                                                <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} onInvoiced={uninvoicedOnly ? handleInvoiced : undefined} />
+                                                <InspectionRow it={it} onDelete={(id, mode) => setPendingDelete({ id, mode })} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} onInvoiced={uninvoicedOnly ? handleInvoiced : undefined} />
                                             </li>
                                         ))}
                                     </ul>
@@ -593,19 +596,19 @@ export function InspectionsListPage({
             )}
 
             <Dialog
-                open={pendingDeleteId !== null}
+                open={pendingDelete !== null}
                 onClose={() => {
-                    if (!deleting) setPendingDeleteId(null);
+                    if (!deleting) setPendingDelete(null);
                 }}
-                title="Odstrániť kontrolu?"
-                description="Táto akcia je nevratná. Kontrola bude trvalo odstránená spolu so všetkými položkami."
+                title={pendingDelete ? DISCARD_DIALOG[pendingDelete.mode].title : ""}
+                description={pendingDelete ? DISCARD_DIALOG[pendingDelete.mode].description : ""}
                 dismissible={!deleting}
             >
                 <div className="flex justify-end gap-2">
                     <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setPendingDeleteId(null)}
+                        onClick={() => setPendingDelete(null)}
                         disabled={deleting}
                     >
                         Zrušiť
@@ -616,7 +619,7 @@ export function InspectionsListPage({
                         loading={deleting}
                         onClick={handleDelete}
                     >
-                        Odstrániť
+                        {pendingDelete ? DISCARD_DIALOG[pendingDelete.mode].confirmLabel : ""}
                     </Button>
                 </div>
             </Dialog>
@@ -633,7 +636,7 @@ function InspectionRow({
     onInvoiced,
 }: {
     it: InspectionListItem;
-    onDelete: (id: number) => void;
+    onDelete: (id: number, mode: DiscardMode) => void;
     onRepeat: (id: number) => void;
     repeatingId: number | null;
     isReadOnly: boolean;
@@ -642,6 +645,7 @@ function InspectionRow({
 }) {
     const isRepeating = repeatingId === it.id;
     const { canDeleteUkon } = useMemberRights();
+    const discardMode = discardModeOf(it);
 
     const actions = isReadOnly ? null : (
         <>
@@ -670,11 +674,11 @@ function InspectionRow({
             >
                 <Edit2 className="size-4" />
             </Link>
-            {canDeleteUkon(it, it.inspector_user_id) && (
+            {discardMode !== null && canDeleteUkon(it, it.inspector_user_id) && (
                 <button
                     type="button"
-                    title="Odstrániť"
-                    onClick={() => onDelete(it.id)}
+                    title={discardMode === "delete" ? "Natrvalo zmazať" : "Archivovať"}
+                    onClick={() => onDelete(it.id, discardMode)}
                     className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
                 >
                     <Trash2 className="size-4" />
