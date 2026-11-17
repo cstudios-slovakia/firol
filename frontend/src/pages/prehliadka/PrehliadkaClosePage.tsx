@@ -43,7 +43,6 @@ import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { Chip } from '@/components/prehliadka/ui';
-import { cn } from '@/lib/cn';
 import { useDetailsSaver } from '@/pages/prehliadka/useDetailsSaver';
 
 type Loaded = {
@@ -137,7 +136,6 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
   const canEdit = i.status === 'draft' && !isReadOnly;
 
   const [closing, setClosing] = useState(false);
-  const [signedOnScreen, setSignedOnScreen] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
   // Closing reads the prehliadka on the server, so what is still waiting in the
   // outbox (defects, photos, the answers saved here) has to get there first.
@@ -384,26 +382,6 @@ function CloseForm({ id, loaded }: { id: number; loaded: Loaded }) {
           </div>
         )}
 
-        <div className="mt-1">
-          <label className="text-xs font-semibold uppercase tracking-wide text-ink-500">Podpis na displeji</label>
-          <button
-            type="button"
-            disabled={!canEdit}
-            onClick={() => setSignedOnScreen((s) => !s)}
-            className={cn(
-              'mt-1.5 flex h-24 w-full items-center justify-center rounded-2xl border text-sm transition-all',
-              signedOnScreen
-                ? 'border-[#BFE0CB] bg-[var(--color-status-ok-bg)] font-semibold text-status-ok'
-                : 'border-dashed border-ink-300 bg-white text-ink-500 hover:border-firol-400 hover:text-firol-700',
-            )}
-          >
-            {signedOnScreen ? '✓ Pripravené na podpis' : 'Vytlačiť a dať podpísať (alebo klikni pre podpis na displeji)'}
-          </button>
-        </div>
-
-        <p className="text-xs text-ink-400">
-          Podpisuje vedúci zamestnanec organizačnej zložky aj ten, kto zápis vyhotovil.
-        </p>
       </Card>
 
       <div className="flex flex-col gap-2">

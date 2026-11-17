@@ -3,6 +3,7 @@ import {
 } from 'react';
 import { Eraser } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { mirror, splinePiece, type StrokePoint } from '@/lib/strokeSpline';
 
 export type SignaturePadHandle = {
   /** True when the user has actually drawn something. */
@@ -27,7 +28,7 @@ type Props = {
   onEmptyChange?: (empty: boolean) => void;
 };
 
-type Point = { x: number; y: number };
+type Point = StrokePoint;
 
 /** Stroke width in CSS pixels — reads like a ballpoint once the PNG is printed small. */
 const LINE_WIDTH = 2.5;
@@ -35,20 +36,22 @@ const LINE_WIDTH = 2.5;
 /** Samples closer than this (CSS px) to the previous one add only jitter. */
 const MIN_STEP = 0.75;
 
-function mid(a: Point, b: Point): Point {
-  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-}
+/** Browsers that deliver pointer samples as they arrive, not once per frame (Chromium). */
+const HAS_RAW_UPDATE = typeof window !== 'undefined' && 'onpointerrawupdate' in window;
 
 /**
  * Touchscreen + mouse signature capture. Single canvas with PointerEvent
  * handlers so touch and mouse share one code path. The element auto-
  * resizes for HiDPI displays so the exported PNG is sharp on retina.
  *
- * Every sample the browser has is used — it batches moves to one event per
- * frame and hands the rest over as coalesced events — and the line runs
- * from midpoint to midpoint with the sample between them as the curve's
- * control point. Consecutive pieces share their end points and tangents, so
- * a stroke is one continuous smooth line however sparse the samples are.
+ * Every sample the browser has is used: `pointerrawupdate` where it exists
+ * (samples as they arrive instead of one per frame), and the coalesced
+ * events of each move. The line is a centripetal Catmull–Rom spline through
+ * the samples ({@link splinePiece}), subdivided into chords of 2 px at most,
+ * so a fast stroke whose samples are 20–40 px apart — or a browser without
+ * coalesced events — still draws one smooth curve through every sample
+ * rather than straight pieces. A piece is drawn once the sample after it is
+ * known (its tangent needs it); the last piece is drawn on lift.
  */
 export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function SignaturePad(
   { className, heightPx = 180, color = '#1a1a1f', onEmptyChange },
@@ -132,32 +135,66 @@ export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function Signa
     return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
   }
 
-  /** Append one sample and draw the piece of line it completes. */
-  function addPoint(p: Point) {
+  /** Stroke the spline piece from `p1` to `p2`. */
+  function drawPiece(p0: Point, p1: Point, p2: Point, p3: Point) {
     const ctx = ctxRef.current;
+    if (!ctx) return;
+    const path = splinePiece(p0, p1, p2, p3);
+    ctx.beginPath();
+    ctx.moveTo(path[0].x, path[0].y);
+    for (let k = 1; k < path.length; k++) ctx.lineTo(path[k].x, path[k].y);
+    ctx.stroke();
+  }
+
+  /**
+   * Append one sample and draw the piece it completes: with samples
+   * … a, b, c, p the piece b → c is drawn now, its tangent at c taken from p.
+   */
+  function addPoint(p: Point) {
     const pts = pointsRef.current;
     const last = pts[pts.length - 1];
-    if (!ctx || !last) return;
+    if (!ctxRef.current || !last) return;
     if (Math.hypot(p.x - last.x, p.y - last.y) < MIN_STEP) return;
 
     pts.push(p);
-    if (pts.length > 3) pts.shift();
-
-    ctx.beginPath();
-    if (pts.length === 2) {
-      // Opening piece: from the touch-down point to the first midpoint.
-      const m = mid(pts[0], pts[1]);
-      ctx.moveTo(pts[0].x, pts[0].y);
-      ctx.lineTo(m.x, m.y);
-    } else {
-      const [a, b, c] = pts;
-      const from = mid(a, b);
-      const to = mid(b, c);
-      ctx.moveTo(from.x, from.y);
-      ctx.quadraticCurveTo(b.x, b.y, to.x, to.y);
+    const n = pts.length;
+    if (n >= 3) {
+      const b = pts[n - 3];
+      const c = pts[n - 2];
+      // The stroke's first piece has nothing before it: a phantom mirrors c over b.
+      const a = n >= 4 ? pts[n - 4] : mirror(b, c);
+      drawPiece(a, b, c, p);
     }
-    ctx.stroke();
+    if (pts.length > 3) pts.shift();
   }
+
+  /** The samples of one pointer event: its coalesced ones when the browser has them. */
+  function samplesOf(native: PointerEvent): PointerEvent[] {
+    const coalesced = typeof native.getCoalescedEvents === 'function'
+      ? native.getCoalescedEvents()
+      : [];
+    return coalesced.length > 0 ? coalesced : [native];
+  }
+
+  function takeSamples(native: PointerEvent, canvas: HTMLCanvasElement) {
+    if (native.pointerId !== pointerRef.current) return;
+    const rect = canvas.getBoundingClientRect();
+    for (const s of samplesOf(native)) addPoint(localPoint(s, rect));
+  }
+
+  // Where the browser has pointerrawupdate, the samples come from it (as they
+  // arrive) and pointermove is ignored, so no sample is taken twice. React has
+  // no prop for the event, hence the native listener; the handler reads refs
+  // only, through a ref that always points at the current render's function.
+  const takeSamplesRef = useRef(takeSamples);
+  takeSamplesRef.current = takeSamples;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !HAS_RAW_UPDATE) return;
+    const onRaw = (ev: Event) => takeSamplesRef.current(ev as PointerEvent, canvas);
+    canvas.addEventListener('pointerrawupdate', onRaw);
+    return () => canvas.removeEventListener('pointerrawupdate', onRaw);
+  }, []);
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     const ctx = ctxRef.current;
@@ -178,31 +215,20 @@ export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function Signa
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (e.pointerId !== pointerRef.current) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const native = e.nativeEvent;
-    // Coalesced events are every sample since the last dispatched move;
-    // browsers without them (older Safari) give just this event.
-    const coalesced = typeof native.getCoalescedEvents === 'function'
-      ? native.getCoalescedEvents()
-      : [];
-    const samples = coalesced.length > 0 ? coalesced : [native];
-    for (const s of samples) addPoint(localPoint(s, rect));
+    if (HAS_RAW_UPDATE) return; // taken from pointerrawupdate instead
+    takeSamples(e.nativeEvent, e.currentTarget);
   }
 
   function endStroke(e: React.PointerEvent<HTMLCanvasElement>) {
     if (e.pointerId !== pointerRef.current) return;
-    const ctx = ctxRef.current;
     const pts = pointsRef.current;
-    if (ctx && pts.length >= 2) {
-      // Closing piece: from the last midpoint to where the pointer lifted.
-      const b = pts[pts.length - 2];
-      const c = pts[pts.length - 1];
-      const m = mid(b, c);
-      ctx.beginPath();
-      ctx.moveTo(m.x, m.y);
-      ctx.lineTo(c.x, c.y);
-      ctx.stroke();
+    const n = pts.length;
+    if (ctxRef.current && n >= 2) {
+      // Closing piece: up to where the pointer lifted, with a phantom after it.
+      const b = pts[n - 2];
+      const c = pts[n - 1];
+      const a = n >= 3 ? pts[n - 3] : mirror(b, c);
+      drawPiece(a, b, c, mirror(c, b));
     }
     pointerRef.current = null;
     pointsRef.current = [];
