@@ -10,28 +10,22 @@ namespace Firol\Idoklad;
  * process (~1 h lifetime, so a single PHP-FPM worker doesn't re-auth
  * on every webhook).
  *
- * iDoklad has no sandbox — the real API is the only one. We protect
- * dev/staging environments by routing every IssuedInvoice through
- * Draft mode (status=4 in iDoklad lingo) when IDOKLAD_DRAFT_MODE=true.
- * Drafts don't burn document numbers and don't get sent to clients.
+ * iDoklad has no sandbox — the real API is the only one, and every POST of
+ * an IssuedInvoice creates a real, numbered invoice. This client has no draft
+ * mode. Dev/staging is protected one level up: IssuePolicy decides whether
+ * InvoiceIssuer may call this client at all (outside production it only
+ * prepares the payload by default, and test-mode Stripe invoices are never
+ * sent).
  *
  * Docs: https://api.idoklad.cz/Help/v3/cs/
  */
-final class IDokladClient
+final class IDokladClient implements IDokladApi
 {
     /**
      * @see https://api.idoklad.cz/Help/v3/cs/    Authorization section.
      */
     private const TOKEN_URL = 'https://identity.idoklad.cz/server/connect/token';
     private const API_BASE  = 'https://api.idoklad.cz/v3';
-
-    /**
-     * iDoklad invoice status codes from the IssuedInvoiceStatus enum.
-     * 0 = New, 1 = Issued, 4 = Draft, etc. We only ever set Draft or
-     * leave Stripe-side default (Issued).
-     */
-    public const STATUS_ISSUED = 1;
-    public const STATUS_DRAFT  = 4;
 
     private static ?string $cachedToken = null;
     private static int     $cachedTokenExpiresAt = 0;
@@ -55,12 +49,6 @@ final class IDokladClient
     {
         return ($_ENV['IDOKLAD_CLIENT_ID'] ?? '') !== ''
             && ($_ENV['IDOKLAD_CLIENT_SECRET'] ?? '') !== '';
-    }
-
-    public static function isDraftMode(): bool
-    {
-        $v = strtolower((string) ($_ENV['IDOKLAD_DRAFT_MODE'] ?? 'true'));
-        return in_array($v, ['1', 'true', 'yes'], true);
     }
 
     /**
@@ -108,7 +96,10 @@ final class IDokladClient
         curl_close($ch);
 
         if ($body === '' && $err !== '') {
-            throw new \RuntimeException("iDoklad transport error: $err");
+            throw new IDokladTransportException("iDoklad transport error: $err");
+        }
+        if ($status === 0 || $status >= 500) {
+            throw new IDokladTransportException("iDoklad $method $path failed: HTTP $status — $body");
         }
         if ($status < 200 || $status >= 300) {
             throw new \RuntimeException("iDoklad $method $path failed: HTTP $status — $body");
