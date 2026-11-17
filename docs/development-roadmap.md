@@ -1648,7 +1648,8 @@ trip) is tracked in the hand-back report to the owner, not here.
 **Customer decisions (13. 11. 2026):**
 - The concepts checklist lists the routine concepts plus the follow-ups.
 - Oprava / vyradenie devices come from today's PHP check.
-- A result is carried from the last protocol only for TS hadíc.
+- ~~A result is carried from the last protocol only for TS hadíc.~~ Reversed by the fix list of
+  16. 11. 2026: every fire-protection type carries its values and result (see below).
 - Protocols carry the prehliadka date, editable.
 - The catalogue counter stays as it is.
 - Company-wide trainings in Priložiť záznamy form one group headed „Celá organizácia" (not „Celá
@@ -1674,6 +1675,61 @@ trip) is tracked in the hand-back report to the owner, not here.
   the month's end, PHP rolls over); the book screens use the server rule.
 - ⏸ Discarding a book entry or a prehliadka is the usual soft archive: items and photos stay with
   the archived row.
+
+### Fix list of 16. 11. 2026 (`POapp_opravy_2026-11-16.pdf`) — ✅ built
+
+Five points, tested by FIROL on the staging server. Issued documents are untouched; everything
+applies to new drafts and newly generated PDFs.
+
+**1. Values and result travel with the items** (fire-protection types only: PHP, hydranty,
+tlaková skúška hadíc, požiarne uzávery — akcieschopnosť and údržba, núdzové osvetlenie).
+- The rule „stav a výsledok sa neprenáša" (BOZP block spec ch. 12) **no longer applies to the fire
+  types**; it still holds for the BOZP item types (rebríky, regále, pracovné prostriedky,
+  označenie, OOPP) and the person lists. Spec 12.2 of the požiarna kniha zadanie is the source:
+  „preberú sa tie isté údaje, čo tam boli predtým, vrátane výsledku".
+- `CarryOver::FULL`: Opakovať, „Prevziať položky", the concepts of a closed prehliadka and the
+  ts_hadic follow-ups take every item field of the last finalized protocol of the same kind at the
+  prevádzka — identification, measured values, result / stav, defects / notes / vykonané práce.
+  No `previous_status` badge for these types (it would only repeat the carried value).
+- Concepts: a device named in an open defect of today's prehliadka still gets nevyhovuje (PHP `O`)
+  and the defect text; a carried device without a defect keeps what it carried; a new device (or a
+  carried item whose result was empty) gets the passing result as before.
+- ts_hadic: Opakovať, the checklist and the follow-up button on the hydranty úkon all take values
+  and result from the last ts_hadic protocol (`PrehliadkaChecklist::tsHadicRows()`); a hose with
+  no match, or no earlier protocol, stays blank and its result is not presumed.
+- Origin: Opakovať and „Prevziať položky" record `carried_from` / `carried_positions` like the
+  concepts; the úkon's summary shows „Položky prevzaté z protokolu č. … zo dňa …". The summary
+  rows show every value (núdzové osvetlenie now shows the trvanie, údržba the výrobca).
+- Completeness at generate for every draft of the six fire types (the concepts' `missingFields`
+  rule); the summary marks the items („Chýba: …") and „Generovať" is blocked until they are filled.
+  Issued úkony are never generated again, so imports and old-format records are not affected.
+- An item form opened on an item with no result / stav shows nothing picked and asks for one
+  instead of presuming „vyhovuje" / „A".
+
+**2. „Uložiť a ďalší v poradí"** — a fourth button on every item form (the eight own footers and
+the shared BOZP `ItemFormFooter`), shown while editing an item that has a next one; it saves and
+opens the next recorded item. Works when the save is queued offline. The three old buttons are
+unchanged.
+
+**3. Closing screen** — „Podpis na displeji" and the sentence under it removed from „Uzavretie
+prehliadky". Signing elsewhere is unchanged. The signature line is now a centripetal Catmull–Rom
+spline through every sample with chords of at most 2 px and `pointerrawupdate` where available
+(`lib/strokeSpline.ts`); verified with synthetic samples 14–43 px apart, **not on a real phone**.
+
+**4. Núdzové osvetlenie in the prehliadka** — cause: a svietidlo without an evidenčné číslo (optional,
+empty after an Excel import) was dropped from the device list, so step 1 saw no devices. The
+device list never drops a device now (label falls back to the typ svietidla, the umiestnenie, then
+„Svietidlo"). Step 3 lists every automatic term the record prints — also those of úkony not ticked
+today (`PrehliadkaTerms` `recorded`) — and an override of any of them reaches the printed record
+(`ClientTerms::forPrehliadka()` `$overrides`).
+
+**5. Typos and the footer** — „tej istej prevádzky a typu" (lost space), „1 podzemné" (sk3 forms),
+„Periodický záznam o stave ochrany pred požiarmi", and the software credit printed once per page:
+the page footer of `PdfRenderer` stays, the copies in the body of `ProtocolLayout::footer()` and the
+six fire templates are gone.
+
+**Check script:** `bin/test-prehliadka-followups.php` gained part 3 (carry-over and the device
+labels). Four checks of part 1 (defect tasks in Dnes) fail at `dfd76f4` already — not touched.
 
 ---
 
