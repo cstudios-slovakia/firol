@@ -30,7 +30,9 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { NextRecordedButton } from './NextRecordedButton';
 
 function isPuKind(s: unknown): s is PuKind {
   return s === 'dvere' || s === 'okno' || s === 'klapka';
@@ -42,7 +44,7 @@ function isPassFail(s: unknown): s is PassFailResult {
 /** Carried into the next uzáver by "Ďalší rovnaký" — never the identifier. */
 type PuAkSeed = { kind: PuKind; manufacturer: string };
 
-function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -50,7 +52,7 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
   const [identifier, setIdentifier] = useState('');
   const [manufacturer, setManufacturer] = useState('');
   const [location, setLocation] = useState('');
-  const [result, setResult] = useState<PassFailResult>('vyhovuje');
+  const [result, setResult] = useState<PassFailResult | ''>('vyhovuje');
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
@@ -66,7 +68,9 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
       setIdentifier(typeof f.identifier === 'string' ? f.identifier : '');
       setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
       setLocation(typeof f.location === 'string' ? f.location : '');
-      setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
+      // A result the item arrived without (a hose with no match in the last
+      // protocol) stays unpicked: it is the technician's to choose, never presumed.
+      setResult(isPassFail(f.result) ? f.result : '');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
       // "Ďalší rovnaký": carry kind + manufacturer; identifier/location fresh.
@@ -95,7 +99,7 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
 
   async function handleSubmit(
     e: FormEvent,
-    action: 'save-and-next' | 'save-and-summary',
+    action: SubmitAction,
     duplicate = false,
   ) {
     e.preventDefault();
@@ -103,6 +107,7 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
     if (!identifier.trim()) errs.identifier = 'Doplň číslo / označenie uzáveru.';
     if (!manufacturer.trim()) errs.manufacturer = 'Doplň výrobcu.';
     if (!location.trim()) errs.location = 'Doplň umiestnenie.';
+    if (!result) errs.result = 'Vyber výsledok.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
     setApiError(null);
@@ -113,7 +118,7 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
         identifier: identifier.trim(),
         manufacturer: manufacturer.trim(),
         location: location.trim(),
-        result,
+        result: result as PassFailResult,
         notes: notes.trim() || null,
       };
       const saved = await saveItemWithPhotos({
@@ -176,11 +181,11 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
           )}
         </Field>
 
-        <Field label="Výsledok kontroly" required>
+        <Field label="Výsledok kontroly" required error={fieldErrors.result}>
           {() => (
             <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Výsledok kontroly">
               {(['vyhovuje', 'nevyhovuje'] as const).map((r) => (
-                <ResultButton key={r} value={r} active={result === r} onClick={() => setResult(r)} />
+                <ResultButton key={r} value={r} active={result === r} onClick={() => { setResult(r); setFieldErrors((prev) => { const n = { ...prev }; delete n.result; return n; }); }} />
               ))}
             </div>
           )}
@@ -212,7 +217,7 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
           </p>
         )}
 
-        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
@@ -222,6 +227,10 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
             title="Uloží a predvyplní ďalší uzáver rovnakého druhu a výrobcu.">
             Ďalší rovnaký
           </Button>
+          {editing && hasNextItem && (
+            <NextRecordedButton loading={submitting}
+              onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next-recorded')} />
+          )}
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}

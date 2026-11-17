@@ -24,6 +24,7 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
 
 /**
@@ -44,7 +45,7 @@ function isCondition(v: unknown): v is OoppCondition {
   return v === 'vyhovujuci' || v === 'opotrebeny' || v === 'chyba';
 }
 
-function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -87,7 +88,7 @@ function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
     return errs;
   }
 
-  async function handleSubmit(e: FormEvent | React.SyntheticEvent, action: 'save-and-next' | 'save-and-summary') {
+  async function handleSubmit(e: FormEvent | React.SyntheticEvent, action: SubmitAction) {
     e.preventDefault();
     if (submitting) return;
     const errs = validate();
@@ -175,6 +176,7 @@ function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
         <DefectsEditor state={defects} initialPhotos={initialItem?.photos} />
 
         <ItemFormFooter
+          onNextRecorded={hasNextItem ? (e) => handleSubmit(e, 'save-and-next-recorded') : undefined}
           editing={editing}
           submitting={submitting}
           apiError={apiError}

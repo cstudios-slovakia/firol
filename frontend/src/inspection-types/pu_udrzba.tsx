@@ -30,7 +30,9 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { NextRecordedButton } from './NextRecordedButton';
 
 function isPuKind(s: unknown): s is PuKind {
   return s === 'dvere' || s === 'okno' || s === 'klapka';
@@ -46,7 +48,7 @@ function isPassFail(s: unknown): s is PassFailResult {
  */
 type PuUdSeed = { kind: PuKind; manufacturer: string; maintenance_work: string };
 
-function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -55,7 +57,7 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
   const [manufacturer, setManufacturer] = useState('');
   const [location, setLocation] = useState('');
   const [maintenanceWork, setMaintenanceWork] = useState('');
-  const [result, setResult] = useState<PassFailResult>('vyhovuje');
+  const [result, setResult] = useState<PassFailResult | ''>('vyhovuje');
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
@@ -72,7 +74,9 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
       setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
       setLocation(typeof f.location === 'string' ? f.location : '');
       setMaintenanceWork(typeof f.maintenance_work === 'string' ? f.maintenance_work : '');
-      setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
+      // A result the item arrived without (a hose with no match in the last
+      // protocol) stays unpicked: it is the technician's to choose, never presumed.
+      setResult(isPassFail(f.result) ? f.result : '');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
       // "Ďalší rovnaký": carry kind + manufacturer + performed work;
@@ -103,7 +107,7 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
 
   async function handleSubmit(
     e: FormEvent,
-    action: 'save-and-next' | 'save-and-summary',
+    action: SubmitAction,
     duplicate = false,
   ) {
     e.preventDefault();
@@ -111,6 +115,7 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
     if (!identifier.trim()) errs.identifier = 'Doplň číslo / označenie uzáveru.';
     if (!location.trim()) errs.location = 'Doplň umiestnenie.';
     if (!maintenanceWork.trim()) errs.maintenanceWork = 'Popíš vykonané práce — aspoň krátko.';
+    if (!result) errs.result = 'Vyber výsledok.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
     setApiError(null);
@@ -122,7 +127,7 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
         manufacturer: manufacturer.trim(),
         location: location.trim(),
         maintenance_work: maintenanceWork.trim(),
-        result,
+        result: result as PassFailResult,
         notes: notes.trim() || null,
       };
       const saved = await saveItemWithPhotos({
@@ -203,11 +208,11 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
           )}
         </Field>
 
-        <Field label="Výsledok" required>
+        <Field label="Výsledok" required error={fieldErrors.result}>
           {() => (
             <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Výsledok kontroly">
               {(['vyhovuje', 'nevyhovuje'] as const).map((r) => (
-                <ResultButton key={r} value={r} active={result === r} onClick={() => setResult(r)} />
+                <ResultButton key={r} value={r} active={result === r} onClick={() => { setResult(r); setFieldErrors((prev) => { const n = { ...prev }; delete n.result; return n; }); }} />
               ))}
             </div>
           )}
@@ -239,7 +244,7 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
           </p>
         )}
 
-        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
@@ -249,6 +254,10 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
             title="Uloží a predvyplní ďalší uzáver rovnakého druhu, výrobcu a s rovnakými vykonanými prácami (číslo a umiestnenie ostanú prázdne).">
             Ďalší rovnaký
           </Button>
+          {editing && hasNextItem && (
+            <NextRecordedButton loading={submitting}
+              onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next-recorded')} />
+          )}
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}
@@ -338,6 +347,13 @@ function PuUdItemRow({
             )}
           </div>
           <p className="mt-0.5 truncate text-xs text-ink-500">
+            {f.manufacturer && (
+              <>
+                <Tag className="-mt-0.5 mr-1 inline size-3" />
+                {f.manufacturer}
+                <span className="mx-1.5 text-ink-300">·</span>
+              </>
+            )}
             <MapPin className="-mt-0.5 mr-1 inline size-3" />
             {f.location}
           </p>

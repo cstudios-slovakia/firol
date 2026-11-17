@@ -29,7 +29,9 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { NextRecordedButton } from './NextRecordedButton';
 
 function isHydrantType(s: unknown): s is HydrantTypeKind {
   return (HYDRANT_TYPES as string[]).includes(s as string);
@@ -45,7 +47,7 @@ function isPassFail(s: unknown): s is PassFailResult {
  */
 type HydrantSeed = { type: HydrantTypeKind; type_other: string; hose_count: string };
 
-function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -57,7 +59,7 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
   const [hd, setHd] = useState<string>('');
   const [q, setQ] = useState<string>('');
   const [defects, setDefects] = useState('');
-  const [result, setResult] = useState<PassFailResult>('vyhovuje');
+  const [result, setResult] = useState<PassFailResult | ''>('vyhovuje');
 
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -76,7 +78,9 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
       setHd(typeof f.hd === 'number' ? String(f.hd) : '');
       setQ(typeof f.q === 'number' ? String(f.q) : '');
       setDefects(typeof f.defects === 'string' ? f.defects : '');
-      setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
+      // A result the item arrived without (a hose with no match in the last
+      // protocol) stays unpicked: it is the technician's to choose, never presumed.
+      setResult(isPassFail(f.result) ? f.result : '');
     } else {
       // "Ďalší rovnaký": carry type + hose count only; measured HS/HD/Q and
       // defects/result always start fresh (2.4.2).
@@ -108,7 +112,7 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
 
   async function handleSubmit(
     e: FormEvent,
-    action: 'save-and-next' | 'save-and-summary',
+    action: SubmitAction,
     duplicate = false,
   ) {
     e.preventDefault();
@@ -123,6 +127,7 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
     if (!Number.isFinite(hdN) || hdN < 0 || hdN > 50) errs.hd = 'Hodnota HD musí byť číslo v rozsahu 0–50.';
     const qN = Number(q);
     if (!Number.isFinite(qN) || qN < 0 || qN > 100) errs.q = 'Hodnota Q musí byť číslo v rozsahu 0–100.';
+    if (!result) errs.result = 'Vyber výsledok.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
     setApiError(null);
@@ -137,7 +142,7 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
         hd: Number(hd),
         q: Number(q),
         defects: defects.trim() || null,
-        result,
+        result: result as PassFailResult,
       };
       const saved = await saveItemWithPhotos({
         inspectionId,
@@ -240,11 +245,11 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
           )}
         </Field>
 
-        <Field label="Výsledok kontroly" required>
+        <Field label="Výsledok kontroly" required error={fieldErrors.result}>
           {() => (
             <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Výsledok kontroly">
               {(['vyhovuje', 'nevyhovuje'] as const).map((r) => (
-                <ResultButton key={r} value={r} active={result === r} onClick={() => setResult(r)} />
+                <ResultButton key={r} value={r} active={result === r} onClick={() => { setResult(r); setFieldErrors((prev) => { const n = { ...prev }; delete n.result; return n; }); }} />
               ))}
             </div>
           )}
@@ -263,7 +268,7 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
           </p>
         )}
 
-        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
@@ -273,6 +278,10 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
             title="Uloží a predvyplní ďalší hydrant rovnakým typom (namerané tlaky a prietok ostanú prázdne).">
             Ďalší rovnaký
           </Button>
+          {editing && hasNextItem && (
+            <NextRecordedButton loading={submitting}
+              onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next-recorded')} />
+          )}
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}

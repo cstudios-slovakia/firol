@@ -27,7 +27,8 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { Input } from '@/components/ui/Input';
-import type { DetailsBlockProps, StatsBarProps } from './common';
+import type { DetailsBlockProps, StatsBarProps, SubmitAction } from './common';
+import { NextRecordedButton } from './NextRecordedButton';
 
 /* ------------------------------------------------------------------ fields */
 
@@ -197,6 +198,7 @@ export function ItemFormFooter({
   onSummary,
   onDuplicate,
   duplicateHint,
+  onNextRecorded,
 }: {
   editing: boolean;
   submitting: boolean;
@@ -205,6 +207,8 @@ export function ItemFormFooter({
   onSummary: (e: React.SyntheticEvent) => void;
   onDuplicate?: (e: React.SyntheticEvent) => void;
   duplicateHint?: string;
+  /** „Uložiť a ďalší v poradí" — set only while editing an item that has a next one. */
+  onNextRecorded?: (e: React.SyntheticEvent) => void;
 }) {
   return (
     <>
@@ -218,7 +222,7 @@ export function ItemFormFooter({
           Formulár obsahuje nevyplnené povinné polia.
         </p>
       )}
-      <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
+      <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
         <Button type="button" variant="secondary" onClick={onSummary}
           loading={submitting} leftIcon={<ListChecks className="size-4" />}>
           Uložiť a prejsť na súhrn
@@ -229,6 +233,7 @@ export function ItemFormFooter({
             Ďalší rovnaký
           </Button>
         )}
+        {editing && onNextRecorded && <NextRecordedButton loading={submitting} onClick={onNextRecorded} />}
         <Button type="submit" loading={submitting}
           rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
           {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}
@@ -246,7 +251,7 @@ export function saveErrorMessage(err: unknown): string {
 /** Standard submit guard: prevents default and swallows a double tap. */
 export type SubmitHandler = (
   e: FormEvent | React.SyntheticEvent,
-  action: 'save-and-next' | 'save-and-summary',
+  action: SubmitAction,
   duplicate?: boolean,
 ) => Promise<void>;
 

@@ -23,12 +23,14 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { NextRecordedButton } from './NextRecordedButton';
 
 /** Fields carried into the next item by "Ďalší rovnaký" — never serial/location. */
 type OpravaSeed = { manufacturer: string; type: string; year: string };
 
-function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -80,7 +82,7 @@ function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
 
   async function handleSubmit(
     e: FormEvent,
-    action: 'save-and-next' | 'save-and-summary',
+    action: SubmitAction,
     duplicate = false,
   ) {
     e.preventDefault();
@@ -198,7 +200,7 @@ function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
           </p>
         )}
 
-        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
@@ -208,6 +210,10 @@ function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
             title="Uloží a predvyplní ďalšiu položku rovnakými údajmi (okrem výr. čísla a umiestnenia).">
             Ďalší rovnaký
           </Button>
+          {editing && hasNextItem && (
+            <NextRecordedButton loading={submitting}
+              onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next-recorded')} />
+          )}
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}

@@ -24,6 +24,7 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
 
 /**
@@ -43,7 +44,7 @@ export function isPassFail(v: unknown): v is PassFail {
   return v === 'vyhovuje' || v === 'nevyhovuje';
 }
 
-function PpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function PpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -86,7 +87,7 @@ function PpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
     return errs;
   }
 
-  async function handleSubmit(e: FormEvent | React.SyntheticEvent, action: 'save-and-next' | 'save-and-summary') {
+  async function handleSubmit(e: FormEvent | React.SyntheticEvent, action: SubmitAction) {
     e.preventDefault();
     if (submitting) return;
     const errs = validate();
@@ -175,6 +176,7 @@ function PpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
         <DefectsEditor state={defects} initialPhotos={initialItem?.photos} />
 
         <ItemFormFooter
+          onNextRecorded={hasNextItem ? (e) => handleSubmit(e, 'save-and-next-recorded') : undefined}
           editing={editing}
           submitting={submitting}
           apiError={apiError}

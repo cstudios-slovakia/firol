@@ -26,7 +26,9 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { NextRecordedButton } from './NextRecordedButton';
 
 const TS_HADIC_RESULT_LABELS: Record<PassFailResult, string> = {
   vyhovuje:    'Funkčná',
@@ -49,7 +51,7 @@ type TsHadicSeed = {
   year_of_manufacture: string;
 };
 
-function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -60,7 +62,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
   const [testPressure, setTestPressure]       = useState('');
   const [length, setLength]                   = useState('');
   const [yearOfManufacture, setYearOfManufacture] = useState('');
-  const [result, setResult]                   = useState<PassFailResult>('vyhovuje');
+  const [result, setResult]                   = useState<PassFailResult | ''>('vyhovuje');
   const [notes, setNotes]                     = useState('');
 
   const [submitting, setSubmitting]   = useState(false);
@@ -79,7 +81,9 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
       setTestPressure(typeof f.test_pressure === 'number' ? String(f.test_pressure) : '');
       setLength(typeof f.length === 'number' ? String(f.length) : '');
       setYearOfManufacture(typeof f.year_of_manufacture === 'number' ? String(f.year_of_manufacture) : '');
-      setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
+      // A result the item arrived without (a hose with no match in the last
+      // protocol) stays unpicked: it is the technician's to choose, never presumed.
+      setResult(isPassFail(f.result) ? f.result : '');
       setNotes(typeof f.notes === 'string' ? f.notes : '');
     } else {
       // "Ďalší rovnaký": carry the hose description (type, manufacturer,
@@ -111,7 +115,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
 
   async function handleSubmit(
     e: FormEvent,
-    action: 'save-and-next' | 'save-and-summary',
+    action: SubmitAction,
     duplicate = false,
   ) {
     e.preventDefault();
@@ -133,6 +137,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
     const year = Number(yearOfManufacture);
     if (yearOfManufacture && (!Number.isInteger(year) || year < 1900 || year > new Date().getFullYear()))
       errs.yearOfManufacture = 'Zadaj platný rok výroby.';
+    if (!result) errs.result = 'Vyber výsledok.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
     setApiError(null);
@@ -146,7 +151,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
         test_pressure:       tp,
         length:              len,
         year_of_manufacture: yearOfManufacture ? year : null,
-        result,
+        result: result as PassFailResult,
         notes: notes.trim() || null,
       };
       const saved = await saveItemWithPhotos({
@@ -242,11 +247,11 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
           </Field>
         </div>
 
-        <Field label="Výsledok skúšky" required>
+        <Field label="Výsledok skúšky" required error={fieldErrors.result}>
           {() => (
             <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Výsledok skúšky">
               {(['vyhovuje', 'nevyhovuje'] as const).map((r) => (
-                <ResultButton key={r} value={r} active={result === r} onClick={() => setResult(r)} />
+                <ResultButton key={r} value={r} active={result === r} onClick={() => { setResult(r); setFieldErrors((prev) => { const n = { ...prev }; delete n.result; return n; }); }} />
               ))}
             </div>
           )}
@@ -278,7 +283,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
           </p>
         )}
 
-        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
             loading={submitting} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
@@ -288,6 +293,10 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
             title="Uloží a predvyplní ďalšiu hadicu rovnakým popisom (namerané tlaky a umiestnenie ostanú prázdne).">
             Ďalšia rovnaká
           </Button>
+          {editing && hasNextItem && (
+            <NextRecordedButton loading={submitting}
+              onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next-recorded')} />
+          )}
           <Button type="submit" loading={submitting}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalšia hadica'}

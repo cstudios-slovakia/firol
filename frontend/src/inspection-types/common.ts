@@ -13,9 +13,10 @@ import type {
 
 /**
  * The action the user picked on the form CTA. Determines where to
- * navigate after the API call resolves.
+ * navigate after the API call resolves. `save-and-next-recorded` opens the
+ * next item already recorded in the úkon (fix list of 16. 11. 2026).
  */
-export type SubmitAction = 'save-and-next' | 'save-and-summary';
+export type SubmitAction = 'save-and-next' | 'save-and-summary' | 'save-and-next-recorded';
 
 export type Step2FormProps = {
   inspectionId: number;
@@ -29,6 +30,11 @@ export type Step2FormProps = {
   csrfToken: string | null;
   /** Called after a successful save with the action the user picked. */
   onSaved: (action: SubmitAction) => void;
+  /**
+   * Editing an item that has a recorded item after it — the form then offers
+   * „Uložiť a ďalší v poradí" (`save-and-next-recorded`).
+   */
+  hasNextItem?: boolean;
   /**
    * Items already saved in this inspection. Lets a form start a new row from
    * where the list left off (označenie walks its predefined kinds).

@@ -26,6 +26,7 @@ import type {
   InspectionTypeModule,
   ItemRowProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
 
 /**
@@ -37,7 +38,7 @@ import type {
 
 const CUSTOM = '__custom__';
 
-function OznacenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, items }: Step2FormProps) {
+function OznacenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, items, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -123,7 +124,7 @@ function OznacenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
     return errs;
   }
 
-  async function handleSubmit(e: FormEvent | React.SyntheticEvent, action: 'save-and-next' | 'save-and-summary') {
+  async function handleSubmit(e: FormEvent | React.SyntheticEvent, action: SubmitAction) {
     e.preventDefault();
     if (submitting) return;
     const errs = validate();
@@ -326,6 +327,7 @@ function OznacenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
         <DefectsEditor state={defects} initialPhotos={initialItem?.photos} />
 
         <ItemFormFooter
+          onNextRecorded={hasNextItem ? (e) => handleSubmit(e, 'save-and-next-recorded') : undefined}
           editing={editing}
           submitting={submitting}
           apiError={apiError}

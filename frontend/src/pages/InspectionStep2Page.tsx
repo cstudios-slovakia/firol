@@ -73,10 +73,22 @@ export function InspectionStep2Page() {
     ? Math.max(1, (detail?.items.findIndex((it) => it.id === itemId) ?? -1) + 1)
     : totalItems + 1;
   const totalForHeader = editing ? totalItems : totalItems + 1;
+  // The item recorded after the one being edited (items come in position order),
+  // for „Uložiť a ďalší v poradí". Known before the save, so the step works the
+  // same when the save goes to the offline queue.
+  const nextItemId = useMemo(() => {
+    if (!detail || !editing) return null;
+    const idx = detail.items.findIndex((it) => it.id === itemId);
+    return idx >= 0 && idx + 1 < detail.items.length ? detail.items[idx + 1].id : null;
+  }, [detail, editing, itemId]);
 
   async function handleSaved(action: SubmitAction) {
     if (action === 'save-and-summary') {
       navigate(`/inspections/${inspectionId}`, { replace: true });
+      return;
+    }
+    if (action === 'save-and-next-recorded' && nextItemId !== null) {
+      navigate(`/inspections/${inspectionId}/items/${nextItemId}`, { replace: true });
       return;
     }
     // save-and-next: when editing, point at the create route so a fresh
@@ -188,8 +200,8 @@ export function InspectionStep2Page() {
         />
       )}
 
-      {/* Chapter 12 — the stav this device had last time, shown while the
-          technician enters this year's. It is never prefilled as the answer. */}
+      {/* Chapter 12 — the stav this device had last time (types that carry
+          identification only), shown while the technician enters this year's. */}
       {initialItem && previousStatusOf(initialItem.fields) && (
         <PreviousStatusBadge type={i.type} fields={initialItem.fields} className="self-start" />
       )}
@@ -203,6 +215,7 @@ export function InspectionStep2Page() {
         csrfToken={csrfToken}
         onSaved={handleSaved}
         items={detail.items}
+        hasNextItem={nextItemId !== null}
       />
     </div>
   );
