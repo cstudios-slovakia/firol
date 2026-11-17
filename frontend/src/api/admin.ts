@@ -20,6 +20,8 @@ export type AdminAccount = {
   subscription_end_date: string | null;
   main_user_id: number;
   stripe_status: string | null;
+  /** A live Stripe subscription controls subscription_end_date (the admin edit is refused). */
+  has_live_subscription: boolean;
   billing_period: 'monthly' | 'yearly' | null;
   created_at: string;
   included_technicians: number;
@@ -58,6 +60,24 @@ export type AdminInvoice = {
   issued_at: string;
   /** iDoklad PublicHtmlUrl when issued, Stripe invoice PDF otherwise. */
   pdf_url: string | null;
+  /** Stripe's numbers — a credit invoice has a negative total. */
+  stripe_total_cents: number | null;
+  stripe_amount_paid_cents: number | null;
+  stripe_livemode: boolean | null;
+  stripe_balance: Partial<Record<'subtotal' | 'amount_due' | 'starting_balance' | 'ending_balance', number>> | null;
+  /** Why a row is held (needs_review): credit, discount, mismatch, uncertain_send, missing_snapshot. */
+  review_reason: string | null;
+  error_message: string | null;
+  attempts: number;
+  last_attempt_at: string | null;
+  /** „Vystaviť znova" is offered. */
+  can_reissue: boolean;
+};
+
+export type SystemCheck = {
+  key: string;
+  level: 'ok' | 'warn' | 'error';
+  message: string;
 };
 
 export type AdminInvoicesPage = {
@@ -81,8 +101,12 @@ export const AdminPanel = {
   },
   updateAccount: (id: number, body: AdminAccountUpdate, csrfToken: string | null) =>
     api<{ ok: true }>(`/api/admin/accounts/${id}`, { method: 'PATCH', body, csrfToken }),
-  deleteAccount: (id: number, csrfToken: string | null) =>
-    api<void>(`/api/admin/accounts/${id}`, { method: 'DELETE', csrfToken }),
+  /** With cancelSubscription the account's live Stripe subscription is cancelled at once first. */
+  deleteAccount: (id: number, csrfToken: string | null, cancelSubscription = false) =>
+    api<void>(`/api/admin/accounts/${id}${cancelSubscription ? '?cancel_subscription=1' : ''}`, { method: 'DELETE', csrfToken }),
+  reissueInvoice: (id: number, csrfToken: string | null) =>
+    api<{ ok: boolean; status: string; message: string | null }>(`/api/admin/invoices/${id}/reissue`, { method: 'POST', csrfToken }),
+  systemCheck: () => api<{ checks: SystemCheck[] }>('/api/admin/system-check'),
   updateUser: (id: number, body: AdminUserUpdate, csrfToken: string | null) =>
     api<{ ok: true }>(`/api/admin/users/${id}`, { method: 'PATCH', body, csrfToken }),
   deleteUser: (id: number, csrfToken: string | null) =>

@@ -18,6 +18,7 @@ export type User = {
  * - `trial_paid`       — trialing with a subscription on file (will auto-charge)
  * - `active`           — paid subscription, fully active
  * - `past_due`         — payment failed, Stripe is retrying
+ * - `unpaid`           — Stripe stopped retrying; the invoice stays open
  * - `canceled`         — subscription canceled (may still have access until period end)
  * - `incomplete`       — payment never completed or expired
  * - `has_subscription` — any other Stripe state with a subscription attached
@@ -27,6 +28,7 @@ export type SubscriptionState =
   | 'trial_paid'
   | 'active'
   | 'past_due'
+  | 'unpaid'
   | 'canceled'
   | 'incomplete'
   | 'has_subscription';
@@ -47,6 +49,10 @@ export type Account = {
   has_billing_details: boolean;
   subscription_state: SubscriptionState;
   admin_owned: boolean;
+  included_technicians: number;
+  extra_technicians: number;
+  /** Next regular charge (base + extra technicians at their Stripe prices, without prorations); null without a subscription. */
+  next_charge_cents: number | null;
 };
 
 /**

@@ -20,7 +20,7 @@ import { ApiError } from "@/lib/api";
 import { offlineMessage } from "@/lib/offline";
 import { useToast } from "@/lib/toast";
 import { useCertMissingSyncToast, warmCertProfile } from "@/lib/certMissing";
-import { periodPriceLabel, usePricing } from "@/lib/pricing";
+import { formatCents, periodPriceLabel, usePricing } from "@/lib/pricing";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { OfflineIndicator } from "./OfflineIndicator";
 import { AuroraBackground } from "./AuroraBackground";
@@ -312,7 +312,7 @@ export function AppShell() {
  * until Phase 6b wires up Stripe Checkout.
  */
 function SubscriptionBanner() {
-    const { accounts, activeAccountId, csrfToken, isAdmin } = useAuth();
+    const { accounts, activeAccountId, csrfToken, isAdmin, user } = useAuth();
     const toast = useToast();
     const navigate = useNavigate();
     const [busy, setBusy] = useState(false);
@@ -339,13 +339,23 @@ function SubscriptionBanner() {
         year: "numeric",
     });
 
+    // Only the main user may pay (the billing endpoints answer 403 to
+    // anyone else). A subscription whose renewal failed is paid through the
+    // portal — a new checkout would start a second subscription.
+    const isMainUser = !!user && user.id === account.main_user_id;
+    const unpaid =
+        account.subscription_state === "past_due" ||
+        account.subscription_state === "unpaid";
+
     async function onPay() {
         setBusy(true);
         try {
-            const res = await Billing.checkout(
-                account?.billing_period ?? "monthly",
-                csrfToken,
-            );
+            const res = unpaid
+                ? await Billing.portal(csrfToken)
+                : await Billing.checkout(
+                      account?.billing_period ?? "monthly",
+                      csrfToken,
+                  );
             window.location.assign(res.url);
         } catch (err) {
             if (err instanceof ApiError && err.status === 422) {
@@ -374,17 +384,20 @@ function SubscriptionBanner() {
                         Účet je v režime len na čítanie — nové kontroly,
                         školenia ani úpravy nie sú možné, kým si neobnovíš
                         predplatné.
+                        {!isMainUser && " Predplatné obnoví hlavný používateľ účtu."}
                     </p>
                 </div>
-                <button
-                    type="button"
-                    onClick={onPay}
-                    disabled={busy}
-                    className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-status-bad)] px-3 py-2 text-xs font-semibold text-white shadow transition-opacity hover:opacity-90 disabled:opacity-60"
-                >
-                    <CreditCard className="size-4" />
-                    {busy ? "Otváram Stripe…" : "Zaplatiť"}
-                </button>
+                {isMainUser && (
+                    <button
+                        type="button"
+                        onClick={onPay}
+                        disabled={busy}
+                        className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-status-bad)] px-3 py-2 text-xs font-semibold text-white shadow transition-opacity hover:opacity-90 disabled:opacity-60"
+                    >
+                        <CreditCard className="size-4" />
+                        {busy ? "Otváram Stripe…" : "Zaplatiť"}
+                    </button>
+                )}
             </div>
         </div>
     );
@@ -398,7 +411,7 @@ function SubscriptionBanner() {
  *  - anything else → no banner (active sub or expired SubscriptionBanner takes over)
  */
 function TrialBanner() {
-    const { accounts, activeAccountId, csrfToken, isAdmin } = useAuth();
+    const { accounts, activeAccountId, csrfToken, isAdmin, user } = useAuth();
     const toast = useToast();
     const navigate = useNavigate();
     const pricing = usePricing();
@@ -426,10 +439,17 @@ function TrialBanner() {
         month: "long",
     });
 
-    const periodPrice = periodPriceLabel(
-        pricing,
-        account.billing_period === "yearly" ? "yearly" : "monthly",
-    );
+    // The next charge with the extra technicians at their Stripe prices;
+    // the price list only while no subscription exists yet.
+    const periodWord = account.billing_period === "yearly" ? "rok" : "mesiac";
+    const periodPrice =
+        account.next_charge_cents !== null
+            ? `${formatCents(account.next_charge_cents)} / ${periodWord}`
+            : periodPriceLabel(
+                  pricing,
+                  account.billing_period === "yearly" ? "yearly" : "monthly",
+              );
+    const isMainUser = !!user && user.id === account.main_user_id;
 
     const isTrialPaid = state === "trial_paid";
 
@@ -478,7 +498,7 @@ function TrialBanner() {
                     >
                         Spravovať predplatné
                     </button>
-                ) : (
+                ) : isMainUser ? (
                     <button
                         type="button"
                         onClick={onPay}
@@ -486,7 +506,7 @@ function TrialBanner() {
                     >
                         Predplatiť
                     </button>
-                )}
+                ) : null}
             </div>
         </div>
     );

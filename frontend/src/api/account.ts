@@ -26,6 +26,12 @@ export type Account = {
   price_per_extra_technician_cents: number;
   /** What a yearly subscription charges per extra technician (from the backend, not derived here). */
   price_per_extra_technician_yearly_cents: number;
+  /** What one extra technician costs this account per billing period: the unit amount on its Stripe item when one exists, else today's price. */
+  extra_unit_amount_cents: number;
+  /** True when extra_unit_amount_cents is read from the customer's Stripe item. */
+  extra_unit_from_stripe: boolean;
+  /** Next regular charge (base + extra technicians, without prorations); null without a subscription. */
+  next_charge_cents: number | null;
   main_user_id: number | null;
   admin_owned: boolean;
   default_php_user_id: number | null;

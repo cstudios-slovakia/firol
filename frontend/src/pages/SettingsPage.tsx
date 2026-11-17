@@ -1126,12 +1126,12 @@ function TeamSection() {
         0;
     const extra = Math.max(0, active - included);
     const max = seatInfo?.max_self_service_technicians ?? 20;
-    // A yearly account sees the yearly price the backend charges (not 12 ×
-    // monthly); everyone else the monthly one.
+    // The account's own price per period from the backend: the unit amount on
+    // its Stripe item when it has one (an item keeps the price it was created
+    // with), else today's price — yearly for a yearly account (not 12 ×
+    // monthly), monthly for everyone else.
     const isYearly = seatInfo?.billing_period === "yearly";
-    const perExtraLabel = isYearly
-        ? `${formatCents(seatInfo?.price_per_extra_technician_yearly_cents ?? 0)} / rok`
-        : `${formatCents(seatInfo?.price_per_extra_technician_cents ?? 0)} / mes`;
+    const perExtraLabel = `${formatCents(seatInfo?.extra_unit_amount_cents ?? 0)} / ${isYearly ? "rok" : "mes"}`;
     const atCap = active >= max;
 
     async function onInvite(e: FormEvent) {
