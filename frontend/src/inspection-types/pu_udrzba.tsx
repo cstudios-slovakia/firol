@@ -19,6 +19,7 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
+import { Textarea } from '@/components/ui/Textarea';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
@@ -196,15 +197,10 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
 
         <Field label="Vykonané práce" required hint={fieldErrors.maintenanceWork ? undefined : 'Mazanie, výmena tesnení, kontrola samozatváračov, atď.'} error={fieldErrors.maintenanceWork}>
           {(p) => (
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
-                <Wrench className="size-4" />
-              </span>
-              <textarea id={p.id} required rows={3} value={maintenanceWork}
-                onChange={(e) => { setMaintenanceWork(e.target.value); if (fieldErrors.maintenanceWork) setFieldErrors((prev) => { const n = { ...prev }; delete n.maintenanceWork; return n; }); }}
-                placeholder="Vyčistenie a namazanie pántov, výmena tesnenia po obvode, kontrola samozatváračov."
-                className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
-            </div>
+            <Textarea id={p.id} required rows={3} clearable
+              leftIcon={<Wrench className="size-4" />}
+              value={maintenanceWork} onValueChange={(v) => { setMaintenanceWork(v); if (fieldErrors.maintenanceWork) setFieldErrors((prev) => { const n = { ...prev }; delete n.maintenanceWork; return n; }); }}
+              placeholder="Vyčistenie a namazanie pántov, výmena tesnenia po obvode, kontrola samozatváračov." />
           )}
         </Field>
 
@@ -220,14 +216,10 @@ function PuUdStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
 
         <Field label="Poznámky / závady" hint="Voliteľné — len ak sa niečo zistí.">
           {(p) => (
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
-                <NotebookPen className="size-4" />
-              </span>
-              <textarea id={p.id} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)}
-                placeholder="Odporúčaná výmena spodného tesnenia pri ďalšej údržbe."
-                className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
-            </div>
+            <Textarea id={p.id} rows={2} clearable
+              leftIcon={<NotebookPen className="size-4" />}
+              value={notes} onValueChange={setNotes}
+              placeholder="Odporúčaná výmena spodného tesnenia pri ďalšej údržbe." />
           )}
         </Field>
 

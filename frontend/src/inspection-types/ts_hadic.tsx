@@ -15,6 +15,7 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
+import { Textarea } from '@/components/ui/Textarea';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
@@ -259,14 +260,10 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
 
         <Field label="Poznámky / závady" hint="Voliteľné — len ak sa niečo zistí.">
           {(p) => (
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
-                <NotebookPen className="size-4" />
-              </span>
-              <textarea id={p.id} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
-                placeholder="Mikrotrhlinky pri spojke, výmena celej hadice odporúčaná."
-                className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
-            </div>
+            <Textarea id={p.id} rows={3} clearable
+              leftIcon={<NotebookPen className="size-4" />}
+              value={notes} onValueChange={setNotes}
+              placeholder="Mikrotrhlinky pri spojke, výmena celej hadice odporúčaná." />
           )}
         </Field>
 

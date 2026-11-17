@@ -13,11 +13,13 @@ import {
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
+import { sk3 } from '@/lib/kniha';
 import { ItemPhotoField, usePhotoStaging } from '@/components/ItemPhotos';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
+import { Textarea } from '@/components/ui/Textarea';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
@@ -73,7 +75,9 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
       setHydrantType(isHydrantType(f.type) ? f.type : 'DN52');
       setTypeOther(typeof f.type_other === 'string' ? f.type_other : '');
       setLocation(typeof f.location === 'string' ? f.location : '');
-      setHoseCount(typeof f.hose_count === 'number' ? String(f.hose_count) : '1');
+      // An item that arrives without a hose count (a device the walk wrote down,
+      // an import) shows the field empty — „1" is presumed for a new item only.
+      setHoseCount(typeof f.hose_count === 'number' ? String(f.hose_count) : '');
       setHs(typeof f.hs === 'number' ? String(f.hs) : '');
       setHd(typeof f.hd === 'number' ? String(f.hd) : '');
       setQ(typeof f.q === 'number' ? String(f.q) : '');
@@ -119,14 +123,15 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
     const errs: Record<string, string> = {};
     if (hydrantType === 'other' && !typeOther.trim()) errs.typeOther = 'Doplň označenie typu (alebo vyber štandardný DN).';
     if (!location.trim()) errs.location = 'Doplň umiestnenie.';
+    // Number('') is 0: an empty field is an error of its own, never a measured zero.
     const hc = Number(hoseCount);
-    if (!Number.isInteger(hc) || hc < 0 || hc > 20) errs.hoseCount = 'Počet hadíc musí byť 0–20.';
+    if (!hoseCount.trim() || !Number.isInteger(hc) || hc < 0 || hc > 20) errs.hoseCount = 'Počet hadíc musí byť 0–20.';
     const hsN = Number(hs);
-    if (!Number.isFinite(hsN) || hsN < 0 || hsN > 50) errs.hs = 'Hodnota HS musí byť číslo v rozsahu 0–50.';
+    if (!hs.trim() || !Number.isFinite(hsN) || hsN < 0 || hsN > 50) errs.hs = 'Hodnota HS musí byť číslo v rozsahu 0–50.';
     const hdN = Number(hd);
-    if (!Number.isFinite(hdN) || hdN < 0 || hdN > 50) errs.hd = 'Hodnota HD musí byť číslo v rozsahu 0–50.';
+    if (!hd.trim() || !Number.isFinite(hdN) || hdN < 0 || hdN > 50) errs.hd = 'Hodnota HD musí byť číslo v rozsahu 0–50.';
     const qN = Number(q);
-    if (!Number.isFinite(qN) || qN < 0 || qN > 100) errs.q = 'Hodnota Q musí byť číslo v rozsahu 0–100.';
+    if (!q.trim() || !Number.isFinite(qN) || qN < 0 || qN > 100) errs.q = 'Hodnota Q musí byť číslo v rozsahu 0–100.';
     if (!result) errs.result = 'Vyber výsledok.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
@@ -137,10 +142,10 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
         type: hydrantType,
         type_other: hydrantType === 'other' ? typeOther.trim() : null,
         location: location.trim(),
-        hose_count: Number(hoseCount),
-        hs: Number(hs),
-        hd: Number(hd),
-        q: Number(q),
+        hose_count: hc,
+        hs: hsN,
+        hd: hdN,
+        q: qN,
         defects: defects.trim() || null,
         result: result as PassFailResult,
       };
@@ -234,14 +239,10 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
 
         <Field label="Zistené závady" hint="Voliteľné — nech zostane prázdne ak je hydrant v poriadku.">
           {(p) => (
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
-                <NotebookPen className="size-4" />
-              </span>
-              <textarea id={p.id} rows={3} value={defects} onChange={(e) => setDefects(e.target.value)}
-                placeholder="Korózia spojky, popraskaná hadica, chýbajúca tabuľka."
-                className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
-            </div>
+            <Textarea id={p.id} rows={3} clearable
+              leftIcon={<NotebookPen className="size-4" />}
+              value={defects} onValueChange={setDefects}
+              placeholder="Korózia spojky, popraskaná hadica, chýbajúca tabuľka." />
           )}
         </Field>
 
@@ -379,7 +380,7 @@ function HydrantyItemRow({
             <MapPin className="-mt-0.5 mr-1 inline size-3" />
             {f.location}
             <span className="mx-1.5 text-ink-300">·</span>
-            {f.hose_count ?? 0} {(f.hose_count ?? 0) === 1 ? 'hadica' : 'hadíc'}
+            {f.hose_count ?? 0} {sk3(f.hose_count ?? 0, 'hadica', 'hadice', 'hadíc')}
           </p>
           <p className="mt-0.5 font-mono text-xs text-ink-600">
             HS {fmt(f.hs)} · HD {fmt(f.hd)} <span className="text-ink-400">MPa</span>

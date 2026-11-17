@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -42,6 +42,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { ClearTextButton } from '@/components/ui/ClearTextButton';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
@@ -64,7 +65,8 @@ import { devicesLabel, originText, type ReviewNavState } from '@/components/preh
 type ChoiceOption = { value: string; label: string };
 type InlineField =
   | { key: string; label: string; kind: 'number'; unit: string; step: string; min: number; max: number }
-  | { key: string; label: string; kind: 'text'; optional?: true }
+  // `clearable`: a free text carried from the last protocol gets the „Vymazať text" button.
+  | { key: string; label: string; kind: 'text'; optional?: true; clearable?: true }
   | { key: string; label: string; kind: 'choice'; options: ChoiceOption[]; select?: boolean };
 
 const PASS_FAIL: ChoiceOption[] = [
@@ -84,27 +86,27 @@ const PHP_STATUSES: ChoiceOption[] = (Object.keys(PHP_STATUS_LABELS) as PhpStatu
 const FIELDS: Partial<Record<InspectionType, InlineField[]>> = {
   php: [
     { key: 'status', label: 'Stav', kind: 'choice', options: PHP_STATUSES, select: true },
-    { key: 'notes', label: 'Poznámky / závady', kind: 'text', optional: true },
+    { key: 'notes', label: 'Poznámky / závady', kind: 'text', optional: true, clearable: true },
   ],
   hydranty: [
     { key: 'hs', label: 'HS', kind: 'number', unit: 'MPa', step: '0.01', min: 0, max: 50 },
     { key: 'hd', label: 'HD', kind: 'number', unit: 'MPa', step: '0.01', min: 0, max: 50 },
     { key: 'q', label: 'Q', kind: 'number', unit: 'l/s', step: '0.01', min: 0, max: 100 },
-    { key: 'defects', label: 'Zistené závady', kind: 'text', optional: true },
+    { key: 'defects', label: 'Zistené závady', kind: 'text', optional: true, clearable: true },
     { key: 'result', label: 'Výsledok kontroly', kind: 'choice', options: PASS_FAIL },
   ],
   pu_akcieschopnost: [
-    { key: 'notes', label: 'Poznámky / závady', kind: 'text', optional: true },
+    { key: 'notes', label: 'Poznámky / závady', kind: 'text', optional: true, clearable: true },
     { key: 'result', label: 'Výsledok kontroly', kind: 'choice', options: PASS_FAIL },
   ],
   pu_udrzba: [
-    { key: 'maintenance_work', label: 'Vykonané práce', kind: 'text' },
-    { key: 'notes', label: 'Poznámky / závady', kind: 'text', optional: true },
+    { key: 'maintenance_work', label: 'Vykonané práce', kind: 'text', clearable: true },
+    { key: 'notes', label: 'Poznámky / závady', kind: 'text', optional: true, clearable: true },
     { key: 'result', label: 'Výsledok', kind: 'choice', options: PASS_FAIL },
   ],
   nudzove_osvetlenie: [
     { key: 'duration_min', label: 'Doba svietenia v núdzovom režime', kind: 'number', unit: 'min', step: '1', min: 0, max: 600 },
-    { key: 'notes', label: 'Poznámky / závady', kind: 'text', optional: true },
+    { key: 'notes', label: 'Poznámky / závady', kind: 'text', optional: true, clearable: true },
     { key: 'result', label: 'Výsledok testu', kind: 'choice', options: PASS_FAIL },
   ],
   rebriky: [
@@ -131,7 +133,7 @@ const FIELDS: Partial<Record<InspectionType, InlineField[]>> = {
       ],
     },
     // Carried with the rest of the hose's data (decision 3), so it is shown too.
-    { key: 'notes', label: 'Poznámky / závady', kind: 'text', optional: true },
+    { key: 'notes', label: 'Poznámky / závady', kind: 'text', optional: true, clearable: true },
   ],
 };
 
@@ -704,11 +706,11 @@ function ItemEditor({
         f.kind === 'text' ? (
           <label key={f.key} className="flex flex-col gap-1">
             <span className="text-[11px] font-medium text-ink-500">{f.label}</span>
-            <Input
+            <ReviewTextInput
               disabled={!canEdit}
+              clearable={f.clearable === true}
               value={valueOf(item, edits, f.key)}
-              onChange={(e) => onEdit(item.id, f.key, e.target.value)}
-              className="h-10"
+              onChange={(v) => onEdit(item.id, f.key, v)}
             />
           </label>
         ) : f.kind === 'choice' && f.select ? (
@@ -758,3 +760,31 @@ function ItemEditor({
   );
 }
 
+/** A text value edited in place; a carried free text gets the clear button. */
+function ReviewTextInput({
+  value,
+  onChange,
+  disabled,
+  clearable,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled: boolean;
+  clearable: boolean;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  return (
+    <Input
+      ref={ref}
+      disabled={disabled}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="h-10"
+      rightSlot={
+        clearable ? (
+          <ClearTextButton value={value} onClear={() => onChange('')} target={ref} disabled={disabled} />
+        ) : undefined
+      }
+    />
+  );
+}
