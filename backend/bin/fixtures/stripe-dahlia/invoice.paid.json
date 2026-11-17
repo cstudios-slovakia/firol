@@ -1,0 +1,533 @@
+{
+    "id": "evt_1UcnxbTESTACCT00XQTBafjY",
+    "object": "event",
+    "api_version": "2026-04-22.dahlia",
+    "created": 1794927975,
+    "data": {
+        "object": {
+            "id": "in_1UcnxVTESTACCT00t1RkBLp6",
+            "object": "invoice",
+            "account_country": "SK",
+            "account_name": "Firol dev sandbox",
+            "account_tax_ids": null,
+            "amount_due": 4066,
+            "amount_overpaid": 0,
+            "amount_paid": 4066,
+            "amount_remaining": 0,
+            "amount_shipping": 0,
+            "application": null,
+            "attempt_count": 1,
+            "attempted": true,
+            "auto_advance": false,
+            "automatic_tax": {
+                "disabled_reason": null,
+                "enabled": false,
+                "liability": null,
+                "provider": null,
+                "status": null
+            },
+            "automatically_finalizes_at": null,
+            "billing_reason": "subscription_cycle",
+            "collection_method": "charge_automatically",
+            "created": 1797519942,
+            "currency": "eur",
+            "custom_fields": null,
+            "customer": "cus_Ve69zPLA4OYUzS",
+            "customer_account": null,
+            "customer_address": null,
+            "customer_email": "billing-test@example.com",
+            "customer_name": "Billing test 1",
+            "customer_phone": null,
+            "customer_shipping": null,
+            "customer_tax_exempt": "none",
+            "customer_tax_ids": [],
+            "default_payment_method": null,
+            "default_source": null,
+            "default_tax_rates": [],
+            "description": null,
+            "discounts": [],
+            "due_date": null,
+            "effective_at": 1797523542,
+            "ending_balance": 0,
+            "footer": null,
+            "from_invoice": null,
+            "hosted_invoice_url": "https://example.com/stripe-test-hosted_invoice_url",
+            "invoice_pdf": "https://example.com/stripe-test-invoice_pdf",
+            "issuer": {
+                "type": "self"
+            },
+            "last_finalization_error": null,
+            "latest_revision": null,
+            "lines": {
+                "object": "list",
+                "data": [
+                    {
+                        "id": "il_1UiF6ITESTACCT00WQAJnoo5",
+                        "object": "line_item",
+                        "amount": -1000,
+                        "currency": "eur",
+                        "description": "Unused time on 2 × Extra technician (test) after 02 Dec 2026",
+                        "discount_amounts": [],
+                        "discountable": false,
+                        "discounts": [],
+                        "invoice": "in_1UcnxVTESTACCT00t1RkBLp6",
+                        "livemode": false,
+                        "metadata": [],
+                        "parent": {
+                            "invoice_item_details": null,
+                            "subscription_item_details": {
+                                "invoice_item": "ii_1UcnxOTESTACCT00MfgUZdgc",
+                                "proration": true,
+                                "proration_details": {
+                                    "credited_items": {
+                                        "invoice": "in_1UcnxVTESTACCT00t1RkBLp6",
+                                        "invoice_line_items": [
+                                            "il_1UgQidTESTACCT00niacGIc3"
+                                        ]
+                                    }
+                                },
+                                "subscription": "sub_1UcnxBTESTACCT00Uz6Dfj1O",
+                                "subscription_item": "si_Ve69d0iZiKjLts"
+                            },
+                            "type": "subscription_item_details"
+                        },
+                        "period": {
+                            "end": 1797519942,
+                            "start": 1796223942
+                        },
+                        "pretax_credit_amounts": [],
+                        "pricing": {
+                            "price_details": {
+                                "price": "price_1UcnxFTESTACCT00cM6aRMCb",
+                                "product": "prod_Ve63Xoxigebu0y"
+                            },
+                            "type": "price_details",
+                            "unit_amount_decimal": null
+                        },
+                        "quantity": 2,
+                        "quantity_decimal": "2",
+                        "subtotal": -1000,
+                        "taxes": []
+                    },
+                    {
+                        "id": "il_1UiF6JTESTACCT00f2h72FPb",
+                        "object": "line_item",
+                        "amount": 500,
+                        "currency": "eur",
+                        "description": "Remaining time on Extra technician (test) after 02 Dec 2026",
+                        "discount_amounts": [],
+                        "discountable": false,
+                        "discounts": [],
+                        "invoice": "in_1UcnxVTESTACCT00t1RkBLp6",
+                        "livemode": false,
+                        "metadata": [],
+                        "parent": {
+                            "invoice_item_details": null,
+                            "subscription_item_details": {
+                                "invoice_item": "ii_1UcnxQTESTACCT00BuvlQefL",
+                                "proration": true,
+                                "proration_details": {
+                                    "credited_items": null
+                                },
+                                "subscription": "sub_1UcnxBTESTACCT00Uz6Dfj1O",
+                                "subscription_item": "si_Ve69YNLlqJhPUY"
+                            },
+                            "type": "subscription_item_details"
+                        },
+                        "period": {
+                            "end": 1797519942,
+                            "start": 1796223942
+                        },
+                        "pretax_credit_amounts": [],
+                        "pricing": {
+                            "price_details": {
+                                "price": "price_1UcnxQTESTACCT007tMuH6V0",
+                                "product": "prod_Ve63Xoxigebu0y"
+                            },
+                            "type": "price_details",
+                            "unit_amount_decimal": null
+                        },
+                        "quantity": 1,
+                        "quantity_decimal": "1",
+                        "subtotal": 500,
+                        "taxes": []
+                    },
+                    {
+                        "id": "il_1UiF6KTESTACCT00vTfDuZyw",
+                        "object": "line_item",
+                        "amount": -500,
+                        "currency": "eur",
+                        "description": "Unused time on Extra technician (test) after 02 Dec 2026",
+                        "discount_amounts": [],
+                        "discountable": false,
+                        "discounts": [],
+                        "invoice": "in_1UcnxVTESTACCT00t1RkBLp6",
+                        "livemode": false,
+                        "metadata": [],
+                        "parent": {
+                            "invoice_item_details": null,
+                            "subscription_item_details": {
+                                "invoice_item": "ii_1UcnxPTESTACCT006mLV1Vdg",
+                                "proration": true,
+                                "proration_details": {
+                                    "credited_items": {
+                                        "invoice": "in_1UcnxVTESTACCT00t1RkBLp6",
+                                        "invoice_line_items": [
+                                            "il_1UiF6LTESTACCT00vw1PoP0I"
+                                        ]
+                                    }
+                                },
+                                "subscription": "sub_1UcnxBTESTACCT00Uz6Dfj1O",
+                                "subscription_item": "si_Ve69d0iZiKjLts"
+                            },
+                            "type": "subscription_item_details"
+                        },
+                        "period": {
+                            "end": 1797519942,
+                            "start": 1796223942
+                        },
+                        "pretax_credit_amounts": [],
+                        "pricing": {
+                            "price_details": {
+                                "price": "price_1UcnxFTESTACCT00cM6aRMCb",
+                                "product": "prod_Ve63Xoxigebu0y"
+                            },
+                            "type": "price_details",
+                            "unit_amount_decimal": null
+                        },
+                        "quantity": 1,
+                        "quantity_decimal": "1",
+                        "subtotal": -500,
+                        "taxes": []
+                    },
+                    {
+                        "id": "il_1UiF6LTESTACCT00vw1PoP0I",
+                        "object": "line_item",
+                        "amount": 500,
+                        "currency": "eur",
+                        "description": "Remaining time on Extra technician (test) after 02 Dec 2026",
+                        "discount_amounts": [],
+                        "discountable": false,
+                        "discounts": [],
+                        "invoice": "in_1UcnxVTESTACCT00t1RkBLp6",
+                        "livemode": false,
+                        "metadata": [],
+                        "parent": {
+                            "invoice_item_details": null,
+                            "subscription_item_details": {
+                                "invoice_item": "ii_1UcnxOTESTACCT00xE74q2gD",
+                                "proration": true,
+                                "proration_details": {
+                                    "credited_items": null
+                                },
+                                "subscription": "sub_1UcnxBTESTACCT00Uz6Dfj1O",
+                                "subscription_item": "si_Ve69d0iZiKjLts"
+                            },
+                            "type": "subscription_item_details"
+                        },
+                        "period": {
+                            "end": 1797519942,
+                            "start": 1796223942
+                        },
+                        "pretax_credit_amounts": [],
+                        "pricing": {
+                            "price_details": {
+                                "price": "price_1UcnxFTESTACCT00cM6aRMCb",
+                                "product": "prod_Ve63Xoxigebu0y"
+                            },
+                            "type": "price_details",
+                            "unit_amount_decimal": null
+                        },
+                        "quantity": 1,
+                        "quantity_decimal": "1",
+                        "subtotal": 500,
+                        "taxes": []
+                    },
+                    {
+                        "id": "il_1UgQicTESTACCT00fJIuldp7",
+                        "object": "line_item",
+                        "amount": -667,
+                        "currency": "eur",
+                        "description": "Unused time on Extra technician (test) after 27 Nov 2026",
+                        "discount_amounts": [],
+                        "discountable": false,
+                        "discounts": [],
+                        "invoice": "in_1UcnxVTESTACCT00t1RkBLp6",
+                        "livemode": false,
+                        "metadata": [],
+                        "parent": {
+                            "invoice_item_details": null,
+                            "subscription_item_details": {
+                                "invoice_item": "ii_1UcnxKTESTACCT00L6amQPGG",
+                                "proration": true,
+                                "proration_details": {
+                                    "credited_items": {
+                                        "invoice": "in_1UcnxVTESTACCT00t1RkBLp6",
+                                        "invoice_line_items": [
+                                            "il_1UcnxATESTACCT00J8H8VC1F"
+                                        ]
+                                    }
+                                },
+                                "subscription": "sub_1UcnxBTESTACCT00Uz6Dfj1O",
+                                "subscription_item": "si_Ve69d0iZiKjLts"
+                            },
+                            "type": "subscription_item_details"
+                        },
+                        "period": {
+                            "end": 1797519942,
+                            "start": 1795791942
+                        },
+                        "pretax_credit_amounts": [],
+                        "pricing": {
+                            "price_details": {
+                                "price": "price_1UcnxFTESTACCT00cM6aRMCb",
+                                "product": "prod_Ve63Xoxigebu0y"
+                            },
+                            "type": "price_details",
+                            "unit_amount_decimal": null
+                        },
+                        "quantity": 1,
+                        "quantity_decimal": "1",
+                        "subtotal": -667,
+                        "taxes": []
+                    },
+                    {
+                        "id": "il_1UgQidTESTACCT00niacGIc3",
+                        "object": "line_item",
+                        "amount": 1333,
+                        "currency": "eur",
+                        "description": "Remaining time on 2 × Extra technician (test) after 27 Nov 2026",
+                        "discount_amounts": [],
+                        "discountable": false,
+                        "discounts": [],
+                        "invoice": "in_1UcnxVTESTACCT00t1RkBLp6",
+                        "livemode": false,
+                        "metadata": [],
+                        "parent": {
+                            "invoice_item_details": null,
+                            "subscription_item_details": {
+                                "invoice_item": "ii_1UcnxKTESTACCT00cX9LkCte",
+                                "proration": true,
+                                "proration_details": {
+                                    "credited_items": null
+                                },
+                                "subscription": "sub_1UcnxBTESTACCT00Uz6Dfj1O",
+                                "subscription_item": "si_Ve69d0iZiKjLts"
+                            },
+                            "type": "subscription_item_details"
+                        },
+                        "period": {
+                            "end": 1797519942,
+                            "start": 1795791942
+                        },
+                        "pretax_credit_amounts": [],
+                        "pricing": {
+                            "price_details": {
+                                "price": "price_1UcnxFTESTACCT00cM6aRMCb",
+                                "product": "prod_Ve63Xoxigebu0y"
+                            },
+                            "type": "price_details",
+                            "unit_amount_decimal": null
+                        },
+                        "quantity": 2,
+                        "quantity_decimal": "2",
+                        "subtotal": 1333,
+                        "taxes": []
+                    },
+                    {
+                        "id": "il_1UcnxATESTACCT00J8H8VC1F",
+                        "object": "line_item",
+                        "amount": 1000,
+                        "currency": "eur",
+                        "description": "Remaining time on Extra technician (test) after 17 Nov 2026",
+                        "discount_amounts": [],
+                        "discountable": false,
+                        "discounts": [],
+                        "invoice": "in_1UcnxVTESTACCT00t1RkBLp6",
+                        "livemode": false,
+                        "metadata": [],
+                        "parent": {
+                            "invoice_item_details": null,
+                            "subscription_item_details": {
+                                "invoice_item": "ii_1UcnxFTESTACCT00UUMaFMHz",
+                                "proration": true,
+                                "proration_details": {
+                                    "credited_items": null
+                                },
+                                "subscription": "sub_1UcnxBTESTACCT00Uz6Dfj1O",
+                                "subscription_item": "si_Ve69d0iZiKjLts"
+                            },
+                            "type": "subscription_item_details"
+                        },
+                        "period": {
+                            "end": 1797519942,
+                            "start": 1794927942
+                        },
+                        "pretax_credit_amounts": [],
+                        "pricing": {
+                            "price_details": {
+                                "price": "price_1UcnxFTESTACCT00cM6aRMCb",
+                                "product": "prod_Ve63Xoxigebu0y"
+                            },
+                            "type": "price_details",
+                            "unit_amount_decimal": null
+                        },
+                        "quantity": 1,
+                        "quantity_decimal": "1",
+                        "subtotal": 1000,
+                        "taxes": []
+                    },
+                    {
+                        "id": "il_1UngFWTESTACCT00OSWQhu0r",
+                        "object": "line_item",
+                        "amount": 1900,
+                        "currency": "eur",
+                        "description": "1 × Firol subscription (at €19.00 / month)",
+                        "discount_amounts": [],
+                        "discountable": true,
+                        "discounts": [],
+                        "invoice": "in_1UcnxVTESTACCT00t1RkBLp6",
+                        "livemode": false,
+                        "metadata": {
+                            "billing_period": "monthly",
+                            "firol_account_id": "217"
+                        },
+                        "parent": {
+                            "invoice_item_details": null,
+                            "subscription_item_details": {
+                                "invoice_item": null,
+                                "proration": false,
+                                "proration_details": {
+                                    "credited_items": null
+                                },
+                                "subscription": "sub_1UcnxBTESTACCT00Uz6Dfj1O",
+                                "subscription_item": "si_Ve69Xz4rqDtiWB"
+                            },
+                            "type": "subscription_item_details"
+                        },
+                        "period": {
+                            "end": 1800198342,
+                            "start": 1797519942
+                        },
+                        "pretax_credit_amounts": [],
+                        "pricing": {
+                            "price_details": {
+                                "price": "price_1TVpukTESTACCT00JEPZXfYM",
+                                "product": "prod_UUpZbOjSYGJXHK"
+                            },
+                            "type": "price_details",
+                            "unit_amount_decimal": "1900"
+                        },
+                        "quantity": 1,
+                        "quantity_decimal": "1",
+                        "subtotal": 1900,
+                        "taxes": []
+                    },
+                    {
+                        "id": "il_1UngFWTESTACCT00rjpn2ZX3",
+                        "object": "line_item",
+                        "amount": 1000,
+                        "currency": "eur",
+                        "description": "1 × Extra technician (test) (at €10.00 / month)",
+                        "discount_amounts": [],
+                        "discountable": true,
+                        "discounts": [],
+                        "invoice": "in_1UcnxVTESTACCT00t1RkBLp6",
+                        "livemode": false,
+                        "metadata": {
+                            "billing_period": "monthly",
+                            "firol_account_id": "217"
+                        },
+                        "parent": {
+                            "invoice_item_details": null,
+                            "subscription_item_details": {
+                                "invoice_item": null,
+                                "proration": false,
+                                "proration_details": {
+                                    "credited_items": null
+                                },
+                                "subscription": "sub_1UcnxBTESTACCT00Uz6Dfj1O",
+                                "subscription_item": "si_Ve69YNLlqJhPUY"
+                            },
+                            "type": "subscription_item_details"
+                        },
+                        "period": {
+                            "end": 1800198342,
+                            "start": 1797519942
+                        },
+                        "pretax_credit_amounts": [],
+                        "pricing": {
+                            "price_details": {
+                                "price": "price_1UcnxQTESTACCT007tMuH6V0",
+                                "product": "prod_Ve63Xoxigebu0y"
+                            },
+                            "type": "price_details",
+                            "unit_amount_decimal": "1000"
+                        },
+                        "quantity": 1,
+                        "quantity_decimal": "1",
+                        "subtotal": 1000,
+                        "taxes": []
+                    }
+                ],
+                "has_more": false,
+                "total_count": 9,
+                "url": "/v1/invoices/in_1UcnxVTESTACCT00t1RkBLp6/lines"
+            },
+            "livemode": false,
+            "metadata": [],
+            "next_payment_attempt": null,
+            "number": "853JYOFO-0068",
+            "on_behalf_of": null,
+            "parent": {
+                "quote_details": null,
+                "subscription_details": {
+                    "metadata": {
+                        "billing_period": "monthly",
+                        "firol_account_id": "217"
+                    },
+                    "subscription": "sub_1UcnxBTESTACCT00Uz6Dfj1O"
+                },
+                "type": "subscription_details"
+            },
+            "payment_settings": {
+                "default_mandate": null,
+                "payment_method_options": null,
+                "payment_method_types": null
+            },
+            "period_end": 1797519942,
+            "period_start": 1794927942,
+            "post_payment_credit_notes_amount": 0,
+            "pre_payment_credit_notes_amount": 0,
+            "receipt_number": null,
+            "rendering": null,
+            "shipping_cost": null,
+            "shipping_details": null,
+            "starting_balance": 0,
+            "statement_descriptor": null,
+            "status": "paid",
+            "status_transitions": {
+                "finalized_at": 1797523542,
+                "marked_uncollectible_at": null,
+                "paid_at": 1797523542,
+                "voided_at": null
+            },
+            "subtotal": 4066,
+            "subtotal_excluding_tax": 4066,
+            "test_clock": "clock_1Ucnx2TESTACCT00MmW3R1iE",
+            "total": 4066,
+            "total_discount_amounts": [],
+            "total_excluding_tax": 4066,
+            "total_pretax_credit_amounts": [],
+            "total_taxes": [],
+            "webhooks_delivered_at": 1797519942
+        }
+    },
+    "livemode": false,
+    "pending_webhooks": 0,
+    "request": {
+        "id": null,
+        "idempotency_key": null
+    },
+    "type": "invoice.paid"
+}
