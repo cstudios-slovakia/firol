@@ -66,6 +66,21 @@ frontend (`npm ci && npm run build`), runs `composer install --no-dev`,
 applies any pending DB migrations and ensures the `backend/storage/`
 tree exists.
 
+### Frontend build on a small server
+
+- **Source maps are off by default.** Writing them is what made the build
+  run out of memory on the staging host (without them it fits in ~400 MB).
+  Set `VITE_BUILD_SOURCEMAP=1` for a build that should emit them (as
+  `hidden` maps — no `//# sourceMappingURL` pointer in the public bundle),
+  e.g. `VITE_BUILD_SOURCEMAP=1 npm run build`.
+- **`npm run build:safe`** builds into `frontend/dist-next/` and swaps it in
+  as `frontend/dist/` only after Vite finished successfully
+  (`frontend/scripts/swap-dist.mjs`). A build the host kills half-way then
+  leaves the live `dist/` untouched instead of empty. The previous build is
+  kept in `dist-prev/` until the next swap (rollback: rename it back). The
+  deploy workflow still runs the plain `npm run build`; switch it to
+  `build:safe` on a server where the build may be killed.
+
 ### GitHub Secrets required for deploy workflow
 - `PROD_SSH_HOST`
 - `PROD_SSH_PORT`
