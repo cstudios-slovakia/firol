@@ -1667,7 +1667,7 @@ trip) is tracked in the hand-back report to the owner, not here.
 - ⏸ R3: a book entry does not close earlier defects; defects written in a book entry feed the next
   prehliadka at that prevádzka (both spôsoby).
 - ⏸ Opakovať lands on the default spôsob for the number of prevádzky (criterion 3 over O5).
-- ⏸ Excel import of book rows still creates old-format entries.
+- ✅ Excel import of book rows creates new-format entries (round 2 of the fix list of 16. 11.).
 - ⏸ A new defect set to „dôvod zanikol" prints as an ordinary point with its deadline.
 - ⏸ A firma prehliadka record prints the lead line „Obsahom prehliadky bola kontrola:" and
   „Ďalej vykonané" above custom activities.
@@ -1692,17 +1692,19 @@ tlaková skúška hadíc, požiarne uzávery — akcieschopnosť and údržba, n
   prevádzka — identification, measured values, result / stav, defects / notes / vykonané práce.
   No `previous_status` badge for these types (it would only repeat the carried value).
 - Concepts: a device named in an open defect of today's prehliadka still gets nevyhovuje (PHP `O`)
-  and the defect text; a carried device without a defect keeps what it carried; a new device (or a
-  carried item whose result was empty) gets the passing result as before.
+  and the defect text; a carried device without a defect keeps what it carried — an empty result
+  stays empty and is marked „Chýba" (round 2); a new device gets the passing result as before.
 - ts_hadic: Opakovať, the checklist and the follow-up button on the hydranty úkon all take values
   and result from the last ts_hadic protocol (`PrehliadkaChecklist::tsHadicRows()`); a hose with
   no match, or no earlier protocol, stays blank and its result is not presumed.
 - Origin: Opakovať and „Prevziať položky" record `carried_from` / `carried_positions` like the
   concepts; the úkon's summary shows „Položky prevzaté z protokolu č. … zo dňa …". The summary
   rows show every value (núdzové osvetlenie now shows the trvanie, údržba the výrobca).
-- Completeness at generate for every draft of the six fire types (the concepts' `missingFields`
-  rule); the summary marks the items („Chýba: …") and „Generovať" is blocked until they are filled.
-  Issued úkony are never generated again, so imports and old-format records are not affected.
+- Completeness at generate (the concepts' `missingFields` rule) for the drafts whose items were
+  inserted without the item validator — a concept, or a fire draft with a recorded origin
+  (`carried_from`); the summary marks the items („Chýba: …") and „Generovať" is blocked until they
+  are filled. Round 2 narrowed it from „every fire draft": imports and „Upraviť" create drafts too
+  (`CarryOver::checksCompleteness()`).
 - An item form opened on an item with no result / stav shows nothing picked and asks for one
   instead of presuming „vyhovuje" / „A".
 
@@ -1729,7 +1731,69 @@ the page footer of `PdfRenderer` stays, the copies in the body of `ProtocolLayou
 six fire templates are gone.
 
 **Check script:** `bin/test-prehliadka-followups.php` gained part 3 (carry-over and the device
-labels). Four checks of part 1 (defect tasks in Dnes) fail at `dfd76f4` already — not touched.
+labels). The four part-1 failures were a stale fixture, fixed in round 2.
+
+
+### Fix list of 16. 11. 2026 — round 2 (review of round 1 + owner's decisions) — ✅ built
+
+**Review findings fixed**
+- **Completeness check** runs only where items skipped the item validator: concepts, and fire drafts
+  with `carried_from` (Opakovať, „Prevziať položky", the ts_hadic follow-ups). Typed, imported and
+  unlocked drafts generate as before round 1; `show()` and the carry-over endpoint return
+  `incomplete_items` by the same rule, so „Chýba" and the disabled button follow it at once.
+- **Hydranty form**: an empty HS / HD / Q / počet hadíc is an error, never 0; an existing item
+  without a hose count opens empty („1" only for a new item). The other five forms already refused
+  empty values.
+- **Concepts**: a carried device with no defect and an empty result keeps its texts and stays
+  without a result („Chýba"), as a hose with no match does.
+- **„Prevzaté" on a new item**: deleting an item takes its position off `carried_positions`, and a
+  new item's position is never on it (`PrehliadkaChecklist::dropCarriedPosition()`).
+- Smaller: „Prevziať položky" refuses a source that is not finalized; Slovak labels for `notes`,
+  `defects`, `manufacturer`, `evid_number`, `floor` and a Slovak „Pole … je príliš dlhé"; the
+  concept banner and the origin line worded by whether there is an origin / whether the type
+  carries values; the device fallback label is capped at 80 characters, not repeated as the place,
+  and used on „Skontroluj hodnoty" and in „Chýba" messages too; the signature spline sizes its steps
+  by the curve's length (≤ 2 px chords, no 48-step cap) and the pad takes `pointermove` until the
+  first `pointerrawupdate` of a stroke arrives; step 3 drops a routine override when the type's
+  tick changes in step 1 and asks again for facts cached without `recorded`; plurals („2 hadice",
+  „2 nevyhovujú", „ďalšia podľa potreby"); a phone page has room below its last button for the
+  „Spätná väzba" tab; Opakovať prefills today's date (it left the date empty).
+- Check script: part 1's failures were a fixture without the `key` every `previous` row has — not
+  a defect and not date-dependent. Part 4 covers `withResult`, the ts_hadic rows of the checklist
+  and the follow-up button, the recorded origin, the completeness rule and the carried positions.
+- Reported only: the núdzové osvetlenie protocol does not print the doba svietenia; the protocol
+  mockup in `docs/handoff/handoff/PDF_protokoly/03_…` has no such column either, while the base
+  document lists the field on the item.
+
+**New work**
+- **Clear button** („X", `aria-label="Vymazať text"`, `ClearTextButton`) on the carried free texts
+  of the fire types — `notes`, hydranty `defects`, údržba `maintenance_work` — in the item forms
+  (shared `ui/Textarea`) and on „Skontroluj hodnoty"; shown only while there is text, focus stays.
+- **Dnes**: rows name the prevádzka („prevádzka · mesto", `facilityPlace()`), the whole-client
+  label for a training of the whole firma (plan rows carry `company_client_type`); the same on the
+  timeline and in the calendar list by firma.
+- **Excel import of the book (B3)**: sheets `Kniha_zapisy`, `Kniha_prevadzky`, `Kniha_nedostatky`
+  create new-format (`pk2`) drafts through the app's own validation (`BookEntry`,
+  `PrehliadkaDefects::validate` with the book's options); a failing row is reported with its sheet
+  and row. The template drops `Polozky_poziarna_kniha`, which still imports as before. The
+  companies sheet has an optional last column `Druh klienta`.
+- **Extra technician on a yearly plan (B4)**: `SeatSync::EXTRA_YEARLY_MONTHS = 10` (13,50 € → 135 €
+  a year). `/api/account` and `/api/public/settings` expose `price_per_extra_technician_yearly_cents`;
+  the billing, settings and admin screens show it and say that a yearly account's next invoice is
+  the renewal. Existing Stripe items keep their price (SeatSync changes only the quantity):
+  `bin/reprice-yearly-extra-seats.php` (dry run by default, `--offline`, `--apply`, `--account=ID`)
+  moves yearly extra-seat items to the new price with `proration_behavior none` — **not run; the
+  owner runs it**.
+- **VOP 4.1**: the trial is 30 dní. `VOP_VERSION` not bumped.
+
+**Open for the owner**
+- ⏸ Run `bin/reprice-yearly-extra-seats.php` (dry run first) against Stripe.
+- ⏸ `SeatSync::applyToStripe` creates a subscription item with `price_data.product_data`; Stripe's
+  subscription-item `price_data` takes a `product` id — check the first extra seat on a live
+  subscription.
+- ⏸ Doba svietenia on the núdzové osvetlenie protocol — print it or not (mockup has no column).
+- ⏸ The núdzové osvetlenie item form requires the evidenčné číslo while the server and the import
+  treat it as optional; an imported svietidlo cannot be saved from its form without one.
 
 ---
 
