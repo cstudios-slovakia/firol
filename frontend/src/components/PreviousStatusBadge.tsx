@@ -10,10 +10,13 @@ import { cn } from '@/lib/cn';
 /**
  * What a carried-over item scored last time — block 1 / chapter 12.
  *
- * "Pri každej prenesenej položke sa zobrazí, aký mala minule stav." It is the
- * difference between retyping forty extinguishers and glancing down a list to
- * see which one was on tlaková skúška a year ago. Display only: the value is
- * never a default for this year's stav, and no protocol template prints it.
+ * "Pri každej prenesenej položke sa zobrazí, aký mala minule stav." For the
+ * types that carry identification only (the BOZP rows) it is the difference
+ * between retyping a list and glancing down it; display only, never a default
+ * for this year's stav, and no protocol template prints it. The fire types
+ * carry the stav itself (fix list of 16. 11. 2026) and the server no longer
+ * sets the value for them; on an older draft the badge is hidden where it
+ * would only repeat the item's current value.
  *
  * The badge disappears as soon as the technician records a result, so a row
  * never shows two verdicts at once.
@@ -51,10 +54,12 @@ export function PreviousStatusBadge({
 }) {
   const previous = previousStatusOf(fields);
   if (!previous) return null;
+  const current = type === 'php' ? fields.status : type === 'oopp' ? fields.condition : fields.result;
+  if (current === previous) return null;
 
   return (
     <span
-      title="Stav z predchádzajúcej kontroly — tento rok ho zadaj nanovo."
+      title="Stav z predchádzajúcej kontroly."
       className={cn(
         'inline-flex items-center gap-1 rounded-full bg-ink-100 px-2 py-0.5 text-[11px] font-medium text-ink-500',
         className,

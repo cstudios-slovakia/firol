@@ -19,6 +19,7 @@ use Firol\Support\CertGuard;
 use Firol\Support\InspectionCoverage;
 use Firol\Support\InspectionDetails;
 use Firol\Support\Periodicity;
+use Firol\Support\PrehliadkaChecklist;
 use Firol\Support\PrehliadkaConcepts;
 use Firol\Support\PrehliadkaDefects;
 use Firol\Support\PrehliadkaDetails;
@@ -399,9 +400,16 @@ final class InspectionController
 
         // A concept from a prehliadka: the items that still lack a required field
         // (what keeps it from being confirmed), so the list can mark them.
+        $isConcept = PrehliadkaConcepts::isConcept(InspectionDetails::decode($row['details'] ?? null));
         $conceptIncomplete = null;
-        if ($row['status'] === 'draft' && PrehliadkaConcepts::isConcept(InspectionDetails::decode($row['details'] ?? null))) {
+        if ($row['status'] === 'draft' && $isConcept) {
             $conceptIncomplete = PrehliadkaConcepts::incompleteItems((string) $row['type'], $items);
+        }
+        // Every draft of a fire-protection type: the same check holds its protocol
+        // back (fix list of 16. 11. 2026, decision 7), so the summary marks the items.
+        $incomplete = $conceptIncomplete;
+        if ($row['status'] === 'draft' && !$isConcept && CarryOver::carriesValues((string) $row['type'])) {
+            $incomplete = PrehliadkaConcepts::incompleteItems((string) $row['type'], $items);
         }
 
         $shapedDetail = self::shapeDetail($row);
@@ -417,6 +425,7 @@ final class InspectionController
             'follow_ups' => $followUps,
             'carry_over' => $carryOver,
             'concept_incomplete' => $conceptIncomplete,
+            'incomplete_items' => $incomplete,
         ]);
     }
 
@@ -465,11 +474,22 @@ final class InspectionController
             $itemsStmt->fetchAll(),
         );
 
-        $mapped = match ($targetType) {
-            'oprava_ts_php' => self::mapPhpToOprava($sourceItems),
-            'vyradenie'     => self::mapPhpToVyradenie($sourceItems),
-            default         => self::mapHydrantyToTsHadic($sourceItems),
-        };
+        // A tlaková skúška hadíc takes each hose's values and result from the last
+        // ts_hadic protocol here — the checklist's own matching, with its origin
+        // recorded the same way (fix list of 16. 11. 2026, decision 4).
+        $carriedDetails = null;
+        if ($targetType === 'ts_hadic') {
+            $build = PrehliadkaChecklist::tsHadicRows($accountId, (int) $source['facility_id'], $sourceItems);
+            $mapped = $build['rows'];
+            $carriedDetails = [
+                PrehliadkaChecklist::CARRIED_FROM_KEY      => $build['origin'],
+                PrehliadkaChecklist::CARRIED_POSITIONS_KEY => array_map(static fn (int $i): int => $i + 1, $build['carried']),
+            ];
+        } else {
+            $mapped = $targetType === 'oprava_ts_php'
+                ? self::mapPhpToOprava($sourceItems)
+                : self::mapPhpToVyradenie($sourceItems);
+        }
 
         if ($mapped === []) {
             Response::error('Zdrojová kontrola neobsahuje položky pre nadväzujúci koncept.', 422);
@@ -527,6 +547,10 @@ final class InspectionController
             // the firm, not from the source úkon.
             $pdo->prepare('UPDATE inspections SET billing_mode = ? WHERE id = ?')
                 ->execute([\Firol\Support\Invoicing::companyMode((int) $source['company_id']), $newId]);
+            if ($carriedDetails !== null) {
+                $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
+                    ->execute([InspectionDetails::encode($carriedDetails), $newId]);
+            }
 
             $ins = $pdo->prepare(
                 'INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)'
@@ -602,8 +626,11 @@ final class InspectionController
     /**
      * Hydrant items → Tlaková skúška hadíc draft items. One hose row per hose
      * on the hydrant (hose_count), carrying the hydrant's type/DN as the hose
-     * type and the hydrant location. Measured pressures/length are left blank
-     * for the technician to fill when the test is actually performed.
+     * type and the hydrant location. Everything else — výrobca, pressures,
+     * length, year and the result — is blank here; the values of the last
+     * ts_hadic protocol are laid over it by
+     * {@see PrehliadkaChecklist::tsHadicRows()}, and a hose with no match there
+     * stays blank for manual entry, its result not presumed.
      *
      * @param list<array<string, mixed>> $items
      * @return list<array<string, mixed>>
@@ -630,7 +657,7 @@ final class InspectionController
                     'test_pressure'       => null,
                     'length'              => null,
                     'year_of_manufacture' => null,
-                    'result'              => 'vyhovuje',
+                    'result'              => '',
                     'notes'               => null,
                 ];
             }
@@ -1165,12 +1192,13 @@ final class InspectionController
      * "Opakovať" — start this year's inspection from last year's, block 1 /
      * chapter 12.
      *
-     * The devices come across; the verdict on them does not. Stav, výsledok,
-     * poznámka, photos and nedostatky all start empty, and a device disposed
-     * of last time is left behind entirely (the response says how many, so the
-     * technician can see it was a decision). Each carried item remembers what
-     * it scored last time in `previous_status`, shown beside it while entering
-     * results but printed on nothing.
+     * The devices come across as {@see CarryOver} maps them: a fire-protection
+     * type with its values and result (the draft records where they came from,
+     * `carried_from` / `carried_positions`, shown on its summary), any other
+     * type with its identification only and last time's verdict in
+     * `previous_status`. Photos never travel, and a device disposed of last
+     * time is left behind entirely (the response says how many, so the
+     * technician can see it was a decision).
      *
      * The source inspection and its protocol are untouched.
      */
@@ -1263,7 +1291,8 @@ final class InspectionController
             // The header travels in the same spirit as the items: what
             // identifies (the device, the kind of oboznámenie) comes along,
             // what was observed last time does not.
-            $carriedDetails = InspectionDetails::carry($type, InspectionDetails::decode($source['details'] ?? null));
+            $carriedDetails = InspectionDetails::carry($type, InspectionDetails::decode($source['details'] ?? null))
+                ?? self::carriedOrigin($accountId, $type, $sourceId, count($carried['items']));
             if ($carriedDetails !== null) {
                 $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
                     ->execute([InspectionDetails::encode($carriedDetails), $newId]);
@@ -1350,6 +1379,12 @@ final class InspectionController
             $pdo->prepare(
                 'UPDATE inspections SET carried_over_from_id = ? WHERE id = ? AND account_id = ?'
             )->execute([$sourceId, $id, $accountId]);
+            $origin = self::carriedOrigin($accountId, $type, $sourceId, count($carried['items']));
+            if ($origin !== null) {
+                $details = array_merge(InspectionDetails::decode($row['details'] ?? null) ?? [], $origin);
+                $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?')
+                    ->execute([InspectionDetails::encode($details), $id, $accountId]);
+            }
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
@@ -1362,6 +1397,26 @@ final class InspectionController
             'source_id' => $sourceId,
             'disposed_skipped' => $carried['disposed'],
         ]);
+    }
+
+    /**
+     * Where the values of a fire-protection draft came from, in the shape the
+     * checklist after a prehliadka records it ({@see PrehliadkaChecklist}), so
+     * the summary says „prevzaté z protokolu č. … zo dňa …" (fix list of
+     * 16. 11. 2026, decision 5). Null for a type that carries identification
+     * only, or when nothing was carried.
+     *
+     * @return array<string, mixed>|null
+     */
+    private static function carriedOrigin(int $accountId, string $type, int $sourceId, int $count): ?array
+    {
+        if (!CarryOver::carriesValues($type) || $count === 0) {
+            return null;
+        }
+        return [
+            PrehliadkaChecklist::CARRIED_FROM_KEY      => PrehliadkaChecklist::originOf($accountId, $sourceId),
+            PrehliadkaChecklist::CARRIED_POSITIONS_KEY => range(1, $count),
+        ];
     }
 
     /**

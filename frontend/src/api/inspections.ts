@@ -444,6 +444,12 @@ export type InspectionDetail = {
   items: InspectionItem[];
   /** Present on show() of a draft concept from a prehliadka; null for any other úkon. */
   concept_incomplete?: ConceptIncompleteItem[] | null;
+  /**
+   * Items lacking a required field on a draft concept or a draft of a
+   * fire-protection type — the protocol is not generated until they are filled
+   * (fix list of 16. 11. 2026). Absent on a detail cached before it existed.
+   */
+  incomplete_items?: ConceptIncompleteItem[] | null;
   /** Present on show(); follow-up drafts created from this inspection. */
   follow_ups?: FollowUpRef[];
   /** Present on show() and on create, when carrying over is possible. */

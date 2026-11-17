@@ -11,19 +11,28 @@ use Firol\Db;
  *
  * The single biggest time saver in the field: a technician standing in a
  * boiler room does not retype forty extinguishers they already typed a year
- * ago. What travels is IDENTIFICATION — make, type, serial, year, inventory
- * number, location. What does NOT travel is the assessment: stav, výsledok,
- * poznámka, photos and nedostatky all start empty, because carrying a result
- * forward would let a protocol claim something nobody checked this time.
+ * ago. What travels depends on the kind of úkon:
  *
- * Two further rules from the spec:
- *   - an item disposed of last time ("vyradený") is not carried over at all;
- *     the technician is told how many were dropped, so a missing device reads
- *     as a decision rather than a bug.
- *   - each carried item keeps `previous_status`, shown next to it while
- *     entering results — the technician sees at a glance which extinguisher
- *     was on tlaková skúška last year. It is display-only and no protocol
- *     template reads it.
+ *   - The fire-protection types ({@see self::FULL}: PHP, hydranty, tlaková
+ *     skúška hadíc, both požiarne uzávery, núdzové osvetlenie) carry EVERY
+ *     field of the last protocol — identification, measured values, the
+ *     result / stav and the texts (fix list of 16. 11. 2026, spec 12.2:
+ *     „preberú sa tie isté údaje, čo tam boli predtým, vrátane výsledku").
+ *     The technician changes only what changed; where the values came from is
+ *     recorded on the draft (`carried_from` / `carried_positions`, see
+ *     {@see PrehliadkaChecklist}) and shown on its summary, and nothing is
+ *     issued with a required value empty
+ *     ({@see \Firol\Controllers\DocumentController::generateForInspectionInternal()}).
+ *   - Every other type (the BOZP rows and records, the person lists) carries
+ *     IDENTIFICATION only — make, type, serial, inventory number, location.
+ *     Its assessment (výsledok, poznámka, nedostatky) starts empty and each
+ *     carried item keeps `previous_status`, shown next to it while entering
+ *     results; it is display-only and no protocol template reads it (BOZP
+ *     block spec ch. 12).
+ *
+ * Photos never travel, and an item disposed of last time ("vyradený") is not
+ * carried over at all; the technician is told how many were dropped, so a
+ * missing device reads as a decision rather than a bug.
  */
 final class CarryOver
 {
@@ -31,8 +40,16 @@ final class CarryOver
     public const PREVIOUS_STATUS_KEY = 'previous_status';
 
     /**
-     * Identification fields kept per inspection type. Everything not listed
-     * is an assessment and is dropped.
+     * Types whose items travel whole — values and result included (fix list
+     * of 16. 11. 2026, point 1). Their field set is KEEP plus the keys of BLANK.
+     */
+    public const FULL = [
+        'php', 'hydranty', 'ts_hadic', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie',
+    ];
+
+    /**
+     * Identification fields kept per inspection type. For a type outside
+     * {@see self::FULL} everything not listed is an assessment and is dropped.
      *
      * @var array<string, list<string>>
      */
@@ -72,7 +89,9 @@ final class CarryOver
     /**
      * Blank values written for the assessment fields, so an item carried over
      * has the same JSON shape the type's form expects rather than a hole the
-     * form has to guess at.
+     * form has to guess at. For a {@see self::FULL} type these are the value
+     * fields that travel too; the blank stands in only where the source item
+     * lacks the key.
      *
      * @var array<string, array<string, mixed>>
      */
@@ -130,6 +149,12 @@ final class CarryOver
         return isset(self::KEEP[$type]);
     }
 
+    /** True when this type's items travel whole, result included ({@see self::FULL}). */
+    public static function carriesValues(string $type): bool
+    {
+        return in_array($type, self::FULL, true);
+    }
+
     /**
      * The latest finalized úkon of this type at this prevádzka — the source a
      * repeat and the device list both draw from. `$exceptId` leaves the draft
@@ -172,8 +197,14 @@ final class CarryOver
             return null;
         }
 
+        // A fire type takes the value fields as well; meta keys of the source
+        // (its own `previous_status`, the defects of a prehliadka it came from)
+        // are not fields of the protocol and stay behind.
+        $keep = self::carriesValues($type)
+            ? array_merge(self::KEEP[$type], array_keys(self::BLANK[$type] ?? []))
+            : self::KEEP[$type];
         $out = [];
-        foreach (self::KEEP[$type] as $key) {
+        foreach ($keep as $key) {
             if (array_key_exists($key, $fields)) {
                 $out[$key] = $fields[$key];
             }
@@ -192,7 +223,8 @@ final class CarryOver
             }, $rows));
         }
 
-        $previous = self::previousStatus($type, $fields);
+        // The carried value itself is last time's stav; a badge would only repeat it.
+        $previous = self::carriesValues($type) ? null : self::previousStatus($type, $fields);
         if ($previous !== null) {
             $out[self::PREVIOUS_STATUS_KEY] = $previous;
         }

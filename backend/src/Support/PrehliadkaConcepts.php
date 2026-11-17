@@ -15,15 +15,18 @@ use Firol\Storage\Storage;
  * ticked in step 1:
  *
  *   - the devices come from the latest finalized úkon of that type at the
- *     prevádzka ({@see CarryOver}, so a disposed device stays behind and the
- *     identification travels without last year's verdict), followed by the
- *     devices the walk-through wrote down that the list did not know
- *     (`details.new_devices`);
+ *     prevádzka ({@see CarryOver}, so a disposed device stays behind), followed
+ *     by the devices the walk-through wrote down that the list did not know
+ *     (`details.new_devices`). A fire-protection type carries the whole item
+ *     of that protocol — measured values, result and texts included (fix list
+ *     of 16. 11. 2026); a BOZP type (rebríky, regále) its identification only;
  *   - a device named in a defect gets the type's failing result — `O` for a
  *     hasiaci prístroj (decision D3), „nevyhovuje" for the others — with the
  *     defect text in the item's own note field and the photos of those defects
- *     copied onto the item;
- *   - every other device gets the passing result.
+ *     copied onto the item: today's finding wins over what was carried;
+ *   - a carried fire-protection device without a defect keeps what it carried;
+ *     every other device (a new one, a BOZP row, a carried item whose result
+ *     was empty) gets the passing result.
  *
  * A concept is NOT a protocol (spec 7.3: the app must not issue for a control
  * something the technician did not confirm). It is marked in `details`:
@@ -358,7 +361,7 @@ final class PrehliadkaConcepts
                 if ($carried === null) {
                     continue; // disposed last time — stays behind
                 }
-                $rows[] = self::withResult($type, $carried, $failing['s' . (int) $row['id']] ?? null) + ['carried' => true];
+                $rows[] = self::withResult($type, $carried, $failing['s' . (int) $row['id']] ?? null, true) + ['carried' => true];
             }
         }
 
@@ -373,13 +376,23 @@ final class PrehliadkaConcepts
     }
 
     /**
-     * @param array<string, mixed> $fields identification + blank assessment
+     * @param array<string, mixed> $fields the carried item, or a new device's identification + blank assessment
      * @param array{defects: list<array{item_id: int, text: string}>}|null $hit
+     * @param bool $carried the fields came from the last protocol
      * @return array{fields: array<string, mixed>, photo_items: list<int>}
      */
-    private static function withResult(string $type, array $fields, ?array $hit): array
+    private static function withResult(string $type, array $fields, ?array $hit, bool $carried = false): array
     {
         $fail = $hit !== null;
+        // A fire-protection device with no defect today keeps the result, values
+        // and texts it carried (fix list of 16. 11. 2026). Only an item whose
+        // result was empty — nothing to keep — falls through to the passing one.
+        if (!$fail && $carried && CarryOver::carriesValues($type)) {
+            $result = $type === 'php' ? ($fields['status'] ?? '') : ($fields['result'] ?? '');
+            if (is_string($result) && $result !== '') {
+                return ['fields' => $fields, 'photo_items' => []];
+            }
+        }
         $note = null;
         if ($hit !== null) {
             $texts = array_values(array_unique(array_filter(
@@ -615,10 +628,10 @@ final class PrehliadkaConcepts
      * same ones that refuse an incomplete item on save — nothing is repeated here.
      *
      * Devices the walk-through wrote down start with the fields it did not ask
-     * for blank (year, výrobca, druh uzáveru, …); a device carried over from the
-     * last úkon is complete in its identification but, like every concept item,
-     * has the measurements of the type blank (HS / HD / Q, trvanie svietenia, …)
-     * — those are required too, as for any úkon of that type. A row whose
+     * for blank (year, výrobca, druh uzáveru, HS / HD / Q, trvanie svietenia, …);
+     * a device carried over from the last protocol brings its values along
+     * and is complete unless that protocol lacked one. Also run on every draft
+     * of a fire-protection type before its protocol is issued. A row whose
      * `fields` is not an object (odd legacy data) counts as having nothing filled in.
      *
      * @param list<array<string, mixed>> $items each with `id`, `position` and `fields`
@@ -654,15 +667,17 @@ final class PrehliadkaConcepts
      * A long list is cut after five devices.
      *
      * @param list<array{item_id: int, name: string, missing: list<string>}> $incomplete
+     * @param bool $concept false for an ordinary draft („Kontrola nie je úplná …")
      */
-    public static function incompleteMessage(array $incomplete): string
+    public static function incompleteMessage(array $incomplete, bool $concept = true): string
     {
         $shown = array_slice($incomplete, 0, 5);
         $parts = array_map(
             static fn (array $r): string => $r['name'] . ' (' . implode(', ', $r['missing']) . ')',
             $shown,
         );
-        $message = 'Koncept nie je úplný — doplň povinné údaje: ' . implode('; ', $parts) . '.';
+        $message = ($concept ? 'Koncept nie je úplný' : 'Kontrola nie je úplná')
+            . ' — doplň povinné údaje: ' . implode('; ', $parts) . '.';
         $rest = count($incomplete) - count($shown);
         if ($rest > 0) {
             $message .= ' Ešte ' . $rest . ' ' . ($rest === 1 ? 'zariadenie' : ($rest < 5 ? 'zariadenia' : 'zariadení')) . '.';

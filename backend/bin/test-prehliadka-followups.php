@@ -9,7 +9,11 @@ declare(strict_types=1);
  *      prehliadka — which defects are offered, the key a task carries, and how
  *      Dnes „Otvorené nedostatky" treats an open / done / foreign task;
  *   2. the required fields of a device in a concept from a prehliadka — which
- *      fields each type lacks, how the refusal reads, odd legacy rows.
+ *      fields each type lacks, how the refusal reads, odd legacy rows;
+ *   3. carrying items over (fix list of 16. 11. 2026): a fire-protection type
+ *      takes every field of the last protocol, values and result included, a
+ *      BOZP row its identification only; and the device list of a prevádzka
+ *      never drops a device for want of a label.
  *
  *     docker compose exec php php bin/test-prehliadka-followups.php
  *
@@ -25,6 +29,8 @@ if (is_file(__DIR__ . '/../.env')) {
 
 use Firol\Controllers\TodayController;
 use Firol\Db;
+use Firol\Support\CarryOver;
+use Firol\Support\FacilityDevices;
 use Firol\Support\PrehliadkaConcepts;
 use Firol\Support\PrehliadkaDefects;
 
@@ -179,7 +185,9 @@ try {
     $expect('2 php new device: year, výrobca, typ missing', $check('php', [
         'manufacturer' => '', 'type' => '', 'serial' => 'LP1-0002', 'year' => null, 'location' => 'Sklad', 'status' => 'O', 'notes' => 'Chýba tabuľka',
     ]), ['LP1-0002 · Sklad', ['Výrobca', 'Typ', 'Rok výroby']]);
-    $expect('2 hydranty carried over: measurements missing', $check('hydranty', [
+    // A draft carried over before 16. 11. 2026 (values blanked) or a hydrant whose
+    // last protocol lacked them: the measurements are still required.
+    $expect('2 hydranty without measurements: they are missing', $check('hydranty', [
         'type' => 'DN52', 'type_other' => null, 'location' => 'Vchod', 'hose_count' => 2,
         'hs' => null, 'hd' => null, 'q' => null, 'defects' => null, 'result' => 'vyhovuje',
     ]), ['DN52 · Vchod', ['HS', 'HD', 'Q']]);
@@ -244,6 +252,70 @@ try {
         'Koncept nie je úplný — doplň povinné údaje: LP1 (Typ); LP2 (Typ); LP3 (Typ); LP4 (Typ); LP5 (Typ). Ešte 2 zariadenia.');
     $expect('2 message of one device', PrehliadkaConcepts::incompleteMessage([['item_id' => 1, 'name' => 'LP1', 'missing' => ['Typ', 'Rok výroby']]]),
         'Koncept nie je úplný — doplň povinné údaje: LP1 (Typ, Rok výroby).');
+    // An ordinary draft of a fire-protection type gets the same check at generate.
+    $expect('2 message of an ordinary draft', PrehliadkaConcepts::incompleteMessage([['item_id' => 1, 'name' => 'DN52 · Dvor', 'missing' => ['HS']]], false),
+        'Kontrola nie je úplná — doplň povinné údaje: DN52 · Dvor (HS).');
+
+    // ── Part 3 — carrying items over (fix list of 16. 11. 2026) ──────────────
+    $hydrant = [
+        'type' => 'DN52', 'type_other' => null, 'location' => 'Dvor', 'hose_count' => 2,
+        'hs' => 0.3, 'hd' => 0.12, 'q' => 0.9, 'defects' => 'Nízky prietok', 'result' => 'nevyhovuje',
+    ];
+    $expect('3 hydranty carry values, result and the defect text', CarryOver::mapItem('hydranty', $hydrant), $hydrant);
+    $expect('3 a carried hydrant is complete', $check('hydranty', (array) CarryOver::mapItem('hydranty', $hydrant)), []);
+    $expect('3 meta keys of the source stay behind', CarryOver::mapItem('hydranty', $hydrant + [
+        'previous_status' => 'vyhovuje', 'prehliadka_defects' => [['item_id' => 1, 'text' => 'x']],
+    ]), $hydrant);
+    $hose = [
+        'hose_type' => 'C52', 'location' => 'Vchod', 'manufacturer' => 'Pyrotex', 'working_pressure' => 1.2,
+        'test_pressure' => 1.5, 'length' => 20, 'year_of_manufacture' => 2018, 'result' => 'vyhovuje', 'notes' => null,
+    ];
+    $sorted = static function (?array $a): ?array {
+        if ($a !== null) {
+            ksort($a);
+        }
+        return $a;
+    };
+    $expect('3 ts hadíc carries pressures and result', $sorted(CarryOver::mapItem('ts_hadic', $hose)), $sorted($hose));
+    $door = ['kind' => 'dvere', 'identifier' => 'PD-2', 'manufacturer' => 'Hörmann', 'location' => 'Kotolňa', 'result' => 'nevyhovuje', 'notes' => 'Nedovierajú'];
+    $expect('3 požiarny uzáver carries its result', CarryOver::mapItem('pu_akcieschopnost', $door), $door);
+    $upkeep = $door + ['maintenance_work' => 'Výmena tesnenia'];
+    $expect('3 údržba uzáveru carries the práce', CarryOver::mapItem('pu_udrzba', $upkeep)['maintenance_work'] ?? null, 'Výmena tesnenia');
+    $light = [
+        'evid_number' => '', 'floor' => '1.PP', 'luminaire_type' => 'Piktogram', 'manufacturer' => 'Zemper',
+        'location' => 'Sklad', 'duration_min' => 20, 'result' => 'nevyhovuje', 'notes' => 'Slabý akumulátor',
+    ];
+    $expect('3 núdzové osvetlenie carries the trvanie', CarryOver::mapItem('nudzove_osvetlenie', $light), $light);
+    $php = ['manufacturer' => 'Hasma', 'type' => 'P6Če', 'serial' => 'PH-2', 'year' => 2018, 'location' => 'Sklad', 'status' => 'TS', 'notes' => 'TS 2026'];
+    $expect('3 php carries its stav and note, no badge', CarryOver::mapItem('php', $php), $php);
+    $expect('3 php disposed last time is not carried', CarryOver::mapItem('php', ['status' => 'V'] + $php), null);
+    $expect('3 hydrant disposed last time is not carried', CarryOver::mapItem('hydranty', ['result' => 'vyradene'] + $hydrant), null);
+    $expect('3 a source item lacking a value gets the blank', CarryOver::mapItem('hydranty', ['type' => 'DN25', 'location' => 'A', 'hose_count' => 1]), [
+        'type' => 'DN25', 'location' => 'A', 'hose_count' => 1,
+        'hs' => null, 'hd' => null, 'q' => null, 'defects' => null, 'result' => '',
+    ]);
+    // BOZP rows are unchanged: identification only, last time's výsledok as a badge.
+    $ladder = [
+        'inventory_number' => 'R-1', 'type' => 'Hliníkový', 'manufacturer' => 'Alve', 'year' => 2020, 'location' => 'Sklad',
+        'faults' => 'Ohnutá priečka', 'result' => 'nevyhovuje', 'defects' => [['text' => 'x']],
+    ];
+    $expect('3 rebrík still carries identification only', CarryOver::mapItem('rebriky', $ladder), [
+        'inventory_number' => 'R-1', 'type' => 'Hliníkový', 'manufacturer' => 'Alve', 'year' => 2020, 'location' => 'Sklad',
+        'faults' => null, 'result' => '', 'defects' => [], 'previous_status' => 'nevyhovuje',
+    ]);
+    $expect('3 the fire types are the ones that carry values', array_values(array_filter(
+        ['php', 'hydranty', 'ts_hadic', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'rebriky', 'regale', 'oopp', 'oznacenie', 'pracovne_prostriedky'],
+        [CarryOver::class, 'carriesValues'],
+    )), ['php', 'hydranty', 'ts_hadic', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie']);
+
+    // The device list names a svietidlo without an evidenčné číslo instead of dropping it.
+    $label = static fn (string $type, array $f): ?string => FacilityDevices::shape($type, $f, true)['label'] ?? null;
+    $expect('3 svietidlo with its number', $label('nudzove_osvetlenie', ['evid_number' => 'NO-1', 'luminaire_type' => 'LED']), 'NO-1');
+    $expect('3 svietidlo without a number: its type', $label('nudzove_osvetlenie', ['evid_number' => '', 'luminaire_type' => 'LED panel', 'location' => 'Chodba']), 'LED panel');
+    $expect('3 svietidlo without number and type: its place', $label('nudzove_osvetlenie', ['evid_number' => null, 'luminaire_type' => '', 'location' => 'Chodba']), 'Chodba');
+    $expect('3 svietidlo with nothing: „Svietidlo"', $label('nudzove_osvetlenie', []), 'Svietidlo');
+    $expect('3 a nameless hasiaci prístroj is still listed', $label('php', ['serial' => '', 'location' => 'Sklad']), 'Sklad');
+    $expect('3 outside the device list a nameless item stays unnamed', FacilityDevices::shape('php', []), null);
 } finally {
     $pdo->rollBack();
 }

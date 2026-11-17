@@ -41,6 +41,7 @@ import { InspectionStatusBadge } from '@/components/InspectionStatusBadge';
 import { InspectionTags } from '@/components/InspectionTags';
 import { HandoverDialog } from '@/components/HandoverDialog';
 import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStatusBadge';
+import { carriedOriginOf, carriesValues, originText } from '@/lib/carryOver';
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { periodicityLabel, type Periodicity } from '@/lib/periodicity';
 import { sectionPathForType } from '@/lib/sections';
@@ -155,8 +156,9 @@ export function InspectionDetailPage() {
 
   /**
    * Fill an empty draft from the previous inspection at this prevádzka
-   * (chapter 12). The devices come across; their stav does not — the
-   * technician enters this year's results themselves.
+   * (chapter 12). A fire-protection type takes the values and the result of
+   * the last protocol (fix list of 16. 11. 2026); any other type the devices
+   * only, its results entered anew.
    */
   async function handleCarryOver() {
     if (!data) return;
@@ -178,7 +180,9 @@ export function InspectionDetailPage() {
           ? 'Záznam z minulej kontroly prevzatý — výsledok zadaj nanovo.'
           : res.disposed_skipped > 0
             ? `Položky prevzaté. ${disposedNotice(res.disposed_skipped)}`
-            : 'Položky z minulej kontroly prevzaté — stav zadaj nanovo.',
+            : carriesValues(res.inspection.type)
+              ? 'Položky prevzaté aj s hodnotami a výsledkom — prepíš len to, čo sa zmenilo.'
+              : 'Položky z minulej kontroly prevzaté — výsledok zadaj nanovo.',
       );
       if (record) navigate(`/inspections/${id}/items/${record.id}`);
     } catch (err) {
@@ -405,11 +409,18 @@ export function InspectionDetailPage() {
   // A concept from a preventívna prehliadka is not a protocol until confirmed (spec 7.3).
   const conceptState = i.concept_state ?? null;
   const conceptPending = isDraft && conceptState === 'pending';
-  // Devices of the concept that still lack a required field — marked in the list; the
-  // concept cannot be confirmed (or its protocol generated) until they are filled.
-  const incompleteItems = isDraft && conceptState !== null ? (data.concept_incomplete ?? []) : [];
+  // Devices that still lack a required field — marked in the list. A concept
+  // cannot be confirmed, and neither it nor a draft of a fire-protection type
+  // (whose items arrive with last protocol's values) can be issued, until they
+  // are filled (fix list of 16. 11. 2026).
+  const incompleteItems = isDraft
+    ? (data.incomplete_items ?? (conceptState !== null ? data.concept_incomplete : null) ?? [])
+    : [];
   const incompleteById = new Map(incompleteItems.map((c) => [c.item_id, c]));
   const conceptIncomplete = incompleteItems.length > 0;
+  // Where the values of a draft came from — „prevzaté z protokolu č. … zo dňa …".
+  const carried = isDraft ? carriedOriginOf(i.details) : null;
+  const allCarried = carried !== null && items.length > 0 && items.every((it) => carried.positions.has(it.position));
 
   return (
     <div className="flex flex-col gap-5">
@@ -516,7 +527,9 @@ export function InspectionDetailPage() {
               </p>
               <p className="mt-0.5">
                 {conceptPending
-                  ? 'Výsledky sú predvyplnené z prehliadky: zariadenia s nedostatkom nevyhovujú (aj s fotkami), ostatné vyhovujú. Prejdi si ich a doplň, čo chýba. Kým ich nepotvrdíš, protokol sa nedá vygenerovať.'
+                  ? carriesValues(i.type)
+                    ? 'Zariadenia s nedostatkom z prehliadky nevyhovujú (aj s fotkami), ostatné majú hodnoty a výsledok z posledného protokolu. Prejdi si ich a doplň, čo chýba. Kým ich nepotvrdíš, protokol sa nedá vygenerovať.'
+                    : 'Výsledky sú predvyplnené z prehliadky: zariadenia s nedostatkom nevyhovujú (aj s fotkami), ostatné vyhovujú. Prejdi si ich a doplň, čo chýba. Kým ich nepotvrdíš, protokol sa nedá vygenerovať.'
                   : conceptIncomplete
                     ? 'Potvrdenie platí, ale niektoré povinné údaje stále chýbajú. Doplň ich, inak sa protokol nedá vygenerovať. Potvrdenie môžeš aj zrušiť.'
                     : 'Protokol môžeš vygenerovať. Ak ešte niečo meníš, potvrdenie môžeš zrušiť.'}
@@ -756,6 +769,7 @@ export function InspectionDetailPage() {
         <CarryOverOfferCard
           offer={data.carry_over}
           record={module?.singleItem === true}
+          withValues={carriesValues(i.type)}
           busy={carryingOver}
           onCarryOver={handleCarryOver}
         />
@@ -775,6 +789,12 @@ export function InspectionDetailPage() {
             </span>
             <span className="text-xs text-ink-500">spolu {items.length}</span>
           </div>
+          {carried && (
+            <p className="border-b border-ink-100 bg-firol-50/50 px-4 py-2 text-xs text-ink-600" data-carried-origin>
+              {allCarried ? 'Položky ' : 'Označené položky '}
+              {originText(carried.origin)} — skontroluj ich a prepíš, čo sa zmenilo.
+            </p>
+          )}
           {module ? (
             <ul className="divide-y divide-ink-100">
               {items.map((it, idx) => (
@@ -787,14 +807,17 @@ export function InspectionDetailPage() {
                     deleting={deletingItemId === it.id}
                     onDelete={() => handleDeleteItem(it.id)}
                   />
-                  {/* Chapter 12 — what this device scored last time, so the
-                      technician can see at a glance which one was on tlaková
-                      skúška a year ago. Display only. */}
+                  {carried && !allCarried && carried.positions.has(it.position) && (
+                    <p className="px-4 pb-2 text-xs text-ink-400">{originText(carried.origin)}</p>
+                  )}
                   {incompleteById.has(it.id) && (
                     <p className="px-4 pb-2 text-xs font-medium text-status-bad" data-incomplete-item={it.id}>
                       Chýba: {incompleteById.get(it.id)?.missing.join(', ')}
                     </p>
                   )}
+                  {/* Chapter 12 — what this device scored last time (types that
+                      carry identification only), so the technician sees at a
+                      glance which one was on tlaková skúška a year ago. */}
                   {previousStatusOf(it.fields) && (
                     <div className="px-4 pb-2">
                       <PreviousStatusBadge type={i.type} fields={it.fields} />
@@ -872,7 +895,9 @@ export function InspectionDetailPage() {
           conceptPending
             ? 'Najprv potvrď výsledky konceptu z prehliadky — až potom sa dá vygenerovať protokol.'
             : conceptIncomplete
-              ? 'Koncept nie je úplný — doplň povinné údaje označených zariadení.'
+              ? conceptState !== null
+                ? 'Koncept nie je úplný — doplň povinné údaje označených zariadení.'
+                : 'Kontrola nie je úplná — doplň povinné údaje označených položiek.'
               : undefined
         }
         generating={generating}
@@ -936,19 +961,23 @@ function disposedNotice(n: number): string {
  * single biggest time saver in the field: a technician standing in a boiler
  * room does not retype forty extinguishers they already typed a year ago.
  *
- * What travels is identification. Stav, poznámky, fotky and nedostatky start
- * empty, because carrying a verdict forward would let a protocol claim
- * something nobody checked this time.
+ * A fire-protection type takes the whole items of the last protocol — values
+ * and result included (fix list of 16. 11. 2026); any other type its
+ * identification, with stav, poznámky and nedostatky entered anew. Photos
+ * never travel.
  */
 function CarryOverOfferCard({
   offer,
   record = false,
+  withValues,
   busy,
   onCarryOver,
 }: {
   offer: NonNullable<InspectionDetail['carry_over']>;
   /** Single-record úkon — the whole record travels, not a list of devices. */
   record?: boolean;
+  /** The items arrive with their values and result (lib/carryOver). */
+  withValues: boolean;
   busy: boolean;
   onCarryOver: () => void;
 }) {
@@ -978,9 +1007,10 @@ function CarryOverOfferCard({
           </p>
           <p className="mt-1 text-xs text-ink-600">
             Prenesie sa {offer.item_count}{' '}
-            {offer.item_count === 1 ? 'položka' : offer.item_count < 5 ? 'položky' : 'položiek'} aj
-            s označením a umiestnením. Stav, poznámky a fotky zadáš nanovo — pri
-            každej položke uvidíš, aký stav mala minule.
+            {offer.item_count === 1 ? 'položka' : offer.item_count < 5 ? 'položky' : 'položiek'}{' '}
+            {withValues
+              ? 'so všetkými údajmi z posledného protokolu — aj s nameranými hodnotami a výsledkom. Prepíšeš len to, čo sa zmenilo; fotky sa neprenášajú.'
+              : 'aj s označením a umiestnením. Stav, poznámky a fotky zadáš nanovo — pri každej položke uvidíš, aký stav mala minule.'}
             {offer.disposed > 0 && ` ${disposedNotice(offer.disposed)}`}
           </p>
         </div>

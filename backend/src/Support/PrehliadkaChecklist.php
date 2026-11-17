@@ -518,9 +518,10 @@ final class PrehliadkaChecklist
             if (array_key_exists(self::CARRIED_FROM_KEY, $details)) {
                 $origin = is_array($details[self::CARRIED_FROM_KEY]) ? $details[self::CARRIED_FROM_KEY] : null;
             } else {
-                // Made with the follow-up button on the check's own screen: oprava and
-                // vyradenie hold today's devices all the same; a ts_hadic made there
-                // starts blank and is the technician's to fill in.
+                // Made with the follow-up button on the check's own screen before it
+                // recorded an origin: oprava and vyradenie hold today's devices all the
+                // same; such a ts_hadic started blank and is the technician's to fill in.
+                // (The button records the origin since 16. 11. 2026, as this list does.)
                 $origin = in_array($target, self::FROM_TODAY, true) ? self::originOf($accountId, $sourceId) : null;
             }
             $draft = $row['status'] === 'draft';
@@ -574,15 +575,29 @@ final class PrehliadkaChecklist
             ];
         }
 
-        // Tlaková skúška hadíc: today's hoses, each with the values it had on the
-        // last protocol of its kind here (decision 3).
-        $rows = InspectionController::mapHydrantyToTsHadic($sourceItems);
-        $previousId = CarryOver::latestSourceId($accountId, (int) $source['facility_id'], 'ts_hadic');
+        return self::tsHadicRows($accountId, (int) $source['facility_id'], $sourceItems);
+    }
+
+    /**
+     * Tlaková skúška hadíc from a hydranty check: today's hoses (one row per
+     * hose of each hydrant), each with the values it had on the last ts_hadic
+     * protocol at the prevádzka, the result included (decision 3, fix list of
+     * 16. 11. 2026). The same matching serves the checklist after a prehliadka
+     * and the follow-up button on the hydranty úkon itself
+     * ({@see InspectionController::followUp()}).
+     *
+     * A hose with no match in that protocol, or without any earlier protocol,
+     * stays empty for manual entry — its result is not presumed either.
+     *
+     * @param list<array<string, mixed>> $hydrantItems the hydranty úkon's item fields
+     * @return array{rows: list<array<string, mixed>>, carried: list<int>, origin: array{number: ?string, executed_on: ?string}|null}
+     *         carried = indexes into rows
+     */
+    public static function tsHadicRows(int $accountId, int $facilityId, array $hydrantItems): array
+    {
+        $rows = InspectionController::mapHydrantyToTsHadic($hydrantItems);
+        $previousId = CarryOver::latestSourceId($accountId, $facilityId, 'ts_hadic');
         if ($previousId === null || $rows === []) {
-            // Nothing to take over: the result is not presumed either.
-            foreach ($rows as $i => $row) {
-                $rows[$i]['result'] = '';
-            }
             return ['rows' => $rows, 'carried' => [], 'origin' => null];
         }
 
@@ -608,9 +623,7 @@ final class PrehliadkaChecklist
                 }
             }
             if ($pick === null) {
-                // Nothing to take over: the result is not presumed either.
-                $rows[$i]['result'] = '';
-                continue;
+                continue; // nothing to take over; the row stays blank, result included
             }
             $used[$pick] = true;
             foreach (self::TS_HADIC_VALUES as $key) {

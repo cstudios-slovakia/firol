@@ -17,27 +17,23 @@ import { INSPECTION_TYPE_LABELS } from '@/api/inspections';
 import {
   Prehliadka,
   type ChecklistEntry,
-  type ChecklistOrigin,
   type ChecklistRefusal,
   type PrehliadkaConcept,
 } from '@/api/prehliadka';
 import { ApiError } from '@/lib/api';
 import { useCertMissingToast } from '@/lib/certMissing';
 import { cn } from '@/lib/cn';
-import { formatDateSk } from '@/lib/clientNoticeEmail';
 import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { originText } from '@/lib/carryOver';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 
 /** Router state the review screen reads: what could not even be created. */
 export type ReviewNavState = { refused?: ChecklistRefusal[] };
 
-/** „prevzaté z protokolu č. … zo dňa …" — the number is missing on old data without a document. */
-export function originText(origin: ChecklistOrigin): string {
-  const date = origin.executed_on ? ` zo dňa ${formatDateSk(origin.executed_on)}` : '';
-  return origin.number ? `prevzaté z protokolu č. ${origin.number}${date}` : `prevzaté z kontroly${date}`;
-}
+/** „prevzaté z protokolu č. … zo dňa …" — shared with the úkon's summary (lib/carryOver). */
+export { originText };
 
 export function devicesLabel(n: number): string {
   return `${n} ${n === 1 ? 'zariadenie' : n >= 2 && n <= 4 ? 'zariadenia' : 'zariadení'}`;
