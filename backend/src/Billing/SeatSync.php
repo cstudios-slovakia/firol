@@ -16,9 +16,15 @@ use Firol\Stripe\StripeClient;
  *    and includes `accounts.included_technicians` technician seats — the
  *    account admin (main user) counts as one of those.
  *  - Anything beyond is charged as a second recurring line item priced
- *    from `system_settings.price_per_extra_technician_cents`. We only
+ *    from `system_settings.price_per_extra_technician_cents` (a monthly
+ *    amount; the yearly item costs EXTRA_YEARLY_MONTHS × that). We only
  *    create that line item when needed and remove it again when the
  *    overage drops to zero.
+ *  - The price is fixed when the line item is created. Later changes only
+ *    touch its quantity, so a new admin price reaches new items (checkout,
+ *    first extra seat on a subscription) but not existing ones; those keep
+ *    the price they were created with until it is replaced on purpose
+ *    (see bin/reprice-yearly-extra-seats.php).
  *  - During the local trial (no Stripe subscription yet) we just update
  *    `accounts.extra_technicians` in the DB; the checkout flow reads the
  *    current value when it builds the line items.
@@ -30,6 +36,13 @@ use Firol\Stripe\StripeClient;
  */
 final class SeatSync
 {
+    /**
+     * Months a yearly extra technician costs. The public price list sells
+     * the yearly plan as 10 months paid for 12, and the extra technician
+     * on a yearly plan follows it (13,50 € a month → 135 € a year).
+     */
+    public const EXTRA_YEARLY_MONTHS = 10;
+
     /**
      * Re-sync the extra-seat line item for one account.
      *
@@ -124,7 +137,8 @@ final class SeatSync
 
     /**
      * Current extra-technician monthly price in cents, from
-     * `system_settings`. Yearly callers multiply by 12.
+     * `system_settings`. The yearly price comes from
+     * pricePerExtraYearlyCents() — callers never derive it themselves.
      */
     public static function pricePerExtraCents(): int
     {
@@ -135,6 +149,21 @@ final class SeatSync
         $stmt->execute();
         $val = $stmt->fetchColumn();
         return $val !== false ? (int) $val : 1000;
+    }
+
+    /**
+     * Current extra-technician yearly price in cents:
+     * monthly × EXTRA_YEARLY_MONTHS.
+     */
+    public static function pricePerExtraYearlyCents(): int
+    {
+        return self::yearlyFromMonthlyCents(self::pricePerExtraCents());
+    }
+
+    /** Yearly extra-technician amount for a given monthly amount, in cents. */
+    public static function yearlyFromMonthlyCents(int $monthlyCents): int
+    {
+        return $monthlyCents * self::EXTRA_YEARLY_MONTHS;
     }
 
     public static function defaultIncludedTechnicians(): int
@@ -161,15 +190,16 @@ final class SeatSync
 
     /**
      * Returns a `price_data` blob ready to plug into a Stripe line item
-     * for the given billing period. Yearly = monthly × 12.
+     * for the given billing period. Yearly = monthly × EXTRA_YEARLY_MONTHS.
      *
      * @return array<string, mixed>
      */
     public static function extraPriceData(string $billingPeriod): array
     {
-        $monthlyCents = self::pricePerExtraCents();
-        $interval     = $billingPeriod === 'yearly' ? 'year' : 'month';
-        $unitAmount   = $billingPeriod === 'yearly' ? $monthlyCents * 12 : $monthlyCents;
+        $interval   = $billingPeriod === 'yearly' ? 'year' : 'month';
+        $unitAmount = $billingPeriod === 'yearly'
+            ? self::pricePerExtraYearlyCents()
+            : self::pricePerExtraCents();
 
         return [
             'currency'    => 'eur',
@@ -184,6 +214,7 @@ final class SeatSync
     /**
      * Create, update or delete the Stripe Subscription Item that carries
      * the extra-seat charge. Stripe handles proration automatically.
+     * An existing item only gets its quantity changed — its price stays.
      */
     private static function applyToStripe(
         string $subId,

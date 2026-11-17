@@ -66,6 +66,14 @@ export function formatPrice(n: number): string {
   })} €`;
 }
 
+/** Amount in cents as "135,00 €" — always two decimals. */
+export function formatCents(cents: number): string {
+  return `${(cents / 100).toLocaleString('sk-SK', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} €`;
+}
+
 /** "27 € / mesiac" or "270 € / rok"; "—" while prices are loading. */
 export function periodPriceLabel(pricing: Pricing | null, period: 'monthly' | 'yearly'): string {
   if (!pricing) return '—';

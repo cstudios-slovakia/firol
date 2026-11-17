@@ -262,6 +262,9 @@ final class AccountController
             'active_technicians'             => SeatSync::countActiveTechnicians($accountId),
             'max_self_service_technicians'   => SeatSync::maxSelfServiceTechnicians(),
             'price_per_extra_technician_cents' => SeatSync::pricePerExtraCents(),
+            // What a yearly subscription charges per extra technician —
+            // the screens show this figure and never derive it themselves.
+            'price_per_extra_technician_yearly_cents' => SeatSync::pricePerExtraYearlyCents(),
         ];
     }
 }

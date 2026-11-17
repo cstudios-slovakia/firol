@@ -16,7 +16,7 @@ import { Skeleton, CardBlockSkeleton } from '@/components/ui/Skeleton';
 import { Badge } from '@/components/ui/Badge';
 import { Dialog } from '@/components/ui/Dialog';
 import { cn } from '@/lib/cn';
-import { periodPriceLabel, usePricing, yearlyHint } from '@/lib/pricing';
+import { formatCents, periodPriceLabel, usePricing, yearlyHint } from '@/lib/pricing';
 
 export function BillingPage() {
   const [account, setAccount] = useState<Account | null>(null);
@@ -55,10 +55,13 @@ function SeatsSection({ account, loading }: { account: Account | null; loading: 
   const included   = account.included_technicians;
   const extra      = Math.max(0, active - included);
   const max        = account.max_self_service_technicians;
-  const perExtra   = account.price_per_extra_technician_cents / 100;
-  const isYearly   = account.billing_period === 'yearly';
-  const perPeriod  = isYearly ? perExtra * 12 : perExtra;
-  const periodWord = isYearly ? 'rok' : 'mesiac';
+  // Both amounts come from the backend: the yearly one is what Stripe
+  // charges a yearly subscription (not 12 × monthly).
+  const perMonthCents  = account.price_per_extra_technician_cents;
+  const perYearCents   = account.price_per_extra_technician_yearly_cents;
+  const isYearly       = account.billing_period === 'yearly';
+  const perPeriodCents = isYearly ? perYearCents : perMonthCents;
+  const periodWord     = isYearly ? 'rok' : 'mesiac';
   const overMax    = active > max;
 
   return (
@@ -82,8 +85,8 @@ function SeatsSection({ account, loading }: { account: Account | null; loading: 
           <SeatStat label="Aktívnych technikov" value={`${active}`} />
           <SeatStat
             label="Extra (nad rámec)"
-            value={extra === 0 ? '0' : `${extra} × ${perExtra.toFixed(2)} €`}
-            hint={extra > 0 ? `+${(extra * perPeriod).toFixed(2)} € / ${periodWord} (proratované)` : 'Plán nie je preplnený.'}
+            value={extra === 0 ? '0' : `${extra} × ${formatCents(perPeriodCents)}`}
+            hint={extra > 0 ? `+${formatCents(extra * perPeriodCents)} / ${periodWord} (proratované)` : 'Plán nie je preplnený.'}
           />
         </div>
 
@@ -101,10 +104,17 @@ function SeatsSection({ account, loading }: { account: Account | null; loading: 
           <div className="rounded-2xl border border-ink-100 bg-ink-50/40 px-4 py-3 text-xs text-ink-600">
             Si na hranici self-service plánu ({max} {pluralTech(max)}). Pre väčší tím nás kontaktuj — pripravíme individuálnu ponuku.
           </div>
+        ) : isYearly ? (
+          <p className="text-xs text-ink-500">
+            Každý ďalší technik nad zahrnutý počet stojí {formatCents(perYearCents)} / rok.
+            Pri pozvaní sa pomerná časť ceny za zvyšok predplateného roka pripočíta automaticky
+            k najbližšej faktúre — pri ročnom predplatnom je to faktúra za jeho obnovu.
+          </p>
         ) : (
           <p className="text-xs text-ink-500">
-            Každý ďalší technik nad zahrnutý počet stojí {perExtra.toFixed(2)} € / mesiac
-            (ročne {(perExtra * 12).toFixed(2)} €). Pri pozvaní sa cena pripočíta automaticky a proratovane.
+            Každý ďalší technik nad zahrnutý počet stojí {formatCents(perMonthCents)} / mesiac
+            (pri ročnom predplatnom {formatCents(perYearCents)} / rok). Pri pozvaní sa cena pripočíta
+            automaticky a proratovane.
           </p>
         )}
       </div>

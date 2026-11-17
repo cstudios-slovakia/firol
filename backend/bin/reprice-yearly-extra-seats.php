@@ -1,0 +1,223 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * One-off: move existing yearly extra-technician items to the new price.
+ *
+ * Until the fix list of 16. 11. 2026 (round 2, B4) a yearly extra technician
+ * was created in Stripe at 12 × the monthly price; the price list sells it at
+ * SeatSync::EXTRA_YEARLY_MONTHS × the monthly price. SeatSync only changes the
+ * quantity of an existing item, so subscriptions created before the fix would
+ * keep the old price for ever. This script replaces the price of those items.
+ *
+ *     php backend/bin/reprice-yearly-extra-seats.php [--apply] [--offline] [--account=ID]
+ *
+ *   (no flag)    dry run — the default. Reads each item from Stripe (read-only)
+ *                and lists what would change. Changes nothing.
+ *   --offline    dry run from the database only, without any Stripe call.
+ *   --apply      replaces the prices in Stripe. Cannot be combined with
+ *                --offline.
+ *   --account=ID limit the run to one account.
+ *
+ * Which accounts: `billing_period = 'yearly'` with a subscription and a
+ * recorded extra-seat item (`stripe_extra_subscription_item_id`).
+ *
+ * What changes: the item gets a new inline price — same product, currency,
+ * interval and tax behaviour, unit amount = SeatSync::pricePerExtraYearlyCents()
+ * — with `proration_behavior = none`. The year already paid stays as it is;
+ * the renewal invoice charges the new price. The item id and its quantity do
+ * not change, so the accounts table needs no update (the
+ * customer.subscription.updated webhook that follows finds the same item).
+ *
+ * Skipped with a note: an item already at the new amount (so a second run
+ * changes nothing), an item that is not on the recorded subscription, an item
+ * whose price is not yearly. An item Stripe cannot find is reported as an
+ * error and the run continues; the exit code is then 1.
+ */
+
+require __DIR__ . '/../vendor/autoload.php';
+
+if (is_file(__DIR__ . '/../.env')) {
+    \Dotenv\Dotenv::createImmutable(__DIR__ . '/..')->safeLoad();
+}
+
+use Firol\Billing\SeatSync;
+use Firol\Db;
+
+/**
+ * @param object|null $stripe  \Stripe\StripeClient (or anything with the same
+ *                             subscriptionItems->retrieve/update); null = offline.
+ * @param callable(string): void $out
+ * @return int number of errors
+ */
+function repriceYearlyExtraSeats(PDO $pdo, ?object $stripe, bool $apply, ?int $onlyAccount, callable $out): int
+{
+    $newAmount = SeatSync::pricePerExtraYearlyCents();
+    $mode = $apply ? 'APPLY' : ($stripe === null ? 'DRY RUN (offline, database only)' : 'DRY RUN');
+    $out(sprintf(
+        "Mode: %s. New yearly extra-technician price: %s EUR (%d cents = %d × %d).",
+        $mode,
+        number_format($newAmount / 100, 2, '.', ''),
+        $newAmount,
+        SeatSync::pricePerExtraCents(),
+        SeatSync::EXTRA_YEARLY_MONTHS,
+    ));
+
+    $sql = "SELECT id, invoice_company_name, stripe_subscription_id,
+                   stripe_extra_subscription_item_id, extra_technicians, stripe_status,
+                   subscription_end_date
+            FROM   accounts
+            WHERE  billing_period = 'yearly'
+              AND  stripe_subscription_id IS NOT NULL AND stripe_subscription_id <> ''
+              AND  stripe_extra_subscription_item_id IS NOT NULL
+              AND  stripe_extra_subscription_item_id <> ''";
+    $params = [];
+    if ($onlyAccount !== null) {
+        $sql .= ' AND id = ?';
+        $params[] = $onlyAccount;
+    }
+    $stmt = $pdo->prepare($sql . ' ORDER BY id');
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $out(sprintf('Accounts found: %d.', count($rows)));
+
+    $errors = 0;
+    $changed = 0;
+    foreach ($rows as $row) {
+        $accountId = (int) $row['id'];
+        $subId     = (string) $row['stripe_subscription_id'];
+        $itemId    = (string) $row['stripe_extra_subscription_item_id'];
+        $label = sprintf(
+            'account %d (%s) sub=%s item=%s qty(db)=%d status=%s paid until=%s',
+            $accountId,
+            (string) $row['invoice_company_name'],
+            $subId,
+            $itemId,
+            (int) $row['extra_technicians'],
+            (string) ($row['stripe_status'] ?? '-'),
+            (string) ($row['subscription_end_date'] ?? '-'),
+        );
+
+        if ($stripe === null) {
+            $out("  $label: would set the price to $newAmount cents/year (current price not read — offline)");
+            $changed++;
+            continue;
+        }
+
+        try {
+            $item = $stripe->subscriptionItems->retrieve($itemId);
+        } catch (\Throwable $e) {
+            $errors++;
+            $out("  $label: ERROR reading the item from Stripe: " . $e->getMessage());
+            continue;
+        }
+
+        $price     = $item->price ?? null;
+        $oldAmount = (int) ($price->unit_amount ?? 0);
+        $interval  = (string) ($price->recurring->interval ?? '');
+        $product   = $price->product ?? '';
+        $product   = is_object($product) ? (string) ($product->id ?? '') : (string) $product;
+        $currency  = (string) ($price->currency ?? 'eur');
+        $taxBehavior = (string) ($price->tax_behavior ?? '');
+        $qty       = (int) ($item->quantity ?? 0);
+
+        if ((string) ($item->subscription ?? '') !== $subId) {
+            $out("  $label: SKIP — the item belongs to subscription " . (string) ($item->subscription ?? '?'));
+            continue;
+        }
+        if ($interval !== 'year') {
+            $out("  $label: SKIP — the item's price is not yearly (interval=$interval)");
+            continue;
+        }
+        if ($product === '') {
+            $errors++;
+            $out("  $label: ERROR — the item's price has no product");
+            continue;
+        }
+        if ($oldAmount === $newAmount) {
+            $out("  $label: SKIP — already at $newAmount cents/year");
+            continue;
+        }
+
+        $priceData = [
+            'currency'    => $currency,
+            'product'     => $product,
+            'unit_amount' => $newAmount,
+            'recurring'   => ['interval' => 'year'],
+        ];
+        if ($taxBehavior === 'inclusive' || $taxBehavior === 'exclusive') {
+            $priceData['tax_behavior'] = $taxBehavior;
+        }
+        $params = [
+            'price_data'         => $priceData,
+            'proration_behavior' => 'none',
+        ];
+
+        $what = sprintf(
+            '%d → %d cents/year × qty %d (product %s, %s)',
+            $oldAmount, $newAmount, $qty, $product, $currency,
+        );
+
+        if (!$apply) {
+            $out("  $label: would change $what");
+            $out('    params: ' . json_encode($params, JSON_UNESCAPED_SLASHES));
+            $changed++;
+            continue;
+        }
+
+        try {
+            $stripe->subscriptionItems->update($itemId, $params);
+            $out("  $label: CHANGED $what");
+            $changed++;
+        } catch (\Throwable $e) {
+            $errors++;
+            $out("  $label: ERROR updating the item: " . $e->getMessage());
+        }
+    }
+
+    $out(sprintf(
+        'Done. %d item(s) %s, %d error(s).',
+        $changed,
+        $apply ? 'changed' : 'would change',
+        $errors,
+    ));
+    return $errors;
+}
+
+// Allows a test harness to load the function without running the script.
+if (defined('FIROL_REPRICE_NO_MAIN')) {
+    return;
+}
+
+$options = getopt('', ['apply', 'offline', 'account:']);
+$apply   = isset($options['apply']);
+$offline = isset($options['offline']);
+$account = isset($options['account']) && is_string($options['account']) && ctype_digit($options['account'])
+    ? (int) $options['account']
+    : null;
+
+if ($apply && $offline) {
+    fwrite(STDERR, "--apply needs Stripe; it cannot be combined with --offline.\n");
+    exit(2);
+}
+
+$stripe = null;
+if (!$offline) {
+    $secret = (string) ($_ENV['STRIPE_SECRET_KEY'] ?? '');
+    if ($secret === '') {
+        fwrite(STDERR, "STRIPE_SECRET_KEY is not set. Use --offline for a database-only dry run.\n");
+        exit(2);
+    }
+    $stripe = \Firol\Stripe\StripeClient::get();
+}
+
+$errors = repriceYearlyExtraSeats(
+    Db::pdo(),
+    $stripe,
+    $apply,
+    $account,
+    static function (string $line): void { echo $line, "\n"; },
+);
+exit($errors > 0 ? 1 : 0);

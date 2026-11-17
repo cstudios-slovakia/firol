@@ -1512,9 +1512,12 @@ function AdminSettingsSection() {
                         </Field>
                     </div>
                     <p className="mt-2 text-xs text-ink-400">
+                        {/* "× 10" mirrors SeatSync::EXTRA_YEARLY_MONTHS. */}
                         Cena za extra technika sa účtuje cez Stripe ako druhá
-                        položka v predplatnom (ročne = mesačne × 12), s
-                        proráciou pri každej zmene počtu.
+                        položka v predplatnom (ročne = mesačne × 10, rovnako
+                        ako ročný plán), s proráciou pri každej zmene počtu.
+                        Nová cena platí pre novo vzniknuté položky; existujúce
+                        predplatné si ponechajú cenu, s ktorou položka vznikla.
                     </p>
                 </div>
                 <div className="flex justify-end pt-1">

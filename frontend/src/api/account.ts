@@ -24,6 +24,8 @@ export type Account = {
   active_technicians: number;
   max_self_service_technicians: number;
   price_per_extra_technician_cents: number;
+  /** What a yearly subscription charges per extra technician (from the backend, not derived here). */
+  price_per_extra_technician_yearly_cents: number;
   main_user_id: number | null;
   admin_owned: boolean;
   default_php_user_id: number | null;

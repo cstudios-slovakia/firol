@@ -55,6 +55,7 @@ import {
     LEGAL_VOP_URL,
 } from "@/lib/legal";
 import { AccountApi, type Account } from "@/api/account";
+import { formatCents } from "@/lib/pricing";
 import { DataApi, type RestoreMode, type RestoreResult } from "@/api/data";
 import { ImportApi, type ImportKind, type ImportResult } from "@/api/import";
 import { BackupReminderModal } from "@/components/BackupReminderModal";
@@ -1125,7 +1126,12 @@ function TeamSection() {
         0;
     const extra = Math.max(0, active - included);
     const max = seatInfo?.max_self_service_technicians ?? 20;
-    const perExtra = (seatInfo?.price_per_extra_technician_cents ?? 0) / 100;
+    // A yearly account sees the yearly price the backend charges (not 12 ×
+    // monthly); everyone else the monthly one.
+    const isYearly = seatInfo?.billing_period === "yearly";
+    const perExtraLabel = isYearly
+        ? `${formatCents(seatInfo?.price_per_extra_technician_yearly_cents ?? 0)} / rok`
+        : `${formatCents(seatInfo?.price_per_extra_technician_cents ?? 0)} / mes`;
     const atCap = active >= max;
 
     async function onInvite(e: FormEvent) {
@@ -1346,15 +1352,18 @@ function TeamSection() {
                                 · extra{" "}
                                 <span className="font-semibold">
                                     {extra}
-                                </span> × {perExtra.toFixed(2)} €/mes
+                                </span> × {perExtraLabel}
                             </>
                         )}
                         .{" "}
                         {isMain && !atCap && (
                             <>
                                 Každý ďalší technik nad zahrnutý počet stojí{" "}
-                                {perExtra.toFixed(2)} € / mes a pripočíta sa
-                                proratovane k najbližšej fakture.
+                                {perExtraLabel} a pripočíta sa proratovane k
+                                najbližšej faktúre
+                                {isYearly
+                                    ? " — pri ročnom predplatnom je to faktúra za jeho obnovu."
+                                    : "."}
                             </>
                         )}
                     </div>

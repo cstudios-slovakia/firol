@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Firol\Controllers;
 
+use Firol\Billing\SeatSync;
 use Firol\Db;
 use Firol\Http\Response;
 
@@ -50,6 +51,11 @@ final class PublicSettingsController
                 ? (float) $row['setting_value']
                 : (int) $row['setting_value'];
         }
+
+        // Derived, not stored: the yearly extra-technician price follows
+        // the monthly setting by the rule SeatSync charges in Stripe.
+        $defaults['price_per_extra_technician_yearly_cents'] =
+            SeatSync::yearlyFromMonthlyCents($defaults['price_per_extra_technician_cents']);
 
         Response::json($defaults);
     }
