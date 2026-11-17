@@ -117,6 +117,8 @@ $router->delete('/api/admin/feedback/{id}', [FeedbackController::class, 'destroy
 
 $router->get('/api/admin/accounts',         [AdminPanelController::class, 'listAccounts']);
 $router->get('/api/admin/accounts/{id}/invoices', [AdminPanelController::class, 'listInvoices']);
+$router->post('/api/admin/invoices/{id}/reissue', [AdminPanelController::class, 'reissueInvoice']);
+$router->get('/api/admin/system-check',     [AdminController::class, 'systemCheck']);
 $router->patch('/api/admin/accounts/{id}',  [AdminPanelController::class, 'updateAccount']);
 $router->delete('/api/admin/accounts/{id}', [AdminPanelController::class, 'deleteAccount']);
 $router->patch('/api/admin/users/{id}',     [AdminPanelController::class, 'updateUser']);

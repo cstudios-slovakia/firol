@@ -11,17 +11,25 @@ declare(strict_types=1);
  * quantity of an existing item, so subscriptions created before the fix would
  * keep the old price for ever. This script replaces the price of those items.
  *
- *     php backend/bin/reprice-yearly-extra-seats.php [--apply] [--offline] [--account=ID]
+ *     php backend/bin/reprice-yearly-extra-seats.php [--apply] [--offline] [--account=ID] [--allow-increase]
  *
- *   (no flag)    dry run — the default. Reads each item from Stripe (read-only)
- *                and lists what would change. Changes nothing.
- *   --offline    dry run from the database only, without any Stripe call.
- *   --apply      replaces the prices in Stripe. Cannot be combined with
- *                --offline.
- *   --account=ID limit the run to one account.
+ *   (no flag)        dry run — the default. Reads each item from Stripe
+ *                    (read-only) and lists what would change. Changes nothing.
+ *   --offline        dry run from the database only, without any Stripe call.
+ *   --apply          replaces the prices in Stripe. Cannot be combined with
+ *                    --offline.
+ *   --account=ID     limit the run to one account (a numeric id; anything
+ *                    else is refused, as is any unknown option).
+ *   --allow-increase also change an item whose new price is HIGHER. Without
+ *                    it such an item is skipped: the terms (5.5) require 30
+ *                    days' notice of a price increase.
  *
  * Which accounts: `billing_period = 'yearly'` with a subscription and a
- * recorded extra-seat item (`stripe_extra_subscription_item_id`).
+ * recorded extra-seat item (`stripe_extra_subscription_item_id`). A
+ * subscription that is cancelled, or set to end at the period end, is skipped
+ * (there is no renewal to reprice). Yearly accounts with more active
+ * technicians than included but no extra item are listed as „NOT CHARGED"
+ * (see also bin/billing-seat-report.php).
  *
  * What changes: the item gets a new inline price — same product, currency,
  * interval and tax behaviour, unit amount = SeatSync::pricePerExtraYearlyCents()
@@ -51,7 +59,7 @@ use Firol\Db;
  * @param callable(string): void $out
  * @return int number of errors
  */
-function repriceYearlyExtraSeats(PDO $pdo, ?object $stripe, bool $apply, ?int $onlyAccount, callable $out): int
+function repriceYearlyExtraSeats(PDO $pdo, ?object $stripe, bool $apply, ?int $onlyAccount, callable $out, bool $allowIncrease = false): int
 {
     $newAmount = SeatSync::pricePerExtraYearlyCents();
     $mode = $apply ? 'APPLY' : ($stripe === null ? 'DRY RUN (offline, database only)' : 'DRY RUN');
@@ -140,6 +148,26 @@ function repriceYearlyExtraSeats(PDO $pdo, ?object $stripe, bool $apply, ?int $o
             $out("  $label: SKIP — already at $newAmount cents/year");
             continue;
         }
+        if ($newAmount > $oldAmount && !$allowIncrease) {
+            $out("  $label: SKIP — $oldAmount → $newAmount cents/year would RAISE the price; the terms (5.5) need 30 days' notice. Re-run with --allow-increase once the customer was told.");
+            continue;
+        }
+        try {
+            $sub = $stripe->subscriptions->retrieve($subId);
+        } catch (\Throwable $e) {
+            $errors++;
+            $out("  $label: ERROR reading the subscription from Stripe: " . $e->getMessage());
+            continue;
+        }
+        $subStatus = (string) ($sub->status ?? '');
+        if (in_array($subStatus, ['canceled', 'incomplete_expired', 'incomplete'], true)) {
+            $out("  $label: SKIP — the subscription is $subStatus");
+            continue;
+        }
+        if (!empty($sub->cancel_at_period_end)) {
+            $out("  $label: SKIP — the subscription ends at the period end (no renewal to reprice)");
+            continue;
+        }
 
         $priceData = [
             'currency'    => $currency,
@@ -177,6 +205,32 @@ function repriceYearlyExtraSeats(PDO $pdo, ?object $stripe, bool $apply, ?int $o
         }
     }
 
+    // Yearly accounts above the included count whose subscription has no
+    // extra item at all: nothing to reprice, and nothing charged.
+    $sql = "SELECT a.id, a.invoice_company_name, a.stripe_subscription_id, a.included_technicians,
+                   (SELECT COUNT(*) FROM account_users au WHERE au.account_id = a.id AND au.is_active = 1) AS active
+            FROM   accounts a
+            WHERE  a.billing_period = 'yearly'
+              AND  a.stripe_subscription_id IS NOT NULL AND a.stripe_subscription_id <> ''
+              AND  (a.stripe_status IS NULL OR a.stripe_status NOT IN ('canceled', 'incomplete_expired'))
+              AND  (a.stripe_extra_subscription_item_id IS NULL OR a.stripe_extra_subscription_item_id = '')";
+    $params = [];
+    if ($onlyAccount !== null) {
+        $sql .= ' AND a.id = ?';
+        $params[] = $onlyAccount;
+    }
+    $stmt = $pdo->prepare($sql . ' ORDER BY a.id');
+    $stmt->execute($params);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $extra = (int) $row['active'] - (int) $row['included_technicians'];
+        if ($extra > 0) {
+            $out(sprintf(
+                '  account %d (%s) sub=%s: NOT CHARGED — %d extra technician(s), no extra item on the subscription',
+                (int) $row['id'], (string) $row['invoice_company_name'], (string) $row['stripe_subscription_id'], $extra,
+            ));
+        }
+    }
+
     $out(sprintf(
         'Done. %d item(s) %s, %d error(s).',
         $changed,
@@ -191,12 +245,23 @@ if (defined('FIROL_REPRICE_NO_MAIN')) {
     return;
 }
 
-$options = getopt('', ['apply', 'offline', 'account:']);
+// getopt() silently ignores an option it does not know, so a misspelled
+// --acount=5 would run on every account. Check every argument first.
+$known = ['--apply', '--offline', '--allow-increase'];
+foreach (array_slice($argv, 1) as $arg) {
+    if (in_array($arg, $known, true) || preg_match('/^--account=\d+$/', $arg) === 1) {
+        continue;
+    }
+    fwrite(STDERR, "Unknown or invalid argument: $arg\n"
+        . "Usage: php bin/reprice-yearly-extra-seats.php [--apply] [--offline] [--account=ID] [--allow-increase]\n");
+    exit(2);
+}
+
+$options = getopt('', ['apply', 'offline', 'account:', 'allow-increase']);
 $apply   = isset($options['apply']);
 $offline = isset($options['offline']);
-$account = isset($options['account']) && is_string($options['account']) && ctype_digit($options['account'])
-    ? (int) $options['account']
-    : null;
+$allowIncrease = isset($options['allow-increase']);
+$account = isset($options['account']) ? (int) $options['account'] : null;
 
 if ($apply && $offline) {
     fwrite(STDERR, "--apply needs Stripe; it cannot be combined with --offline.\n");
@@ -219,5 +284,6 @@ $errors = repriceYearlyExtraSeats(
     $apply,
     $account,
     static function (string $line): void { echo $line, "\n"; },
+    $allowIncrease,
 );
 exit($errors > 0 ? 1 : 0);

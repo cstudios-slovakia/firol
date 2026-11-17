@@ -341,6 +341,9 @@ final class AuthController
                     a.member_rights,
                     a.stripe_status, a.stripe_subscription_id, a.stripe_cancel_at_period_end,
                     a.billing_period, a.stripe_customer_id,
+                    a.included_technicians, a.extra_technicians,
+                    a.stripe_extra_subscription_item_id, a.stripe_extra_unit_amount_cents,
+                    a.stripe_base_unit_amount_cents,
                     a.invoice_street, a.invoice_postal_code, a.invoice_city, a.invoice_ico
              FROM   accounts a
              JOIN   account_users au ON au.account_id = a.id
@@ -369,6 +372,7 @@ final class AuthController
                 $status === 'active'     => 'active',
                 $status === 'trialing'   => 'trial_paid',
                 $status === 'past_due'   => 'past_due',
+                $status === 'unpaid'     => 'unpaid',
                 $status === 'canceled'   => 'canceled',
                 $status === 'incomplete' || $status === 'incomplete_expired' => 'incomplete',
                 $subId !== null && $subId !== ''                              => 'has_subscription',
@@ -380,7 +384,13 @@ final class AuthController
             // Surface the flag so the UI can hide the trial/expiry banners
             // even when subscription_end_date is in the past.
             $a['admin_owned'] = \Firol\Auth\Admin::isAdmin((int) ($a['main_user_id'] ?? 0));
-            unset($a['stripe_subscription_id']);
+            // The next regular charge: base + extra technicians at their
+            // Stripe unit amounts (no prorations); null without a subscription.
+            $a['next_charge_cents'] = \Firol\Billing\SeatSync::nextChargeCents($a);
+            unset(
+                $a['stripe_subscription_id'], $a['stripe_extra_subscription_item_id'],
+                $a['stripe_extra_unit_amount_cents'], $a['stripe_base_unit_amount_cents'],
+            );
             return $a;
         }, $accountsRaw);
 

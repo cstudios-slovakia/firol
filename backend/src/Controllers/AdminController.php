@@ -50,6 +50,13 @@ final class AdminController
         Response::json(['settings' => self::loadAll()]);
     }
 
+    /** GET /api/admin/system-check — billing configuration check. */
+    public static function systemCheck(Request $req): void
+    {
+        Admin::require();
+        Response::json(['checks' => \Firol\Billing\ConfigCheck::run()]);
+    }
+
     public static function updateSettings(Request $req): void
     {
         Admin::require();
