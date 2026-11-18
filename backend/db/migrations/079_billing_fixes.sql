@@ -48,3 +48,31 @@ ALTER TABLE accounts
     ADD COLUMN IF NOT EXISTS stripe_extra_interval          VARCHAR(8) NULL AFTER stripe_extra_unit_amount_cents,
     ADD COLUMN IF NOT EXISTS stripe_base_unit_amount_cents  INT UNSIGNED NULL AFTER stripe_extra_interval,
     ADD COLUMN IF NOT EXISTS stripe_has_discount            TINYINT(1) NOT NULL DEFAULT 0 AFTER stripe_base_unit_amount_cents;
+
+-- Round 3 of 18. 11. 2026 (docs/prompts/billing-fixes-2026-11-round-3.md):
+--
+-- 4. accounts remembers the plan item of the subscription (so a changed base
+--    price cannot make an unrelated item the plan item), the extra quantity
+--    really on Stripe (the next charge is built from it while the reconcile
+--    switch is off or the account is left for a person), the last seat
+--    reconcile result (ok / would_change / manual / error, with its note) and
+--    the customer's other live subscriptions as the daily run found them
+--    (JSON, NULL when there is none).
+-- 5. billing_operator_alerts remembers which one-off operator alerts were
+--    mailed (an account left for a person, a second live subscription, a
+--    take-over, a refused daily run, a webhook event Stripe no longer has),
+--    so each is sent once; a key is written only after the mail went out, so
+--    a failed send is repeated by the next daily run.
+
+ALTER TABLE accounts
+    ADD COLUMN IF NOT EXISTS stripe_base_subscription_item_id VARCHAR(64) NULL AFTER stripe_has_discount,
+    ADD COLUMN IF NOT EXISTS stripe_extra_quantity            INT UNSIGNED NULL AFTER stripe_base_subscription_item_id,
+    ADD COLUMN IF NOT EXISTS seat_sync_state                  VARCHAR(16) NULL AFTER stripe_extra_quantity,
+    ADD COLUMN IF NOT EXISTS seat_sync_note                   TEXT NULL AFTER seat_sync_state,
+    ADD COLUMN IF NOT EXISTS seat_sync_at                     DATETIME NULL AFTER seat_sync_note,
+    ADD COLUMN IF NOT EXISTS stripe_other_subscriptions       TEXT NULL AFTER seat_sync_at;
+
+CREATE TABLE IF NOT EXISTS billing_operator_alerts (
+    alert_key  VARCHAR(191) NOT NULL PRIMARY KEY,
+    sent_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

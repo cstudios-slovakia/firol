@@ -215,6 +215,7 @@ final class AccountController
                     included_technicians, extra_technicians,
                     stripe_extra_subscription_item_id, stripe_extra_unit_amount_cents,
                     stripe_extra_interval, stripe_base_unit_amount_cents, stripe_has_discount,
+                    stripe_extra_quantity, seat_sync_state,
                     main_user_id, default_php_user_id, default_oprava_user_id
              FROM   accounts WHERE id = ?'
         );
@@ -274,9 +275,12 @@ final class AccountController
             'extra_unit_amount_cents'        => SeatSync::extraUnitCents($row),
             'extra_unit_from_stripe'         => !empty($row['stripe_extra_subscription_item_id'])
                                                   && $row['stripe_extra_unit_amount_cents'] !== null,
-            // Base item + wanted extras at their Stripe unit amounts, without
-            // prorations; null until a subscription exists.
+            // Base item + extras at their Stripe unit amounts, without
+            // prorations; null until a subscription exists. The extras are
+            // the wanted count, or what Stripe has while nothing is pushed
+            // (reconcile switch off, account left for a person).
             'next_charge_cents'              => SeatSync::nextChargeCents($row),
+            'next_charge_extra_technicians'  => SeatSync::chargedExtraCount($row),
             // A promotion code is on the subscription: the figure above is
             // the price before the discount (the screens say so).
             'next_charge_before_discount'    => !empty($row['stripe_has_discount']),

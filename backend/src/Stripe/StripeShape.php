@@ -54,14 +54,19 @@ final class StripeShape
     }
 
     /**
-     * Whether a discount (promotion code / coupon) is on the subscription:
-     * `discount` in the pinned version, `discounts` in both.
+     * Whether a discount (promotion code / coupon) applies to the
+     * subscription: `discount` in the pinned version, `discounts` in both,
+     * or a coupon on the customer (Stripe applies it to every subscription
+     * of the customer that has no discount of its own — visible when the
+     * customer is expanded, see SeatSync::RETRIEVE_EXPAND).
      *
      * @param array<string, mixed> $sub
      */
     public static function subscriptionHasDiscount(array $sub): bool
     {
-        return !empty($sub['discount']) || !empty($sub['discounts']);
+        $customer = $sub['customer'] ?? null;
+        return !empty($sub['discount']) || !empty($sub['discounts'])
+            || (is_array($customer) && (!empty($customer['discount']) || !empty($customer['discounts'])));
     }
 
     /** @param array<string, mixed> $invoice */

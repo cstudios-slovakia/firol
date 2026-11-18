@@ -55,6 +55,8 @@ export type Account = {
   next_charge_cents: number | null;
   /** A promotion code is on the subscription: next_charge_cents is before the discount. */
   next_charge_before_discount?: boolean;
+  /** Extra technicians next_charge_cents includes (Stripe's count while nothing is pushed to Stripe). */
+  next_charge_extra_technicians?: number;
 };
 
 /**

@@ -6,6 +6,8 @@ namespace Firol\Controllers;
 
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
+use Firol\Billing\BillingLock;
+use Firol\Billing\OperatorAlert;
 use Firol\Billing\SeatSync;
 use Firol\Billing\SubscriptionStatus;
 use Firol\Db;
@@ -68,9 +70,7 @@ final class BillingController
 
         // One checkout at a time per account: two clicks (or two tabs) must
         // not open two sessions that could both complete.
-        $lock = Db::pdo()->prepare('SELECT GET_LOCK(?, 10)');
-        $lock->execute(['firol_checkout_' . $accountId]);
-        if ((int) $lock->fetchColumn() !== 1) {
+        if (!BillingLock::acquire('firol_checkout_' . $accountId, 10)) {
             Response::error('Platba sa práve pripravuje. Skús to o chvíľu znova.', 409);
         }
 
@@ -97,8 +97,12 @@ final class BillingController
                 Response::error('Stripe sa nepodarilo overiť. Skús to o chvíľu znova.', 502);
             }
             if ($current !== null) {
-                self::handleSubscriptionUpsert($current, false);
-                self::refuseLiveSubscription((string) $current->status);
+                // Written from a fresh read under the subscription lock: the
+                // retrieve above may be older than an event handled meanwhile.
+                self::upsertOr502($current);
+                $data = self::findAccountRowById($accountId);
+                self::refuseLiveSubscription((string) ($data['stripe_subscription_id'] ?? '') === (string) $current->id
+                    ? (string) ($data['stripe_status'] ?? '') : (string) $current->status);
             }
         }
 
@@ -123,7 +127,7 @@ final class BillingController
         // customer before opening a new session.
         $live = self::findLiveSubscription($customerId);
         if ($live !== null) {
-            self::handleSubscriptionUpsert($live);
+            self::upsertOr502($live);
             self::refuseLiveSubscription((string) $live->status);
         }
         self::expireOpenCheckoutSessions($customerId);
@@ -159,27 +163,26 @@ final class BillingController
         // The wanted extra quantity is computed fresh, so a technician
         // invited a moment ago is on the first invoice.
         $extra = SeatSync::wantedExtra($accountId, (int) $account['included_technicians']);
-        $lineItems = self::checkoutLineItems($billingPeriod, $extra);
 
+        $params = [
+            'mode'        => 'subscription',
+            'customer'    => $customerId,
+            'success_url' => $success . '&session_id={CHECKOUT_SESSION_ID}',
+            'cancel_url'  => $cancel,
+            'allow_promotion_codes' => true,
+            // Force Slovak — without this Stripe auto-detects from
+            // Accept-Language. The "X dni/dní" wording on their page
+            // is Stripe's own translation; we can't override it
+            // beyond picking 'en' or 'auto'.
+            'locale'      => 'sk',
+            'subscription_data' => $subscriptionData,
+            'metadata' => [
+                'firol_account_id' => (string) $accountId,
+                'billing_period'   => $billingPeriod,
+            ],
+        ];
         try {
-            $session = StripeClient::get()->checkout->sessions->create([
-                'mode'        => 'subscription',
-                'customer'    => $customerId,
-                'line_items'  => $lineItems,
-                'success_url' => $success . '&session_id={CHECKOUT_SESSION_ID}',
-                'cancel_url'  => $cancel,
-                'allow_promotion_codes' => true,
-                // Force Slovak — without this Stripe auto-detects from
-                // Accept-Language. The "X dni/dní" wording on their page
-                // is Stripe's own translation; we can't override it
-                // beyond picking 'en' or 'auto'.
-                'locale'      => 'sk',
-                'subscription_data' => $subscriptionData,
-                'metadata' => [
-                    'firol_account_id' => (string) $accountId,
-                    'billing_period'   => $billingPeriod,
-                ],
-            ]);
+            $session = self::createCheckoutSession($params, $billingPeriod, $extra);
         } catch (\Throwable $e) {
             error_log('[billing.checkout] ' . $e->getMessage());
             Response::error('Stripe Checkout sa nepodaril spustiť', 502);
@@ -196,14 +199,38 @@ final class BillingController
     }
 
     /**
+     * Create the Checkout Session with the app's line items. When Stripe
+     * refuses the extra-technician line naming STRIPE_PRODUCT_EXTRA_TECHNICIAN
+     * (a mistyped, archived or other-mode id) it is created once more with
+     * the inline product; ConfigCheck reports the variable. Throws on any
+     * other refusal.
+     *
+     * @param array<string, mixed> $params the session parameters without line_items
+     */
+    public static function createCheckoutSession(array $params, string $billingPeriod, int $extra): \Stripe\Checkout\Session
+    {
+        try {
+            return StripeClient::get()->checkout->sessions->create($params + ['line_items' => self::checkoutLineItems($billingPeriod, $extra)]);
+        } catch (\Stripe\Exception\InvalidRequestException $e) {
+            $productId = StripeClient::extraTechnicianProductId();
+            if ($extra <= 0 || $productId === '' || !str_contains($e->getMessage(), $productId)) {
+                throw $e;
+            }
+            error_log('[billing.checkout] Stripe refused the extra-technician product, retrying with an inline one: ' . $e->getMessage());
+            return StripeClient::get()->checkout->sessions->create($params + ['line_items' => self::checkoutLineItems($billingPeriod, $extra, true)]);
+        }
+    }
+
+    /**
      * Line items of a new subscription: the base Price, plus the extra
      * technicians beyond the included count under the fixed extra product
-     * (an inline product when STRIPE_PRODUCT_EXTRA_TECHNICIAN is missing —
-     * see SeatSync::checkoutExtraPriceData()).
+     * (an inline product when STRIPE_PRODUCT_EXTRA_TECHNICIAN is missing, or
+     * $inlineExtra after Stripe refused it — see
+     * SeatSync::checkoutExtraPriceData()).
      *
      * @return list<array<string, mixed>>
      */
-    public static function checkoutLineItems(string $billingPeriod, int $extra): array
+    public static function checkoutLineItems(string $billingPeriod, int $extra, bool $inlineExtra = false): array
     {
         $lineItems = [[
             'price'    => StripeClient::priceFor($billingPeriod),
@@ -211,11 +238,27 @@ final class BillingController
         ]];
         if ($extra > 0) {
             $lineItems[] = [
-                'price_data' => SeatSync::checkoutExtraPriceData($billingPeriod),
+                'price_data' => SeatSync::checkoutExtraPriceData($billingPeriod, $inlineExtra),
                 'quantity'   => $extra,
             ];
         }
         return $lineItems;
+    }
+
+    /**
+     * Checkout: store a subscription Stripe returned, read again under the
+     * account's subscription lock (handleSubscriptionUpsert refetches). A
+     * busy lock or a Stripe error answers 502 — the customer tries again —
+     * instead of a raw 500.
+     */
+    private static function upsertOr502(\Stripe\StripeObject $sub): void
+    {
+        try {
+            self::handleSubscriptionUpsert($sub);
+        } catch (\Throwable $e) {
+            error_log('[billing.checkout] ' . $e->getMessage());
+            Response::error('Stripe sa nepodarilo overiť. Skús to o chvíľu znova.', 502);
+        }
     }
 
     private static function refuseLiveSubscription(string $status): void
@@ -629,18 +672,30 @@ final class BillingController
         }
     }
 
+    /** Days after which an event that keeps failing is given up (`gone`). */
+    public const EVENT_GIVE_UP_DAYS = 30;
+
     /**
      * The daily run: handle again a webhook event that failed (or was left
      * `processing`), read from Stripe by its id. Returns 'done', 'failed:
-     * <message>', or 'skipped' (another delivery is handling it, or it is
-     * done already).
+     * <message>', 'gone: <message>' or 'skipped' (another delivery is
+     * handling it, or it is done already).
+     *
+     * Every failure is written on the event row. An event Stripe no longer
+     * returns (404 — Stripe keeps events for 30 days) or one received more
+     * than EVENT_GIVE_UP_DAYS ago that still fails becomes `gone`: a terminal
+     * state the daily run no longer re-runs and ConfigCheck lists.
      */
     public static function reprocessEvent(string $eventId): string
     {
         try {
             $event = StripeClient::get()->events->retrieve($eventId);
         } catch (\Throwable $e) {
-            return 'failed: could not read the event from Stripe — ' . $e->getMessage();
+            $msg = 'udalosť sa nepodarilo načítať zo Stripe — ' . $e->getMessage();
+            $gone = ($e instanceof \Stripe\Exception\InvalidRequestException && $e->getHttpStatus() === 404)
+                || self::eventOlderThan($eventId, self::EVENT_GIVE_UP_DAYS);
+            self::recordEventFailure($eventId, $gone ? 'gone' : 'failed', $msg);
+            return ($gone ? 'gone: ' : 'failed: ') . $msg;
         }
         $claim = self::claimEvent($eventId, (string) $event->type);
         if ($claim !== 'process') {
@@ -649,11 +704,29 @@ final class BillingController
         try {
             self::dispatchEvent($event);
         } catch (\Throwable $e) {
-            self::finishEvent($eventId, 'failed', $e->getMessage());
-            return 'failed: ' . $e->getMessage();
+            $gone = self::eventOlderThan($eventId, self::EVENT_GIVE_UP_DAYS);
+            self::finishEvent($eventId, $gone ? 'gone' : 'failed', $e->getMessage());
+            return ($gone ? 'gone: ' : 'failed: ') . $e->getMessage();
         }
         self::finishEvent($eventId, 'done', null);
         return 'done';
+    }
+
+    private static function eventOlderThan(string $eventId, int $days): bool
+    {
+        $stmt = Db::pdo()->prepare('SELECT received_at < NOW() - INTERVAL ' . $days . ' DAY FROM stripe_webhook_events WHERE event_id = ?');
+        $stmt->execute([$eventId]);
+        return (int) $stmt->fetchColumn() === 1;
+    }
+
+    /** Write a failed re-run on the event row (the event was not claimed). */
+    private static function recordEventFailure(string $eventId, string $status, string $message): void
+    {
+        Db::pdo()->prepare(
+            "UPDATE stripe_webhook_events
+             SET    status = ?, error_message = ?, attempts = attempts + 1
+             WHERE  event_id = ? AND status IN ('failed', 'processing')"
+        )->execute([$status, mb_substr($message, 0, 2000), $eventId]);
     }
 
     /**
@@ -682,7 +755,7 @@ final class BillingController
             "UPDATE stripe_webhook_events
              SET    status = 'processing', attempts = attempts + 1, error_message = NULL
              WHERE  event_id = ?
-               AND  (status = 'failed'
+               AND  (status IN ('failed', 'gone')
                      OR (status = 'processing' AND updated_at < NOW() - INTERVAL " . self::STALE_PROCESSING_MINUTES . ' MINUTE))'
         );
         $take->execute([$eventId]);
@@ -761,7 +834,23 @@ final class BillingController
                 ));
                 return;
             }
+            $oldId = (string) ($account['stripe_subscription_id'] ?? '');
+            $oldStatus = (string) ($account['stripe_status'] ?? '');
             self::storeSubscriptionState($account, $subId, $data);
+            if ($oldId !== '' && $oldId !== $subId && SubscriptionStatus::isLive($oldStatus)) {
+                // A paid subscription took over a live unpaid one: alert once,
+                // after the response went back to Stripe.
+                register_shutdown_function(static function () use ($accountId, $subId, $status, $oldId, $oldStatus): void {
+                    if (function_exists('fastcgi_finish_request')) {
+                        fastcgi_finish_request();
+                    }
+                    try {
+                        self::alertTakeOver($accountId, $subId, $status, $oldId, $oldStatus);
+                    } catch (\Throwable $e) {
+                        error_log('[billing.takeover] ' . $e->getMessage());
+                    }
+                });
+            }
         });
 
         // Stripe's quantity is never copied into the DB — the DB's wanted
@@ -799,6 +888,11 @@ final class BillingController
         if ($endDate === null && isset($data['trial_end']) && is_int($data['trial_end'])) {
             $endDate = date('Y-m-d', $data['trial_end']);
         }
+        // An incomplete subscription has a period (Stripe sets it at creation)
+        // but nothing was paid for it: it never moves the paid-until date.
+        if (in_array($status, ['incomplete', 'incomplete_expired'], true)) {
+            $endDate = null;
+        }
         $cancelFlag = !SubscriptionStatus::isTerminal($status) && !empty($data['cancel_at_period_end']) ? 1 : 0;
 
         Db::pdo()->prepare(
@@ -817,34 +911,128 @@ final class BillingController
     }
 
     /**
-     * The daily run: read the account's current subscription from Stripe and
-     * write its status, period end and cancel flag (repairs a state left
-     * stale by a lost or failed event). Returns what changed, or null.
+     * The daily run: read the account's subscriptions from Stripe and write
+     * the current one's status, period end and cancel flag (repairs a state
+     * left stale by a lost or failed event). Returns what changed, or null.
      * Throws when Stripe cannot be read.
+     *
+     * The take-over rule of the webhook (isCurrentSubscription) is applied
+     * here too, on Stripe's statuses, paid candidates first: when the
+     * recorded subscription is not paid (past_due / unpaid / paused /
+     * incomplete) and the customer has a paid (active / trialing) one — or
+     * the recorded one is over and another one is live — that one becomes
+     * the account's subscription — without this an account whose paid
+     * subscription sends no event would keep its technicians on the unpaid
+     * one for up to a year. The old subscription is never cancelled or
+     * changed; the operator is alerted once (alertTakeOver()).
+     *
+     * Also stores the customer's other live subscriptions on the account
+     * when it has two or more (stripe_other_subscriptions, JSON: id, status,
+     * extra_qty) for ConfigCheck and the daily run's alert; NULL otherwise.
      */
     public static function syncSubscriptionState(int $accountId, bool $dryRun = false): ?string
     {
-        return self::withSubscriptionLock($accountId, static function () use ($accountId, $dryRun): ?string {
+        $takeOver = null;
+        $result = self::withSubscriptionLock($accountId, static function () use ($accountId, $dryRun, &$takeOver): ?string {
             $before = self::findAccountRowById($accountId);
             $subId  = (string) ($before['stripe_subscription_id'] ?? '');
             if ($before === null || $subId === '') {
                 return null;
             }
-            $data = StripeShape::arr(StripeClient::get()->subscriptions->retrieve($subId, SeatSync::RETRIEVE_EXPAND));
-            $periodEnd = StripeShape::subscriptionPeriodEnd($data);
+            $stripe = StripeClient::get();
+            $data = StripeShape::arr($stripe->subscriptions->retrieve($subId, SeatSync::RETRIEVE_EXPAND));
             $status = (string) ($data['status'] ?? '');
             $diff = [];
-            if ($status !== (string) $before['stripe_status']) {
+
+            $customerId = self::customerOf($data) ?: (string) ($before['stripe_customer_id'] ?? '');
+            $live = SeatSync::liveSubscriptions($customerId);
+            // The webhook's rule on Stripe's statuses, paid candidates first
+            // (newest first within each group).
+            $candidates = $live;
+            usort($candidates, static fn (array $a, array $b): int =>
+                [!in_array((string) ($a['status'] ?? ''), SeatSync::PAID_STATUSES, true), -(int) ($a['created'] ?? 0)]
+                <=> [!in_array((string) ($b['status'] ?? ''), SeatSync::PAID_STATUSES, true), -(int) ($b['created'] ?? 0)]);
+            $recordedWithStripeStatus = ['stripe_status' => $status] + $before;
+            foreach ($candidates as $candidate) {
+                $cid = (string) $candidate['id'];
+                $cstatus = (string) ($candidate['status'] ?? '');
+                if ($cid !== $subId
+                    && !in_array($status, SeatSync::PAID_STATUSES, true)
+                    && self::isCurrentSubscription($recordedWithStripeStatus, $cid, $cstatus)) {
+                    $diff[] = "TAKE-OVER: subscription $cid ($cstatus) replaces $subId ($status)";
+                    $takeOver = [$cid, $cstatus, $subId, $status];
+                    $subId = $cid;
+                    $data = $candidate;
+                    $status = $cstatus;
+                    break;
+                }
+            }
+
+            $periodEnd = StripeShape::subscriptionPeriodEnd($data);
+            if ($status !== (string) $before['stripe_status'] && $takeOver === null) {
                 $diff[] = "status {$before['stripe_status']} → $status";
             }
-            if ($periodEnd !== null && date('Y-m-d', $periodEnd) !== (string) $before['subscription_end_date']) {
+            if ($periodEnd !== null && date('Y-m-d', $periodEnd) !== (string) $before['subscription_end_date']
+                && !in_array($status, ['incomplete', 'incomplete_expired'], true)) {
                 $diff[] = "end {$before['subscription_end_date']} → " . date('Y-m-d', $periodEnd);
+            }
+
+            // Only a customer with two or more live subscriptions is flagged.
+            $others = [];
+            foreach (count($live) >= 2 ? $live : [] as $s) {
+                if ((string) $s['id'] !== $subId) {
+                    $others[] = ['id' => (string) $s['id'], 'status' => (string) ($s['status'] ?? ''), 'extra_qty' => (int) ($s['extra_qty'] ?? 0)];
+                }
             }
             if (!$dryRun) {
                 self::storeSubscriptionState($before, $subId, $data);
+                Db::pdo()->prepare('UPDATE accounts SET stripe_other_subscriptions = ? WHERE id = ?')
+                    ->execute([$others === [] ? null : json_encode($others), $accountId]);
             }
-            return $diff === [] ? null : implode(', ', $diff);
+            if ($others !== []) {
+                $diff[] = 'other live subscription(s): ' . implode(', ', array_map(
+                    static fn (array $o): string => "{$o['id']} {$o['status']}" . ($o['extra_qty'] > 0 ? " with {$o['extra_qty']} extra technician(s)" : ''),
+                    $others,
+                ));
+            }
+            return $diff === [] ? null : implode('; ', $diff);
         });
+        if ($takeOver !== null && !$dryRun) {
+            $result .= ' — take-over operator alert: ' . self::alertTakeOver($accountId, ...$takeOver);
+        }
+        return $result;
+    }
+
+    /**
+     * Tell the operator once that a paid subscription took over an unpaid
+     * one: the old one still bills (Stripe retries it) and may still carry
+     * an extra-technician item. The app never cancels or changes it — the
+     * owner decides in Stripe.
+     */
+    public static function alertTakeOver(int $accountId, string $newId, string $newStatus, string $oldId, string $oldStatus): string
+    {
+        $name = (string) (self::findAccountRowById($accountId)['invoice_company_name'] ?? '');
+        $oldExtra = '?';
+        try {
+            $old = StripeShape::arr(StripeClient::get()->subscriptions->retrieve($oldId, SeatSync::RETRIEVE_EXPAND));
+            $split = SeatSync::classifyItems((array) ($old['items']['data'] ?? []));
+            $qty = array_sum(array_map(static fn (array $i): int => (int) ($i['quantity'] ?? 0), $split['extras']));
+            $oldStatus = (string) ($old['status'] ?? $oldStatus);
+            $oldExtra = $qty > 0 ? "áno, $qty extra technik(ov)" : 'nie';
+        } catch (\Throwable $e) {
+            error_log("[billing.takeover] account=$accountId old subscription $oldId: " . $e->getMessage());
+        }
+        return OperatorAlert::once(
+            "takeover:$accountId:$newId",
+            'účet prešiel na iné predplatné zákazníka',
+            'Zákazník má popri predplatnom, ktoré aplikácia používala (nezaplatené alebo skončené), ďalšie predplatné. Aplikácia odteraz používa to druhé; staré nezrušila ani nezmenila — rozhodni v Stripe.',
+            [
+                "Účet: $name (#$accountId)",
+                "Nové (používa sa): $newId ($newStatus)",
+                "Staré: $oldId ($oldStatus)",
+                "Staré ešte nesie položku extra technika: $oldExtra",
+            ],
+        );
     }
 
     public static function handleSubscriptionDeleted(\Stripe\StripeObject $sub): void
@@ -895,15 +1083,13 @@ final class BillingController
     private static function withSubscriptionLock(int $accountId, callable $fn): mixed
     {
         $name = 'firol_subscription_' . $accountId;
-        $stmt = Db::pdo()->prepare('SELECT GET_LOCK(?, 20)');
-        $stmt->execute([$name]);
-        if ((int) $stmt->fetchColumn() !== 1) {
+        if (!BillingLock::acquire($name, 20)) {
             throw new \RuntimeException("subscription lock of account $accountId busy");
         }
         try {
             return $fn();
         } finally {
-            Db::pdo()->prepare('SELECT RELEASE_LOCK(?)')->execute([$name]);
+            BillingLock::release($name);
         }
     }
 
@@ -921,10 +1107,12 @@ final class BillingController
      * current subscription, when the current one is over (canceled /
      * expired) and this one is not — a new subscription after the old one
      * ended — and when this one is paid (active / trialing) while the
-     * current one is not (past_due / unpaid / paused): a customer who started
-     * a new subscription next to an unpaid one before 17. 11. 2026 must not
-     * stay read-only with its technicians pushed onto the unpaid one. Any
-     * other subscription (an old one, a second unpaid one) is ignored.
+     * current one is not (past_due / unpaid / paused / incomplete): a
+     * customer who started a new subscription next to an unpaid one before
+     * 17. 11. 2026 must not stay read-only with its technicians pushed onto
+     * the unpaid one. Any other subscription (an old one, a second unpaid
+     * one) is ignored. The daily run applies the same rule
+     * (syncSubscriptionState).
      *
      * @param array<string, mixed> $account
      */
@@ -939,7 +1127,7 @@ final class BillingController
             return !SubscriptionStatus::isTerminal($status);
         }
         if (in_array($status, ['active', 'trialing'], true)
-            && in_array($currentStatus, ['past_due', 'unpaid', 'paused'], true)) {
+            && in_array($currentStatus, ['past_due', 'unpaid', 'paused', 'incomplete'], true)) {
             error_log(sprintf(
                 '[billing.webhook] account=%d takes paid subscription %s (%s) over %s (%s) — the old one still bills, check the customer in Stripe',
                 (int) $account['id'], $subId, $status, $current, $currentStatus,

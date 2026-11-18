@@ -295,8 +295,10 @@ function BillingSection({
 
   const isYearly = account.billing_period === 'yearly';
   // The next regular charge: base + extra technicians at the prices on the
-  // customer's Stripe items (prorations for changes come on top).
-  const extra = account.extra_technicians;
+  // customer's Stripe items (prorations for changes come on top). The count
+  // is the one the charge was built from (Stripe's own while nothing is
+  // pushed to Stripe).
+  const extra = account.next_charge_extra_technicians ?? account.extra_technicians;
   const periodPrice = account.next_charge_cents !== null
     ? `${formatCents(account.next_charge_cents)} / ${isYearly ? 'rok' : 'mesiac'}${extra > 0 ? ` vrátane ${extra} ${extra === 1 ? 'extra technika' : 'extra technikov'}` : ''}${account.next_charge_before_discount ? ' (pred zľavou)' : ''}`
     : periodPriceLabel(pricing, isYearly ? 'yearly' : 'monthly');
