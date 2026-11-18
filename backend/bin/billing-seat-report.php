@@ -68,7 +68,8 @@ if ($baseProducts === null) {
 }
 
 $sql = "SELECT id, invoice_company_name, included_technicians, stripe_customer_id,
-               stripe_subscription_id, stripe_status, stripe_extra_subscription_item_id, billing_period
+               stripe_subscription_id, stripe_status, stripe_extra_subscription_item_id,
+               stripe_base_subscription_item_id, billing_period
         FROM   accounts
         WHERE  stripe_customer_id IS NOT NULL AND stripe_customer_id <> ''";
 $params = [];
@@ -89,34 +90,31 @@ foreach ($stmt->fetchAll() as $a) {
         $accountId, (string) $a['invoice_company_name'], $active, (int) $a['included_technicians'], $wanted);
 
     try {
-        $subs = $stripe->subscriptions->all(['customer' => (string) $a['stripe_customer_id'], 'status' => 'all', 'limit' => 20]);
+        // The same reading as the daily run (SeatSync::liveSubscriptions):
+        // every live subscription of the customer, expanded, newest first.
+        $live = SeatSync::liveSubscriptions((string) $a['stripe_customer_id']);
     } catch (\Throwable $e) {
         $errors++;
         echo "  $label: ERROR reading Stripe: ", $e->getMessage(), "\n";
         continue;
     }
-    $live = [];
-    foreach ($subs->data as $s) {
-        if (SubscriptionStatus::isLive((string) $s->status)) {
-            $live[] = $s;
-        }
-    }
 
     $flags = [];
     if (count($live) > 1) {
-        $flags[] = 'MORE THAN ONE LIVE SUBSCRIPTION (' . implode(', ', array_map(static fn ($s) => $s->id . ' ' . $s->status, $live)) . ')';
+        $flags[] = 'MORE THAN ONE LIVE SUBSCRIPTION (' . implode(', ', array_map(static fn (array $s): string => $s['id'] . ' ' . $s['status']
+            . ($s['extra_qty'] > 0 ? ' with ' . $s['extra_qty'] . ' extra' : ''), $live)) . ')';
     }
 
     $current = null;
     foreach ($live as $s) {
-        if ($s->id === $a['stripe_subscription_id']) {
+        if ($s['id'] === $a['stripe_subscription_id']) {
             $current = $s;
         }
     }
     if (count($live) > 1) {
         $flags[] = $current !== null
-            ? "checked {$current->id} — the one recorded on the account"
-            : 'checked ' . $live[0]->id . ' — none is recorded on the account (db ' . ($a['stripe_subscription_id'] ?: '-') . '), the first live one Stripe lists';
+            ? "checked {$current['id']} — the one recorded on the account"
+            : 'checked ' . $live[0]['id'] . ' — none is recorded on the account (db ' . ($a['stripe_subscription_id'] ?: '-') . '), the newest live one';
     }
     $current ??= $live[0] ?? null;
 
@@ -131,14 +129,9 @@ foreach ($stmt->fetchAll() as $a) {
         continue;
     }
 
-    try {
-        $data = StripeShape::arr($stripe->subscriptions->retrieve((string) $current->id, SeatSync::RETRIEVE_EXPAND));
-    } catch (\Throwable $e) {
-        $errors++;
-        echo "  $label: ERROR reading subscription {$current->id}: ", $e->getMessage(), "\n";
-        continue;
-    }
-    $split = SeatSync::classifyItems((array) ($data['items']['data'] ?? []), (string) ($a['stripe_extra_subscription_item_id'] ?? ''), $baseProducts);
+    $data = $current;
+    $split = SeatSync::classifyItems((array) ($data['items']['data'] ?? []), (string) ($a['stripe_extra_subscription_item_id'] ?? ''), $baseProducts,
+        (string) ($a['stripe_base_subscription_item_id'] ?? ''));
     $qty   = array_sum(array_map(static fn (array $i): int => (int) ($i['quantity'] ?? 0), $split['extras']));
     $unit  = isset($split['extras'][0]['price']['unit_amount']) ? (int) $split['extras'][0]['price']['unit_amount'] : null;
     $interval = $split['base'] !== null ? StripeShape::itemInterval($split['base']) : '?';
@@ -162,13 +155,17 @@ foreach ($stmt->fetchAll() as $a) {
         $flags[] = "UNVERIFIED item {$item['id']} (qty " . (int) ($item['quantity'] ?? 0) . ', price ' . (string) ($item['price']['id'] ?? '?')
             . ') — only the recorded id calls it an extra item; the reconcile leaves this subscription to a person';
     }
+    foreach ($split['unknown'] as $item) {
+        $flags[] = "UNRECOGNISED item {$item['id']} (qty " . (int) ($item['quantity'] ?? 0) . ', price ' . (string) ($item['price']['id'] ?? '?')
+            . ') — neither the plan nor a marked extra item (an old extra item?); the reconcile leaves this subscription to a person';
+    }
     foreach ($split['notes'] as $note) {
         if (str_contains($note, 'base item') || str_contains($note, 'base-plan') || str_contains($note, 'unrecognised')) {
             $flags[] = $note;
         }
     }
 
-    $line = sprintf('%s — sub %s %s %s, Stripe extra qty %d%s', $label, $current->id, $current->status, $interval,
+    $line = sprintf('%s — sub %s %s %s, Stripe extra qty %d%s', $label, $current['id'], $current['status'], $interval,
         $qty, $unit !== null ? ' at ' . number_format($unit / 100, 2, ',', ' ') . ' €' : '');
     if ($flags !== []) {
         $flagged++;

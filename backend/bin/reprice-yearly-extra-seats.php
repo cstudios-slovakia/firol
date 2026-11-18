@@ -24,10 +24,13 @@ declare(strict_types=1);
  *                    it such an item is skipped: the terms (5.5) require 30
  *                    days' notice of a price increase.
  *
- * Which accounts: `billing_period = 'yearly'` with a subscription and a
- * recorded extra-seat item (`stripe_extra_subscription_item_id`). A
- * subscription that is cancelled, or set to end at the period end, is skipped
- * (there is no renewal to reprice). Yearly accounts with more active
+ * Which accounts: `billing_period = 'yearly'` with a subscription. Which
+ * items: the subscription is read from Stripe and its items are classified
+ * with SeatSync::classifyItems() — only items it calls extra-technician items
+ * are repriced, never the plan item, an UNVERIFIED item or an unrecognised
+ * one, whatever id the account recorded (the old webhook could record the
+ * plan item as the extra item). A subscription that is cancelled, or set to
+ * end at the period end, is skipped (there is no renewal to reprice). Yearly accounts with more active
  * technicians than included but no extra item are listed as „NOT CHARGED"
  * (see also bin/billing-seat-report.php).
  *
@@ -39,8 +42,8 @@ declare(strict_types=1);
  * customer.subscription.updated webhook that follows finds the same item).
  *
  * Skipped with a note: an item already at the new amount (so a second run
- * changes nothing), an item that is not on the recorded subscription, an item
- * whose price is not yearly. An item Stripe cannot find is reported as an
+ * changes nothing), an item whose price is not yearly, a recorded item that is
+ * not an extra item. A subscription Stripe cannot read is reported as an
  * error and the run continues; the exit code is then 1.
  */
 
@@ -52,10 +55,12 @@ if (is_file(__DIR__ . '/../.env')) {
 
 use Firol\Billing\SeatSync;
 use Firol\Db;
+use Firol\Stripe\StripeShape;
 
 /**
  * @param object|null $stripe  \Stripe\StripeClient (or anything with the same
- *                             subscriptionItems->retrieve/update); null = offline.
+ *                             subscriptions->retrieve and subscriptionItems->update);
+ *                             null = offline.
  * @param callable(string): void $out
  * @return int number of errors
  */
@@ -73,13 +78,11 @@ function repriceYearlyExtraSeats(PDO $pdo, ?object $stripe, bool $apply, ?int $o
     ));
 
     $sql = "SELECT id, invoice_company_name, stripe_subscription_id,
-                   stripe_extra_subscription_item_id, extra_technicians, stripe_status,
-                   subscription_end_date
+                   stripe_extra_subscription_item_id, stripe_base_subscription_item_id,
+                   extra_technicians, stripe_status, subscription_end_date
             FROM   accounts
             WHERE  billing_period = 'yearly'
-              AND  stripe_subscription_id IS NOT NULL AND stripe_subscription_id <> ''
-              AND  stripe_extra_subscription_item_id IS NOT NULL
-              AND  stripe_extra_subscription_item_id <> ''";
+              AND  stripe_subscription_id IS NOT NULL AND stripe_subscription_id <> ''";
     $params = [];
     if ($onlyAccount !== null) {
         $sql .= ' AND id = ?';
@@ -109,99 +112,108 @@ function repriceYearlyExtraSeats(PDO $pdo, ?object $stripe, bool $apply, ?int $o
         );
 
         if ($stripe === null) {
-            $out("  $label: would set the price to $newAmount cents/year (current price not read — offline)");
+            if ($itemId === '') {
+                continue; // offline: nothing recorded to name
+            }
+            $out("  $label: would set the price to $newAmount cents/year (current price not read — offline; online the subscription's items are classified first)");
             $changed++;
             continue;
         }
 
         try {
-            $item = $stripe->subscriptionItems->retrieve($itemId);
-        } catch (\Throwable $e) {
-            $errors++;
-            $out("  $label: ERROR reading the item from Stripe: " . $e->getMessage());
-            continue;
-        }
-
-        $price     = $item->price ?? null;
-        $oldAmount = (int) ($price->unit_amount ?? 0);
-        $interval  = (string) ($price->recurring->interval ?? '');
-        $product   = $price->product ?? '';
-        $product   = is_object($product) ? (string) ($product->id ?? '') : (string) $product;
-        $currency  = (string) ($price->currency ?? 'eur');
-        $taxBehavior = (string) ($price->tax_behavior ?? '');
-        $qty       = (int) ($item->quantity ?? 0);
-
-        if ((string) ($item->subscription ?? '') !== $subId) {
-            $out("  $label: SKIP — the item belongs to subscription " . (string) ($item->subscription ?? '?'));
-            continue;
-        }
-        if ($interval !== 'year') {
-            $out("  $label: SKIP — the item's price is not yearly (interval=$interval)");
-            continue;
-        }
-        if ($product === '') {
-            $errors++;
-            $out("  $label: ERROR — the item's price has no product");
-            continue;
-        }
-        if ($oldAmount === $newAmount) {
-            $out("  $label: SKIP — already at $newAmount cents/year");
-            continue;
-        }
-        if ($newAmount > $oldAmount && !$allowIncrease) {
-            $out("  $label: SKIP — $oldAmount → $newAmount cents/year would RAISE the price; the terms (5.5) need 30 days' notice. Re-run with --allow-increase once the customer was told.");
-            continue;
-        }
-        try {
-            $sub = $stripe->subscriptions->retrieve($subId);
+            $sub = StripeShape::arr($stripe->subscriptions->retrieve($subId, SeatSync::RETRIEVE_EXPAND));
         } catch (\Throwable $e) {
             $errors++;
             $out("  $label: ERROR reading the subscription from Stripe: " . $e->getMessage());
             continue;
         }
-        $subStatus = (string) ($sub->status ?? '');
+        $subStatus = (string) ($sub['status'] ?? '');
         if (in_array($subStatus, ['canceled', 'incomplete_expired', 'incomplete'], true)) {
             $out("  $label: SKIP — the subscription is $subStatus");
             continue;
         }
-        if (!empty($sub->cancel_at_period_end)) {
+        if (!empty($sub['cancel_at_period_end'])) {
             $out("  $label: SKIP — the subscription ends at the period end (no renewal to reprice)");
             continue;
         }
 
-        $priceData = [
-            'currency'    => $currency,
-            'product'     => $product,
-            'unit_amount' => $newAmount,
-            'recurring'   => ['interval' => 'year'],
-        ];
-        if ($taxBehavior === 'inclusive' || $taxBehavior === 'exclusive') {
-            $priceData['tax_behavior'] = $taxBehavior;
+        // Only what classifyItems() calls an extra-technician item — never
+        // the plan item the old webhook may have recorded as „extra".
+        $split = SeatSync::classifyItems((array) ($sub['items']['data'] ?? []), $itemId, null,
+            (string) ($row['stripe_base_subscription_item_id'] ?? ''));
+        $extraIds = array_map(static fn (array $i): string => (string) $i['id'], $split['extras']);
+        if ($itemId !== '' && !in_array($itemId, $extraIds, true)) {
+            $out("  $label: NOTE — the recorded item $itemId is not an extra-technician item (the plan item, an UNVERIFIED or unrecognised item, or gone) — it is never repriced");
         }
-        $params = [
-            'price_data'         => $priceData,
-            'proration_behavior' => 'none',
-        ];
-
-        $what = sprintf(
-            '%d → %d cents/year × qty %d (product %s, %s)',
-            $oldAmount, $newAmount, $qty, $product, $currency,
-        );
-
-        if (!$apply) {
-            $out("  $label: would change $what");
-            $out('    params: ' . json_encode($params, JSON_UNESCAPED_SLASHES));
-            $changed++;
+        if ($split['extras'] === []) {
+            $out("  $label: SKIP — no extra-technician item on the subscription");
             continue;
         }
 
-        try {
-            $stripe->subscriptionItems->update($itemId, $params);
-            $out("  $label: CHANGED $what");
-            $changed++;
-        } catch (\Throwable $e) {
-            $errors++;
-            $out("  $label: ERROR updating the item: " . $e->getMessage());
+        foreach ($split['extras'] as $item) {
+            $thisItem  = (string) $item['id'];
+            $price     = (array) ($item['price'] ?? []);
+            $oldAmount = (int) ($price['unit_amount'] ?? 0);
+            $interval  = (string) ($price['recurring']['interval'] ?? '');
+            $product   = $price['product'] ?? '';
+            $product   = is_array($product) ? (string) ($product['id'] ?? '') : (string) $product;
+            $currency  = (string) ($price['currency'] ?? 'eur');
+            $taxBehavior = (string) ($price['tax_behavior'] ?? '');
+            $qty       = (int) ($item['quantity'] ?? 0);
+            $itemLabel = "$label extra item $thisItem";
+
+            if ($interval !== 'year') {
+                $out("  $itemLabel: SKIP — the item's price is not yearly (interval=$interval)");
+                continue;
+            }
+            if ($product === '') {
+                $errors++;
+                $out("  $itemLabel: ERROR — the item's price has no product");
+                continue;
+            }
+            if ($oldAmount === $newAmount) {
+                $out("  $itemLabel: SKIP — already at $newAmount cents/year");
+                continue;
+            }
+            if ($newAmount > $oldAmount && !$allowIncrease) {
+                $out("  $itemLabel: SKIP — $oldAmount → $newAmount cents/year would RAISE the price; the terms (5.5) need 30 days' notice. Re-run with --allow-increase once the customer was told.");
+                continue;
+            }
+
+            $priceData = [
+                'currency'    => $currency,
+                'product'     => $product,
+                'unit_amount' => $newAmount,
+                'recurring'   => ['interval' => 'year'],
+            ];
+            if ($taxBehavior === 'inclusive' || $taxBehavior === 'exclusive') {
+                $priceData['tax_behavior'] = $taxBehavior;
+            }
+            $params = [
+                'price_data'         => $priceData,
+                'proration_behavior' => 'none',
+            ];
+
+            $what = sprintf(
+                '%d → %d cents/year × qty %d (product %s, %s)',
+                $oldAmount, $newAmount, $qty, $product, $currency,
+            );
+
+            if (!$apply) {
+                $out("  $itemLabel: would change $what");
+                $out('    params: ' . json_encode($params, JSON_UNESCAPED_SLASHES));
+                $changed++;
+                continue;
+            }
+
+            try {
+                $stripe->subscriptionItems->update($thisItem, $params);
+                $out("  $itemLabel: CHANGED $what");
+                $changed++;
+            } catch (\Throwable $e) {
+                $errors++;
+                $out("  $itemLabel: ERROR updating the item: " . $e->getMessage());
+            }
         }
     }
 

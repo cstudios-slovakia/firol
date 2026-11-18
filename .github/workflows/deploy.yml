@@ -79,33 +79,44 @@ jobs:
             BACKUP_DIR=/usr/home/awgefy/db-backups
             mkdir -p $BACKUP_DIR
 
-            # Install the nightly DB backup cron job (idempotent — adds the
-            # line only if it is not already present in the crontab).
+            # Cron lines are added idempotently (only when not present yet).
+            # The crontab is read once: `crontab -l` fails with "no crontab"
+            # when there is none (= empty); any other failure leaves the
+            # crontab alone. Piping a failed read into `crontab -` would
+            # replace the whole crontab with the one new line.
+            if CRONTAB_NOW=$(crontab -l 2>&1); then CRONTAB_OK=1
+            elif printf '%s' "$CRONTAB_NOW" | grep -q "no crontab"; then CRONTAB_NOW=""; CRONTAB_OK=1
+            else echo "crontab -l failed, cron lines not installed: $CRONTAB_NOW"; CRONTAB_OK=0
+            fi
+            add_cron() {
+              [ "$CRONTAB_OK" = 1 ] || return 0
+              printf '%s\n' "$CRONTAB_NOW" | grep -qF "$1" && return 0
+              if [ -n "$CRONTAB_NOW" ]; then CRONTAB_NOW=$(printf '%s\n%s' "$CRONTAB_NOW" "$2"); else CRONTAB_NOW="$2"; fi
+              printf '%s\n' "$CRONTAB_NOW" | crontab -
+            }
+
+            # Install the nightly DB backup cron job.
             CRON_CMD="0 2 * * * $ROOT/scripts/backup-db.sh >> $BACKUP_DIR/backup.log 2>&1"
-            ( crontab -l 2>/dev/null | grep -qF "$ROOT/scripts/backup-db.sh" ) \
-              || ( crontab -l 2>/dev/null; echo "$CRON_CMD" ) | crontab -
+            add_cron "$ROOT/scripts/backup-db.sh" "$CRON_CMD"
 
             # Nightly retention job — enforces the 12-month log retention the
             # privacy policy publishes (change request 3.1). Runs after the
             # backup so a rotated log is already captured in that night's dump.
             PRUNE_CMD="30 2 * * * php $ROOT/backend/db/prune.php >> $BACKUP_DIR/prune.log 2>&1"
-            ( crontab -l 2>/dev/null | grep -qF "$ROOT/backend/db/prune.php" ) \
-              || ( crontab -l 2>/dev/null; echo "$PRUNE_CMD" ) | crontab -
+            add_cron "$ROOT/backend/db/prune.php" "$PRUNE_CMD"
 
             # Daily automatic client notice of upcoming termíny (chapter 11.3).
             # Sends only for accounts that switched it on in Nastavenia; the
             # script records every notice so a client never gets one twice.
             # 06:00 so the mail arrives at the start of the working day.
             NOTICE_CMD="0 6 * * * php $ROOT/backend/bin/send-deadline-notices.php >> $BACKUP_DIR/deadline-notices.log 2>&1"
-            ( crontab -l 2>/dev/null | grep -qF "$ROOT/backend/bin/send-deadline-notices.php" ) \
-              || ( crontab -l 2>/dev/null; echo "$NOTICE_CMD" ) | crontab -
+            add_cron "$ROOT/backend/bin/send-deadline-notices.php" "$NOTICE_CMD"
 
             # Daily billing run: re-runs failed Stripe events, syncs seats to
             # Stripe (report only while BILLING_RECONCILE=off), retries failed
             # iDoklad invoices and alerts ADMIN_EMAIL.
             BILLING_CMD="30 5 * * * php $ROOT/backend/bin/billing-daily.php >> $BACKUP_DIR/billing-daily.log 2>&1"
-            ( crontab -l 2>/dev/null | grep -qF "$ROOT/backend/bin/billing-daily.php" ) \
-              || ( crontab -l 2>/dev/null; echo "$BILLING_CMD" ) | crontab -
+            add_cron "$ROOT/backend/bin/billing-daily.php" "$BILLING_CMD"
 
       # Smoke-test the freshly deployed app from the GitHub runner. Fails
       # the workflow if /api/health doesn't return 200 — a stronger signal
