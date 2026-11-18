@@ -3,19 +3,26 @@
 declare(strict_types=1);
 
 /**
- * Billing checks that need neither iDoklad nor a Stripe test clock (fix list
- * of 17. 11. 2026, docs/prompts/billing-fixes-2026-11.md):
+ * Billing checks that need neither iDoklad nor a Stripe test clock (fix lists
+ * of 17. 11. 2026, docs/prompts/billing-fixes-2026-11.md and
+ * billing-fixes-2026-11-round-2.md):
  *
  *   1. IssuePolicy — what is sent and what is only prepared; a test-mode
- *      Stripe invoice is never sent.
+ *      Stripe invoice is never sent. The policy matrix (APP_ENV ×
+ *      IDOKLAD_ISSUE_MODE × Stripe key) with what the admin check says: a
+ *      live key without `send` and a prepared live invoice are errors.
  *   2. Captured webhook payloads in API version 2026-04-22.dahlia
  *      (bin/fixtures/stripe-dahlia): fields read whatever the version.
- *   3. Which Stripe invoices become an iDoklad invoice (0 €, credit, discount)
- *      and the payload built for them.
+ *   3. Which Stripe invoices become an iDoklad invoice (0 €, credit, netted
+ *      proration pairs, promotion-code discounts) and the payload built for
+ *      them.
  *   4. InvoiceIssuer end to end with a RECORDING STUB in place of iDoklad: the
  *      payload that would be posted, a failure and the retry cap, an
- *      uncertain POST, a credit invoice held for review.
- *   5. bin/reprice-yearly-extra-seats.php refuses a bad or misspelled option.
+ *      uncertain POST, a 2xx without an invoice Id, a credit invoice held for
+ *      review, a row of the old code without a snapshot, the policy path
+ *      with the client built from env.
+ *   5. bin/reprice-yearly-extra-seats.php refuses a bad or misspelled option;
+ *      bin/billing-daily.php refuses a live key outside production.
  *   6. Over HTTP (nginx → PHP-FPM): a team member who is not the main user
  *      gets 403 from every billing action; a webhook event that fails is
  *      handled again on Stripe's retry instead of being skipped (needs an
@@ -23,12 +30,14 @@ declare(strict_types=1);
  *
  *     docker compose exec php php bin/test-billing-invoices.php
  *
- * iDoklad is never called: its credentials are removed from this process and
- * every send goes to the recorder. Mail is switched off in this process.
- * Parts 1–4 run in one transaction that is rolled back; part 6 creates
- * throwaway rows and deletes them. Local / staging only.
+ * iDoklad is never called: bin/lib/idoklad-recorder.php is loaded before the
+ * autoloader and IS Firol\Idoklad\IDokladClient in this process (checked),
+ * and the credentials are removed as well. Mail is switched off in this
+ * process. Parts 1–4 run in one transaction that is rolled back; part 6
+ * creates throwaway rows and deletes them. Local / staging only.
  */
 
+require __DIR__ . '/lib/idoklad-recorder.php'; // before the autoloader: no real iDoklad client in this process
 require __DIR__ . '/../vendor/autoload.php';
 
 if (is_file(__DIR__ . '/../.env')) {
@@ -38,7 +47,7 @@ if (is_file(__DIR__ . '/../.env')) {
 use Firol\Auth\Password;
 use Firol\Billing\SeatSync;
 use Firol\Db;
-use Firol\Idoklad\IDokladApi;
+use Firol\Idoklad\IDokladClient;
 use Firol\Idoklad\IDokladTransportException;
 use Firol\Idoklad\InvoiceIssuer;
 use Firol\Idoklad\IssuePolicy;
@@ -53,6 +62,7 @@ foreach (['IDOKLAD_CLIENT_ID', 'IDOKLAD_CLIENT_SECRET'] as $name) {
     putenv($name);
 }
 $_ENV['SMTP_HOST'] = '';
+IDokladClient::assertStub();
 
 $failures = 0;
 $expect = static function (string $name, mixed $actual, mixed $expected) use (&$failures): void {
@@ -64,49 +74,6 @@ $expect = static function (string $name, mixed $actual, mixed $expected) use (&$
             . "\n       got      " . json_encode($actual, JSON_UNESCAPED_UNICODE) . "\n";
     }
 };
-
-/** Stands in for iDoklad: records every call, answers like iDoklad would. */
-final class RecordingIDoklad implements IDokladApi
-{
-    /** @var list<array{0: string, 1: string, 2: ?array<string, mixed>}> */
-    public array $calls = [];
-    public ?\Throwable $failInvoicePost = null;
-
-    public function get(string $path): array
-    {
-        $this->calls[] = ['GET', $path, null];
-        if ($path === 'IssuedInvoices/Default') {
-            return [
-                'Id' => 0, 'DocumentSerialNumber' => 42, 'NumericSequenceId' => 7, 'PaymentStatus' => 0,
-                'Items' => [['Id' => 0, 'DiscountPercentage' => 0, 'IsTaxMovement' => true, 'PriceType' => 1, 'VatRateType' => 2, 'Unit' => 'ks']],
-            ];
-        }
-        return ['PublicHtmlUrl' => 'https://example.com/idoklad/invoice'];
-    }
-
-    public function post(string $path, array $payload): array
-    {
-        $this->calls[] = ['POST', $path, $payload];
-        if ($path === 'Contacts') {
-            return ['Id' => 555];
-        }
-        if ($this->failInvoicePost !== null) {
-            throw $this->failInvoicePost;
-        }
-        return ['Id' => 9001, 'DocumentNumber' => 'FV-TEST-1', 'PublicHtmlUrl' => 'https://example.com/idoklad/9001'];
-    }
-
-    /** @return array<string, mixed>|null */
-    public function lastInvoicePost(): ?array
-    {
-        foreach (array_reverse($this->calls) as [$m, $p, $body]) {
-            if ($m === 'POST' && $p === 'IssuedInvoices') {
-                return $body;
-            }
-        }
-        return null;
-    }
-}
 
 $withEnv = static function (array $env, callable $fn): mixed {
     $saved = [];
@@ -142,6 +109,42 @@ $expect('local with IDOKLAD_ISSUE_MODE=send, test-mode invoice → not sent', $p
 $expect('…plus IDOKLAD_ALLOW_TEST_EVENTS=true → sent', $p(['APP_ENV' => 'local', 'IDOKLAD_ISSUE_MODE' => 'send', 'IDOKLAD_ALLOW_TEST_EVENTS' => 'true'], false), true);
 $expect('production with IDOKLAD_ISSUE_MODE=prepare → not sent', $p(['APP_ENV' => 'production', 'IDOKLAD_ISSUE_MODE' => 'prepare', 'IDOKLAD_ALLOW_TEST_EVENTS' => null], true), false);
 $expect('IDOKLAD_DRAFT_MODE is not read', $p(['APP_ENV' => 'local', 'IDOKLAD_ISSUE_MODE' => null, 'IDOKLAD_DRAFT_MODE' => 'false'], true), false);
+$expect('live key alone does not imply send (APP_ENV=local)', $p(['APP_ENV' => 'local', 'IDOKLAD_ISSUE_MODE' => null, 'STRIPE_SECRET_KEY' => 'sk_live_fake'], true), false);
+
+// The matrix of round 2, item 3: what is sent for a live Stripe invoice and
+// what „Kontrola fakturácie" says about it. A wrong APP_ENV on a live key
+// must show as an ERROR, never as OK.
+echo "     · policy matrix for a LIVE Stripe invoice (send? / admin check level of the iDoklad mode):\n";
+$levelOf = static function (array $checks, array $keys): string {
+    $worst = 'ok';
+    foreach ($checks as $c) {
+        if (in_array($c['key'], $keys, true) && ($c['level'] === 'error' || ($c['level'] === 'warn' && $worst === 'ok'))) {
+            $worst = $c['level'];
+        }
+    }
+    return $worst;
+};
+$matrix = [];
+foreach (['sk_test_fake' => 'test key', 'sk_live_fake' => 'LIVE key'] as $keyValue => $keyLabel) {
+    foreach (['production', 'prod', 'local', ''] as $appEnv) {
+        foreach ([null, 'send', 'prepare'] as $mode) {
+            [$send, $level] = $withEnv(
+                ['STRIPE_SECRET_KEY' => $keyValue, 'APP_ENV' => $appEnv, 'IDOKLAD_ISSUE_MODE' => $mode,
+                 'IDOKLAD_ALLOW_TEST_EVENTS' => null, 'STRIPE_PRODUCT_EXTRA_TECHNICIAN' => null,
+                 'IDOKLAD_CLIENT_ID' => 'x', 'IDOKLAD_CLIENT_SECRET' => 'x'],
+                static fn () => [IssuePolicy::decide(true)['send'], $levelOf(\Firol\Billing\ConfigCheck::run(), ['idoklad', 'idoklad_live_mode'])],
+            );
+            $matrix[] = [$keyLabel, $appEnv, $mode, $send, $level];
+            printf("       %-8s APP_ENV=%-10s IDOKLAD_ISSUE_MODE=%-8s → %-7s check %s\n",
+                $keyLabel, $appEnv === '' ? '(empty)' : $appEnv, $mode ?? '(unset)', $send ? 'SEND' : 'prepare', strtoupper($level));
+        }
+    }
+}
+$liveNotSent = array_filter($matrix, static fn ($r) => $r[0] === 'LIVE key' && !$r[3]);
+$expect('matrix: every live-key row that does not send is an admin ERROR', array_values(array_unique(array_map(static fn ($r) => $r[4], $liveNotSent))), ['error']);
+$expect('matrix: live key + APP_ENV=prod (not „production"), mode unset → not sent, ERROR', [$matrix[15][3], $matrix[15][4]], [false, 'error']);
+$expect('matrix: live key + APP_ENV=production + IDOKLAD_ISSUE_MODE=send → sent, OK', [$matrix[13][3], $matrix[13][4]], [true, 'ok']);
+$expect('matrix: a live key with send is always sent', array_values(array_unique(array_map(static fn ($r) => $r[3], array_filter($matrix, static fn ($r) => $r[0] === 'LIVE key' && $r[2] === 'send')))), [true]);
 echo "\n";
 
 // ── 2. dahlia payloads ──────────────────────────────────────────────────
@@ -167,7 +170,7 @@ foreach ($sub['items']['data'] as $item) {
     }
 }
 $split = $withEnv(['STRIPE_PRODUCT_EXTRA_TECHNICIAN' => $extraProduct, 'STRIPE_PRICE_MONTHLY' => $basePrice],
-    static fn () => SeatSync::classifyItems($sub['items']['data']));
+    static fn () => SeatSync::classifyItems($sub['items']['data'], '', []));
 $expect('dahlia subscription: base and one extra item told apart', [count($split['extras']), $split['base']['price']['id'] ?? null], [1, $basePrice]);
 
 $inv = $invEvent['data']['object'];
@@ -184,7 +187,10 @@ foreach ($inv['lines']['data'] as $l) {
         break;
     }
 }
-$want = 'POapp — predplatné (' . date('d.m.Y', $base['period']['start']) . ' – ' . date('d.m.Y', $base['period']['end']) . ')';
+$per = static fn (int $a, int $b): string => date('Y', $a) === date('Y', $b)
+    ? ' (' . date('d.m.', $a) . '–' . date('d.m.Y', $b) . ')'
+    : ' (' . date('d.m.Y', $a) . ' – ' . date('d.m.Y', $b) . ')';
+$want = 'POapp — predplatné' . $per($base['period']['start'], $base['period']['end']);
 $first = $inv['lines']['data'][0];
 $expect('description period from the first non-proration line, not lines[0]', InvoiceIssuer::deriveDescription($inv), $want);
 $expect('…lines[0] is a proration with another period', [StripeShape::lineIsProration($first), $first['period']['start'] !== $base['period']['start']], [true, true]);
@@ -193,10 +199,12 @@ echo "\n";
 // ── 3. classification and payload ───────────────────────────────────────
 echo "3 — which Stripe invoices are invoiced\n";
 $period = ['start' => strtotime('2026-12-17'), 'end' => strtotime('2027-01-17')];
-$line = static fn (int $amount, string $desc, bool $proration = false, int $qty = 1, ?array $per = null) => [
+$line = static fn (int $amount, string $desc, bool $proration = false, int $qty = 1, ?array $per = null, int $discount = 0, string $item = 'si_x') => [
     'amount' => $amount, 'description' => $desc, 'quantity' => $qty, 'proration' => $proration,
     'type' => $proration ? 'invoiceitem' : 'subscription', 'period' => $per ?? $period,
+    'subscription' => 'sub_test', 'subscription_item' => $item,
     'price' => ['id' => 'price_x', 'product' => $desc === 'extra' ? 'prod_extra_test' : 'prod_base_test'],
+    'discount_amounts' => $discount > 0 ? [['amount' => $discount, 'discount' => 'di_test']] : [],
 ];
 $invoice = static fn (int $total, int $paid, array $lines, array $more = []) => array_merge([
     'id' => 'in_test_' . bin2hex(random_bytes(4)), 'object' => 'invoice', 'currency' => 'eur', 'livemode' => false,
@@ -210,7 +218,45 @@ $expect('19 € paid 9 € by card, rest from credit → review', $c($invoice(19
 $expect('fully covered by credit (paid 0) → review', $c($invoice(1900, 0, [$line(1900, 'base')])), 'review/credit');
 $expect('negative total → review', $c($invoice(-500, 0, [$line(-500, 'extra', true)])), 'review/credit');
 $expect('positive total with a credit line → review', $c($invoice(2400, 2400, [$line(1900, 'base'), $line(1000, 'extra'), $line(-500, 'extra', true)])), 'review/credit');
-$expect('promotion code (lines ≠ total) → review', $c($invoice(1520, 1520, [$line(1900, 'base')])), 'review/discount');
+$expect('lines ≠ total with no discount to explain it (tax?) → review', $c($invoice(1520, 1520, [$line(1900, 'base')])), 'review/mismatch');
+
+// Round 2, item 1: proration pairs of one change are one charge.
+$change = ['start' => strtotime('2026-12-01'), 'end' => strtotime('2026-12-17')];
+$xEnv = ['STRIPE_PRODUCT_EXTRA_TECHNICIAN' => 'prod_extra_test'];
+$qtyUp = $invoice(534 + 1900 + 2000, 534 + 1900 + 2000, [
+    $line(-534, 'extra', true, 1, $change), $line(1068, 'extra', true, 2, $change),
+    $line(1900, 'base'), $line(2000, 'extra', false, 2),
+]);
+$expect('quantity 1→2 (Unused 1× / Remaining 2×) → issue', $withEnv($xEnv, static fn () => $c($qtyUp)), 'issue');
+$expect('…netted into one line „(+1 technik)"', $withEnv($xEnv, static fn () => array_map(static fn ($l) => [$l['name'], $l['amount']], InvoiceIssuer::invoiceLines($qtyUp))), [
+    ['POapp — extra technik, pomerná časť (+1 technik) (01.12.–17.12.2026)', 534],
+    ['POapp — predplatné (17.12.2026 – 17.01.2027)', 1900],
+    ['POapp — extra technik (17.12.2026 – 17.01.2027)', 2000],
+]);
+$expect('…payload: 2 extra technicians as 2 × 10 €', $withEnv($xEnv, static fn () => array_map(static fn ($i) => [$i['Amount'], $i['UnitPrice']], InvoiceIssuer::buildPayload(1, $qtyUp)['Items'])), [[1, 5.34], [1, 19.0], [2, 10.0]]);
+$merge = $invoice(1900 + 2000, 1900 + 2000, [
+    $line(-534, 'extra', true, 1, $change, 0, 'si_dup'), $line(-534, 'extra', true, 1, $change, 0, 'si_keep'), $line(1068, 'extra', true, 2, $change, 0, 'si_keep'),
+    $line(1900, 'base'), $line(2000, 'extra', false, 2, null, 0, 'si_keep'),
+]);
+$expect('duplicate items merged (net 0) → no proration line, issue', $withEnv($xEnv, static fn () => [$c($merge), count(InvoiceIssuer::invoiceLines($merge))]), ['issue', 2]);
+$removal = $invoice(1900 + 1000 - 534, 1900 + 1000 - 534, [
+    $line(-1068, 'extra', true, 2, $change), $line(534, 'extra', true, 1, $change),
+    $line(1900, 'base'), $line(1000, 'extra'),
+]);
+$expect('a real removal (2→1 nets to −5,34 €) is still a credit → review', $withEnv($xEnv, static fn () => $c($removal)), 'review/credit');
+$expect('3 technicians added at once → „(+3 technici)"', $withEnv($xEnv, static fn () => InvoiceIssuer::invoiceLines($invoice(1602, 1602, [$line(-534, 'extra', true, 1, $change), $line(2136, 'extra', true, 4, $change)]))[0]['name']),
+    'POapp — extra technik, pomerná časť (+3 technici) (01.12.–17.12.2026)');
+
+// Round 2, item 4: promotion codes — lines priced net of their discounts.
+$pct = $invoice(1520 + 800, 1520 + 800, [$line(1900, 'base', false, 1, null, 380), $line(1000, 'extra', false, 1, null, 200)],
+    ['total_discount_amounts' => [['amount' => 580, 'discount' => 'di_test']]]);
+$expect('20 % coupon: lines net of discount_amounts → issue', $withEnv($xEnv, static fn () => $c($pct)), 'issue');
+$expect('…payload sums to the amount paid, names say „po zľave"', $withEnv($xEnv, static function () use ($pct) {
+    $items = InvoiceIssuer::buildPayload(1, $pct)['Items'];
+    return [round(array_sum(array_map(static fn ($i) => $i['Amount'] * $i['UnitPrice'], $items)), 2), array_column($items, 'Name')];
+}), [23.2, ['POapp — predplatné, po zľave (17.12.2026 – 17.01.2027)', 'POapp — extra technik, po zľave (17.12.2026 – 17.01.2027)']]);
+$fixed = $invoice(2400, 2400, [$line(1900, 'base'), $line(1000, 'extra')], ['total_discount_amounts' => [['amount' => 500, 'discount' => 'di_test']]]);
+$expect('discount carried by no line → one „Zľava" line, issue', $withEnv($xEnv, static fn () => [$c($fixed), array_map(static fn ($l) => [$l['name'], $l['amount']], InvoiceIssuer::invoiceLines($fixed))[2] ?? null]), ['issue', ['Zľava', -500]]);
 
 $payload = $withEnv(['STRIPE_PRODUCT_EXTRA_TECHNICIAN' => 'prod_extra_test'], static fn () => InvoiceIssuer::buildPayload(1, $invoice(3567, 3567, [
     $line(667, 'extra', true, 1, ['start' => strtotime('2026-12-07'), 'end' => strtotime('2026-12-17')]),
@@ -218,15 +264,17 @@ $payload = $withEnv(['STRIPE_PRODUCT_EXTRA_TECHNICIAN' => 'prod_extra_test'], st
     $line(1000, 'extra'),
 ])));
 $expect('payload: one item per line', array_map(static fn ($i) => [$i['Name'], $i['Amount'], $i['UnitPrice']], $payload['Items']), [
-    ['POapp — extra technik, pomerná časť (07.12.2026 – 17.12.2026)', 1, 6.67],
+    ['POapp — extra technik, pomerná časť (+1 technik) (07.12.–17.12.2026)', 1, 6.67],
     ['POapp — predplatné (17.12.2026 – 17.01.2027)', 1, 19.0],
     ['POapp — extra technik (17.12.2026 – 17.01.2027)', 1, 10.0],
 ]);
 $expect('payload: header period from the subscription line', $payload['Description'], 'POapp — predplatné (17.12.2026 – 17.01.2027)');
 $expect('payload: taxing date = payment date', $payload['DateOfTaxing'], '2026-12-17');
-$legacy = $line(1000, 'x');
-$legacy['description'] = '1 × ' . SeatSync::LEGACY_PRODUCT_NAME . ' (at €10.00 / month)';
-$expect('legacy extra line named as extra technician', InvoiceIssuer::buildPayload(1, $invoice(1000, 1000, [$legacy]))['Items'][0]['Name'], 'POapp — extra technik (17.12.2026 – 17.01.2027)');
+foreach (SeatSync::LEGACY_PRODUCT_NAMES as $legacyName) {
+    $legacy = $line(1000, 'x');
+    $legacy['description'] = '1 × ' . $legacyName . ' (at €10.00 / month)';
+    $expect("legacy extra line „{$legacyName}\" named as extra technician", InvoiceIssuer::buildPayload(1, $invoice(1000, 1000, [$legacy]))['Items'][0]['Name'], 'POapp — extra technik (17.12.2026 – 17.01.2027)');
+}
 echo "\n";
 
 // ── 4. InvoiceIssuer with a recording stub ──────────────────────────────
@@ -261,7 +309,7 @@ try {
     $expect('send mode + livemode=false: prepared, never sent', [$st, str_contains((string) $row($id2)['error_message'], 'test-mode')], ['prepared', true]);
 
     // The send path, recorded.
-    $rec = new RecordingIDoklad();
+    $rec = new IDokladClient();
     $i3 = $invoice(3567, 3567, [
         $line(667, 'extra', true, 1, ['start' => strtotime('2026-12-07'), 'end' => strtotime('2026-12-17')]),
         $line(1900, 'base'),
@@ -284,7 +332,7 @@ try {
     }
 
     // A failing iDoklad: error, retried up to the cap, then left for a person.
-    $rec4 = new RecordingIDoklad();
+    $rec4 = new IDokladClient();
     $rec4->failInvoicePost = new RuntimeException('iDoklad POST IssuedInvoices failed: HTTP 400 — validation');
     $id4 = InvoiceIssuer::record($acc, $invoice(1900, 1900, [$line(1900, 'base')], ['livemode' => true]), true);
     $issuer4 = new InvoiceIssuer($rec4);
@@ -297,7 +345,7 @@ try {
     $expect('manual „Vystaviť znova" past the cap issues it', [$issuer4->issue($id4, true), (int) $row($id4)['attempts']], ['issued', 4]);
 
     // No definite answer to the POST: held, never re-sent automatically.
-    $rec5 = new RecordingIDoklad();
+    $rec5 = new IDokladClient();
     $rec5->failInvoicePost = new IDokladTransportException('iDoklad transport error: Operation timed out');
     $id5 = InvoiceIssuer::record($acc, $invoice(1900, 1900, [$line(1900, 'base')], ['livemode' => true]), true);
     $issuer5 = new InvoiceIssuer($rec5);
@@ -315,6 +363,41 @@ try {
     InvoiceIssuer::record($acc, $iz, false);
     $s->execute([$iz['id']]);
     $expect('0 € invoice: no row', $s->fetch(), false);
+
+    // Round 2, item 5: a 2xx answer without an invoice Id is not „issued".
+    $rec6 = new IDokladClient();
+    $rec6->invoicePostAnswer = ['DocumentNumber' => ''];
+    $id6 = InvoiceIssuer::record($acc, $invoice(1900, 1900, [$line(1900, 'base')], ['livemode' => true]), true);
+    $issuer6 = new InvoiceIssuer($rec6);
+    $expect('2xx without Id: needs_review / uncertain_send, not issued', [$issuer6->issue($id6), $row($id6)['review_reason'], $row($id6)['idoklad_invoice_id']], ['needs_review', 'uncertain_send', null]);
+    $issuer6->issue($id6);
+    $expect('…not posted again automatically', $rec6->invoicePosts(), 1);
+    $expect('…the admin can „Vystaviť znova" after checking iDoklad', InvoiceIssuer::manualIssueAllowed($row($id6)), true);
+
+    // Round 2, item 5: rows the old code left without a snapshot.
+    $pdo->prepare("INSERT INTO invoices (account_id, stripe_invoice_id, amount_cents, currency, status, issued_at)
+                   VALUES (?, ?, 1900, 'EUR', 'pending', NOW())")->execute([$acc, 'in_legacy_doesnotexist_' . bin2hex(random_bytes(3))]);
+    $idL = (int) $pdo->lastInsertId();
+    $expect('legacy pending row without snapshot: no „Vystaviť" button', InvoiceIssuer::manualIssueAllowed($row($idL)), false);
+    $recL = new IDokladClient();
+    $st = (new InvoiceIssuer($recL))->issue($idL);
+    $expect('…an automatic run never sends it; Stripe has no such invoice → missing_snapshot', [$st, $row($idL)['review_reason'], $recL->invoicePosts()], ['needs_review', 'missing_snapshot', 0]);
+    $expect('…the message says to check iDoklad first', str_contains((string) $row($idL)['error_message'], 'najprv skontroluj v iDoklade, či faktúra už neexistuje'), true);
+    $expect('…still no button (it cannot work until the snapshot is rebuilt)', InvoiceIssuer::manualIssueAllowed($row($idL)), false);
+
+    // The real policy path: no injected API, the client comes from env —
+    // and in this process that is the recorder (loaded before the autoloader).
+    IDokladClient::$shared = new IDokladClient();
+    $id7 = InvoiceIssuer::record($acc, $invoice(1900, 1900, [$line(1900, 'base')], ['livemode' => true]), true);
+    $st = $withEnv(['IDOKLAD_ISSUE_MODE' => 'send', 'IDOKLAD_CLIENT_ID' => 'x', 'IDOKLAD_CLIENT_SECRET' => 'x'], static fn () => (new InvoiceIssuer())->issue($id7));
+    $expect('policy send + live invoice + client from env → issued to the recorder', [$st, IDokladClient::$shared->invoicePosts()], ['issued', 1]);
+
+    // Round 2, item 3: a prepared row of a live invoice is an admin error.
+    $id8 = InvoiceIssuer::record($acc, $invoice(1900, 1900, [$line(1900, 'base')], ['livemode' => true]), true);
+    $st = $withEnv(['APP_ENV' => 'prod', 'IDOKLAD_ISSUE_MODE' => null], static fn () => (new InvoiceIssuer())->issue($id8));
+    $checks = array_column(\Firol\Billing\ConfigCheck::run(), 'level', 'key');
+    $expect('live invoice under APP_ENV=prod → prepared, and the admin check shows an ERROR', [$st, $checks['invoices_prepared_live'] ?? 'missing'], ['prepared', 'error']);
+    $expect('…with „Vystaviť" offered', InvoiceIssuer::manualIssueAllowed($row($id8)), true);
 } finally {
     $pdo->rollBack();
 }
@@ -331,6 +414,18 @@ $runScript = static function (array $args): int {
 $expect('misspelled --acount=5 refused', $runScript(['--offline', '--acount=5']), 2);
 $expect('non-numeric --account=abc refused', $runScript(['--offline', '--account=abc']), 2);
 $expect('--offline --account=999999 runs (dry, database only)', $runScript(['--offline', '--account=999999']), 0);
+// bin/billing-daily.php with a live key outside production.
+$daily = static function (array $env, array $args = []): array {
+    $p = proc_open([PHP_BINARY, __DIR__ . '/billing-daily.php', '--dry-run', '--only=seats', '--account=999999', ...$args],
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, array_merge(getenv(), $env));
+    stream_get_contents($pipes[1]);
+    $err = (string) stream_get_contents($pipes[2]);
+    return [proc_close($p), $err];
+};
+[$code, $err] = $daily(['STRIPE_SECRET_KEY' => 'sk_live_fake', 'APP_ENV' => 'local']);
+$expect('billing-daily with a live key and APP_ENV=local refuses', [$code, str_contains($err, 'LIVE key')], [2, true]);
+[$code] = $daily(['STRIPE_SECRET_KEY' => 'sk_live_fake', 'APP_ENV' => 'local'], ['--allow-live']);
+$expect('…--allow-live lets it run (dry run, a missing account, nothing read)', $code, 0);
 echo "\n";
 
 // ── 6. over HTTP ────────────────────────────────────────────────────────
@@ -370,6 +465,7 @@ try {
                    VALUES ('Billing 403 test', 'Test 1', '000 00', 'Test', '00000000', ?, ?)")->execute([$mainId, date('Y-m-d', time() + 30 * 86400)]);
     $accId = (int) $pdo->lastInsertId();
     $created['accounts'][] = $accId;
+    $pdo->prepare('UPDATE accounts SET stripe_customer_id = ? WHERE id = ?')->execute(['cus_billingtest_' . $suffix, $accId]);
     $pdo->prepare("INSERT INTO account_users (account_id, user_id, role, is_active) VALUES (?, ?, 'main', 1), (?, ?, 'technician', 1)")
         ->execute([$accId, $mainId, $accId, $memberId]);
 
@@ -391,7 +487,7 @@ try {
         $event = [
             'id' => $eventId, 'object' => 'event', 'type' => 'customer.subscription.updated', 'livemode' => false,
             'api_version' => '2026-04-22.dahlia', 'created' => time(),
-            'data' => ['object' => ['id' => 'sub_doesnotexist_' . $suffix, 'object' => 'subscription', 'customer' => 'cus_doesnotexist']],
+            'data' => ['object' => ['id' => 'sub_doesnotexist_' . $suffix, 'object' => 'subscription', 'customer' => 'cus_billingtest_' . $suffix]],
         ];
         $body = json_encode($event);
         $send = static function () use ($body, $base): int {

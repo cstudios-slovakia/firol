@@ -35,16 +35,46 @@ declare(strict_types=1);
  *   D  two additions at the same moment (two processes) — one item, qty 2.
  *   E  a failed SeatSync call, then the reconcile repairs it; duplicate extra
  *      items are merged.
- *   F  a changed base price id: the base item is never taken for the extra
- *      item, a legacy extra item (inline product) is still recognised.
+ *   F  a changed base price id (a new plan price under a new product) while
+ *      the old webhook recorded the base item as the extra one: the base item
+ *      is never changed or deleted; a legacy extra item (inline product named
+ *      „POapp — extra technik" and, from 17. 5. to 28. 7. 2026, „Firol —
+ *      extra technik") is still recognised and carries the changes, down to 0.
  *   G  an old subscription's events do not overwrite the new subscription.
  *   R  replay of every captured event through the real webhook (HTTP, signed):
  *      the state comes out right, no 0 € invoice, the period text, credit
- *      invoices held as needs_review, duplicate and out-of-order deliveries.
+ *      invoices held as needs_review, duplicate and out-of-order deliveries;
+ *      then everything again and everything in reverse order — same end
+ *      state, no invoice row twice, nothing sent.
  *   P  (decision 3, report only) a renewal whose card fails: what Stripe does
  *      to current_period_end and the status under the default retry settings.
+ *
+ * Round 2 (docs/prompts/billing-fixes-2026-11-round-2.md):
+ *   H  renewals after quantity changes, recorded as the iDoklad payload
+ *      (recording stub): H1 monthly 3rd technician created + 4th (qty 1→2),
+ *      H2 yearly the same, H3 a legacy „Firol" item qty 1→2, H4 the first
+ *      extra technician only, H5 duplicate items merged (net 0 → no line) —
+ *      all issued with netted lines summing to the amount paid; H6 a real
+ *      removal is still held as a credit.
+ *   K  promotion codes: a 20 % and a 3 € coupon, first invoice and a renewal
+ *      with an extra technician added — issued, lines net of the discount;
+ *      the account knows the next charge is „pred zľavou".
+ *   L  item-2 safety: L2 STRIPE_PRODUCT_EXTRA_TECHNICIAN set to the plan's
+ *      own product (nothing changed, admin error, Checkout falls back to an
+ *      inline product that Stripe accepts), L3 an item only the recorded id
+ *      points to (left for a person, listed by the seat report), L4 the last
+ *      item of a subscription is never removed.
+ *   S  subscription state: S1 a newer paid subscription wins over an older
+ *      unpaid one (and the admin delete lists both), S2 the daily run writes
+ *      a stale status from Stripe, S3 Checkout decides on Stripe's status
+ *      when the DB says „active" for a cancelled subscription (over HTTP).
+ *   W  BILLING_RECONCILE=off: nothing pushed, the seat report lists the gap,
+ *      the daily run only reports; switched on → repaired.
+ *   O  a row the old code left `pending` without a snapshot: rebuilt from
+ *      Stripe, held for a person, then issued by „Vystaviť znova".
  */
 
+require __DIR__ . '/lib/idoklad-recorder.php'; // before the autoloader: no real iDoklad client in this process
 require __DIR__ . '/../vendor/autoload.php';
 
 if (is_file(__DIR__ . '/../.env')) {
@@ -54,7 +84,8 @@ if (is_file(__DIR__ . '/../.env')) {
 use Firol\Billing\SeatSync;
 use Firol\Controllers\BillingController;
 use Firol\Db;
-use Firol\Idoklad\IssuePolicy;
+use Firol\Idoklad\IDokladClient;
+use Firol\Idoklad\InvoiceIssuer;
 use Firol\Stripe\StripeClient;
 use Firol\Stripe\StripeShape;
 
@@ -72,7 +103,9 @@ foreach (['IDOKLAD_CLIENT_ID', 'IDOKLAD_CLIENT_SECRET'] as $name) {
     putenv($name);
 }
 $_ENV['IDOKLAD_ISSUE_MODE'] = 'prepare';
-unset($_ENV['IDOKLAD_ALLOW_TEST_EVENTS']);
+unset($_ENV['IDOKLAD_ALLOW_TEST_EVENTS'], $_ENV['BILLING_RECONCILE']);
+$_ENV['SMTP_HOST'] = '';
+IDokladClient::assertStub();
 if (StripeClient::extraTechnicianProductId() === '') {
     fwrite(STDERR, "STRIPE_PRODUCT_EXTRA_TECHNICIAN is not set (a test-mode product id).\n");
     exit(1);
@@ -115,7 +148,28 @@ $accounts = [];
 $users = [];
 $customers = [];
 $archive = [];
-register_shutdown_function(static function () use (&$clocks, &$accounts, &$users, &$archive, $keep, $stripe, $pdo): void {
+$coupons = [];
+$sessions = [];
+register_shutdown_function(static function () use (&$clocks, &$accounts, &$users, &$archive, &$coupons, &$sessions, $keep, $stripe, $pdo): void {
+    foreach ($sessions as $id) {
+        try {
+            $stripe->checkout->sessions->expire($id);
+        } catch (\Throwable $e) {
+            echo "cleanup: could not expire checkout session $id: {$e->getMessage()}\n";
+        }
+    }
+    foreach ($coupons as $id) {
+        try {
+            $stripe->coupons->delete($id);
+        } catch (\Throwable $e) {
+            echo "cleanup: could not delete coupon $id: {$e->getMessage()}\n";
+        }
+    }
+    foreach ($archive as [$kind, $id]) {
+        if ($kind === 'price') {
+            $pdo->prepare('DELETE FROM system_settings WHERE setting_key = ?')->execute(['stripe_price_product:' . $id]);
+        }
+    }
     foreach ($accounts as $id) {
         $pdo->prepare('DELETE FROM invoices WHERE account_id = ?')->execute([$id]);
         $pdo->prepare('DELETE FROM accounts WHERE id = ?')->execute([$id]);
@@ -282,6 +336,61 @@ $lineSummary = static function (array $invoice): string {
 };
 $eur = static fn (int $c): string => number_format($c / 100, 2, ',', ' ') . ' €';
 
+// Round 2 helpers ─ record a Stripe invoice as the webhook does and issue it
+// to the RECORDING STUB; returns the outcome and the payload that would go to
+// iDoklad.
+$issueRecorded = static function (array $acc, array $invoice) use ($pdo): array {
+    $rowId = InvoiceIssuer::record($acc['id'], $invoice, false);
+    $s = $pdo->prepare('SELECT * FROM invoices WHERE stripe_invoice_id = ?');
+    if ($rowId === null) {
+        $s->execute([$invoice['id']]);
+        $row = $s->fetch() ?: [];
+        return ['status' => $row['status'] ?? 'no row', 'reason' => $row['review_reason'] ?? null,
+                'detail' => $row['error_message'] ?? null, 'items' => [], 'sum' => null, 'row' => $row['id'] ?? null];
+    }
+    $rec = new IDokladClient();
+    $st  = (new InvoiceIssuer($rec))->issue($rowId);
+    $sent = $rec->lastInvoicePost() ?? [];
+    $items = array_map(static fn ($i) => [$i['Name'], $i['Amount'], $i['UnitPrice']], $sent['Items'] ?? []);
+    $sum = (int) round(array_sum(array_map(static fn ($i) => $i['Amount'] * $i['UnitPrice'] * 100, $sent['Items'] ?? [])));
+    return ['status' => $st, 'reason' => null, 'detail' => null, 'items' => $items, 'sum' => $sum, 'row' => $rowId];
+};
+$showRecorded = static function (string $label, array $invoice, array $r) use ($note, $eur, $lineSummary): void {
+    $note(sprintf('%s: Stripe total %s, paid %s → %s%s', $label, $eur((int) $invoice['total']), $eur((int) $invoice['amount_paid']),
+        $r['status'], $r['reason'] ? " ({$r['reason']}: {$r['detail']})" : ''));
+    $note('  Stripe lines: ' . $lineSummary($invoice));
+    foreach ($r['items'] as [$name, $amount, $unit]) {
+        $note(sprintf('  iDoklad item: %s — %d × %s €', $name, $amount, number_format($unit, 2, ',', ' ')));
+    }
+    if ($r['sum'] !== null) {
+        $note('  iDoklad items sum ' . $eur($r['sum']));
+    }
+};
+$byReason = static function (string $customer, string $reason) use ($invoicesOf): ?array {
+    $found = null;
+    foreach ($invoicesOf($customer) as $inv) {
+        if (($inv['billing_reason'] ?? '') === $reason && ($inv['status'] ?? '') === 'paid') {
+            $found = $inv;
+        }
+    }
+    return $found;
+};
+// A throwaway price under a new product, archived at the end.
+$throwawayPrice = static function (string $name, int $amount, string $interval = 'month', array $productMeta = []) use ($stripe, &$archive): object {
+    $price = $stripe->prices->create([
+        'currency' => 'eur', 'unit_amount' => $amount, 'recurring' => ['interval' => $interval],
+        'product_data' => array_filter(['name' => $name, 'metadata' => $productMeta]),
+    ]);
+    $archive[] = ['price', $price->id];
+    $archive[] = ['product', (string) $price->product];
+    return $price;
+};
+$runScript = static function (string $script, array $args, array $env = []): array {
+    $p = proc_open([PHP_BINARY, __DIR__ . '/' . $script, ...$args], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, array_merge(getenv(), $env));
+    $out = (string) stream_get_contents($pipes[1]) . (string) stream_get_contents($pipes[2]);
+    return [proc_close($p), $out];
+};
+
 $product = StripeClient::extraTechnicianProductId();
 echo "Stripe TEST mode, extra product $product, base prices " . implode(' / ', StripeClient::basePriceIds()) . "\n\n";
 
@@ -438,58 +547,64 @@ if ($run('E')) {
 
 // ── F: changed base price id, legacy item ───────────────────────────────
 if ($run('F')) {
-    echo "F — changed base price id and a legacy extra item\n";
-    $clock = $newClock('F base price');
-    $acc = $newAccount($clock, 'F base price');
-    $addTech($acc, false);
-    // A legacy extra item: an inline product named as old Checkouts named it.
-    $legacyPrice = $stripe->prices->create([
-        'currency' => 'eur', 'unit_amount' => SeatSync::pricePerExtraCents(), 'recurring' => ['interval' => 'month'],
-        'product_data' => ['name' => SeatSync::LEGACY_PRODUCT_NAME],
-    ]);
-    $archive[] = ['price', $legacyPrice->id];
-    $archive[] = ['product', (string) $legacyPrice->product];
-    $sub = $stripe->subscriptions->create([
-        'customer' => $acc['customer'],
-        'items'    => [['price' => StripeClient::priceFor('monthly'), 'quantity' => 1], ['price' => $legacyPrice->id, 'quantity' => 1]],
-    ]);
-    $addTech($acc, false); // 3 active = 1 extra, as on Stripe
-    $items = StripeShape::arr($sub)['items']['data'];
-    $baseItemId = '';
-    foreach ($items as $it) {
-        if ($it['price']['id'] === StripeClient::priceFor('monthly')) {
-            $baseItemId = $it['id'];
+    foreach (SeatSync::LEGACY_PRODUCT_NAMES as $fi => $legacyName) {
+        $fl = 'F' . ($fi + 1);
+        echo "$fl — changed base price id and a legacy extra item „{$legacyName}\"\n";
+        $clock = $newClock("$fl base price");
+        $acc = $newAccount($clock, "$fl base price");
+        $addTech($acc, false);
+        // A legacy extra item: an inline product named as old Checkouts named it.
+        $legacyPrice = $throwawayPrice($legacyName, SeatSync::pricePerExtraCents());
+        $realMonthly = $_ENV['STRIPE_PRICE_MONTHLY'];
+        $sub = $stripe->subscriptions->create([
+            'customer' => $acc['customer'],
+            'items'    => [['price' => $realMonthly, 'quantity' => 1], ['price' => $legacyPrice->id, 'quantity' => 1]],
+        ]);
+        $addTech($acc, false); // 3 active = 1 extra, as on Stripe
+        $baseItemId = '';
+        foreach (StripeShape::arr($sub)['items']['data'] as $it) {
+            if ($it['price']['id'] === $realMonthly) {
+                $baseItemId = $it['id'];
+            }
         }
-    }
-    // What the old webhook did after a base price change: it recorded the
-    // BASE item as the extra item. And the env now names a new base price.
-    $realMonthly = $_ENV['STRIPE_PRICE_MONTHLY'];
-    $_ENV['STRIPE_PRICE_MONTHLY'] = 'price_changed_' . $tag;
-    $pdo->prepare('UPDATE accounts SET stripe_subscription_id = ?, stripe_status = ?, billing_period = ?, stripe_extra_subscription_item_id = ? WHERE id = ?')
-        ->execute([$sub->id, 'active', 'monthly', $baseItemId, $acc['id']]);
+        // The plan's price changed in env (a new price under a new product),
+        // and the old webhook recorded the BASE item as the extra item.
+        $newPlan = $throwawayPrice("Plan (test) $tag", 1900);
+        $_ENV['STRIPE_PRICE_MONTHLY'] = $newPlan->id;
+        $pdo->prepare('UPDATE accounts SET stripe_subscription_id = ?, stripe_status = ?, billing_period = ?, stripe_extra_subscription_item_id = ? WHERE id = ?')
+            ->execute([$sub->id, 'active', 'monthly', $baseItemId, $acc['id']]);
 
-    $x = $extrasOf($sub->id, $baseItemId);
-    $expect('F legacy item recognised by its product name, base item not', [$x['count'], (string) ($x['base']['id'] ?? '')], [1, $baseItemId]);
-    BillingController::handleSubscriptionUpsert($sub);
-    $t = $addTech($acc);
-    $x = $extrasOf($sub->id);
-    $baseNow = null;
-    foreach ($x['all'] as $it) {
-        if ($it['id'] === $baseItemId) {
-            $baseNow = $it;
-        }
+        $x = $extrasOf($sub->id, $baseItemId);
+        $expect("$fl legacy item recognised by its product name, base item not", [$x['count'], (string) ($x['base']['id'] ?? '')], [1, $baseItemId]);
+        $baseOf = static function (array $x) use ($baseItemId): ?array {
+            foreach ($x['all'] as $it) {
+                if ($it['id'] === $baseItemId) {
+                    return $it;
+                }
+            }
+            return null;
+        };
+        BillingController::handleSubscriptionUpsert($sub);
+        $t = $addTech($acc);
+        $x = $extrasOf($sub->id);
+        $expect("$fl base item untouched (qty 1, same price)", [(int) ($baseOf($x)['quantity'] ?? 0), (string) ($baseOf($x)['price']['id'] ?? '')], [1, $realMonthly]);
+        $expect("$fl legacy item carries the change (qty 2), no new item", [$x['count'], $x['qty']], [1, 2]);
+        $removeTech($acc, $t);
+        $x = $extrasOf($sub->id);
+        $expect("$fl removal lowers the legacy item, base untouched", [$x['qty'], count($x['all'])], [1, 2]);
+        // Down to the included count: the legacy item goes, the base stays.
+        $pdo->prepare("DELETE FROM account_users WHERE account_id = ? AND role = 'technician' LIMIT 1")->execute([$acc['id']]);
+        SeatSync::recompute($acc['id']);
+        $x = $extrasOf($sub->id);
+        $expect("$fl wanted 0: legacy item deleted, base item still there (qty 1)", [$x['count'], count($x['all']), (int) ($baseOf($x)['quantity'] ?? 0)], [0, 1, 1]);
+        $_ENV['STRIPE_PRICE_MONTHLY'] = $realMonthly;
+        echo "\n";
     }
-    $expect('F base item untouched (qty 1, same price)', [(int) ($baseNow['quantity'] ?? 0), (string) ($baseNow['price']['id'] ?? '')], [1, $realMonthly]);
-    $expect('F legacy item carries the change (qty 2), no new item', [$x['count'], $x['qty']], [1, 2]);
-    $removeTech($acc, $t);
-    $x = $extrasOf($sub->id);
-    $expect('F removal lowers the legacy item, base untouched', [$x['qty'], count($x['all'])], [1, 2]);
-    $_ENV['STRIPE_PRICE_MONTHLY'] = $realMonthly;
-    echo "\n";
 }
 
 // ── G: old subscription's events ────────────────────────────────────────
 $oldSubEvents = [];
+$rSkip = []; // accounts whose replayed end state is not comparable (see S1)
 if ($run('G')) {
     echo "G — an old subscription does not overwrite the new one\n";
     $clock = $newClock('G two subs');
@@ -505,6 +620,369 @@ if ($run('G')) {
     $row = $accountRow($acc['id']);
     $expect('G old subscription events ignored', [$row['stripe_subscription_id'], $row['stripe_status'], $row['billing_period']], [$subB->id, 'active', 'yearly']);
     $oldSubEvents = [$acc['id'], $subA->id, $subB->id];
+    echo "\n";
+}
+
+// ── H: renewals after quantity changes (round 2, item 1) ────────────────
+if ($run('H')) {
+    echo "H — renewals after quantity changes, recorded iDoklad payloads\n";
+    $assertIssued = static function (string $label, array $invoice, array $r) use ($expect, $showRecorded): void {
+        $showRecorded($label, $invoice, $r);
+        $expect("$label issued, iDoklad items sum to the amount paid", [$r['status'], $r['sum']], ['issued', (int) $invoice['amount_paid']]);
+    };
+
+    // H1 monthly: 3rd technician (item created), 4th (qty 1→2).
+    $clock = $newClock('H1 monthly');
+    $acc = $newAccount($clock, 'H1 monthly');
+    $addTech($acc, false);
+    $subscribe($acc, 'monthly');
+    $advance($clock, $clockNow($clock) + 3 * 86400);
+    $addTech($acc);
+    $advance($clock, $clockNow($clock) + 10 * 86400);
+    $addTech($acc);
+    $advance($clock, $clockNow($clock) + 20 * 86400);
+    $inv = $byReason($acc['customer'], 'subscription_cycle');
+    $r = $issueRecorded($acc, $inv);
+    $assertIssued('H1 monthly renewal', $inv, $r);
+    $expect('H1 two netted „(+1 technik)" lines', count(array_filter($r['items'], static fn ($i) => str_contains($i[0], 'pomerná časť (+1 technik)'))), 2);
+
+    // H2 yearly: the same, months apart.
+    $clock = $newClock('H2 yearly');
+    $acc = $newAccount($clock, 'H2 yearly');
+    $addTech($acc, false);
+    $subscribe($acc, 'yearly');
+    $advance($clock, $clockNow($clock) + 30 * 86400);
+    $addTech($acc);
+    $advance($clock, $clockNow($clock) + 90 * 86400);
+    $addTech($acc);
+    $advance($clock, $clockNow($clock) + 250 * 86400);
+    $inv = $byReason($acc['customer'], 'subscription_cycle');
+    $r = $issueRecorded($acc, $inv);
+    $assertIssued('H2 yearly renewal', $inv, $r);
+
+    // H3 a legacy item (inline product of a Firol-era Checkout), qty 1→2.
+    $clock = $newClock('H3 legacy');
+    $acc = $newAccount($clock, 'H3 legacy');
+    $addTech($acc, false);
+    $addTech($acc, false);
+    $legacyPrice = $throwawayPrice(SeatSync::LEGACY_PRODUCT_NAMES[1], SeatSync::pricePerExtraCents());
+    $sub = $stripe->subscriptions->create([
+        'customer' => $acc['customer'],
+        'items'    => [['price' => StripeClient::priceFor('monthly'), 'quantity' => 1], ['price' => $legacyPrice->id, 'quantity' => 1]],
+    ]);
+    BillingController::handleSubscriptionUpsert($sub);
+    $legacyId = (string) ($extrasOf($sub->id)['items'][0]['id'] ?? '');
+    $advance($clock, $clockNow($clock) + 12 * 86400);
+    $addTech($acc);
+    $x = $extrasOf($sub->id);
+    $expect('H3 legacy item raised to qty 2, no new item', [$x['count'], $x['qty'], (string) ($x['items'][0]['id'] ?? '')], [1, 2, $legacyId]);
+    $advance($clock, $clockNow($clock) + 20 * 86400);
+    $inv = $byReason($acc['customer'], 'subscription_cycle');
+    $r = $issueRecorded($acc, $inv);
+    $assertIssued('H3 legacy renewal', $inv, $r);
+    $expect('H3 legacy lines named as extra technician', count(array_filter($r['items'], static fn ($i) => str_starts_with($i[0], 'POapp — extra technik'))), 2);
+
+    // H4 the first extra technician only.
+    $clock = $newClock('H4 first extra');
+    $acc = $newAccount($clock, 'H4 first extra');
+    $addTech($acc, false);
+    $subscribe($acc, 'monthly');
+    $h4 = $acc;
+    $advance($clock, $clockNow($clock) + 14 * 86400);
+    $addTech($acc);
+    $advance($clock, $clockNow($clock) + 18 * 86400);
+    $inv = $byReason($acc['customer'], 'subscription_cycle');
+    $r = $issueRecorded($acc, $inv);
+    $assertIssued('H4 first extra renewal', $inv, $r);
+
+    // H5 duplicate extra items merged by the reconcile.
+    $clock = $newClock('H5 merge');
+    $acc = $newAccount($clock, 'H5 merge');
+    $addTech($acc, false);
+    $addTech($acc, false);
+    $sub = $subscribe($acc, 'monthly'); // extra qty 1 from Checkout's line items
+    $advance($clock, $clockNow($clock) + 9 * 86400);
+    $stripe->subscriptionItems->create([
+        'subscription' => $sub->id, 'quantity' => 1, 'proration_behavior' => 'none',
+        'price_data' => SeatSync::extraPriceData('monthly'),
+        'metadata' => ['firol_account_id' => (string) $acc['id'], 'firol_line_kind' => SeatSync::LINE_KIND],
+    ]);
+    $addTech($acc, false); // wanted 2 = what the two items carry
+    $rr = SeatSync::reconcile($acc['id']);
+    $x = $extrasOf($sub->id);
+    $note('H5 reconcile: ' . implode('; ', $rr['notes']));
+    $expect('H5 merged into one item, qty 2', [$x['count'], $x['qty']], [1, 2]);
+    $advance($clock, $clockNow($clock) + 23 * 86400);
+    $inv = $byReason($acc['customer'], 'subscription_cycle');
+    $r = $issueRecorded($acc, $inv);
+    $assertIssued('H5 renewal after a merge', $inv, $r);
+    $expect('H5 the merge nets to 0: no proration line', count(array_filter($r['items'], static fn ($i) => str_contains($i[0], 'pomerná časť'))), 0);
+
+    // H6 a real removal: still a credit, held.
+    $clock = $newClock('H6 removal');
+    $acc = $newAccount($clock, 'H6 removal');
+    $addTech($acc, false);
+    $t = $addTech($acc, false);
+    $addTech($acc, false);
+    $subscribe($acc, 'monthly'); // extra qty 2
+    $advance($clock, $clockNow($clock) + 10 * 86400);
+    $removeTech($acc, $t);
+    $advance($clock, $clockNow($clock) + 22 * 86400);
+    $inv = $byReason($acc['customer'], 'subscription_cycle');
+    $r = $issueRecorded($acc, $inv);
+    $showRecorded('H6 renewal after a removal', $inv, $r);
+    $expect('H6 removal credit held for review (credit)', [$r['status'], $r['reason']], ['needs_review', 'credit']);
+    echo "\n";
+}
+
+// ── O: a row the old code left pending (round 2, item 5) ────────────────
+if ($run('O') && isset($h4)) {
+    echo "O — a pending row of the old code, without a snapshot\n";
+    $first = $byReason($h4['customer'], 'subscription_create');
+    $pdo->prepare("INSERT INTO invoices (account_id, stripe_invoice_id, amount_cents, currency, status, issued_at) VALUES (?, ?, ?, 'EUR', 'pending', NOW())")
+        ->execute([$h4['id'], $first['id'], (int) $first['amount_paid']]);
+    $rowId = (int) $pdo->lastInsertId();
+    $rowOf = static function (int $id) use ($pdo): array {
+        $s = $pdo->prepare('SELECT * FROM invoices WHERE id = ?');
+        $s->execute([$id]);
+        return $s->fetch() ?: [];
+    };
+    $expect('O no „Vystaviť" while the snapshot is missing', InvoiceIssuer::manualIssueAllowed($rowOf($rowId)), false);
+    $rec = new IDokladClient();
+    $st = (new InvoiceIssuer($rec))->issue($rowId); // what the daily run does with it
+    $row = $rowOf($rowId);
+    $expect('O rebuilt from Stripe by invoice id, held: uncertain_send, nothing sent', [$st, $row['review_reason'], $row['stripe_invoice_json'] !== null, $rec->invoicePosts()], ['needs_review', 'uncertain_send', true, 0]);
+    $note('O message: ' . $row['error_message']);
+    $expect('O after the rebuild „Vystaviť znova" is offered', InvoiceIssuer::manualIssueAllowed($row), true);
+    $st = (new InvoiceIssuer($rec))->issue($rowId, true); // the admin, after checking iDoklad
+    $expect('O „Vystaviť znova" issues it (to the recorder)', [$st, $rec->invoicePosts()], ['issued', 1]);
+    echo "\n";
+}
+
+// ── K: promotion codes (round 2, item 4) ────────────────────────────────
+if ($run('K')) {
+    echo "K — promotion codes\n";
+    $pct = $stripe->coupons->create(['percent_off' => 20, 'duration' => 'forever', 'name' => "$tag 20 %"]);
+    $fix = $stripe->coupons->create(['amount_off' => 300, 'currency' => 'eur', 'duration' => 'forever', 'name' => "$tag 3 EUR"]);
+    $coupons[] = $pct->id;
+    $coupons[] = $fix->id;
+    foreach (['K1 20 %' => $pct->id, 'K2 3 €' => $fix->id] as $label => $couponId) {
+        $clock = $newClock($label);
+        $acc = $newAccount($clock, $label);
+        $addTech($acc, false);
+        $addTech($acc, false); // 3 technicians: one extra from the start
+        $sub = $stripe->subscriptions->create([
+            'customer'  => $acc['customer'],
+            'items'     => BillingController::checkoutLineItems('monthly', SeatSync::wantedExtra($acc['id'], 2)),
+            'discounts' => [['coupon' => $couponId]],
+            'metadata'  => ['firol_account_id' => (string) $acc['id'], 'billing_period' => 'monthly'],
+        ]);
+        BillingController::handleSubscriptionUpsert($sub);
+        $expect("$label account knows the next charge is before the discount", (int) $accountRow($acc['id'])['stripe_has_discount'], 1);
+        $inv = $byReason($acc['customer'], 'subscription_create');
+        $r = $issueRecorded($acc, $inv);
+        $showRecorded("$label first invoice", $inv, $r);
+        $expect("$label first invoice issued, items sum to the amount paid", [$r['status'], $r['sum']], ['issued', (int) $inv['amount_paid']]);
+        $advance($clock, $clockNow($clock) + 11 * 86400);
+        $addTech($acc);
+        $advance($clock, $clockNow($clock) + 21 * 86400);
+        $inv = $byReason($acc['customer'], 'subscription_cycle');
+        $r = $issueRecorded($acc, $inv);
+        $showRecorded("$label renewal with an extra technician added", $inv, $r);
+        $expect("$label renewal issued, items sum to the amount paid", [$r['status'], $r['sum']], ['issued', (int) $inv['amount_paid']]);
+    }
+    echo "\n";
+}
+
+// ── L: base item never taken for an extra item (round 2, item 2) ────────
+if ($run('L')) {
+    echo "L — the plan's item and items nobody can vouch for are never changed\n";
+    $itemQty = static function (string $subId) use ($stripe): array {
+        $out = [];
+        foreach (StripeShape::arr($stripe->subscriptions->retrieve($subId))['items']['data'] as $it) {
+            $out[$it['id']] = [(string) $it['price']['id'], (int) $it['quantity']];
+        }
+        ksort($out);
+        return $out;
+    };
+
+    // L2 STRIPE_PRODUCT_EXTRA_TECHNICIAN set to the plan's own product.
+    $clock = $newClock('L2 mis-set product');
+    $acc = $newAccount($clock, 'L2 mis-set product');
+    $addTech($acc, false);
+    $addTech($acc, false);
+    $sub = $subscribe($acc, 'monthly'); // base + a real extra item qty 1
+    $before = $itemQty($sub->id);
+    $realProduct = $_ENV['STRIPE_PRODUCT_EXTRA_TECHNICIAN'];
+    $baseProduct = (string) $stripe->prices->retrieve(StripeClient::priceFor('monthly'))->product;
+    $_ENV['STRIPE_PRODUCT_EXTRA_TECHNICIAN'] = $baseProduct;
+    $x = $extrasOf($sub->id);
+    $expect('L2 the plan item stays the base item (never an extra item)', [(string) ($x['base']['price']['id'] ?? ''), in_array((string) ($x['base']['id'] ?? ''), array_column($x['items'], 'id'), true)], [StripeClient::priceFor('monthly'), false]);
+    $addTech($acc); // wanted 2
+    try {
+        SeatSync::reconcile($acc['id']);
+        $refused = '';
+    } catch (\Throwable $e) {
+        $refused = $e->getMessage();
+    }
+    $note('L2 reconcile: ' . $refused);
+    $expect('L2 reconcile refuses, nothing on Stripe changed', [str_contains($refused, 'product of the base plan'), $itemQty($sub->id)], [true, $before]);
+    $checks = array_column(\Firol\Billing\ConfigCheck::run(), null, 'key');
+    $expect('L2 admin check: error for the extra product', $checks['stripe_product_extra']['level'] ?? null, 'error');
+    $note('L2 admin check: ' . ($checks['stripe_product_extra']['message'] ?? ''));
+    $lines = BillingController::checkoutLineItems('monthly', 1);
+    $expect('L2 Checkout falls back to an inline product', isset($lines[1]['price_data']['product_data']) && !isset($lines[1]['price_data']['product']), true);
+    $session = $stripe->checkout->sessions->create([
+        'mode' => 'subscription', 'customer' => $acc['customer'], 'line_items' => $lines,
+        'success_url' => 'https://example.com/ok', 'cancel_url' => 'https://example.com/cancel',
+    ]);
+    $sessions[] = $session->id;
+    $expect('L2 Stripe accepts that Checkout session', (string) $session->status, 'open');
+    unset($_ENV['STRIPE_PRODUCT_EXTRA_TECHNICIAN']);
+    $lines = BillingController::checkoutLineItems('yearly', 2);
+    $session = $stripe->checkout->sessions->create([
+        'mode' => 'subscription', 'customer' => $acc['customer'], 'line_items' => $lines,
+        'success_url' => 'https://example.com/ok', 'cancel_url' => 'https://example.com/cancel',
+    ]);
+    $sessions[] = $session->id;
+    $expect('L2 variable missing: Checkout with an inline product still opens (no 500)', [(string) $session->status, $lines[1]['price_data']['product_data']['name'] ?? null], ['open', SeatSync::LEGACY_PRODUCT_NAMES[0]]);
+    $inline = $throwawayPrice(SeatSync::LEGACY_PRODUCT_NAMES[0], 1000, 'month', ['firol_line_kind' => SeatSync::LINE_KIND]);
+    $_ENV['STRIPE_PRODUCT_EXTRA_TECHNICIAN'] = $realProduct;
+    $split = SeatSync::classifyItems([['id' => 'si_inline', 'quantity' => 1, 'price' => StripeShape::arr($stripe->prices->retrieve($inline->id, ['expand' => ['product']]))]]);
+    $expect('L2 an item of that inline product is recognised as an extra item', count($split['extras']), 1);
+
+    // L3 an item only the recorded id points to.
+    $clock = $newClock('L3 unverified');
+    $acc = $newAccount($clock, 'L3 unverified');
+    $addTech($acc, false);
+    $addTech($acc, false);
+    $odd = $throwawayPrice("Something else (test) $tag", 500);
+    $sub = $stripe->subscriptions->create([
+        'customer' => $acc['customer'],
+        'items'    => [['price' => StripeClient::priceFor('monthly'), 'quantity' => 1], ['price' => $odd->id, 'quantity' => 1]],
+    ]);
+    $oddItem = '';
+    foreach (StripeShape::arr($sub)['items']['data'] as $it) {
+        if ($it['price']['id'] === $odd->id) {
+            $oddItem = $it['id'];
+        }
+    }
+    $pdo->prepare('UPDATE accounts SET stripe_subscription_id = ?, stripe_status = ?, billing_period = ?, stripe_extra_subscription_item_id = ? WHERE id = ?')
+        ->execute([$sub->id, 'active', 'monthly', $oddItem, $acc['id']]);
+    $before = $itemQty($sub->id);
+    $addTech($acc, false); // wanted 2
+    $rr = SeatSync::reconcile($acc['id']);
+    $note('L3 reconcile: ' . implode('; ', $rr['notes']));
+    $expect('L3 left for a person, nothing on Stripe changed', [$rr['action'], $itemQty($sub->id)], ['manual', $before]);
+    [, $out] = $runScript('billing-seat-report.php', ['--account=' . $acc['id']]);
+    $expect('L3 the seat report lists the UNVERIFIED item', str_contains($out, "UNVERIFIED item $oddItem"), true);
+
+    // L4 the last item of a subscription.
+    $clock = $newClock('L4 last item');
+    $acc = $newAccount($clock, 'L4 last item');
+    $sub = $stripe->subscriptions->create([
+        'customer' => $acc['customer'],
+        'items'    => [['price_data' => SeatSync::extraPriceData('monthly'), 'quantity' => 1, 'metadata' => ['firol_line_kind' => SeatSync::LINE_KIND]]],
+    ]);
+    $pdo->prepare('UPDATE accounts SET stripe_subscription_id = ?, stripe_status = ?, billing_period = ? WHERE id = ?')
+        ->execute([$sub->id, 'active', 'monthly', $acc['id']]);
+    $before = $itemQty($sub->id);
+    $rr = SeatSync::reconcile($acc['id']); // wanted 0 would delete the only item
+    $expect('L4 the only item is never deleted', [$rr['action'], $itemQty($sub->id)], ['manual', $before]);
+    echo "\n";
+}
+
+// ── S: subscription state (round 2, item 6) ─────────────────────────────
+if ($run('S')) {
+    echo "S — subscription state\n";
+    // S1 an older unpaid subscription and a newer paid one.
+    $clock = $newClock('S1 two subs');
+    $acc = $newAccount($clock, 'S1 two subs');
+    $subA = $subscribe($acc, 'monthly');
+    $fail = $stripe->paymentMethods->attach('pm_card_chargeCustomerFail', ['customer' => $acc['customer']]);
+    $stripe->customers->update($acc['customer'], ['invoice_settings' => ['default_payment_method' => $fail->id]]);
+    $advance($clock, $clockNow($clock) + 33 * 86400);
+    BillingController::handleSubscriptionUpsert($subA);
+    $expect('S1 the first subscription is past_due', $accountRow($acc['id'])['stripe_status'], 'past_due');
+    $good = $stripe->paymentMethods->attach('pm_card_visa', ['customer' => $acc['customer']]);
+    $stripe->customers->update($acc['customer'], ['invoice_settings' => ['default_payment_method' => $good->id]]);
+    $subB = $stripe->subscriptions->create(['customer' => $acc['customer'], 'items' => [['price' => StripeClient::priceFor('monthly'), 'quantity' => 1]]]);
+    BillingController::handleSubscriptionUpsert($subB);
+    $row = $accountRow($acc['id']);
+    $expect('S1 the newer paid subscription takes over', [$row['stripe_subscription_id'], $row['stripe_status']], [$subB->id, 'active']);
+    BillingController::handleSubscriptionUpsert($subA);
+    $expect('S1 a later event of the unpaid one is ignored', $accountRow($acc['id'])['stripe_subscription_id'], $subB->id);
+    $addTech($acc);
+    $addTech($acc);
+    $expect('S1 the extra technician goes onto the paid subscription, not the unpaid one', [$extrasOf($subB->id)['qty'], $extrasOf($subA->id)['qty']], [1, 0]);
+    $live = array_column((new ReflectionMethod(\Firol\Controllers\AdminPanelController::class, 'liveSubscriptions'))->invoke(null, $acc['id']), 'status', 'id');
+    ksort($live);
+    $want = [$subA->id => 'past_due', $subB->id => 'active'];
+    ksort($want);
+    $expect('S1 the admin account delete sees both live subscriptions', $live, $want);
+    $rSkip[] = $acc['id'];
+
+    // S2 a lost event: the DB still says active, Stripe has cancelled it.
+    $stripe->subscriptions->cancel($subB->id);
+    [$code, $out] = $runScript('billing-daily.php', ['--only=seats', '--account=' . $acc['id']]);
+    $note('S2 daily: ' . trim(implode(' | ', array_filter(explode("\n", $out), static fn ($l) => str_contains($l, 'account=')))));
+    $expect('S2 the daily run writes Stripe\'s status', $accountRow($acc['id'])['stripe_status'], 'canceled');
+
+    // S3 Checkout with a stale „active" in the DB (over HTTP, as the main user).
+    $clock = $newClock('S3 checkout');
+    $acc = $newAccount($clock, 'S3 checkout');
+    $sub = $subscribe($acc, 'monthly');
+    $stripe->subscriptions->cancel($sub->id);
+    $pdo->prepare("UPDATE accounts SET stripe_status = 'active' WHERE id = ?")->execute([$acc['id']]);
+    $pw = 'Pw-' . bin2hex(random_bytes(4)) . '-123';
+    $mainId = (int) $pdo->query('SELECT main_user_id FROM accounts WHERE id = ' . (int) $acc['id'])->fetchColumn();
+    $pdo->prepare('UPDATE users SET password_hash = ?, vop_version = ?, vop_accepted_at = NOW(), privacy_version = ?, privacy_accepted_at = NOW() WHERE id = ?')
+        ->execute([\Firol\Auth\Password::hash($pw), \Firol\Legal\Terms::VOP_VERSION, \Firol\Legal\Terms::PRIVACY_VERSION, $mainId]);
+    $email = (string) $pdo->query('SELECT email FROM users WHERE id = ' . $mainId)->fetchColumn();
+    $cookie = tempnam(sys_get_temp_dir(), 'billing-s3');
+    $http = static function (string $method, string $path, ?array $body, array $headers = []) use ($cookie): array {
+        $ch = curl_init('http://nginx' . $path);
+        curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 60,
+            CURLOPT_COOKIEJAR => $cookie, CURLOPT_COOKIEFILE => $cookie,
+            CURLOPT_HTTPHEADER => array_merge(['Content-Type: application/json', 'Accept: application/json'], $headers)]);
+        if ($body !== null) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
+        }
+        $out = (string) curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        return [$code, json_decode($out, true)];
+    };
+    [, $login] = $http('POST', '/api/auth/login', ['email' => $email, 'password' => $pw]);
+    [$code, $res] = $http('POST', '/api/billing/checkout', ['billing_period' => 'monthly'], ['X-CSRF-Token: ' . (string) ($login['csrfToken'] ?? '')]);
+    if (isset($res['id'])) {
+        $sessions[] = (string) $res['id'];
+    }
+    @unlink($cookie);
+    $expect('S3 Checkout opens (Stripe says canceled, not the stale DB „active")', [$code, isset($res['url'])], [200, true]);
+    $expect('S3 …and the DB now has Stripe\'s status', $accountRow($acc['id'])['stripe_status'], 'canceled');
+    echo "\n";
+}
+
+// ── W: the reconcile switch (round 2, item 7) ───────────────────────────
+if ($run('W')) {
+    echo "W — BILLING_RECONCILE=off, then on\n";
+    $clock = $newClock('W switch');
+    $acc = $newAccount($clock, 'W switch');
+    $addTech($acc, false);
+    $sub = $subscribe($acc, 'monthly'); // 2 technicians, no extra item
+    $_ENV['BILLING_RECONCILE'] = 'off';
+    $addTech($acc); // a roster change with the switch off
+    BillingController::handleSubscriptionUpsert($sub); // a webhook with the switch off
+    $expect('W switch off: nothing pushed, the DB keeps the wanted count', [$extrasOf($sub->id)['count'], (int) $accountRow($acc['id'])['extra_technicians']], [0, 1]);
+    [, $out] = $runScript('billing-seat-report.php', ['--account=' . $acc['id']], ['BILLING_RECONCILE' => 'off']);
+    $expect('W the seat report lists the gap (NOT CHARGED) and says the switch is off', [str_contains($out, 'NOT CHARGED'), str_contains($out, 'reconcile OFF')], [true, true]);
+    [, $out] = $runScript('billing-daily.php', ['--only=seats', '--account=' . $acc['id']], ['BILLING_RECONCILE' => 'off']);
+    $expect('W the daily run only reports', [str_contains($out, 'would_change'), $extrasOf($sub->id)['count']], [true, 0]);
+    unset($_ENV['BILLING_RECONCILE']);
+    [, $out] = $runScript('billing-daily.php', ['--only=seats', '--account=' . $acc['id']]);
+    $x = $extrasOf($sub->id);
+    $expect('W switch on: the daily run repairs it (item qty 1)', [$x['count'], $x['qty']], [1, 1]);
     echo "\n";
 }
 
@@ -598,9 +1076,28 @@ if ($run('R') && $accounts !== []) {
         $expected = [];
         foreach ($accounts as $id) {
             $r = $accountRow($id);
-            $status = $r['stripe_subscription_id'] ? (string) $stripe->subscriptions->retrieve((string) $r['stripe_subscription_id'])->status : null;
-            $expected[$id] = [$r['stripe_subscription_id'], $status, $r['billing_period'], (int) $r['extra_technicians']];
+            $status = null;
+            $cancel = 0;
+            if ($r['stripe_subscription_id']) {
+                $live = $stripe->subscriptions->retrieve((string) $r['stripe_subscription_id']);
+                $status = (string) $live->status;
+                $cancel = !in_array($status, ['canceled', 'incomplete_expired'], true) && $live->cancel_at_period_end ? 1 : 0;
+            }
+            $expected[$id] = [$r['stripe_subscription_id'], $status, $r['billing_period'], (int) $r['extra_technicians'], $cancel];
         }
+        $endState = static function (string $label) use ($accounts, &$rSkip, $accountRow, &$expected, $expect, $note): void {
+            foreach ($accounts as $id) {
+                if (in_array($id, $rSkip, true)) {
+                    continue;
+                }
+                $r = $accountRow($id);
+                $got = [$r['stripe_subscription_id'], $r['stripe_status'], $r['billing_period'], (int) $r['extra_technicians'], (int) $r['stripe_cancel_at_period_end']];
+                $expect("R $label: account $id end state matches", $got, $expected[$id]);
+            }
+            if ($rSkip !== []) {
+                $note("$label: not compared (two subscriptions, the reset forgets which one was current): accounts " . implode(', ', $rSkip));
+            }
+        };
         $in = implode(',', array_fill(0, count($accounts), '?'));
         $pdo->prepare("UPDATE accounts SET stripe_subscription_id = NULL, stripe_status = NULL, billing_period = NULL,
                                            subscription_end_date = '2000-01-01' WHERE id IN ($in)")->execute($accounts);
@@ -613,11 +1110,7 @@ if ($run('R') && $accounts !== []) {
         $expect('R every event answered 204', array_values(array_unique($codes)), [204]);
         sleep(3); // invoices are issued after the response
 
-        foreach ($accounts as $id) {
-            $r = $accountRow($id);
-            $got = [$r['stripe_subscription_id'], $r['stripe_status'], $r['billing_period'], (int) $r['extra_technicians']];
-            $expect("R account $id end state matches", $got, $expected[$id]);
-        }
+        $endState('first pass');
 
         // Duplicate delivery: skipped.
         $dup = $events[array_key_last($events)];
@@ -670,8 +1163,34 @@ if ($run('R') && $accounts !== []) {
                 $note(sprintf('  needs_review %s: total %s paid %s — %s', $r['stripe_invoice_id'], $eur((int) $r['stripe_total_cents']), $eur((int) $r['stripe_amount_paid_cents']), $r['error_message']));
             } else {
                 $expect("R row {$r['id']} prepared, description from the first non-proration line", [$r['status'], $payload['Description'] ?? null], ['prepared', $wantDesc]);
+                $sum = (int) round(array_sum(array_map(static fn ($i) => $i['Amount'] * $i['UnitPrice'] * 100, $payload['Items'] ?? [])));
+                $expect("R row {$r['id']} payload sums to the amount paid", $sum, (int) $r['stripe_amount_paid_cents']);
                 $note(sprintf('  prepared %s %s: %s', $r['stripe_invoice_id'], $eur((int) $r['stripe_total_cents']), json_encode(array_map(static fn ($i) => $i['Name'] . ' ' . $i['Amount'] . '×' . $i['UnitPrice'], $payload['Items'] ?? []), JSON_UNESCAPED_UNICODE)));
             }
+        }
+
+        // Round 2: everything again (new event ids — Stripe re-sending it all)
+        // and then everything in reverse order: same end state, no invoice
+        // row twice, nothing sent, no cancel flag left on a cancelled account.
+        $rowCount = static function () use ($pdo, $in, $accounts): int {
+            $s = $pdo->prepare("SELECT COUNT(*) FROM invoices WHERE account_id IN ($in)");
+            $s->execute($accounts);
+            return (int) $s->fetchColumn();
+        };
+        $rowsBefore = $rowCount();
+        foreach (['again' => $events, 'reverse' => array_reverse($events)] as $label => $list) {
+            $codes = [];
+            foreach ($list as $e) {
+                $e['id'] .= "_$label";
+                $codes[] = $post($e);
+            }
+            $expect("R $label: every event answered 204", array_values(array_unique($codes)), [204]);
+            sleep(3);
+            $endState($label);
+            $expect("R $label: no new invoice row (each Stripe invoice recorded once)", $rowCount(), $rowsBefore);
+            $s = $pdo->prepare("SELECT COUNT(*) FROM invoices WHERE account_id IN ($in) AND status IN ('issued', 'sending', 'error')");
+            $s->execute($accounts);
+            $expect("R $label: nothing issued or sending (iDoklad untouched)", (int) $s->fetchColumn(), 0);
         }
     }
     echo "\n";
