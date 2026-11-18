@@ -25,7 +25,16 @@ declare(strict_types=1);
  *      the BOZP record of a prehliadka, the permanent delete re-decided under
  *      its lock (archived, issued or followed up meanwhile), and backup /
  *      restore keeping `issued_before` (also for a backup from before it).
- *      This part writes scratch accounts and removes them at the end.
+ *      This part writes scratch accounts and removes them at the end;
+ *   7. round 5: the BOZP item checks carry their result and texts (not their
+ *      nedostatky), the completeness rule for them, no „dôvod zanikol" for a
+ *      new defect, the fixed sentence of a bytové družstvo;
+ *   8. round 5: restore of a backup from before `issued_before` (every draft
+ *      issued, counted) and a draft named by a documents row not restored;
+ *   9. round 5: požiarna kniha numbers PK-<KÓD>-NNN — codes, the series across
+ *      a year change, „Upraviť" keeping the number, old numbers, a second
+ *      account, a firma without a code, other types, two parallel issues.
+ *      Writes scratch accounts and removes them at the end.
  *
  *     docker compose exec php php bin/test-prehliadka-followups.php
  *
@@ -53,6 +62,19 @@ use Firol\Support\UkonDiscardRefused;
 if (($_ENV['APP_ENV'] ?? getenv('APP_ENV') ?: '') === 'production') {
     fwrite(STDERR, "Refusing to run in production.\n");
     exit(1);
+}
+
+// Part 9 starts this script twice as a child that issues one book number and
+// holds the firma's row lock for a while (two technicians at the same moment).
+if (($argv[1] ?? '') === '--book-race') {
+    $racePdo = Db::pdo();
+    $racePdo->beginTransaction();
+    $raceRow = $racePdo->query('SELECT id, company_id FROM inspections WHERE id = ' . (int) $argv[3] . ' FOR UPDATE')->fetch(PDO::FETCH_ASSOC);
+    $raceNumber = \Firol\Documents\BookNumber::forIssue($racePdo, (int) $argv[2], $raceRow)['number'];
+    usleep((int) $argv[4] * 1000);
+    $racePdo->commit();
+    echo $raceNumber;
+    exit(0);
 }
 
 // Part 6 runs code that names its actor (the audit row of a permanent
@@ -316,19 +338,20 @@ try {
         'type' => 'DN25', 'location' => 'A', 'hose_count' => 1,
         'hs' => null, 'hd' => null, 'q' => null, 'defects' => null, 'result' => '',
     ]);
-    // BOZP rows are unchanged: identification only, last time's výsledok as a badge.
+    // BOZP item checks carry their result and texts too since the customer's
+    // answer of 18. 11. 2026 (part 7); their structured nedostatky stay behind.
     $ladder = [
         'inventory_number' => 'R-1', 'type' => 'Hliníkový', 'manufacturer' => 'Alve', 'year' => 2020, 'location' => 'Sklad',
         'faults' => 'Ohnutá priečka', 'result' => 'nevyhovuje', 'defects' => [['text' => 'x']],
     ];
-    $expect('3 rebrík still carries identification only', CarryOver::mapItem('rebriky', $ladder), [
+    $expect('3 rebrík carries its result and závady, not its nedostatky', CarryOver::mapItem('rebriky', $ladder), [
         'inventory_number' => 'R-1', 'type' => 'Hliníkový', 'manufacturer' => 'Alve', 'year' => 2020, 'location' => 'Sklad',
-        'faults' => null, 'result' => '', 'defects' => [], 'previous_status' => 'nevyhovuje',
+        'faults' => 'Ohnutá priečka', 'result' => 'nevyhovuje', 'defects' => [],
     ]);
-    $expect('3 the fire types are the ones that carry values', array_values(array_filter(
-        ['php', 'hydranty', 'ts_hadic', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'rebriky', 'regale', 'oopp', 'oznacenie', 'pracovne_prostriedky'],
+    $expect('3 the device types are the ones that carry values', array_values(array_filter(
+        ['php', 'hydranty', 'ts_hadic', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'rebriky', 'regale', 'oopp', 'oznacenie', 'pracovne_prostriedky', 'kniha_bozp', 'pracovisko', 'skolenie_bozp'],
         [CarryOver::class, 'carriesValues'],
-    )), ['php', 'hydranty', 'ts_hadic', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie']);
+    )), ['php', 'hydranty', 'ts_hadic', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'rebriky', 'regale', 'oopp', 'oznacenie', 'pracovne_prostriedky']);
 
     // The device list names a svietidlo without an evidenčné číslo instead of dropping it.
     $label = static fn (string $type, array $f): ?string => FacilityDevices::shape($type, $f, true)['label'] ?? null;
@@ -373,8 +396,10 @@ try {
     $expect('4 … and the item is reported as missing its result', $check('hydranty', $r['fields'])[1] ?? null, ['Výsledok kontroly']);
     $r = $withResult->invoke(null, 'hydranty', ['type' => 'other', 'type_other' => 'H-1', 'location' => 'Dvor'] + CarryOver::blank('hydranty'), null, false);
     $expect('4 a device written down on the walk gets the passing result', $r['fields']['result'], 'vyhovuje');
-    $r = $withResult->invoke(null, 'rebriky', $ladder, null, true);
-    $expect('4 a BOZP row still gets the passing result', $r['fields']['result'], 'vyhovuje');
+    $r = $withResult->invoke(null, 'rebriky', (array) CarryOver::mapItem('rebriky', $ladder), null, true);
+    $expect('7 a carried rebrík without a defect today keeps its result (answer 2 „asi A")', [$r['fields']['result'], $r['fields']['faults']], ['nevyhovuje', 'Ohnutá priečka']);
+    $r = $withResult->invoke(null, 'rebriky', ['inventory_number' => 'R-9', 'type' => 'Drevený', 'manufacturer' => '', 'year' => null, 'location' => 'Dvor'] + CarryOver::blank('rebriky'), null, false);
+    $expect('7 a rebrík written down on the walk gets the passing result', $r['fields']['result'], 'vyhovuje');
 
     // B — the ts_hadic rows of the checklist and of the follow-up button (tsHadicRows).
     $f4 = $newFacility('Hadice');
@@ -398,7 +423,11 @@ try {
         PrehliadkaChecklist::CARRIED_FROM_KEY      => ['number' => null, 'executed_on' => '2025-10-01'],
         PrehliadkaChecklist::CARRIED_POSITIONS_KEY => [1, 2],
     ]);
-    $expect('4 a BOZP type records no origin', $origin->invoke(null, $accountId, 'rebriky', $lastTs, 2), null);
+    $expect('7 a BOZP item check records its origin too', $origin->invoke(null, $accountId, 'rebriky', $lastTs, 2), [
+        PrehliadkaChecklist::CARRIED_FROM_KEY      => ['number' => null, 'executed_on' => '2025-10-01'],
+        PrehliadkaChecklist::CARRIED_POSITIONS_KEY => [1, 2],
+    ]);
+    $expect('4 a BOZP record type records no origin', $origin->invoke(null, $accountId, 'pracovisko', $lastTs, 1), null);
     $expect('4 nothing carried, no origin', $origin->invoke(null, $accountId, 'hydranty', $lastTs, 0), null);
 
     // D — which drafts the completeness check holds back (CarryOver::checksCompleteness,
@@ -420,9 +449,12 @@ try {
         CarryOver::checksCompleteness($row('php', ['issued_contractor' => ['name' => 'X']], 455)), false);
     $expect('5 not checked: an unlocked old protocol (carried_over_from_id, issued_before)',
         CarryOver::checksCompleteness($row('php', null, 455, 1)), false);
-    // Round 4, item 7: the old-Opakovať rule is for the fire types only.
-    $expect('6 not checked: a BOZP Opakovať draft from before round 1',
-        CarryOver::checksCompleteness($row('rebriky', null, 468)), false);
+    // Round 4, item 7: the old-Opakovať rule is for the types that carry values —
+    // since 18. 11. 2026 the BOZP item checks too, not the BOZP records.
+    $expect('6 not checked: a BOZP record Opakovať draft from before round 1',
+        CarryOver::checksCompleteness($row('pracovisko', null, 468)), false);
+    $expect('7 checked: a BOZP item Opakovať draft from before round 1',
+        CarryOver::checksCompleteness($row('rebriky', null, 468)), true);
     $expect('6 not checked: a book entry with carried_over_from_id',
         CarryOver::checksCompleteness($row('poziarna_kniha', null, 468)), false);
     $expect('6 still checked: a hydranty Opakovať draft from before round 1',
@@ -497,6 +529,58 @@ try {
     $expect('5 the list decides every row at once', [$many[$typed]['mode'], $many[$issued]['mode'], $many[$withTask]['mode']],
         [UkonDiscard::DELETE, UkonDiscard::ARCHIVE, null]);
     $expect('5 another account sees nothing to delete', UkonDiscard::decideMany($otherAccountId, [$load($typed)])[$typed]['mode'], null);
+
+    // ── Part 7 — round 5: BOZP item checks carry the result, small changes ───
+    $sorted7 = static function (?array $a): ?array {
+        if ($a !== null) {
+            ksort($a);
+        }
+        return $a;
+    };
+    $shelf = ['label' => 'R-A1', 'type' => 'Policový', 'capacity' => '200 kg', 'location' => 'Sklad', 'capacity_marked' => false,
+        'faults' => 'Chýba štítok', 'result' => 'nevyhovuje', 'defects' => [['key' => 'k1', 'description' => 'x']]];
+    $expect('7 regál carries capacity_marked, závady, result; not its nedostatky', $sorted7(CarryOver::mapItem('regale', $shelf)),
+        $sorted7(['defects' => []] + $shelf));
+    $ppe = ['position' => 'Zvárač', 'equipment' => 'Kukla, rukavice', 'provided' => true, 'used' => false, 'condition' => 'opotrebeny', 'notes' => 'Nepoužíva kuklu', 'defects' => []];
+    $expect('7 OOPP carries poskytnuté, používané, stav, poznámku', $sorted7(CarryOver::mapItem('oopp', $ppe)), $sorted7($ppe));
+    $tool = ['name' => 'Uhlová brúska', 'manufacturer_type' => 'Bosch GWS', 'inventory_number' => 'N-4', 'location' => 'Dielňa', 'faults' => 'Chýba kryt', 'result' => 'nevyhovuje', 'defects' => []];
+    $expect('7 pracovný prostriedok carries závady and result', $sorted7(CarryOver::mapItem('pracovne_prostriedky', $tool)), $sorted7($tool));
+    $sign = ['kind' => 'Únikový východ', 'location' => 'Hala', 'result' => 'vyhovuje', 'notes' => 'Vybledne', 'defects' => []];
+    $expect('7 označenie carries stav and poznámku', $sorted7(CarryOver::mapItem('oznacenie', $sign)), $sorted7($sign));
+    $expect('7 no previous_status badge on a carried BOZP row', array_key_exists('previous_status', (array) CarryOver::mapItem('oznacenie', $sign)), false);
+    $expect('7 a rebrík disposed last time is still left behind', CarryOver::mapItem('rebriky', ['result' => 'vyradene'] + $ladder), null);
+
+    // Opakovať / „Prevziať položky" go through carryItems + carriedOrigin.
+    $carryItems = new ReflectionMethod(InspectionController::class, 'carryItems');
+    $carried7 = $carryItems->invoke(null, 'rebriky', [$ladder, ['result' => 'vyradene'] + $ladder, ['result' => 'vyhovuje', 'faults' => null] + $ladder]);
+    $expect('7 Opakovať carries two rebríky with their results, one disposed', [array_column($carried7['items'], 'result'), $carried7['disposed']], [['nevyhovuje', 'vyhovuje'], 1]);
+    $expect('7 a carried rebrík with no result is held back („Chýba")', $check('rebriky', ['result' => ''] + (array) CarryOver::mapItem('rebriky', $ladder))[1] ?? null, ['Výsledok']);
+    $expect('7 a carried regál with no označenie nosnosti is held back', $check('regale', ['capacity_marked' => null] + (array) CarryOver::mapItem('regale', $shelf))[1] ?? null, ['Označenie nosnosti']);
+    $expect('7 a complete carried rebrík passes', $check('rebriky', (array) CarryOver::mapItem('rebriky', $ladder)), []);
+    $expect('7 checked: a BOZP item draft with a recorded origin', CarryOver::checksCompleteness($row('oopp', $carriedDetails)), true);
+    $expect('7 not checked: an imported BOZP item draft', CarryOver::checksCompleteness($row('oopp', null)), false);
+    $expect('7 not checked: an unlocked BOZP item protocol', CarryOver::checksCompleteness($row('oznacenie', null, 455, 1)), false);
+
+    // Part C1 — a new defect is not offered „dôvod zanikol" (answer 6 B).
+    $zanik = ['title' => 'Chýba PHP', 'scope' => 'po', 'where' => ['place' => 'Chodba'], 'description' => 'Popis', 'deadline_choice' => 'bezodkladne', 'status' => 'zanik', 'reason' => 'Priestor zrušený.'];
+    $zanikRefusal = static function (array $body, array $options = []): ?string {
+        try {
+            PrehliadkaDefects::validate($body, '2026-11-18', false, $options);
+            return null;
+        } catch (\InvalidArgumentException $e) {
+            return $e->getMessage();
+        }
+    };
+    $expect('7 a new defect with „dôvod zanikol" is refused', str_starts_with((string) $zanikRefusal($zanik), 'Stav „dôvod zanikol" má len nedostatok prenesený'), true);
+    $expect('7 … stored with it before, it keeps it', $zanikRefusal($zanik, ['allow_new_zanik' => true]), null);
+    $expect('7 a carried defect may be „dôvod zanikol"', $zanikRefusal($zanik + ['persists_from' => ['key' => 'k-1', 'inspection_id' => 1, 'source_item_id' => null, 'number' => 'PPP-2026-001', 'executed_on' => '2026-01-01']]), null);
+    $expect('7 a new defect „zistený" is fine', $zanikRefusal(['status' => 'zisteny'] + $zanik), null);
+
+    // Part C2 — the fixed sentence of a book entry (answer 9b).
+    $expect('7 firma, one prevádzka', \Firol\Support\BookSentences::fixed('2026-11-18', ['Sklad']), 'Dňa 18. 11. 2026 bola vykonaná prehliadka v prevádzke Sklad.');
+    $expect('7 firma, two prevádzky', \Firol\Support\BookSentences::fixed('2026-11-18', ['Sklad', 'Hala']), 'Dňa 18. 11. 2026 bola vykonaná prehliadka v prevádzkach Sklad, Hala.');
+    $expect('7 bytové družstvo, one dom', \Firol\Support\BookSentences::fixed('2026-11-18', ['Hlavná 5'], true), 'Dňa 18. 11. 2026 bola vykonaná prehliadka v bytovom dome Hlavná 5.');
+    $expect('7 bytové družstvo, two domy', \Firol\Support\BookSentences::fixed('2026-11-18', ['Hlavná 5', 'Krátka 2'], true), 'Dňa 18. 11. 2026 bola vykonaná prehliadka v bytových domoch Hlavná 5, Krátka 2.');
 } finally {
     $pdo->rollBack();
 }
@@ -638,11 +722,51 @@ try {
     $zip->addFromString(\Firol\Backup\Archive::MANIFEST, json_encode($manifest, JSON_UNESCAPED_UNICODE));
     $zip->close();
     [$l6, $ul6] = $r4Account('stara-zaloha');
-    \Firol\Backup\Restorer::run($l6, $ul6, $legacyPath, \Firol\Backup\Restorer::MODE_MERGE);
-    $expect('6 an old backup: finalized, snapshot and documents row count as issued', $issuedAfter($l6), [
-        // R4-unlocked has none of the three in the archive — nothing can tell.
-        'R4-document' => 1, 'R4-final' => 1, 'R4-never' => 0, 'R4-snapshot' => 1, 'R4-unlocked' => 0,
+    $legacyResult = \Firol\Backup\Restorer::run($l6, $ul6, $legacyPath, \Firol\Backup\Restorer::MODE_MERGE);
+    // Round 5, item 4 (b): an archive without the key cannot tell an unlocked
+    // protocol from a never-issued draft — every draft comes back as issued.
+    $expect('8 an old backup: every draft counts as issued (safe default)', $issuedAfter($l6), [
+        'R4-document' => 1, 'R4-final' => 1, 'R4-never' => 1, 'R4-snapshot' => 1, 'R4-unlocked' => 1,
     ]);
+    // Every restored draft without the contractor snapshot (part 6's race rows
+    // included; a row the merge matched to another is not restored) was marked
+    // by the default.
+    $assumed = (int) $pdo->query("SELECT COUNT(*) FROM inspections WHERE account_id = $l6 AND status = 'draft'
+        AND (details IS NULL OR NOT JSON_EXISTS(details, '$.issued_contractor'))")->fetchColumn();
+    $expect('8 … and the result says how many drafts were marked that way',
+        [$legacyResult['issued_assumed'], count(array_filter($legacyResult['warnings'], static fn (string $w): bool => str_contains($w, 'označen')))], [$assumed, 1]);
+    $restoredNever = $pdo->query("SELECT id, account_id, type, status, details, issued_before, source_inspection_id, carried_over_from_id
+                                  FROM inspections WHERE account_id = $l6 AND notes = 'R4-never'")->fetch(PDO::FETCH_ASSOC);
+    $expect('8 … the completeness rule does not change for them (no carried_over_from_id)',
+        [$restoredNever['carried_over_from_id'], CarryOver::checksCompleteness($restoredNever)], [null, false]);
+
+    // Round 5, item 4 (a): a current archive whose documents row is not
+    // restored (its PDF is missing from the archive) still marks its draft.
+    $neverId = null;
+    foreach ($manifest['inspections'] as $mi) {
+        if (($mi['notes'] ?? null) === 'R4-never') {
+            $neverId = (int) $mi['id'];
+        }
+    }
+    $withKey = json_decode((string) json_encode($manifest), true);
+    foreach ($withKey['inspections'] as &$keyRow) {
+        $keyRow['issued_before'] = ($keyRow['notes'] ?? null) === 'R4-never' ? 0 : 1;
+    }
+    unset($keyRow);
+    $withKey['documents'][] = [
+        'number' => 'R4-MISSING-' . $neverId, 'parent_type' => 'inspection', 'parent_id' => $neverId, 'type' => 'php',
+        'file' => 'documents/missing-from-archive.pdf', 'generated_at' => '2026-11-18 10:00:00', 'signed' => 1,
+    ];
+    $missingPath = $archive['path'] . '-missing.zip';
+    copy($archive['path'], $missingPath);
+    $r4Files[] = $missingPath;
+    $zip = new ZipArchive();
+    $zip->open($missingPath);
+    $zip->addFromString(\Firol\Backup\Archive::MANIFEST, json_encode($withKey, JSON_UNESCAPED_UNICODE));
+    $zip->close();
+    [$m6, $um6] = $r4Account('chyba-pdf');
+    $missingResult = \Firol\Backup\Restorer::run($m6, $um6, $missingPath, \Firol\Backup\Restorer::MODE_MERGE);
+    $expect('8 a draft named by a documents row that was not restored is issued', [$issuedAfter($m6)['R4-never'] ?? null, $missingResult['issued_assumed']], [1, 0]);
 } catch (Throwable $e) {
     $failures++;
     echo 'FAIL part 6 stopped: ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ")\n";
@@ -661,6 +785,175 @@ try {
     }
     foreach ($r4Files as $file) {
         @unlink($file);
+    }
+}
+
+// ── Part 9 — round 5: numbers of požiarna kniha entries (answer 3) ──────────
+// Issues real protocols (DocumentController opens its own transactions), so
+// like part 6 it writes scratch accounts and removes them, rows and files.
+$r5Users = [];
+$r5Accounts = [];
+try {
+    $r5Account = static function (string $label) use ($pdo, &$r5Users, &$r5Accounts): array {
+        $pdo->prepare('INSERT INTO users (fullname, email, password_hash, is_pending, is_admin) VALUES (?, ?, ?, 0, 0)')
+            ->execute(['Test R5 ' . $label, 'test-followups-r5-' . bin2hex(random_bytes(4)) . '@firol.test', 'x']);
+        $userId = (int) $pdo->lastInsertId();
+        $r5Users[] = $userId;
+        $pdo->prepare(
+            "INSERT INTO accounts (invoice_company_name, invoice_street, invoice_postal_code, invoice_city,
+                                   invoice_ico, main_user_id, subscription_end_date, member_rights)
+             VALUES ('R5 Test s.r.o.', 'Skúšobná 1', '949 01', 'Nitra', '12345678', ?, '2030-12-31', 'plne')"
+        )->execute([$userId]);
+        $accountId = (int) $pdo->lastInsertId();
+        $r5Accounts[] = $accountId;
+        return [$accountId, $userId];
+    };
+    $r5Company = static function (int $accountId, string $name, string $type = 'firma') use ($pdo): array {
+        $pdo->prepare('INSERT INTO companies (account_id, name, client_type, street, postal_code, city, ico) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            ->execute([$accountId, $name, $type, 'Ulica 1', '949 01', 'Nitra', '87654321']);
+        $companyId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO facilities (account_id, company_id, name, street, postal_code, city) VALUES (?, ?, ?, ?, ?, ?)')
+            ->execute([$accountId, $companyId, 'Sklad ' . $name, 'Ulica 2', '949 01', 'Nitra']);
+        return [$companyId, (int) $pdo->lastInsertId()];
+    };
+    $r5Entry = static function (int $accountId, int $userId, int $companyId, int $facilityId, string $on) use ($pdo): int {
+        $details = ['format' => 'pk2', 'sposob' => 2, 'sposob_rucne' => false, 'uvod' => null, 'cinnosti' => [], 'vlastne_cinnosti' => [],
+            'doplnujuci_text' => '', 'text_zapisu' => 'Kontrola stavu ochrany pred požiarmi.', 'zaznamy' => [], 'zaver' => '', 'schvalil' => 'Ján Test'];
+        $pdo->prepare(
+            'INSERT INTO inspections (account_id, company_id, facility_id, type, executed_on, inspector_user_id, status,
+                                      created_by_user_id, details, is_preventive_inspection)
+             VALUES (?, ?, ?, "poziarna_kniha", ?, ?, "draft", ?, ?, 0)'
+        )->execute([$accountId, $companyId, $facilityId, $on, $userId, $userId, json_encode($details, JSON_UNESCAPED_UNICODE)]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO inspection_facilities (account_id, inspection_id, facility_id) VALUES (?, ?, ?)')
+            ->execute([$accountId, $id, $facilityId]);
+        return $id;
+    };
+    $issue = static function (int $accountId, int $userId, int $id): array {
+        $r = \Firol\Controllers\DocumentController::generateForInspectionInternal($accountId, $userId, $id, false);
+        return isset($r['document']) ? ['number' => $r['document']['number'], 'version' => (int) $r['document']['version'], 'file' => $r['document']['file_path']] : ['error' => $r['error'] ?? '?'];
+    };
+    // „Upraviť" as InspectionController::unlock() does it to the rows.
+    $unlock = static function (int $accountId, int $id) use ($pdo): void {
+        $pdo->prepare("DELETE FROM documents WHERE account_id = ? AND parent_type = 'inspection' AND parent_id = ?")->execute([$accountId, $id]);
+        $pdo->prepare("UPDATE inspections SET status = 'draft', issued_before = 1 WHERE id = ? AND account_id = ?")->execute([$id, $accountId]);
+        $pdo->prepare("UPDATE inspections SET details = JSON_REMOVE(details, '$.issued') WHERE id = ? AND JSON_EXISTS(details, '$.issued')")->execute([$id]);
+    };
+    $code = static fn (int $companyId): ?string => ($v = $pdo->query('SELECT book_code FROM companies WHERE id = ' . $companyId)->fetchColumn()) === false ? null : $v;
+    $BN = \Firol\Documents\BookNumber::class;
+
+    // The code from the name.
+    $expect('9 „Stavby Novák s.r.o." → STA', $BN::candidates('Stavby Novák s.r.o.')[0] ?? null, 'STA');
+    $expect('9 „Železiarne" → ZEL (diacritics removed)', $BN::candidates('Železiarne')[0] ?? null, 'ZEL');
+    $expect('9 „3M Slovensko" → MSL (letters only)', $BN::candidates('3M Slovensko')[0] ?? null, 'MSL');
+    $expect('9 next variants: first two + following letters, then a digit',
+        array_slice($BN::candidates('Stavby'), 0, 6), ['STA', 'STV', 'STB', 'STY', 'ST1', 'ST2']);
+    $expect('9 a name of two letters uses what it has', array_slice($BN::candidates('A.B.'), 0, 2), ['AB', 'AB1']);
+    $expect('9 a name of one letter has no proposal', $BN::candidates('Q 1'), []);
+    $codeRefusal = static function (string $raw) use ($BN): ?string {
+        try {
+            return $BN::normalizeCode($raw);
+        } catch (\InvalidArgumentException $e) {
+            return 'refused';
+        }
+    };
+    $expect('9 a typed code is upper-cased; 2–4 letters or digits with a letter',
+        array_map($codeRefusal, ['sta', 'ab12', 'S', 'STAVB', 'ŠT', '2026']), ['STA', 'AB12', 'refused', 'refused', 'refused', 'refused']);
+
+    [$a9, $u9] = $r5Account('kniha');
+    [$cSta, $fSta] = $r5Company($a9, 'Stavby Novák s.r.o.');
+    [$cStv, $fStv] = $r5Company($a9, 'Stavebniny Kováč');
+    $BN::assignProposal($a9, $cSta, 'Stavby Novák s.r.o.');
+    $BN::assignProposal($a9, $cStv, 'Stavebniny Kováč');
+    $expect('9 two firms with the same first three letters get different codes', [$code($cSta), $code($cStv)], ['STA', 'STV']);
+
+    // Three entries of one firma across a year change: 001, 002, 003.
+    $e1 = $r5Entry($a9, $u9, $cSta, $fSta, '2026-12-20');
+    $e2 = $r5Entry($a9, $u9, $cSta, $fSta, '2027-01-05');
+    $e3 = $r5Entry($a9, $u9, $cSta, $fSta, '2027-01-10');
+    $i1 = $issue($a9, $u9, $e1);
+    $expect('9 the code is locked once the first entry is issued', (int) $pdo->query("SELECT book_last_seq FROM companies WHERE id = $cSta")->fetchColumn() > 0, true);
+    $i2 = $issue($a9, $u9, $e2);
+    $i3 = $issue($a9, $u9, $e3);
+    $expect('9 three entries across a year change: 001, 002, 003', [$i1['number'] ?? $i1, $i2['number'] ?? $i2, $i3['number'] ?? $i3], ['PK-STA-001', 'PK-STA-002', 'PK-STA-003']);
+    $expect('9 the file sits in the year folder of the entry', [str_contains((string) ($i1['file'] ?? ''), '/2026/PK-STA-001.pdf'), str_contains((string) ($i2['file'] ?? ''), '/2027/PK-STA-002.pdf')], [true, true]);
+
+    // „Upraviť" + issue again: the same number as version 2; the PDF says it.
+    $unlock($a9, $e2);
+    $re = $issue($a9, $u9, $e2);
+    $expect('9 unlock + issue keeps the number, as version 2', [$re['number'] ?? $re, $re['version'] ?? null, str_ends_with((string) ($re['file'] ?? ''), 'PK-STA-002-v2.pdf')], ['PK-STA-002', 2, true]);
+    $pdfText = (string) @file_get_contents(\Firol\Storage\Storage::documentAbsolute((string) ($re['file'] ?? 'x')));
+    $expect('9 … the re-issued file is a PDF', str_starts_with($pdfText, '%PDF'), true);
+    $e4 = $r5Entry($a9, $u9, $cSta, $fSta, '2027-02-01');
+    $expect('9 the next entry continues the series without a gap', $issue($a9, $u9, $e4)['number'] ?? null, 'PK-STA-004');
+    $expect('9 drafts hold no number: four issues, counter at 4', (int) $pdo->query("SELECT book_last_seq FROM companies WHERE id = $cSta")->fetchColumn(), 4);
+
+    // An entry issued before this change keeps PK-RRRR-NNN, also after „Upraviť".
+    $old = $r5Entry($a9, $u9, $cStv, $fStv, '2026-05-01');
+    $pdo->exec("UPDATE inspections SET book_number = 'PK-2026-950', book_number_version = 1, issued_before = 1 WHERE id = $old");
+    $expect('9 an old PK-2026-… entry is issued again under its number', $issue($a9, $u9, $old)['number'] ?? null, 'PK-2026-950');
+    $expect('9 … and the firma\'s own series is untouched', (int) $pdo->query("SELECT book_last_seq FROM companies WHERE id = $cStv")->fetchColumn(), 0);
+
+    // A second account may use the same code and numbers.
+    [$b9, $ub9] = $r5Account('druhy');
+    [$cOther, $fOther] = $r5Company($b9, 'Stavby Iné');
+    $o1 = $r5Entry($b9, $ub9, $cOther, $fOther, '2026-11-18');
+    $expect('9 another account: STA and 001 again', [$issue($b9, $ub9, $o1)['number'] ?? null, $code($cOther)], ['PK-STA-001', 'STA']);
+
+    // A firma whose name gives no code: refused with the reason, nothing taken.
+    [$cQ, $fQ] = $r5Company($a9, 'Q 1');
+    $q1 = $r5Entry($a9, $u9, $cQ, $fQ, '2026-11-18');
+    $expect('9 a firma without a code is refused with the reason', $issue($a9, $u9, $q1)['error'] ?? null, $BN::NO_CODE_MESSAGE);
+    $pdo->exec("UPDATE companies SET book_code = 'Q1X' WHERE id = $cQ");
+    $expect('9 … and numbered once the user typed one', $issue($a9, $u9, $q1)['number'] ?? null, 'PK-Q1X-001');
+
+    // Other protocol types are numbered as before.
+    $phpNo = \Firol\Documents\NumberAllocator::allocate($a9, 'php', 2026)['number'];
+    $expect('9 other protocols keep PREFIX-RRRR-NNN', $phpNo, 'PHP-2026-001');
+
+    // Two technicians at the same moment: two processes, the firma's row lock.
+    $r1 = $r5Entry($a9, $u9, $cStv, $fStv, '2026-11-18');
+    $r2 = $r5Entry($a9, $u9, $cStv, $fStv, '2026-11-18');
+    $spawn = static function (int $id, int $sleepMs) use ($a9) {
+        $pipes = [];
+        $proc = proc_open([PHP_BINARY, __FILE__, '--book-race', (string) $a9, (string) $id, (string) $sleepMs], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        return [$proc, $pipes];
+    };
+    $p1 = $spawn($r1, 1500);
+    $p2 = $spawn($r2, 0);
+    $out1 = trim((string) stream_get_contents($p1[1][1]));
+    $out2 = trim((string) stream_get_contents($p2[1][1]));
+    $err = trim((string) stream_get_contents($p1[1][2]) . stream_get_contents($p2[1][2]));
+    proc_close($p1[0]);
+    proc_close($p2[0]);
+    $pair = [$out1, $out2];
+    sort($pair);
+    $expect('9 two parallel issues for one firma: two consecutive numbers' . ($err !== '' ? " ($err)" : ''), $pair, ['PK-STV-001', 'PK-STV-002']);
+} catch (Throwable $e) {
+    $failures++;
+    echo 'FAIL part 9 stopped: ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ")\n";
+} finally {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    foreach ($r5Accounts as $acc) {
+        $files = $pdo->prepare('SELECT v.file_path FROM document_versions v JOIN documents d ON d.id = v.document_id WHERE d.account_id = ?');
+        $files->execute([$acc]);
+        foreach ($files->fetchAll(PDO::FETCH_COLUMN) as $rel) {
+            @unlink(\Firol\Storage\Storage::documentAbsolute((string) $rel));
+        }
+        // Versions an „Upraviť" left behind on disk are not in document_versions.
+        foreach (glob(\Firol\Storage\Storage::documentAbsolute("documents/$acc") . '/*/*.pdf') ?: [] as $leftover) {
+            @unlink($leftover);
+        }
+        \Firol\Support\AccountPurge::everything($acc);
+        $pdo->prepare('DELETE FROM inspections WHERE account_id = ?')->execute([$acc]);
+        $pdo->prepare('DELETE FROM document_sequences WHERE account_id = ?')->execute([$acc]);
+        $pdo->prepare('DELETE FROM accounts WHERE id = ?')->execute([$acc]);
+    }
+    foreach ($r5Users as $uid) {
+        $pdo->prepare('DELETE FROM audit_log WHERE actor_user_id = ?')->execute([$uid]);
+        $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$uid]);
     }
 }
 

@@ -1653,28 +1653,30 @@ trip) is tracked in the hand-back report to the owner, not here.
 - The concepts checklist lists the routine concepts plus the follow-ups.
 - Oprava / vyradenie devices come from today's PHP check.
 - ~~A result is carried from the last protocol only for TS hadíc.~~ Reversed by the fix list of
-  16. 11. 2026: every fire-protection type carries its values and result (see below).
+  16. 11. 2026: every fire-protection type carries its values and result (see below); the BOZP
+  item checks too since the customer's answer 1 of 18. 11. 2026 (round 5).
 - Protocols carry the prehliadka date, editable.
 - The catalogue counter stays as it is.
 - Company-wide trainings in Priložiť záznamy form one group headed „Celá organizácia" (not „Celá
   firma" — more general; the client may be an obec or a school).
 
 **Open points for FIROL / the owner:**
-- ⏸ **O1 numbering — undecided, blocker for the merge to `main`.** The app numbers `PK-RRRR-NNN`
-  per account and year (`NumberAllocator`); the spec asks for a series per firma that never resets
-  or skips. `documents` has `UNIQUE (account_id, number)`, so the format cannot carry a per-firma
-  series. Unlock + regenerate also leaves a gap.
-- ⏸ An attached prehliadka with no defects prints „Neboli zistené žiadne nedostatky." — check
-  against criterion 13.
+- ✅ **O1 numbering** — answered 18. 11. 2026 (answer 3 B): `PK-<KÓD>-NNN` per firma, never reset,
+  the number kept by „Upraviť". Built in round 5 (below); the code-uniqueness rule awaits the
+  customer's confirmation.
+- ✅ An attached prehliadka with no defects prints „Neboli zistené žiadne nedostatky." — stays
+  (answer 4 A, 18. 11. 2026).
 - ⏸ Wording „Nedostatok zo zápisu do požiarnej knihy č. …" (note on a carried-over defect).
-- ⏸ The fixed sentence says „v prevádzke / v prevádzkach" also for bytové domy.
-- ⏸ R3: a book entry does not close earlier defects; defects written in a book entry feed the next
-  prehliadka at that prevádzka (both spôsoby).
-- ⏸ Opakovať lands on the default spôsob for the number of prevádzky (criterion 3 over O5).
+- ✅ The fixed sentence says „v bytovom dome / v bytových domoch" for a bytové družstvo (answer 9b,
+  round 5).
+- ✅ R3: a book entry does not close earlier defects; defects written in a book entry feed the next
+  prehliadka at that prevádzka (both spôsoby) — confirmed (answer 7 A).
+- ✅ Opakovať lands on the default spôsob for the number of prevádzky — confirmed (answer 8 A).
 - ✅ Excel import of book rows creates new-format entries (round 2 of the fix list of 16. 11.).
-- ⏸ A new defect set to „dôvod zanikol" prints as an ordinary point with its deadline.
-- ⏸ A firma prehliadka record prints the lead line „Obsahom prehliadky bola kontrola:" and
-  „Ďalej vykonané" above custom activities.
+- ✅ A new defect is no longer offered „dôvod zanikol" (answer 6 B, round 5); one saved with it
+  before keeps printing as it did.
+- ✅ A firma prehliadka record prints the lead line „Obsahom prehliadky bola kontrola:" and
+  „Ďalej vykonané" above custom activities — the customer leaves it, without a heading (answer 9a).
 - ⏸ Date arithmetic differs between client and server elsewhere in the app (the client clamps to
   the month's end, PHP rolls over); the book screens use the server rule.
 - ✅ Discarding a draft book entry or prehliadka that was never issued deletes it for good, items
@@ -1688,8 +1690,8 @@ applies to new drafts and newly generated PDFs.
 **1. Values and result travel with the items** (fire-protection types only: PHP, hydranty,
 tlaková skúška hadíc, požiarne uzávery — akcieschopnosť and údržba, núdzové osvetlenie).
 - The rule „stav a výsledok sa neprenáša" (BOZP block spec ch. 12) **no longer applies to the fire
-  types**; it still holds for the BOZP item types (rebríky, regále, pracovné prostriedky,
-  označenie, OOPP) and the person lists. Spec 12.2 of the požiarna kniha zadanie is the source:
+  types**; it still holds for the person lists. ~~It still holds for the BOZP item types~~ —
+  reversed by the customer's answer 1 of 18. 11. 2026 (round 5). Spec 12.2 of the požiarna kniha zadanie is the source:
   „preberú sa tie isté údaje, čo tam boli predtým, vrátane výsledku".
 - `CarryOver::FULL`: Opakovať, „Prevziať položky", the concepts of a closed prehliadka and the
   ts_hadic follow-ups take every item field of the last finalized protocol of the same kind at the
@@ -1882,6 +1884,88 @@ labels). The four part-1 failures were a stale fixture, fixed in round 2.
   (`CarryOver::carriesValues`); `optimizeDeps.entries: ['index.html']` — Vite 6.4 crawled
   `dist-next/` (and would `dist-prev/`). The dev server reads the gitignored `vite.config.js` that
   `tsc -b` emits, so a config change reaches `npm run dev` only after `npm run build`.
+
+### Fix list of 16. 11. 2026 — round 5 (the customer's answers of 18. 11. 2026) — ✅ built, checked at 360 px
+
+**The answers**
+
+| # | Answer | Effect |
+|---|---|---|
+| 1 | „B — bolo by to dobré" | BOZP item checks carry their result too → A |
+| 2 | „asi A" | Concepts keep the result of the last protocol (rebríky / regály included now) |
+| 3 | „B — vlastný rad za každú firmu, bez nulovania … PK-<kód firmy>-NNN …" | New numbering of book entries → B |
+| 4 | A | „Neboli zistené žiadne nedostatky." stays |
+| 5 | A | „+ Bez nedostatkov" stays |
+| 6 | B | A new defect is not offered „dôvod zanikol" → C1 |
+| 7 | A | Defects of both spôsoby feed the next prehliadka |
+| 8 | A | Opakovať picks the spôsob by the number of prevádzky |
+| 9a | „nechať tak, bez nadpisu" | No change |
+| 9b | „písať „v bytovom dome / v bytových domoch"" | → C2 |
+| 9c | „Fotodokumentácia zo zápisu do požiarnej knihy" | → C3 |
+| 10b | stav O stays for a PHP with a defect from the prehliadka | No change; see the future idea below |
+| 11–14 | billing stays as today | Not this round |
+
+**A — the BOZP item checks carry the result (answer 1).** The BOZP spec rule „žiadna prenesená
+položka nemá predvyplnený stav" (block 2, ch. 12) is **reversed** by the customer for rebríky,
+regály, pracovné prostriedky, označenie and OOPP: they are `CarryOver::FULL` types now. Opakovať,
+„Prevziať položky" and the concepts of a prehliadka (rebríky / regály) carry every field of the last
+protocol — result / stav, závady, označenie nosnosti, poskytnuté / používané, poznámka — record
+`carried_from` / `carried_positions`, show the same origin line and „prevzaté" marks, and the
+completeness rule holds a carried draft with an empty required value back (unlocked and imported
+drafts are not held back). The structured **nedostatky** of a row (`defects`, with photos, termín
+and „Overiť odstránenie" tasks) are **not** carried: they belong to the protocol they were found in,
+and a copy would be listed twice as open on Dnes (Defects: „never carry over"). The úkon-level
+opatrenia / záver are not carried either (not named in the answer). The carried texts got the clear
+button (závady of rebrík / regál / pracovný prostriedok, poznámka of označenie / OOPP; závady also on
+„Skontroluj hodnoty"). The server no longer writes `previous_status` for these types, so „minule: …"
+shows only on drafts carried before (their result is blank). Unchanged: kniha BOZP, pracovisko,
+osamelé pracovisko, fajčenie (records) and the person lists.
+
+**B — numbers of požiarna kniha entries (answer 3).** Both formats; every other document keeps
+`PREFIX-RRRR-NNN`. Migration `080_book_numbering.sql`: `companies.book_code` (unique per account) and
+`book_last_seq`, `inspections.book_number` and `book_number_version`, backfilled from the documents of
+issued entries. `Documents/BookNumber`: the code is the first three letters of the name (letters only,
+no diacritics, upper case), proposed at creation (app, Excel import, restore) or at the first issue;
+when taken, the next free variant (first two letters + each following letter, then + a digit, then
+first three + a digit); editable on the firma's detail (2–4 letters or digits, at least one letter so
+it can never read as a year of the old series) until the first entry is issued, then locked; a renamed
+firma keeps it. The number is taken at the first issue inside the issue transaction under the firma's
+row lock (locking reads only until then — MariaDB's snapshot isolation otherwise fails the lock with
+error 1020, which the two-process test caught) and stored on the entry: „Upraviť" + issue gives the
+same number as the next version (`…-v2.pdf`). Drafts hold no number; archived entries keep theirs.
+Entries issued as `PK-RRRR-NNN` keep that number, also after a later „Upraviť". The year folder on
+disk stays the year of the entry's date. A firma whose name has fewer than two letters is refused at
+issue with the reason until the user types a code. Backup / restore carry the code, the counter and
+the entry numbers (a code another firma of the target account holds is not taken over; a warning says
+so). **For the customer's confirmation:** the uniqueness of the code within the account (not in the
+answer — it follows from two firms with the same first letters) and that entries unlocked before the
+change take a new-format number at their next issue.
+
+**C — small changes.** C1: the defect screen offers „dôvod zanikol" only for a defect carried from an
+earlier record (or one already stored with it); the server refuses it for a new defect; the Excel
+import of historical book defects (`Kniha_nedostatky`, stav `zanik`) is history and stays accepted.
+C2: „v bytovom dome / v bytových domoch" on the summary and in the PDF (`BookSentences::fixed`,
+`lib/kniha.ts fixedSentence`); the „+ Bez nedostatkov" sentence names no prevádzka and needed no
+change. C3: „Fotodokumentácia zo zápisu do požiarnej knihy" on the defect screen — no PDF carried the
+old text.
+
+**D — leftovers of round 4.** D1: a photo still being resized counts as a change and the save buttons
+of every item form (and the defect screen) wait for it; `saveItemWithPhotos` refuses a save while one
+is processing (Enter key), the BOZP nedostatok photos too. D2: a permanent delete sends
+`?expect=delete`; when the server would archive instead (issued meanwhile) it answers 409 „Protokol bol
+medzitým vystavený, zahodiť ho nemožno." and the list is read again. D3: `tsconfig.node.json` emits
+into `node_modules/.tmp/` (`"noEmit": true` fails here with TS6310 — a referenced project may not
+disable emit) and the scripts pass `--config vite.config.ts`; README: delete the stale files on the
+server once. D4: restore marks every draft a manifest documents row names, restored or not, and an
+archive without `issued_before` restores every draft as issued — the result says how many
+(`issued_assumed` + a warning). D5: the three hints of „Skontroluj hodnoty". D6: „1 fotku / 2 fotky /
+5 fotiek sa nepodarilo uložiť", „Uloží sa, keď budeš online" everywhere. D7: compare-to-initial on
+„na súhrn" in the five BOZP forms, oprava and vyradenie (nedostatky changes count too).
+
+**Future idea (not planned):** a protocol for a PHP in stav O after a prehliadka (answer 10b).
+
+**Check script:** `bin/test-prehliadka-followups.php` parts 7 (A, C), 8 (restore) and 9 (numbering,
+incl. two parallel issues in separate processes).
 
 ---
 
