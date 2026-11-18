@@ -22,13 +22,28 @@ declare(strict_types=1);
  *      review, a row of the old code without a snapshot, the policy path
  *      with the client built from env.
  *   5. bin/reprice-yearly-extra-seats.php refuses a bad or misspelled option;
- *      bin/billing-daily.php refuses a live key outside production.
+ *      bin/billing-daily.php with a live key outside production refuses only
+ *      the Stripe writes, stamps and alerts the refusal once; partial runs do
+ *      not stamp the last run.
+ *  5b. The daily run's invoice step as a child process (recorder prepended):
+ *      a held row whose alert failed is alerted once, a prepared / skipped
+ *      live row is tried once per run (not twice) and issued once allowed,
+ *      a webhook event Stripe no longer has becomes `gone`.
+ *
+ * Round 3 (billing-fixes-2026-11-round-3.md) adds to part 3: proration
+ * lines netted per subscription and kind over the whole invoice (a merge
+ * with the calls 3 s apart, a merge an hour later, add-then-remove with a
+ * positive and a negative net), the plan never an extra line, the „3 ×"
+ * and „po zľave" texts, classifyItems after a base price change, the
+ * reconcile switch values and the next charge while nothing is pushed; to
+ * part 4: a held paid row and a skipped live row as admin errors, the daily
+ * claim only from `prepared`.
  *   6. Over HTTP (nginx → PHP-FPM): a team member who is not the main user
  *      gets 403 from every billing action; a webhook event that fails is
  *      handled again on Stripe's retry instead of being skipped (needs an
  *      sk_test_ key — Stripe answers 404 for the made-up subscription).
  *
- *     docker compose exec php php bin/test-billing-invoices.php
+ *     docker compose exec php php bin/test-billing-invoices.php   (refuses anything but an sk_test_ key)
  *
  * iDoklad is never called: bin/lib/idoklad-recorder.php is loaded before the
  * autoloader and IS Firol\Idoklad\IDokladClient in this process (checked),
@@ -55,6 +70,10 @@ use Firol\Stripe\StripeShape;
 
 if (strtolower((string) ($_ENV['APP_ENV'] ?? '')) === 'production') {
     fwrite(STDERR, "Refusing to run in production.\n");
+    exit(1);
+}
+if (!str_starts_with((string) ($_ENV['STRIPE_SECRET_KEY'] ?? ''), 'sk_test_')) {
+    fwrite(STDERR, "Refusing: STRIPE_SECRET_KEY is not a test-mode key (sk_test_…).\n");
     exit(1);
 }
 foreach (['IDOKLAD_CLIENT_ID', 'IDOKLAD_CLIENT_SECRET'] as $name) {
@@ -179,7 +198,13 @@ $expect('invoice subscription read from parent', StripeShape::invoiceSubscriptio
 $prorations = array_values(array_filter($inv['lines']['data'], static fn ($l) => StripeShape::lineIsProration($l)));
 $expect('proration read from line parent (7 of 9)', count($prorations), 7);
 $expect('line price/product read from pricing', StripeShape::lineProductId($inv['lines']['data'][8]) !== null && StripeShape::linePriceId($inv['lines']['data'][8]) !== null, true);
-$expect('captured renewal with credit lines → needs review (credit)', InvoiceIssuer::classify($inv)['reason'], 'credit');
+// Round 3: an addition, a quantity change, a removal and two merges in one
+// period net to +1 technician (+11,66 €) — one line, issued (round 2 held it
+// as a credit: the removal's lines formed a negative group of their own).
+$expect('captured renewal (add, change, remove in one period) → issue, one netted line', [
+    InvoiceIssuer::classify($inv)['decision'],
+    $withEnv(['STRIPE_PRODUCT_EXTRA_TECHNICIAN' => $extraProduct], static fn () => array_map(static fn ($l) => [$l['name'], $l['amount']], InvoiceIssuer::invoiceLines($inv))[0]),
+], ['issue', ['POapp — extra technik, pomerná časť (+1 technik) (17.11.–17.12.2026)', 1166]]);
 $base = null;
 foreach ($inv['lines']['data'] as $l) {
     if (!StripeShape::lineIsProration($l)) {
@@ -247,6 +272,97 @@ $expect('a real removal (2→1 nets to −5,34 €) is still a credit → review
 $expect('3 technicians added at once → „(+3 technici)"', $withEnv($xEnv, static fn () => InvoiceIssuer::invoiceLines($invoice(1602, 1602, [$line(-534, 'extra', true, 1, $change), $line(2136, 'extra', true, 4, $change)]))[0]['name']),
     'POapp — extra technik, pomerná časť (+3 technici) (01.12.–17.12.2026)');
 
+// Round 3, item 1: the proration lines of one subscription and kind are
+// netted over the whole invoice, not per proration period.
+$at = static fn (string $start) => ['start' => strtotime($start), 'end' => strtotime('2026-12-17')];
+$mergeApart = $invoice(1900 + 2000, 1900 + 2000, [
+    $line(-700, 'extra', true, 1, $at('2026-12-01 10:00:00'), 0, 'si_dup'),   // delete of the duplicate
+    $line(-700, 'extra', true, 1, $at('2026-12-01 10:00:03'), 0, 'si_keep'),  // update 3 s later: Unused 1×
+    $line(1400, 'extra', true, 2, $at('2026-12-01 10:00:03'), 0, 'si_keep'),  //                  Remaining 2×
+    $line(1900, 'base'), $line(2000, 'extra', false, 2, null, 0, 'si_keep'),
+]);
+$expect('merge with the two calls 3 s apart (groups −7,00 / +7,00 in round 2) → issue, no proration line',
+    $withEnv($xEnv, static fn () => [$c($mergeApart), count(InvoiceIssuer::invoiceLines($mergeApart))]), ['issue', 2]);
+$mergeLate = $invoice(2 + 1900 + 1000, 2 + 1900 + 1000, [
+    $line(867, 'extra', true, 1, $at('2026-12-01 10:00'), 0, 'si_dup'),   // the duplicate appeared
+    $line(-865, 'extra', true, 1, $at('2026-12-01 11:00'), 0, 'si_dup'),  // merged an hour later
+    $line(1900, 'base'), $line(1000, 'extra'),
+]);
+$expect('merge an hour after the duplicate appeared (−8,65 / +8,67) → issue, +0,02 € worded without a count',
+    $withEnv($xEnv, static fn () => [$c($mergeLate), array_map(static fn ($l) => [$l['name'], $l['amount']], InvoiceIssuer::invoiceLines($mergeLate))[0]]),
+    ['issue', ['POapp — extra technik, pomerná časť (01.12.–17.12.2026)', 2]]);
+$addRemovePlus = $invoice(500 + 1900, 500 + 1900, [
+    $line(1000, 'extra', true, 1, $at('2026-11-17')), $line(-500, 'extra', true, 1, $at('2026-12-02')), $line(1900, 'base'),
+]);
+$expect('add then remove in one period, positive net (+5,00 €) → issue, one line without a count',
+    $withEnv($xEnv, static fn () => [$c($addRemovePlus), array_map(static fn ($l) => [$l['name'], $l['amount']], InvoiceIssuer::invoiceLines($addRemovePlus))[0]]),
+    ['issue', ['POapp — extra technik, pomerná časť (17.11.–17.12.2026)', 500]]);
+$addRemoveMinus = $invoice(1900 + 1000 - 167, 1900 + 1000 - 167, [
+    $line(333, 'extra', true, 1, $at('2026-12-07')),                                       // a 3rd extra technician
+    $line(-1000, 'extra', true, 2, $at('2026-12-02')), $line(500, 'extra', true, 1, $at('2026-12-02')), // 2 → 1 earlier
+    $line(1900, 'base'), $line(1000, 'extra'),
+]);
+$expect('add and remove in one period, negative net (−1,67 €) → still held as a credit',
+    $withEnv($xEnv, static fn () => $c($addRemoveMinus)), 'review/credit');
+$expect('…the held reason is Slovak', str_starts_with($withEnv($xEnv, static fn () => InvoiceIssuer::classify($addRemoveMinus)['detail']), 'dobropis -1,67 €'), true);
+
+// Round 3, item 6: a line under a base price is never an extra line.
+$guard = $line(1900, 'x');
+$guard['description'] = '1 × POapp — extra technik (at €19.00 / month)';
+$guard['price'] = ['id' => 'price_base_guard', 'product' => 'prod_whatever'];
+$expect('a base-price line with a legacy name in its description is the plan',
+    $withEnv(['STRIPE_PRICE_MONTHLY' => 'price_base_guard'], static fn () => InvoiceIssuer::invoiceLines($invoice(1900, 1900, [$guard]))[0]['kind']), 'base');
+$guard['price'] = ['id' => 'price_x', 'product' => 'prod_extra_test'];
+$expect('…also when STRIPE_PRODUCT_EXTRA_TECHNICIAN is that line\'s product but its price is a base price',
+    $withEnv(['STRIPE_PRODUCT_EXTRA_TECHNICIAN' => 'prod_extra_test', 'STRIPE_PRICE_MONTHLY' => 'price_x'], static fn () => InvoiceIssuer::invoiceLines($invoice(1900, 1900, [$guard]))[0]['kind']), 'base');
+
+// Round 3, item 6: texts of discounted lines.
+$three = $invoice(1900 + 2750, 1900 + 2750, [$line(1900, 'base'), $line(3000, 'extra', false, 3, null, 250)],
+    ['total_discount_amounts' => [['amount' => 250, 'discount' => 'di_test']]]);
+$expect('a discounted line that does not divide by the quantity → 1 ks with the count in the name',
+    $withEnv($xEnv, static fn () => array_map(static fn ($i) => [$i['Name'], $i['Amount'], $i['UnitPrice']], InvoiceIssuer::buildPayload(1, $three)['Items'])[1]),
+    ['POapp — 3 × extra technik, po zľave (17.12.2026 – 17.01.2027)', 1, 27.5]);
+$proDisc = $line(534, 'extra', true, 1, $change);
+$proDisc['discountable'] = true;
+$discRenewal = $invoice(534 + 1710 + 890, 534 + 1710 + 890, [$proDisc, $line(1900, 'base', false, 1, null, 190), $line(1000, 'extra', false, 1, null, 110)],
+    ['total_discount_amounts' => [['amount' => 300, 'discount' => 'di_test']]]);
+$expect('a proration of a discounted subscription is named „po zľave" like the plan line',
+    $withEnv($xEnv, static fn () => [$c($discRenewal), InvoiceIssuer::invoiceLines($discRenewal)[0]['name']]),
+    ['issue', 'POapp — extra technik, pomerná časť (+1 technik), po zľave (01.12.–17.12.2026)']);
+
+// Round 3, item 6: classifyItems after a base price change.
+$item = static fn (string $id, string $price, string $product, array $meta = []) => ['id' => $id, 'quantity' => 1, 'metadata' => $meta, 'price' => ['id' => $price, 'product' => $product, 'recurring' => ['interval' => 'month']]];
+$cls = static fn (array $items, string $recExtra = '', string $recBase = '') => $withEnv(
+    ['STRIPE_PRICE_MONTHLY' => 'price_plan_new', 'STRIPE_PRICE_YEARLY' => 'price_plan_new_y', 'STRIPE_PRODUCT_EXTRA_TECHNICIAN' => 'prod_extra_test'],
+    static function () use ($items, $recExtra, $recBase) {
+        $s = SeatSync::classifyItems($items, $recExtra, [], $recBase);
+        return [$s['base']['id'] ?? null, array_column($s['extras'], 'id'), array_column($s['unknown'], 'id')];
+    });
+$other = $item('si_other', 'price_other', 'prod_other');
+$oldPlan = $item('si_plan', 'price_plan_old', 'prod_plan_old');
+$expect('changed base price, an unrelated item listed first: the remembered plan item is the base, the other is unknown',
+    $cls([$other, $oldPlan], '', 'si_plan'), ['si_plan', [], ['si_other']]);
+$expect('…without a remembered plan item: no base, both unknown (left for a person, no next charge)',
+    $cls([$other, $oldPlan]), [null, [], ['si_other', 'si_plan']]);
+$expect('one unrecognised item and nothing else: it is the plan (as before)', $cls([$oldPlan]), ['si_plan', [], []]);
+$expect('an unmarked old extra item next to the plan, not recorded on the account → unknown (never a second extra item beside it)',
+    $cls([$item('si_base', 'price_plan_new', 'prod_plan'), $item('si_oldx', 'price_oldx', 'prod_oldx')]), ['si_base', [], ['si_oldx']]);
+
+// Round 3, item 5: the reconcile switch accepts only on / off.
+$sw = static fn (?string $v) => $withEnv(['BILLING_RECONCILE' => $v], static fn () => [SeatSync::reconcileSwitch(), SeatSync::pushEnabled()]);
+$expect('BILLING_RECONCILE unset / on / off / OFF / disabled / false',
+    [$sw(null), $sw('on'), $sw('off'), $sw('OFF'), $sw('disabled'), $sw('false')],
+    [['on', true], ['on', true], ['off', false], ['off', false], ['invalid', false], ['invalid', false]]);
+$expect('…an invalid value is an admin error', $withEnv(['BILLING_RECONCILE' => 'disabled'], static fn () => array_column(\Firol\Billing\ConfigCheck::run(), 'level', 'key')['billing_reconcile'] ?? null), 'error');
+
+// Round 3, item 5: „Ďalšia fakturácia" from Stripe's quantity while nothing is pushed.
+$acct = ['stripe_subscription_id' => 'sub_x', 'stripe_base_unit_amount_cents' => 1900, 'extra_technicians' => 2,
+         'stripe_extra_quantity' => 1, 'stripe_extra_subscription_item_id' => 'si_x', 'stripe_extra_unit_amount_cents' => 1000, 'seat_sync_state' => 'ok'];
+$expect('next charge: switch on → wanted count (19 + 2 × 10)', $withEnv(['BILLING_RECONCILE' => null], static fn () => SeatSync::nextChargeCents($acct)), 3900);
+$expect('…switch off → Stripe\'s count (19 + 1 × 10)', $withEnv(['BILLING_RECONCILE' => 'off'], static fn () => SeatSync::nextChargeCents($acct)), 2900);
+$expect('…account left for a person → Stripe\'s count', $withEnv(['BILLING_RECONCILE' => null], static fn () => SeatSync::nextChargeCents(['seat_sync_state' => 'manual'] + $acct)), 2900);
+$expect('…no plan item recognised → no next charge', SeatSync::nextChargeCents(['stripe_base_unit_amount_cents' => null] + $acct), null);
+
 // Round 2, item 4: promotion codes — lines priced net of their discounts.
 $pct = $invoice(1520 + 800, 1520 + 800, [$line(1900, 'base', false, 1, null, 380), $line(1000, 'extra', false, 1, null, 200)],
     ['total_discount_amounts' => [['amount' => 580, 'discount' => 'di_test']]]);
@@ -306,7 +422,8 @@ try {
     $i2 = $invoice(1900, 1900, [$line(1900, 'base')]);
     $id2 = InvoiceIssuer::record($acc, $i2, false);
     $st = $withEnv(['IDOKLAD_ISSUE_MODE' => 'send'], static fn () => (new InvoiceIssuer())->issue($id2));
-    $expect('send mode + livemode=false: prepared, never sent', [$st, str_contains((string) $row($id2)['error_message'], 'test-mode')], ['prepared', true]);
+    $expect('send mode + livemode=false: prepared, never sent', [$st, str_contains((string) $row($id2)['error_message'], 'testovacia platba')], ['prepared', true]);
+    $expect('round 3: preparing a row is not an attempt', [(int) $row($id1)['attempts'], (int) $row($id2)['attempts']], [0, 0]);
 
     // The send path, recorded.
     $rec = new IDokladClient();
@@ -398,6 +515,35 @@ try {
     $checks = array_column(\Firol\Billing\ConfigCheck::run(), 'level', 'key');
     $expect('live invoice under APP_ENV=prod → prepared, and the admin check shows an ERROR', [$st, $checks['invoices_prepared_live'] ?? 'missing'], ['prepared', 'error']);
     $expect('…with „Vystaviť" offered', InvoiceIssuer::manualIssueAllowed($row($id8)), true);
+    $expect('…the alert for it says to set IDOKLAD_ISSUE_MODE=send first (the button cannot work in prepare mode)',
+        $withEnv(['APP_ENV' => 'prod', 'IDOKLAD_ISSUE_MODE' => null], static fn () => str_starts_with(\Firol\Idoklad\InvoiceAlert::action($row($id8)), 'Najprv nastav IDOKLAD_ISSUE_MODE=send')), true);
+
+    // Round 3, item 2: a held paid row is an admin ERROR naming the account
+    // and the amount; its alert is tried at once (mail is off here, so
+    // operator_alerted_at stays NULL and the daily run repeats it).
+    $checks = array_column(\Firol\Billing\ConfigCheck::run(), null, 'key');
+    $expect('held paid rows: admin ERROR naming the account and the amount', [
+        $checks['invoices_held']['level'] ?? null,
+        str_contains((string) ($checks['invoices_held']['message'] ?? ''), 'Invoice test s.r.o. (#' . $acc . ') 9,00 €, dobropis / kredit'),
+    ], ['error', true]);
+    $s = $pdo->prepare('SELECT operator_alerted_at FROM invoices WHERE stripe_invoice_id = ?');
+    $s->execute([$ic['id']]);
+    $expect('…its alert failed (no SMTP here): operator_alerted_at NULL, left for the daily run', $s->fetchColumn(), null);
+
+    // Round 3, item 2: a live row skipped because iDoklad has no credentials.
+    $id9 = InvoiceIssuer::record($acc, $invoice(1900, 1900, [$line(1900, 'base')], ['livemode' => true]), true);
+    $st = $withEnv(['IDOKLAD_ISSUE_MODE' => 'send', 'IDOKLAD_CLIENT_ID' => null, 'IDOKLAD_CLIENT_SECRET' => null], static fn () => (new InvoiceIssuer())->issue($id9));
+    $checks = $withEnv(['APP_ENV' => 'production', 'IDOKLAD_CLIENT_ID' => null, 'IDOKLAD_CLIENT_SECRET' => null], static fn () => array_column(\Firol\Billing\ConfigCheck::run(), 'level', 'key'));
+    $expect('live row with iDoklad not configured → skipped (no attempt used), admin ERROR; „iDoklad not configured" is an ERROR in production',
+        [$st, (int) $row($id9)['attempts'], $checks['invoices_skipped_live'] ?? null, $checks['idoklad'] ?? null], ['skipped', 0, 'error', 'error']);
+
+    // Round 3, item 5: the daily run claims a live row only from its status —
+    // a row an admin moved to uncertain_send in between is never posted.
+    $rec10 = new IDokladClient();
+    $id10 = InvoiceIssuer::record($acc, $invoice(1900, 1900, [$line(1900, 'base')], ['livemode' => true]), true);
+    $pdo->prepare("UPDATE invoices SET status = 'needs_review', review_reason = 'uncertain_send' WHERE id = ?")->execute([$id10]);
+    $expect('daily claim only from „prepared": a row moved to uncertain_send is not posted',
+        [(new InvoiceIssuer($rec10))->issue($id10, true, ['prepared']), $rec10->invoicePosts()], ['needs_review', 0]);
 } finally {
     $pdo->rollBack();
 }
@@ -414,18 +560,118 @@ $runScript = static function (array $args): int {
 $expect('misspelled --acount=5 refused', $runScript(['--offline', '--acount=5']), 2);
 $expect('non-numeric --account=abc refused', $runScript(['--offline', '--account=abc']), 2);
 $expect('--offline --account=999999 runs (dry, database only)', $runScript(['--offline', '--account=999999']), 0);
-// bin/billing-daily.php with a live key outside production.
-$daily = static function (array $env, array $args = []): array {
-    $p = proc_open([PHP_BINARY, __DIR__ . '/billing-daily.php', '--dry-run', '--only=seats', '--account=999999', ...$args],
+// bin/billing-daily.php as a child process: with the iDoklad recorder
+// prepended (auto_prepend_file — it IS the iDoklad client there too), blank
+// iDoklad credentials and IDOKLAD_ISSUE_MODE=prepare unless a check says
+// otherwise. The child reads backend/.env itself; these values win.
+$daily = static function (array $env, array $args): array {
+    $env += ['IDOKLAD_CLIENT_ID' => '', 'IDOKLAD_CLIENT_SECRET' => '', 'IDOKLAD_ISSUE_MODE' => 'prepare', 'IDOKLAD_ALLOW_TEST_EVENTS' => ''];
+    $p = proc_open([PHP_BINARY, '-d', 'auto_prepend_file=' . __DIR__ . '/lib/idoklad-recorder.php', __DIR__ . '/billing-daily.php', ...$args],
         [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, array_merge(getenv(), $env));
-    stream_get_contents($pipes[1]);
+    $out = (string) stream_get_contents($pipes[1]);
     $err = (string) stream_get_contents($pipes[2]);
-    return [proc_close($p), $err];
+    return [proc_close($p), $out, $err];
 };
-[$code, $err] = $daily(['STRIPE_SECRET_KEY' => 'sk_live_fake', 'APP_ENV' => 'local']);
-$expect('billing-daily with a live key and APP_ENV=local refuses', [$code, str_contains($err, 'LIVE key')], [2, true]);
-[$code] = $daily(['STRIPE_SECRET_KEY' => 'sk_live_fake', 'APP_ENV' => 'local'], ['--allow-live']);
+$settingOf = static function (string $key) use ($pdo): ?string {
+    $s = $pdo->prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?');
+    $s->execute([$key]);
+    $v = $s->fetchColumn();
+    return $v === false ? null : (string) $v;
+};
+// Round 3, item 3: a live key outside production refuses only the Stripe
+// writes; the run is stamped, alerted, and the checks still run.
+$lastRunBefore = $settingOf(\Firol\Billing\ConfigCheck::DAILY_RUN_KEY);
+[$code, , $err] = $daily(['STRIPE_SECRET_KEY' => 'sk_live_fake', 'APP_ENV' => 'local'], ['--dry-run', '--only=seats', '--account=999999']);
+$expect('billing-daily with a live key and APP_ENV=local: Stripe writes refused, exit 2 (dry run: nothing stamped)',
+    [$code, str_contains($err, 'LIVE key'), $settingOf(\Firol\Billing\ConfigCheck::DAILY_REFUSED_KEY)], [2, true, null]);
+[$code, $out] = $daily(['STRIPE_SECRET_KEY' => 'sk_live_fake', 'APP_ENV' => 'local'], ['--only=invoices', '--account=999999']);
+$refusedStamp = $settingOf(\Firol\Billing\ConfigCheck::DAILY_REFUSED_KEY);
+$checks = array_column(\Firol\Billing\ConfigCheck::run(), 'level', 'key');
+$expect('…a real run: the invoice step still runs, the refusal is stamped and is an admin ERROR',
+    [$code, str_contains($out, 'invoices:'), $refusedStamp !== null, $checks['daily_refused'] ?? null], [2, true, true, 'error']);
+$expect('…one operator alert for it (mailed by the child, remembered)', \Firol\Billing\OperatorAlert::wasSent('daily_refused'), true);
+[$code, $out] = $daily(['STRIPE_SECRET_KEY' => 'sk_live_fake', 'APP_ENV' => 'local'], ['--only=invoices', '--account=999999']);
+$expect('…a second refused run does not alert again', [$code, str_contains($out, 'operator alert: already')], [2, true]);
+[$code] = $daily(['STRIPE_SECRET_KEY' => 'sk_live_fake', 'APP_ENV' => 'local'], ['--dry-run', '--only=seats', '--account=999999', '--allow-live']);
 $expect('…--allow-live lets it run (dry run, a missing account, nothing read)', $code, 0);
+[$code] = $daily([], ['--only=invoices', '--account=999999']);
+$expect('…a run that is not refused removes the stamp and the alert memory',
+    [$code, $settingOf(\Firol\Billing\ConfigCheck::DAILY_REFUSED_KEY), \Firol\Billing\OperatorAlert::wasSent('daily_refused')], [0, null, false]);
+$expect('partial runs (--dry-run, --only, --account, refused) never stamp the last run', $settingOf(\Firol\Billing\ConfigCheck::DAILY_RUN_KEY), $lastRunBefore);
+// A stale last run with a live key: an error whatever APP_ENV says.
+$pdo->prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES (?, '2000-01-01 00:00:00')
+               ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")->execute([\Firol\Billing\ConfigCheck::DAILY_RUN_KEY]);
+try {
+    $levels = $withEnv(['STRIPE_SECRET_KEY' => 'sk_live_fake', 'APP_ENV' => 'local'], static fn () => array_column(\Firol\Billing\ConfigCheck::run(), 'level', 'key'));
+} finally {
+    if ($lastRunBefore === null) {
+        $pdo->prepare('DELETE FROM system_settings WHERE setting_key = ?')->execute([\Firol\Billing\ConfigCheck::DAILY_RUN_KEY]);
+    } else {
+        $pdo->prepare('UPDATE system_settings SET setting_value = ? WHERE setting_key = ?')->execute([$lastRunBefore, \Firol\Billing\ConfigCheck::DAILY_RUN_KEY]);
+    }
+}
+$expect('a live key with APP_ENV=local is an admin ERROR, and so is a stale daily run with a live key',
+    [$levels['stripe_key'] ?? null, $levels['daily'] ?? null], ['error', 'error']);
+echo "\n";
+
+// ── 5b. the daily run's invoice step (round 3, items 2 and 5) ───────────
+echo "5b — the daily run: held rows re-alerted, one attempt per row, live rows issued once allowed, gone events\n";
+$suffix7 = bin2hex(random_bytes(3));
+$pdo->prepare("INSERT INTO users (fullname, email, password_hash) VALUES ('Daily test', ?, '')")->execute(["daily-test-$suffix7@example.com"]);
+$uid7 = (int) $pdo->lastInsertId();
+$pdo->prepare("INSERT INTO accounts (invoice_company_name, invoice_street, invoice_postal_code, invoice_city, invoice_ico, main_user_id, subscription_end_date)
+               VALUES ('Daily test s.r.o.', 'Test 1', '000 00', 'Test', '00000000', ?, '2027-01-01')")->execute([$uid7]);
+$acc7 = (int) $pdo->lastInsertId();
+$eventId7 = 'evt_test_gone_' . $suffix7;
+try {
+    $rowOf = static function (int $id) use ($pdo): array {
+        $s = $pdo->prepare('SELECT * FROM invoices WHERE id = ?');
+        $s->execute([$id]);
+        return $s->fetch();
+    };
+    // A: held credit (its alert failed — no SMTP in this process).
+    InvoiceIssuer::record($acc7, $ia = $invoice(1900, 900, [$line(1900, 'base')], ['livemode' => true]), true);
+    $idA = (int) $pdo->query('SELECT id FROM invoices WHERE stripe_invoice_id = ' . $pdo->quote($ia['id']))->fetchColumn();
+    // B: a live payment only prepared; C: a live payment skipped (no iDoklad credentials).
+    $idB = (int) InvoiceIssuer::record($acc7, $invoice(1900, 1900, [$line(1900, 'base')], ['livemode' => true]), true);
+    $withEnv(['IDOKLAD_ISSUE_MODE' => 'prepare'], static fn () => (new InvoiceIssuer())->issue($idB));
+    $idC = (int) InvoiceIssuer::record($acc7, $invoice(2900, 2900, [$line(1900, 'base'), $line(1000, 'extra')], ['livemode' => true]), true);
+    $withEnv(['IDOKLAD_ISSUE_MODE' => 'send', 'IDOKLAD_CLIENT_ID' => null, 'IDOKLAD_CLIENT_SECRET' => null], static fn () => (new InvoiceIssuer())->issue($idC));
+    $expect('set-up: A held without an alert, B prepared, C skipped, no attempt used',
+        [[$rowOf($idA)['status'], $rowOf($idA)['operator_alerted_at']], [$rowOf($idB)['status'], (int) $rowOf($idB)['attempts']], [$rowOf($idC)['status'], (int) $rowOf($idC)['attempts']]],
+        [['needs_review', null], ['prepared', 0], ['skipped', 0]]);
+
+    // Sending switched on, iDoklad (the recorder) failing.
+    $sendEnv = ['IDOKLAD_ISSUE_MODE' => 'send', 'IDOKLAD_CLIENT_ID' => 'x', 'IDOKLAD_CLIENT_SECRET' => 'x'];
+    [, $out] = $daily($sendEnv + ['IDOKLAD_RECORDER_FAIL' => '1'], ['--only=invoices', '--account=' . $acc7]);
+    $expect('daily run 1 (iDoklad failing): A alerted now, B and C tried once each (not twice), error',
+        [$rowOf($idA)['operator_alerted_at'] !== null, [$rowOf($idB)['status'], (int) $rowOf($idB)['attempts']], [$rowOf($idC)['status'], (int) $rowOf($idC)['attempts']]],
+        [true, ['error', 1], ['error', 1]]);
+    $expect('…the log says what really happened', [str_contains($out, "row=$idA held (credit) — operator alerted"), str_contains($out, "row=$idB LIVE payment prepared → error")], [true, true]);
+    [, $out] = $daily($sendEnv, ['--only=invoices', '--account=' . $acc7]);
+    $expect('daily run 2 (iDoklad answering): A not alerted again, B and C issued by the retry',
+        [str_contains($out, "row=$idA"), [$rowOf($idB)['status'], (int) $rowOf($idB)['attempts']], [$rowOf($idC)['status'], (string) $rowOf($idC)['document_number'] !== '' ? 'numbered' : '']],
+        [false, ['issued', 2], ['issued', 'numbered']]);
+
+    // A webhook event Stripe no longer has: gone after the first re-run.
+    $pdo->prepare("INSERT INTO stripe_webhook_events (event_id, event_type, status, attempts, error_message) VALUES (?, 'customer.subscription.updated', 'failed', 1, 'test')")
+        ->execute([$eventId7]);
+    [, $out] = $daily([], ['--only=events']);
+    $s = $pdo->prepare('SELECT status, attempts FROM stripe_webhook_events WHERE event_id = ?');
+    $s->execute([$eventId7]);
+    $ev = $s->fetch();
+    $gone = array_column(\Firol\Billing\ConfigCheck::run(), null, 'key')['webhook_events_gone'] ?? [];
+    $expect('an event Stripe answers 404 for → gone (terminal), the failure recorded, listed by the admin check',
+        [$ev['status'] ?? null, (int) ($ev['attempts'] ?? 0), str_contains((string) ($gone['message'] ?? ''), $eventId7)], ['gone', 2, true]);
+    [, $out] = $daily([], ['--only=events']);
+    $expect('…not re-run by the next daily run (only the admin check line names it)', str_contains($out, "event $eventId7 ("), false);
+} finally {
+    $pdo->prepare('DELETE FROM stripe_webhook_events WHERE event_id = ?')->execute([$eventId7]);
+    $pdo->prepare('DELETE FROM billing_operator_alerts WHERE alert_key = ?')->execute(["event_gone:$eventId7"]);
+    $pdo->prepare('DELETE FROM invoices WHERE account_id = ?')->execute([$acc7]);
+    $pdo->prepare('DELETE FROM accounts WHERE id = ?')->execute([$acc7]);
+    $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$uid7]);
+}
 echo "\n";
 
 // ── 6. over HTTP ────────────────────────────────────────────────────────

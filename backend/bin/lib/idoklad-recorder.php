@@ -32,14 +32,30 @@ final class IDokladClient implements IDokladApi
     {
     }
 
+    /**
+     * The shared recorder. A child process started with
+     * IDOKLAD_RECORDER_FAIL=1 gets one whose invoice POST fails (HTTP 400),
+     * so a test can drive the daily run through a failing iDoklad.
+     */
     public static function fromEnv(): self
     {
-        return self::$shared ??= new self();
+        if (self::$shared === null) {
+            self::$shared = new self();
+            if ((string) ($_ENV['IDOKLAD_RECORDER_FAIL'] ?? getenv('IDOKLAD_RECORDER_FAIL') ?: '') === '1') {
+                self::$shared->failInvoicePost = new \RuntimeException('iDoklad POST IssuedInvoices failed: HTTP 400 — recorder told to fail');
+            }
+        }
+        return self::$shared;
     }
 
+    /**
+     * Same rule as the real client (both credentials set), so a test can
+     * show the `skipped` path; the values are never used for anything.
+     */
     public static function isConfigured(): bool
     {
-        return true;
+        return ($_ENV['IDOKLAD_CLIENT_ID'] ?? '') !== ''
+            && ($_ENV['IDOKLAD_CLIENT_SECRET'] ?? '') !== '';
     }
 
     public static function assertStub(): void
