@@ -2143,6 +2143,164 @@ round fixes what the reviews found. Migration `079` edited (not deployed anywher
 - ⏸ Round 1 Part 2 (VAT, charging additions at once, failed-renewal access, credits on tax
   documents, invoice delivery, monthly ↔ yearly) still waits.
 
+### Billing fixes, round 3 (18. 11. 2026) 🟨 built on `poapp-oct-2026`, checked in Stripe test mode; owner decisions pending
+
+Source: `docs/prompts/billing-fixes-2026-11-round-3.md` (three reviews of round 2 and two re-runs on
+test clocks: 26 invoices of 10 customers, 334 events replayed twice and in reverse). Every invoice
+round 2 issued added up to the amount Stripe charged and none was recorded twice; this round fixes
+paid renewals that ended without a tax document and without anyone being told. Migration `079`
+edited again (not deployed anywhere yet).
+
+**What was wrong**
+- A paid renewal after a duplicate merge was held: the reconcile deleted the duplicate and updated
+  the kept item in two calls without `proration_date`, so in real time the two halves got different
+  period starts and `invoiceLines()` (grouped per period start) produced −7,00 / +7,00 → a 39,00 €
+  renewal without a tax document. Same for a merge an hour after the duplicate appeared.
+- Held paid invoices were silent: only an `error_log` line, a yellow count in „Kontrola
+  fakturácie" without account names, the customer seeing „Spracováva sa" forever. A live row
+  `skipped` for missing iDoklad credentials was the same.
+- A wrong `APP_ENV` with a live key hid everything: rows were prepared without an alert, the
+  daily run's live-key guard exited before the invoice alerts every night, `ConfigCheck` showed
+  warnings only; partial runs stamped the last run.
+- Accounts with two subscriptions: the take-over ran only on an event of the paid one; the daily
+  run and every roster change pushed extra technicians onto the recorded unpaid one.
+- Silent states: accounts left for a person only in the log; `BILLING_RECONCILE=disabled` meant
+  ON; the daily run tried a prepared row twice in one run (two attempts, two alerts) and could post
+  a row an admin had just moved to `uncertain_send`; an event Stripe no longer returns failed every
+  night; a failing `crontab -l` could install an empty crontab; a refused extra product made every
+  Checkout with extra technicians answer 502; the alert for a prepared row offered a button that
+  could not work.
+- Smaller: the replay check of L4 failed (no plan item → no period); test child processes did not
+  load the recorder; the reprice script trusted the recorded item id; `classifyItems` took an
+  unrelated item listed first as the plan after a base price change; a plan line could be named as
+  an extra technician; Checkout wrote a subscription read before the lock; a coupon on the
+  customer was not seen; English reasons in the admin and alerts.
+
+**What changed**
+- ✅ Item 1: `SeatSync::reconcile()` passes one `proration_date` (now, or the test clock's frozen
+  time) to every create / update / delete of a run. `InvoiceIssuer::invoiceLines()` nets ALL
+  proration lines of one subscription and kind (extra / plan) over the whole invoice into one line —
+  „POapp — extra technik, pomerná časť (+2 technici) (21.11.–18.12.2026)", the period from the
+  earliest start to the latest end; a positive net with no change in the count is worded without a
+  count. Held only for a negative net, a negative total, `amount_paid` ≠ `total`, or lines that do
+  not add up. **Consequence (as decided in the prompt):** an addition later undone in the same
+  period with a positive net is issued (test clock H8: 21,33 €, extras +2,33 €; the captured
+  renewal of round 1: add + change + remove = +1 technik, 40,66 €, now issued); a removal with a
+  negative net stays held (H9: 21,33 € paid, extras −7,67 € → held). Several changes in one period
+  are one line (H1: „(+2 technici)" instead of two „(+1 technik)" lines).
+- ✅ Item 2: every held paid row alerts the operator once (`InvoiceAlert`, `operator_alerted_at`,
+  sent after the webhook answered); the daily run re-alerts every `needs_review` row whose alert
+  did not go out and logs what really happened (alerted / NOT alerted). `ConfigCheck`: held rows
+  are an **error** naming account, amount and reason; live rows `skipped` without iDoklad
+  credentials are an error, alerted, and issued by the daily run once iDoklad is configured;
+  „iDoklad nie je nastavený" is an error in production (or with a live key). No „issue anyway" for
+  credits (Part 2).
+- ✅ Item 3: `issue()` alerts once when the policy prepares a live row. The daily run's live-key
+  guard stops only the Stripe writes (event re-runs, seat pushes — seats are reported); the checks
+  and the invoice step run; the refusal is stamped (`system_settings.billing_daily_refused`), one
+  alert, exit 2. `ConfigCheck`: a live key with `APP_ENV` ≠ `production`, a stamped refusal, and
+  a stale daily run with a live key are errors. `--dry-run`, `--only`, `--account` and refused runs
+  do not stamp `billing_daily_last_run`.
+- ✅ Item 4: the daily run lists the customer's subscriptions and applies the webhook's take-over
+  rule on Stripe's statuses (paid first; `incomplete` added to what a paid subscription takes over
+  from); `reconcile` pushes nothing to a recorded subscription that is not active / trialing while
+  a paid sibling exists (`manual`). No subscription is ever cancelled or changed automatically; one
+  alert per take-over and per customer with two or more live subscriptions, stored on the account
+  (`stripe_other_subscriptions`) and shown in `ConfigCheck` as an error naming the account and
+  whether the old subscription still carries an extra item. Reachability of an `incomplete`
+  subscription moving `subscription_end_date`: yes, by the code path (not reproduced with the old code) — `customer.subscription.created` of an
+  incomplete subscription (a subscription created in the dashboard / API with
+  `default_incomplete`, or a payment that needs confirmation) on an account with no live
+  subscription stored its period end, a free period; fixed: `incomplete` / `incomplete_expired`
+  never move the paid-until date (test clock T2).
+- ✅ Item 5: the last reconcile result per account (`seat_sync_state`, note, time) — manual and
+  error accounts are an error in `ConfigCheck` with names, alerted once per account and state.
+  `BILLING_RECONCILE` accepts only `on` / `off` (unset = on); anything else is off plus an error;
+  off for more than 3 days is an error (`billing_reconcile_off_since`). While nothing is pushed
+  (switch off, account manual) „Ďalšia fakturácia" uses Stripe's quantity
+  (`stripe_extra_quantity`, `next_charge_extra_technicians`). A prepare / skip claim is not an
+  attempt; a row the daily run handled is skipped by its retry loop; the daily run claims live rows
+  only from `prepared` / `skipped`. An event Stripe answers 404 for, or one failing for 30 days,
+  becomes `gone` (failure recorded on the row, not re-run, listed in `ConfigCheck`, alerted once).
+  `deploy.yml`: the crontab is read once into a variable; a failed read other than „no crontab"
+  leaves it alone (diff below). Checkout retries once with the inline product when Stripe refuses
+  the extra product (`BillingController::createCheckoutSession`). The alert for a prepared row says
+  „Najprv nastav IDOKLAD_ISSUE_MODE=send"; each alert names only what can work in the row's state.
+- ✅ Item 6: test L4's replay expects no period (no plan item); the test child processes run with
+  the recorder as `auto_prepend_file`, blank iDoklad credentials and `IDOKLAD_ISSUE_MODE=prepare`;
+  `test-billing-invoices.php` refuses a key that is not `sk_test_`. The reprice script classifies
+  the subscription's items and reprices only `extras` (L6, dry run). `classifyItems`: the plan item
+  is remembered (`stripe_base_subscription_item_id`) and preferred; more than one unrecognised item,
+  or an unmarked item next to the plan, is `unknown` → `manual`, no next charge without a plan item.
+  `isExtraLine`: a base price / base product line is never an extra line. Checkout stores the
+  subscription read again under the lock, a busy lock answers 502; lock names carry the database
+  name (`BillingLock`). A coupon on the customer counts as a discount (K3). Reasons in the admin and
+  alerts are Slovak; a proration of a discounted subscription is „po zľave"; a discounted line not
+  divisible by its quantity is printed as „POapp — 3 × extra technik, po zľave".
+- ✅ Docs: README (billing notes, webhook events, PHP 8.5 CLI for cron, `ADMIN_EMAIL` = platform
+  admin, OVERCHARGED after the switch, the „Technici zahrnutí v predplatnom" lever, the dry run of
+  the invoice step before the first nightly run, two-subscription flags resolved before the switch),
+  `.env.example`, the manual on disk.
+
+`deploy.yml` (crontab), for the owner's review:
+
+```diff
+-            ( crontab -l 2>/dev/null | grep -qF "$ROOT/scripts/backup-db.sh" ) \
+-              || ( crontab -l 2>/dev/null; echo "$CRON_CMD" ) | crontab -
++            if CRONTAB_NOW=$(crontab -l 2>&1); then CRONTAB_OK=1
++            elif printf '%s' "$CRONTAB_NOW" | grep -q "no crontab"; then CRONTAB_NOW=""; CRONTAB_OK=1
++            else echo "crontab -l failed, cron lines not installed: $CRONTAB_NOW"; CRONTAB_OK=0
++            fi
++            add_cron() {
++              [ "$CRONTAB_OK" = 1 ] || return 0
++              printf '%s\n' "$CRONTAB_NOW" | grep -qF "$1" && return 0
++              if [ -n "$CRONTAB_NOW" ]; then CRONTAB_NOW=$(printf '%s\n%s' "$CRONTAB_NOW" "$2"); else CRONTAB_NOW="$2"; fi
++              printf '%s\n' "$CRONTAB_NOW" | crontab -
++            }
++            add_cron "$ROOT/scripts/backup-db.sh" "$CRON_CMD"
+   (the same one-line `add_cron` for the prune, deadline-notice and billing lines)
+```
+
+**Stripe test mode, 18. 11. 2026** — `bin/test-billing-invoices.php` 116 checks, 0
+  failures; `bin/test-billing-stripe.php` in full 290 checks, 0 failures (31 test clocks, all
+  deleted; 730 events replayed through the real webhook, then again and in reverse: same end state,
+  no invoice row twice, nothing sent; 43 rows prepared, 2 held — the removal credits H6 and H9).
+  Recorded iDoklad payloads, all summing to the amount paid: H1 monthly 53,66 € („pomerná časť
+  (+2 technici)" 14,66 + 19,00 + 2 × 10,00), H2 yearly 557,91 €, H3 Firol-named legacy item
+  45,00 €, H4 34,33 €, H5 merge with the delete and the update 5 s apart 39,00 € — one proration
+  date, no proration line, H7 merge an hour after the duplicate 29,01 € (count-less line 0,01 €),
+  H8 add-then-remove 21,33 € (count-less line 2,33 €); held: H6 removal −6,66 €, H9
+  add-and-remove net −7,67 € (21,33 € paid), each an admin error naming the account and the
+  amount and alerted once by the daily run. K1 20 % 23,20 € / 36,27 €, K2 3 € 26,00 € / 42,34 €
+  — the proration lines „po zľave"; K3 a customer coupon → „pred zľavou". L5 a refused extra
+  product → Checkout retried inline and opened; L6 the reprice dry run skipped the recorded plan
+  item. T: the roster change pushed nothing to the past_due A, the daily run took over B, put 2
+  extra technicians on it, left A's extra item, one take-over and one two-subscription alert (the
+  next run: „already"), admin error naming A's extra item; T2 incomplete → paid-until date
+  unchanged. The `APP_ENV` matrix with a fake live key (offline script): a live key with any
+  `APP_ENV` but `production` is an admin error; without `send` nothing is sent and the prepared
+  row alerts once; the daily run refuses only the Stripe writes, runs the invoice step, stamps and
+  alerts the refusal once (exit 2), a run that is not refused clears it; partial runs never stamp
+  the last run. iDoklad never called (the recorder in every process, PHP-FPM only prepared).
+  `php -l` on every changed file, `npm run build` passed.
+
+**Owner questions (report only, not built)**
+- ⏸ Seat changes made while `BILLING_RECONCILE=off` are prorated from the moment the switch goes
+  on (the next reconcile), not from the change.
+- ⏸ A 0 € invoice (100 % coupon) leaves no `invoices` row at all — nothing in the billing history.
+- ⏸ The period end on invoice lines is Stripe's period end, which is the first day of the next
+  period („18.12.2026 – 18.01.2027"); iDoklad users may expect the last day („17.01.2027").
+- ⏸ Payments the old code lost before the deploy (events marked done, old `skipped` rows):
+  proposal — a one-off, read-only script that lists the paid Stripe invoices (live, since the
+  launch) and compares them with the `invoices` table by Stripe invoice id, printing every paid
+  invoice without a row or with a row that has no iDoklad number. Not written or run.
+- ⏸ Round 2's three questions stay open: the price when the extra item is created again (terms
+  5.5), `PATCH /api/account` open to every team member, the registration claim of an imported
+  technician.
+- ⏸ Round 1 Part 2 (VAT, charging additions at once, failed-renewal access, credits on tax
+  documents, invoice delivery, monthly ↔ yearly) still waits — and now decides the held removal
+  credits (H9) and the OVERCHARGED accounts' first renewal after the switch.
+
 ---
 
 ## Open questions (must be answered before the relevant phase starts)
