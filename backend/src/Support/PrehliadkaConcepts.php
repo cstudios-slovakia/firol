@@ -385,8 +385,9 @@ final class PrehliadkaConcepts
     private static function withResult(string $type, array $fields, ?array $hit, bool $carried = false): array
     {
         $fail = $hit !== null;
-        // A fire-protection device with no defect today keeps the result, values
-        // and texts it carried (fix list of 16. 11. 2026). An empty carried
+        // A device of a FULL type with no defect today keeps the result, values
+        // and texts it carried (fix list of 16. 11. 2026; rebríky and regály
+        // too since the customer's answers of 18. 11. 2026 — answer 2 „asi A"). An empty carried
         // result stays empty — nobody decided it, so the technician sets it, as
         // for a hose with no match — and the carried notes stay with it. Only a
         // device with nothing carried (written down on the walk) gets the

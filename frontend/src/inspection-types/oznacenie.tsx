@@ -28,6 +28,7 @@ import type {
   Step2FormProps,
   SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
 
 /**
  * Kontrola bezpečnostného a zdravotného označenia — block 2 / chapter 7.
@@ -96,8 +97,20 @@ function OznacenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
   const singleKind = kindChoice === CUSTOM ? customKind.trim() : kindChoice;
 
   function isPristine() {
+    // A staged, removed or still-resizing photo is a change; only the save commits it.
+    if (photos.dirty) return false;
+    // An existing item: nothing to save only while nothing differs from what it
+    // opened with — also a carried item whose texts were cleared with the „X"
+    // (compare-to-initial, as in the fire forms; round 5 of the fix list).
+    if (initialItem) {
+      const f = initialItem.fields;
+      return sameFormValues(
+        { kind: str(f, 'kind'), location: str(f, 'location'), result: isPassFail(f.result) ? f.result : null, notes: str(f, 'notes') },
+        { kind: singleKind, location, result, notes },
+      ) && !defects.isDirty();
+    }
     return !location && result === null && !notes && !customKind
-      && photos.total === 0 && !photos.dirty && defects.rows.length === 0;
+      && photos.total === 0 && defects.rows.length === 0;
   }
 
   function getKindsToSave(): string[] {
@@ -318,6 +331,7 @@ function OznacenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
               value={notes}
               onChange={setNotes}
               rows={2}
+              clearable
               placeholder="chýba pri vstupe do haly"
             />
           )}
@@ -327,6 +341,7 @@ function OznacenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
         <DefectsEditor state={defects} initialPhotos={initialItem?.photos} />
 
         <ItemFormFooter
+          busy={photos.processing}
           onNextRecorded={hasNextItem ? (e) => handleSubmit(e, 'save-and-next-recorded') : undefined}
           editing={editing}
           submitting={submitting}

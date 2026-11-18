@@ -3,10 +3,13 @@
  * client needs to know about it. The rules themselves live on the server
  * (`Firol\Support\CarryOver`).
  *
- * The fire-protection types carry every field of the last protocol of the same
- * kind at the prevádzka: identification, measured values, the result / stav
- * and the texts (fix list of 16. 11. 2026, spec 12.2). The technician changes
- * only what changed. Every other type carries identification only.
+ * The device types — the fire-protection types and, since the customer's answer
+ * of 18. 11. 2026, the BOZP item checks (rebríky, regály, pracovné prostriedky,
+ * označenie, OOPP) — carry every field of the last protocol of the same kind at
+ * the prevádzka: identification, measured values, the result / stav and the
+ * texts (fix list of 16. 11. 2026, spec 12.2). The structured nedostatky of a
+ * BOZP row stay behind. The technician changes only what changed. Every other
+ * type (BOZP records, person lists) carries identification only.
  */
 import type { InspectionType } from '@/api/inspections';
 import type { ChecklistOrigin } from '@/api/prehliadka';
@@ -19,6 +22,11 @@ const FULL: ReadonlySet<string> = new Set([
   'pu_akcieschopnost',
   'pu_udrzba',
   'nudzove_osvetlenie',
+  'rebriky',
+  'regale',
+  'pracovne_prostriedky',
+  'oznacenie',
+  'oopp',
 ]);
 
 /** True when this type's items arrive with last protocol's values and result. */

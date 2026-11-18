@@ -26,6 +26,7 @@ import type {
   Step2FormProps,
   SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
 
 /**
  * Kontrola OOPP — block 2 / chapter 7, pattern `tabulka`.
@@ -76,8 +77,23 @@ function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved, hasNextI
   }, [initialItem]);
 
   function isPristine() {
+    // A staged, removed or still-resizing photo is a change; only the save commits it.
+    if (photos.dirty) return false;
+    // An existing item: nothing to save only while nothing differs from what it
+    // opened with — also a carried item whose texts were cleared with the „X"
+    // (compare-to-initial, as in the fire forms; round 5 of the fix list).
+    if (initialItem) {
+      const f = initialItem.fields;
+      return sameFormValues(
+        {
+          position: str(f, 'position'), equipment: str(f, 'equipment'), provided: boolOrNull(f, 'provided'),
+          used: boolOrNull(f, 'used'), condition: isCondition(f.condition) ? f.condition : null, notes: str(f, 'notes'),
+        },
+        { position, equipment, provided, used, condition, notes },
+      ) && !defects.isDirty();
+    }
     return !position && !equipment && provided === null && used === null && condition === null
-      && !notes && photos.total === 0 && !photos.dirty && defects.rows.length === 0;
+      && !notes && photos.total === 0 && defects.rows.length === 0;
   }
 
   function validate(): FieldErrors {
@@ -167,7 +183,7 @@ function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved, hasNextI
 
         <Field label="Poznámka">
           {(p) => (
-            <TextArea id={p.id} value={notes} onChange={setNotes} rows={2}
+            <TextArea id={p.id} value={notes} onChange={setNotes} rows={2} clearable
               placeholder="nepoužíva prilbu" />
           )}
         </Field>
@@ -176,6 +192,7 @@ function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved, hasNextI
         <DefectsEditor state={defects} initialPhotos={initialItem?.photos} />
 
         <ItemFormFooter
+          busy={photos.processing}
           onNextRecorded={hasNextItem ? (e) => handleSubmit(e, 'save-and-next-recorded') : undefined}
           editing={editing}
           submitting={submitting}

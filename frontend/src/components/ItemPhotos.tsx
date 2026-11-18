@@ -224,7 +224,11 @@ export function usePhotoStaging(
         existing: kept,
         staged,
         total,
-        dirty: staged.length > 0 || removedIds.length > 0,
+        // A photo still being resized is a change too: it lands in `staged`
+        // only when the resize finishes, about a second after it was taken
+        // (round 5 of the fix list of 16. 11. 2026). The save buttons wait
+        // for it (`processing`).
+        dirty: staged.length > 0 || removedIds.length > 0 || processing,
         processing,
         error,
         addFiles,

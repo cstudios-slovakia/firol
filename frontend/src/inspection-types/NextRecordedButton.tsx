@@ -10,9 +10,12 @@ import { Button } from '@/components/ui/Button';
  */
 export function NextRecordedButton({
   loading,
+  disabled = false,
   onClick,
 }: {
   loading: boolean;
+  /** While a photo is still being resized. */
+  disabled?: boolean;
   onClick: (e: React.SyntheticEvent) => void;
 }) {
   return (
@@ -21,6 +24,7 @@ export function NextRecordedButton({
       variant="secondary"
       onClick={onClick}
       loading={loading}
+      disabled={disabled}
       rightIcon={<ChevronsRight className="size-4" />}
       title="Uloží položku a otvorí ďalšiu už zapísanú položku tejto kontroly."
       data-next-recorded

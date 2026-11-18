@@ -109,10 +109,14 @@ const FIELDS: Partial<Record<InspectionType, InlineField[]>> = {
     { key: 'notes', label: 'Poznámky / závady', kind: 'text', optional: true, clearable: true },
     { key: 'result', label: 'Výsledok testu', kind: 'choice', options: PASS_FAIL },
   ],
+  // The závady travel with a rebrík / regál since the customer's answer of
+  // 18. 11. 2026, so they are shown — and clearable — like the fire types' notes.
   rebriky: [
+    { key: 'faults', label: 'Zistené závady', kind: 'text', optional: true, clearable: true },
     { key: 'result', label: 'Výsledok', kind: 'choice', options: [...PASS_FAIL, { value: 'vyradene', label: 'Vyradené' }] },
   ],
   regale: [
+    { key: 'faults', label: 'Zistené závady', kind: 'text', optional: true, clearable: true },
     { key: 'result', label: 'Výsledok', kind: 'choice', options: [...PASS_FAIL, { value: 'vyradene', label: 'Vyradené' }] },
   ],
   oprava_ts_php: [{ key: 'notes', label: 'Poznámky', kind: 'text', optional: true }],
@@ -187,16 +191,19 @@ function mergedFields(type: InspectionType, item: ReviewItem, edits: Edits): Rec
 
 /**
  * The sentence after an item refusal. The server names the refused field
- * (`field`); an empty one is to be filled in the item's form, one with a value
- * (a range or length refusal) is to be corrected here or there.
+ * (`field`); an empty one is to be filled in, one with a value (a range or
+ * length refusal) corrected — here when this screen shows the field, else in
+ * the item's form (round 5 of the fix list of 16. 11. 2026).
  */
-function refusalHint(err: ApiError, fields: Record<string, unknown>): string {
+function refusalHint(err: ApiError, type: InspectionType, fields: Record<string, unknown>): string {
   const key = err.body && typeof err.body === 'object' && 'field' in err.body
     ? String((err.body as { field: unknown }).field)
     : null;
   const value = key !== null ? fields[key] : undefined;
   const filled = value !== null && value !== undefined && String(value).trim() !== '';
-  return filled ? 'Oprav ho tu alebo vo formulári položky.' : 'Doplň ho vo formulári položky.';
+  const onScreen = key !== null && (FIELDS[type] ?? []).some((f) => f.key === key);
+  const verb = filled ? 'Oprav' : 'Doplň';
+  return onScreen ? `${verb} ho tu alebo vo formulári položky.` : `${verb} ho vo formulári položky.`;
 }
 
 export function PrehliadkaConceptsReviewPage() {
@@ -312,7 +319,7 @@ export function PrehliadkaConceptsReviewPage() {
     } catch (err) {
       setItemErrors((prev) => ({
         ...prev,
-        [item.id]: err instanceof ApiError ? `${err.message} ${refusalHint(err, fields)}` : 'Položku sa nepodarilo uložiť.',
+        [item.id]: err instanceof ApiError ? `${err.message} ${refusalHint(err, block.type, fields)}` : 'Položku sa nepodarilo uložiť.',
       }));
       return false;
     } finally {

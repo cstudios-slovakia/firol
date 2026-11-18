@@ -10,13 +10,13 @@ import { cn } from '@/lib/cn';
 /**
  * What a carried-over item scored last time — block 1 / chapter 12.
  *
- * "Pri každej prenesenej položke sa zobrazí, aký mala minule stav." For the
- * types that carry identification only (the BOZP rows) it is the difference
- * between retyping a list and glancing down it; display only, never a default
- * for this year's stav, and no protocol template prints it. The fire types
- * carry the stav itself (fix list of 16. 11. 2026) and the server no longer
- * sets the value for them; on an older draft the badge is hidden where it
- * would only repeat the item's current value.
+ * "Pri každej prenesenej položke sa zobrazí, aký mala minule stav." Display
+ * only, never a default for this year's stav, and no protocol template prints
+ * it. The fire types (fix list of 16. 11. 2026) and the BOZP item checks
+ * (customer's answer of 18. 11. 2026) carry the stav itself, so the server no
+ * longer sets the value for them; it remains on drafts carried before, where
+ * the result was left blank, and the badge is hidden where it would only
+ * repeat the item's current value.
  *
  * The badge disappears as soon as the technician records a result, so a row
  * never shows two verdicts at once.

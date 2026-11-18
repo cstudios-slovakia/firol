@@ -27,6 +27,7 @@ import type {
   Step2FormProps,
   SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
 
 /**
  * Kontrola rebríkov — block 2 / chapter 7, pattern `polozky`.
@@ -100,8 +101,24 @@ function RebrikyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
   }, [initialItem, inspectionId]);
 
   function isPristine() {
+    // A staged, removed or still-resizing photo is a change; only the save commits it.
+    if (photos.dirty) return false;
+    // An existing item: nothing to save only while nothing differs from what it
+    // opened with — also a carried item whose texts were cleared with the „X"
+    // (compare-to-initial, as in the fire forms; round 5 of the fix list).
+    if (initialItem) {
+      const f = initialItem.fields;
+      return sameFormValues(
+        {
+          inventoryNumber: str(f, 'inventory_number'), type: str(f, 'type'), manufacturer: str(f, 'manufacturer'),
+          year: str(f, 'year'), location: str(f, 'location'), faults: str(f, 'faults'),
+          result: isDisposalResult(f.result) ? f.result : null,
+        },
+        { inventoryNumber, type, manufacturer, year, location, faults, result },
+      ) && !defects.isDirty();
+    }
     return !inventoryNumber && !type && !manufacturer && !year && !location && !faults
-      && result === null && photos.total === 0 && !photos.dirty && defects.rows.length === 0;
+      && result === null && photos.total === 0 && defects.rows.length === 0;
   }
 
   function validate(): FieldErrors {
@@ -203,7 +220,7 @@ function RebrikyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
 
         <Field label="Zistené závady" hint="Nechaj prázdne, ak je rebrík v poriadku.">
           {(p) => (
-            <TextArea id={p.id} value={faults} onChange={setFaults} rows={2}
+            <TextArea id={p.id} value={faults} onChange={setFaults} rows={2} clearable
               placeholder="ohnutá priečka, chýbajú pätky" />
           )}
         </Field>
@@ -219,6 +236,7 @@ function RebrikyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
         <DefectsEditor state={defects} initialPhotos={initialItem?.photos} />
 
         <ItemFormFooter
+          busy={photos.processing}
           onNextRecorded={hasNextItem ? (e) => handleSubmit(e, 'save-and-next-recorded') : undefined}
           editing={editing}
           submitting={submitting}

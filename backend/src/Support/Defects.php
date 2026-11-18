@@ -48,8 +48,10 @@ use Firol\Db;
  * „Nedostatok č. 2 — popis" — for any type that has no appendix branch of its
  * own. Nothing to do per type.
  *
- * Carry-over. Nedostatky never carry over (chapter 12). List `defects` with
- * `[]` in the type's CarryOver::BLANK entry and never in KEEP.
+ * Carry-over. Nedostatky never carry over (chapter 12) — also for the BOZP
+ * item checks that carry their result and texts since 18. 11. 2026. List
+ * `defects` with `[]` in the type's CarryOver::BLANK entry and never in KEEP;
+ * CarryOver::mapItem() leaves the key behind for a FULL type.
  *
  * Frontend counterpart: frontend/src/components/DefectsEditor.tsx.
  * ────────────────────────────────────────────────────────────────────────────

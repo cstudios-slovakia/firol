@@ -13,10 +13,14 @@
  * their fields are, not how offline id remapping works.
  */
 import { Inspections } from '@/api/inspections';
-import { OfflineQueuedError } from '@/lib/api';
+import { ApiError, OfflineQueuedError } from '@/lib/api';
 import { queuedClientId } from '@/lib/offline';
 import type { PhotoStaging } from '@/components/ItemPhotos';
 import { offerDefectTasks } from '@/components/DefectTaskOffer';
+import { plural } from '@/lib/text';
+
+/** Refusal of a save while a photo is still being resized. */
+export const PHOTO_PROCESSING_MESSAGE = 'Fotka sa ešte spracúva — počkaj chvíľu a ulož znova.';
 
 /** The per-type field payload, as accepted by the items API. */
 export type ItemFields = Parameters<typeof Inspections.addItem>[1];
@@ -44,6 +48,12 @@ export async function saveItemWithPhotos(args: {
 }): Promise<SaveItemResult> {
   const { inspectionId, itemId, fields, csrfToken } = args;
   const photosList = Array.isArray(args.photos) ? args.photos : [args.photos];
+  // A photo still being resized is not in `staged` yet: saving now would store
+  // the item without it. The forms disable their buttons meanwhile; this
+  // catches the Enter key and any form that does not.
+  if (photosList.some((p) => p.processing)) {
+    throw new ApiError(0, PHOTO_PROCESSING_MESSAGE, null, 'photo_processing');
+  }
 
   let queued = false;
   let targetId = itemId;
@@ -90,7 +100,9 @@ export async function saveItemWithPhotos(args: {
  */
 export function saveItemMessage(result: SaveItemResult, savedLabel = 'Položka uložená'): string {
   if (result.photosFailed > 0) {
-    return `${savedLabel} — ${result.photosFailed} fotiek sa nepodarilo uložiť.`;
+    const n = result.photosFailed;
+    // „sa nepodarilo uložiť" is impersonal: only the noun follows the count.
+    return `${savedLabel} — ${plural(n, 'fotku', 'fotky', 'fotiek')} sa nepodarilo uložiť.`;
   }
-  return result.queued ? 'Uloží sa keď budeš online' : savedLabel;
+  return result.queued ? 'Uloží sa, keď budeš online' : savedLabel;
 }

@@ -10,7 +10,7 @@
  * Everything is sized for one thumb in a glove: every choice is a full-width
  * button of at least 44 px, never a dropdown.
  */
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, CopyPlus, Edit2, ListChecks,
@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { Input } from '@/components/ui/Input';
+import { ClearTextButton } from '@/components/ui/ClearTextButton';
 import type { DetailsBlockProps, StatsBarProps, SubmitAction } from './common';
 import { NextRecordedButton } from './NextRecordedButton';
 
@@ -54,6 +55,7 @@ export function TextArea({
   placeholder,
   rows = 3,
   disabled,
+  clearable = false,
 }: {
   id?: string;
   value: string;
@@ -61,21 +63,34 @@ export function TextArea({
   placeholder?: string;
   rows?: number;
   disabled?: boolean;
+  /**
+   * The „Vymazať text" button (round 2 of the fix list of 16. 11. 2026) — on
+   * the texts a carried item arrives with (závady, poznámka; customer's
+   * answer of 18. 11. 2026).
+   */
+  clearable?: boolean;
 }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
   return (
     <div className="relative">
       <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
         <NotebookPen className="size-4" />
       </span>
       <textarea
+        ref={ref}
         id={id}
         rows={rows}
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={cn(TEXTAREA_CLASS, 'disabled:bg-ink-50 disabled:text-ink-500')}
+        className={cn(TEXTAREA_CLASS, 'disabled:bg-ink-50 disabled:text-ink-500', clearable && 'pr-10')}
       />
+      {clearable && (
+        <span className="absolute right-1 top-1">
+          <ClearTextButton value={value} onClear={() => onChange('')} target={ref} disabled={disabled} />
+        </span>
+      )}
     </div>
   );
 }
@@ -199,9 +214,12 @@ export function ItemFormFooter({
   onDuplicate,
   duplicateHint,
   onNextRecorded,
+  busy = false,
 }: {
   editing: boolean;
   submitting: boolean;
+  /** A photo is still being resized: the buttons wait for it (`photos.processing`). */
+  busy?: boolean;
   apiError: string | null;
   hasErrors: boolean;
   onSummary: (e: React.SyntheticEvent) => void;
@@ -224,17 +242,17 @@ export function ItemFormFooter({
       )}
       <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
         <Button type="button" variant="secondary" onClick={onSummary}
-          loading={submitting} leftIcon={<ListChecks className="size-4" />}>
+          loading={submitting} disabled={busy} leftIcon={<ListChecks className="size-4" />}>
           Uložiť a prejsť na súhrn
         </Button>
         {onDuplicate && (
           <Button type="button" variant="secondary" onClick={onDuplicate}
-            loading={submitting} leftIcon={<CopyPlus className="size-4" />} title={duplicateHint}>
+            loading={submitting} disabled={busy} leftIcon={<CopyPlus className="size-4" />} title={duplicateHint}>
             Ďalší rovnaký
           </Button>
         )}
-        {editing && onNextRecorded && <NextRecordedButton loading={submitting} onClick={onNextRecorded} />}
-        <Button type="submit" loading={submitting}
+        {editing && onNextRecorded && <NextRecordedButton loading={submitting} disabled={busy} onClick={onNextRecorded} />}
+        <Button type="submit" loading={submitting} disabled={busy}
           rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
           {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}
         </Button>

@@ -24,6 +24,7 @@ import type {
   Step2FormProps,
   SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
 import { NextRecordedButton } from './NextRecordedButton';
 
 /**
@@ -41,6 +42,18 @@ const COMMON_REASONS = [
 
 /** Fields carried into the next item by "Ďalší rovnaký" — never serial/location. */
 type VyradenieSeed = { manufacturer: string; type: string; year: string; reason: string };
+
+/** The form state of a stored item — what the form opens with and what „na súhrn" compares to. */
+function vyradenieValues(f: Partial<VyradenieItemFields>) {
+  return {
+    manufacturer: typeof f.manufacturer === 'string' ? f.manufacturer : '',
+    extType: typeof f.type === 'string' ? f.type : '',
+    serial: typeof f.serial === 'string' ? f.serial : '',
+    year: typeof f.year === 'number' ? String(f.year) : '',
+    location: typeof f.location === 'string' ? f.location : '',
+    reason: typeof f.reason === 'string' ? f.reason : '',
+  };
+}
 
 function VyradenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
@@ -61,13 +74,13 @@ function VyradenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<VyradenieItemFields>;
-      setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
-      setExtType(typeof f.type === 'string' ? f.type : '');
-      setSerial(typeof f.serial === 'string' ? f.serial : '');
-      setYear(typeof f.year === 'number' ? String(f.year) : '');
-      setLocation(typeof f.location === 'string' ? f.location : '');
-      setReason(typeof f.reason === 'string' ? f.reason : '');
+      const v = vyradenieValues(initialItem.fields as Partial<VyradenieItemFields>);
+      setManufacturer(v.manufacturer);
+      setExtType(v.extType);
+      setSerial(v.serial);
+      setYear(v.year);
+      setLocation(v.location);
+      setReason(v.reason);
     } else {
       const seed = peekDuplicateSeed<VyradenieSeed>(inspectionId);
       setManufacturer(seed?.manufacturer ?? '');
@@ -80,8 +93,17 @@ function VyradenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
   }, [initialItem, inspectionId]);
 
   function isPristine() {
-    return !manufacturer && !extType && !serial && !year && !location && !reason &&
-      !photos.dirty;
+    // A staged, removed or still-resizing photo is a change; only the save commits it.
+    if (photos.dirty) return false;
+    // An existing item: nothing to save only while nothing differs from what it
+    // opened with — also a carried item whose texts were cleared with the „X"
+    // (compare-to-initial, as in the fire forms; round 5 of the fix list).
+    if (initialItem) {
+      return sameFormValues(vyradenieValues(initialItem.fields as Partial<VyradenieItemFields>), {
+        manufacturer, extType, serial, year, location, reason,
+      });
+    }
+    return !manufacturer && !extType && !serial && !year && !location && !reason;
   }
 
   function handleGoToSummary(e: React.SyntheticEvent) {
@@ -227,19 +249,19 @@ function VyradenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
 
         <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
-            loading={submitting} leftIcon={<ListChecks className="size-4" />}>
+            loading={submitting} disabled={photos.processing} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
           <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
-            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            loading={submitting} disabled={photos.processing} leftIcon={<CopyPlus className="size-4" />}
             title="Uloží a predvyplní ďalšiu položku rovnakými údajmi (okrem výr. čísla a umiestnenia).">
             Ďalší rovnaký
           </Button>
           {editing && hasNextItem && (
-            <NextRecordedButton loading={submitting}
+            <NextRecordedButton loading={submitting} disabled={photos.processing}
               onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next-recorded')} />
           )}
-          <Button type="submit" loading={submitting}
+          <Button type="submit" loading={submitting} disabled={photos.processing}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}
           </Button>

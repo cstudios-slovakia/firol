@@ -255,19 +255,19 @@ function RphpStep2Form({ inspectionId, facilityId, clientType, initialItem, csrf
 
         <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
-            loading={submitting} leftIcon={<ListChecks className="size-4" />}>
+            loading={submitting} disabled={photos.processing} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
           <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
-            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            loading={submitting} disabled={photos.processing} leftIcon={<CopyPlus className="size-4" />}
             title="Uloží a predvyplní ďalšiu položku rovnakými údajmi (okrem výr. čísla a umiestnenia).">
             Ďalší rovnaký
           </Button>
           {editing && hasNextItem && (
-            <NextRecordedButton loading={submitting}
+            <NextRecordedButton loading={submitting} disabled={photos.processing}
               onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next-recorded')} />
           )}
-          <Button type="submit" loading={submitting}
+          <Button type="submit" loading={submitting} disabled={photos.processing}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}
           </Button>
