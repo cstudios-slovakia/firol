@@ -663,7 +663,11 @@ final class BookEntry
             $schvalil = (string) ($issued['schvalil'] ?? '');
         } else {
             $facilities = array_map(static fn (array $r): array => ['id' => $r['facility_id'], 'name' => $r['name']], $rows);
-            $fixed = BookSentences::fixed((string) $inspection['executed_on'], array_column($facilities, 'name'));
+            $fixed = BookSentences::fixed(
+                (string) $inspection['executed_on'],
+                array_column($facilities, 'name'),
+                self::clientTypeOf($accountId, $inspection) === ClientKind::BYTOVE_DRUZSTVO,
+            );
             $paragraphRows = self::paragraphRows($accountId, (int) $inspection['company_id'], (array) ($details['zaznamy'] ?? []));
             $schvalil = trim((string) ($details['schvalil'] ?? ''));
         }
@@ -748,6 +752,26 @@ final class BookEntry
             'paragraphs'     => $kniha['paragraph_rows'],
             'schvalil'       => $kniha['schvalil'],
         ];
+    }
+
+    /**
+     * The client type of the entry's firma — taken from the row when the
+     * loader joined it, read from `companies` otherwise.
+     *
+     * @param array<string, mixed> $inspection
+     */
+    private static function clientTypeOf(int $accountId, array $inspection): ?string
+    {
+        if (isset($inspection['client_type']) && is_string($inspection['client_type'])) {
+            return $inspection['client_type'];
+        }
+        if (isset($inspection['company_client_type']) && is_string($inspection['company_client_type'])) {
+            return $inspection['company_client_type'];
+        }
+        $stmt = Db::pdo()->prepare('SELECT client_type FROM companies WHERE id = ? AND account_id = ?');
+        $stmt->execute([(int) ($inspection['company_id'] ?? 0), $accountId]);
+        $type = $stmt->fetchColumn();
+        return is_string($type) ? $type : null;
     }
 
     /**

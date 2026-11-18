@@ -272,9 +272,9 @@ final class InspectionItemController
         $inspection = self::loadInspectionOrFail($isAdmin ? null : $accountId, $inspectionId);
         self::assertEditable($inspection);
 
-        self::loadItemForInspectionOrFail($itemId, $inspectionId);
+        $existingFields = self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
-        $fields = self::validateFields($inspection['type'], $req->json(), $inspection);
+        $fields = self::validateFields($inspection['type'], $req->json(), $inspection, $existingFields);
 
         Db::pdo()->prepare(
             'UPDATE inspection_items SET fields = ? WHERE id = ? AND inspection_id = ?'
@@ -390,8 +390,11 @@ final class InspectionItemController
      *                                         types whose fields depend on it
      * @return array<string, mixed>
      */
-    private static function validateFields(string $type, array $body, array $inspection = []): array
+    private static function validateFields(string $type, array $body, array $inspection = [], ?array $existingFields = null): array
     {
+        // A defect stored as „dôvod zanikol" before the customer's answer 6 B
+        // (18. 11. 2026) keeps that state on a later save of the same item.
+        $keepsZanik = ($existingFields['status'] ?? null) === 'zanik';
         // POapp 26. 10. 2026 — a defect of a preventívna prehliadka.
         if ($type === PrehliadkaDetails::TYPE) {
             try {
@@ -400,6 +403,7 @@ final class InspectionItemController
                     $body,
                     isset($inspection['executed_on']) ? (string) $inspection['executed_on'] : null,
                     $isBytovyDom,
+                    ['allow_new_zanik' => $keepsZanik],
                 );
                 if (isset($fields['persists_from']) && is_array($fields['persists_from'])) {
                     $srcInspId = (int) ($fields['persists_from']['inspection_id'] ?? 0);
@@ -452,7 +456,7 @@ final class InspectionItemController
                     $body,
                     isset($inspection['executed_on']) ? (string) $inspection['executed_on'] : null,
                     ($inspection['client_type'] ?? '') === 'bytove_druzstvo',
-                    ['deadline_optional' => true, 'facility_ids' => $facilityIds],
+                    ['deadline_optional' => true, 'facility_ids' => $facilityIds, 'allow_new_zanik' => $keepsZanik],
                 );
             } catch (\InvalidArgumentException $e) {
                 self::failValidation($e->getMessage());
@@ -1090,15 +1094,19 @@ final class InspectionItemController
         }
     }
 
-    private static function loadItemForInspectionOrFail(int $itemId, int $inspectionId): void
+    /** @return array<string, mixed> the item's stored fields */
+    private static function loadItemForInspectionOrFail(int $itemId, int $inspectionId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT 1 FROM inspection_items WHERE id = ? AND inspection_id = ?'
+            'SELECT fields FROM inspection_items WHERE id = ? AND inspection_id = ?'
         );
         $stmt->execute([$itemId, $inspectionId]);
-        if ($stmt->fetchColumn() === false) {
+        $raw = $stmt->fetchColumn();
+        if ($raw === false) {
             Response::error('Položka sa nenašla.', 404);
         }
+        $fields = json_decode((string) $raw, true);
+        return is_array($fields) ? $fields : [];
     }
 
     /** @return array<string, mixed> */

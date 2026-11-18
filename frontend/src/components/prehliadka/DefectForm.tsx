@@ -209,6 +209,13 @@ export function DefectForm({
   // ── Stav
   const closedCarry =
     state.persistsFrom !== null && (state.status === 'odstraneny' || state.status === 'zanik');
+  // „Dôvod zanikol" belongs to a defect carried from an earlier record; a new
+  // one is not offered it (customer's answer 6 B of 18. 11. 2026). A defect
+  // saved with it before keeps showing it, so the form shows what is stored.
+  const storedZanik = (item?.fields as Record<string, unknown> | undefined)?.status === 'zanik';
+  const statusOptions = DEFECT_STATUS_OPTIONS.filter(
+    (o) => o.value !== 'zanik' || state.persistsFrom !== null || storedZanik,
+  );
 
   // ── Čo to je
   const catalogKnown = state.catalogId !== null && catalogItems.some((c) => c.id === state.catalogId);
@@ -398,7 +405,7 @@ export function DefectForm({
       navigate(backPath, { replace: true });
     } catch (err) {
       if (err instanceof OfflineQueuedError) {
-        toast.success('Uloží sa keď budeš online');
+        toast.success('Uloží sa, keď budeš online');
         navigate(backPath, { replace: true });
         return;
       }
@@ -446,7 +453,7 @@ export function DefectForm({
       <Card id="pp-status" className={cn('flex flex-col gap-2.5 p-4 transition-shadow duration-300', errors.status && 'ring-2 ring-status-bad/40')}>
         <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Stav nedostatku</span>
         <div className="flex flex-wrap gap-2">
-          {DEFECT_STATUS_OPTIONS.map((o) => (
+          {statusOptions.map((o) => (
             <Chip
               key={o.value}
               id={`pp-status-${o.value}`}
@@ -836,7 +843,7 @@ export function DefectForm({
             id="pp-save-next"
             variant="secondary"
             loading={saving === 'next'}
-            disabled={saving !== null}
+            disabled={saving !== null || photos.processing}
             onClick={() => void save(true)}
           >
             Uložiť a ďalšie zariadenie
@@ -861,7 +868,7 @@ export function DefectForm({
             id="pp-save"
             className="flex-1"
             loading={saving === 'save'}
-            disabled={saving !== null || deleting}
+            disabled={saving !== null || deleting || photos.processing}
             onClick={() => void save(false)}
           >
             {item ? 'Uložiť zmeny' : 'Uložiť nedostatok'}
@@ -910,7 +917,7 @@ function CarriedPhotos({ photos, kind }: { photos: InspectionPhoto[]; kind: Prev
   return (
     <div className="flex flex-col gap-2">
       <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">
-        {kind === 'poziarna_kniha' ? 'Fotky zo zápisu do požiarnej knihy' : 'Fotky z minulej prehliadky'}
+        {kind === 'poziarna_kniha' ? 'Fotodokumentácia zo zápisu do požiarnej knihy' : 'Fotky z minulej prehliadky'}
       </span>
       <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4">
         {photos.map((p, i) => (

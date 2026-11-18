@@ -51,15 +51,20 @@ final class BookSentences
     }
 
     /**
-     * The fixed sentence of an entry written as a prehliadka.
+     * The fixed sentence of an entry written as a prehliadka. A bytové družstvo
+     * reads „v bytovom dome / v bytových domoch" (customer's answer 9b of
+     * 18. 11. 2026), a firma „v prevádzke / v prevádzkach".
      *
-     * @param list<string> $names the selected prevádzky
+     * @param list<string> $names the selected prevádzky / bytové domy
      */
-    public static function fixed(string $dateIso, array $names): string
+    public static function fixed(string $dateIso, array $names, bool $bytoveDruzstvo = false): string
     {
         $names = array_values(array_filter(array_map('trim', $names), static fn (string $n): bool => $n !== ''));
-        return 'Dňa ' . self::dateSk($dateIso) . ' bola vykonaná prehliadka '
-            . (count($names) > 1 ? 'v prevádzkach ' : 'v prevádzke ') . implode(', ', $names) . '.';
+        $plural = count($names) > 1;
+        $where = $bytoveDruzstvo
+            ? ($plural ? 'v bytových domoch ' : 'v bytovom dome ')
+            : ($plural ? 'v prevádzkach ' : 'v prevádzke ');
+        return 'Dňa ' . self::dateSk($dateIso) . ' bola vykonaná prehliadka ' . $where . implode(', ', $names) . '.';
     }
 
     /** Title of a record — the name of its úkon or training. */

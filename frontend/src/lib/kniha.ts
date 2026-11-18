@@ -11,6 +11,7 @@
  */
 import type { InspectionItem, InspectionType } from '@/api/inspections';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
+import { isBytoveDruzstvo } from '@/lib/clientKind';
 import { effectiveDeadline, parseDefect, type DefectFields } from '@/lib/prehliadka';
 
 export const KNIHA_TYPE = 'poziarna_kniha' as const;
@@ -156,12 +157,18 @@ export function sk3(n: number, one: string, few: string, many: string): string {
 
 export const monthsWord = (n: number): string => sk3(n, 'mesiac', 'mesiace', 'mesiacov');
 
-/** Spec 9 — the one sentence the app writes itself. */
-export function fixedSentence(dateIso: string | null, names: string[]): string {
+/**
+ * Spec 9 — the one sentence the app writes itself. A bytové družstvo reads
+ * „v bytovom dome / v bytových domoch" (customer's answer 9b of 18. 11. 2026);
+ * the server writes the same sentence (BookSentences::fixed).
+ */
+export function fixedSentence(dateIso: string | null, names: string[], clientType?: string | null): string {
   const date = dateIso ? formatDateSk(dateIso) : '…';
-  return names.length > 1
-    ? `Dňa ${date} bola vykonaná prehliadka v prevádzkach ${names.join(', ')}.`
-    : `Dňa ${date} bola vykonaná prehliadka v prevádzke ${names[0] ?? ''}.`;
+  const plural = names.length > 1;
+  const where = isBytoveDruzstvo(clientType)
+    ? plural ? 'v bytových domoch' : 'v bytovom dome'
+    : plural ? 'v prevádzkach' : 'v prevádzke';
+  return `Dňa ${date} bola vykonaná prehliadka ${where} ${plural ? names.join(', ') : names[0] ?? ''}.`;
 }
 
 /**

@@ -425,11 +425,14 @@ final class PrehliadkaDefects
      * @param array<string, mixed> $body
      * @param string|null $executedOn the date computed deadlines count from (Y-m-d)
      * @param bool $isBytovyDom whether the facility belongs to a bytový dom
-     * @param array{deadline_optional?: bool, facility_ids?: list<int>} $options
+     * @param array{deadline_optional?: bool, facility_ids?: list<int>, allow_new_zanik?: bool} $options
      *        deadline_optional  no deadline is a valid answer; it stays empty
      *                           (`deadline_choice` and `deadline_date` null)
      *        facility_ids       the prevádzky the defect may belong to; with more
      *                           than one, `facility_id` is required and stored
+     *        allow_new_zanik    a defect that is not carried over may be stored
+     *                           as „dôvod zanikol" (the Excel import of history,
+     *                           or a defect already stored with it)
      * @return array<string, mixed>
      * @throws \InvalidArgumentException with a Slovak message
      */
@@ -447,6 +450,14 @@ final class PrehliadkaDefects
 
         $persistsFrom = self::persistsFrom($body['persists_from'] ?? null);
         [$status, $reason] = self::status($body, $persistsFrom !== null);
+        // „Dôvod zanikol" is the answer to a defect carried from an earlier
+        // record; a new defect is not offered it (customer's answer 6 B of
+        // 18. 11. 2026). A defect stored with it before keeps it on a later
+        // save, and the Excel import of historical book defects is history,
+        // not a new defect (`allow_new_zanik`).
+        if ($status === 'zanik' && $persistsFrom === null && empty($options['allow_new_zanik'])) {
+            throw new \InvalidArgumentException('Stav „dôvod zanikol" má len nedostatok prenesený z minulého záznamu. Pri novom nedostatku vyber iný stav.');
+        }
 
         // A carried-over defect answered odstránený / dôvod zanikol prints only
         // in the table of the previous defects — an old book entry gave it no

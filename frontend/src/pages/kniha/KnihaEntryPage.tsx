@@ -566,7 +566,7 @@ function IssuedEntry({
   const composed = composeText({
     sposob: details.sposob,
     uvod: details.uvod ?? '',
-    fixedSentence: issued?.fixed_sentence ?? fixedSentence(i.executed_on, facilities.map((f) => f.name)),
+    fixedSentence: issued?.fixed_sentence ?? fixedSentence(i.executed_on, facilities.map((f) => f.name), i.company_client_type),
     cinnosti: details.cinnosti,
     vlastne: details.vlastne_cinnosti,
     textZapisu: details.text_zapisu,
