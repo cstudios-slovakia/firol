@@ -58,7 +58,7 @@ final class InvoiceIssuer
     /** Minutes after which the daily command treats a `sending` row as stuck. */
     public const STUCK_SENDING_MINUTES = 60;
 
-    /** @var list<int> */
+    /** @var list<\Closure(): mixed> jobs run after the response (issue, alert) */
     private static array $deferred = [];
     private static bool $shutdownRegistered = false;
 
@@ -121,7 +121,11 @@ final class InvoiceIssuer
         $rowId = (int) Db::pdo()->lastInsertId();
 
         if ($status === 'needs_review') {
+            // A paid invoice without a tax document: the operator hears of it
+            // (after the response went back to Stripe); the daily run repeats
+            // the alert when the mail failed.
             error_log("[idoklad.record] $stripeInvoiceId held for review: " . $decision['detail']);
+            self::alertAfterResponse($rowId, 'Faktúra čaká na kontrolu: ' . $decision['detail']);
             return null;
         }
         return $rowId;
@@ -147,29 +151,29 @@ final class InvoiceIssuer
     {
         $total = (int) ($stripeInvoice['total'] ?? 0);
         $paid  = (int) ($stripeInvoice['amount_paid'] ?? 0);
-        $numbers = sprintf('total %s, paid %s', self::eur($total), self::eur($paid));
+        $numbers = sprintf('spolu %s, zaplatené %s', self::eur($total), self::eur($paid));
 
         if ($total === 0 && $paid === 0) {
-            return ['decision' => 'skip', 'reason' => 'zero', 'detail' => "nothing to invoice ($numbers)"];
+            return ['decision' => 'skip', 'reason' => 'zero', 'detail' => "nie je čo fakturovať ($numbers)"];
         }
         if ($total < 0) {
-            return ['decision' => 'review', 'reason' => 'credit', 'detail' => "negative total — credit ($numbers)"];
+            return ['decision' => 'review', 'reason' => 'credit', 'detail' => "záporný súčet — dobropis ($numbers)"];
         }
         if ($paid < $total) {
-            return ['decision' => 'review', 'reason' => 'credit', 'detail' => "partly paid from the customer's credit balance ($numbers)"];
+            return ['decision' => 'review', 'reason' => 'credit', 'detail' => "časť zaplatená z kreditu zákazníka v Stripe ($numbers)"];
         }
         if ($paid > $total) {
-            return ['decision' => 'review', 'reason' => 'mismatch', 'detail' => "paid more than the total ($numbers)"];
+            return ['decision' => 'review', 'reason' => 'mismatch', 'detail' => "zaplatené viac, než je súčet ($numbers)"];
         }
         $sum = 0;
         foreach (self::invoiceLines($stripeInvoice) as $line) {
             if ($line['amount'] < 0 && $line['kind'] !== 'discount') {
-                return ['decision' => 'review', 'reason' => 'credit', 'detail' => 'a credit of ' . self::eur($line['amount']) . ' — ' . $line['name'] . " ($numbers)"];
+                return ['decision' => 'review', 'reason' => 'credit', 'detail' => 'dobropis ' . self::eur($line['amount']) . ' — ' . $line['name'] . " ($numbers)"];
             }
             $sum += $line['amount'];
         }
         if ($sum !== $total) {
-            return ['decision' => 'review', 'reason' => 'mismatch', 'detail' => 'the lines add up to ' . self::eur($sum) . " after discounts — tax or a discount that could not be placed ($numbers)"];
+            return ['decision' => 'review', 'reason' => 'mismatch', 'detail' => 'položky po zľavách dávajú spolu ' . self::eur($sum) . " — daň alebo zľava, ktorú sa nepodarilo priradiť ($numbers)"];
         }
         return ['decision' => 'issue', 'reason' => '', 'detail' => ''];
     }
@@ -179,10 +183,15 @@ final class InvoiceIssuer
      * Stripe's order:
      *
      *  - every amount net of its discounts (the line's discount_amounts);
-     *  - the proration lines of one change — same subscription, same kind
-     *    (extra technician / plan), same proration period — netted into one
-     *    line „…, pomerná časť (+1 technik) (period)". A change that nets to
-     *    0 (duplicate extra items merged) gives no line;
+     *  - ALL proration lines of one subscription and kind (extra technician
+     *    / plan) netted into one line over the whole invoice — „…, pomerná
+     *    časť (+1 technik) (period)", the period from the earliest start to
+     *    the latest end. Not per proration period: two Stripe calls of one
+     *    change made seconds apart (a duplicate merge: delete + update) get
+     *    different period starts, and an addition later undone in the same
+     *    period is one charge for the days in between. A net of 0 gives no
+     *    line; a positive net with no change in the count is worded without
+     *    a count; a negative net stays a credit (classify());
      *  - a discount of the invoice that no line carries → one „Zľava" line;
      *  - lines of 0 dropped.
      *
@@ -198,6 +207,7 @@ final class InvoiceIssuer
         $out    = [];
         $groups = [];
         $placed = 0;
+        $invoiceDiscounted = self::invoiceDiscount($stripeInvoice) !== 0;
         foreach ((array) ($stripeInvoice['lines']['data'] ?? []) as $line) {
             $line     = (array) $line;
             $amount   = (int) ($line['amount'] ?? 0);
@@ -208,10 +218,7 @@ final class InvoiceIssuer
             $qty      = max(0, (int) ($line['quantity'] ?? 1));
 
             if (StripeShape::lineIsProration($line)) {
-                $key = implode('|', [
-                    StripeShape::lineSubscriptionId($line) ?? '', $kind,
-                    $period[0] ?? '', $period[1] ?? '',
-                ]);
+                $key = (StripeShape::lineSubscriptionId($line) ?? '') . '|' . $kind;
                 if (!isset($groups[$key])) {
                     $groups[$key] = count($out);
                     $out[] = ['name' => '', 'amount' => 0, 'qty' => 1, 'kind' => $kind, 'proration' => true,
@@ -219,7 +226,16 @@ final class InvoiceIssuer
                 }
                 $g = $groups[$key];
                 $out[$g]['amount'] += $amount - $discount;
-                $out[$g]['discounted'] = $out[$g]['discounted'] || $discount !== 0;
+                // A proration of a discounted subscription is named like the
+                // plan line („po zľave") also where Stripe placed no part of
+                // the discount on it (a credit line, or a fixed amount spread
+                // over the other lines).
+                $out[$g]['discounted'] = $out[$g]['discounted'] || $discount !== 0
+                    || ($invoiceDiscounted && self::lineCarriesDiscount($line));
+                if ($period !== null) {
+                    $p = $out[$g]['period'];
+                    $out[$g]['period'] = $p === null ? $period : [min($p[0], $period[0]), max($p[1], $period[1])];
+                }
                 if ($amount !== 0) {
                     $out[$g]['delta'] += ($amount < 0 ? -1 : 1) * $qty;
                 }
@@ -229,10 +245,7 @@ final class InvoiceIssuer
                       'proration' => false, 'discounted' => $discount !== 0, 'period' => $period, 'delta' => 0];
         }
 
-        $invoiceDiscount = 0;
-        foreach ((array) ($stripeInvoice['total_discount_amounts'] ?? []) as $d) {
-            $invoiceDiscount += (int) ((array) $d)['amount'];
-        }
+        $invoiceDiscount = self::invoiceDiscount($stripeInvoice);
         if ($invoiceDiscount > $placed) {
             $out[] = ['name' => '', 'amount' => -($invoiceDiscount - $placed), 'qty' => 1, 'kind' => 'discount',
                       'proration' => false, 'discounted' => false, 'period' => null, 'delta' => 0];
@@ -297,6 +310,32 @@ final class InvoiceIssuer
     }
 
     /**
+     * Whether a discount of the invoice applies to the line, even where
+     * Stripe put none of its amount on it: the line lists a discount, or is
+     * discountable.
+     *
+     * @param array<string, mixed> $line
+     */
+    private static function lineCarriesDiscount(array $line): bool
+    {
+        return !empty($line['discount_amounts']) || !empty($line['discounts']) || !empty($line['discountable']);
+    }
+
+    /**
+     * The invoice's whole discount in cents (total_discount_amounts).
+     *
+     * @param array<string, mixed> $stripeInvoice
+     */
+    private static function invoiceDiscount(array $stripeInvoice): int
+    {
+        $sum = 0;
+        foreach ((array) ($stripeInvoice['total_discount_amounts'] ?? []) as $d) {
+            $sum += (int) (((array) $d)['amount'] ?? 0);
+        }
+        return $sum;
+    }
+
+    /**
      * Issue (or prepare) the invoice of one `invoices` row. Returns the row's
      * status afterwards.
      *
@@ -305,12 +344,26 @@ final class InvoiceIssuer
      * `error` row past the cap, a `prepared` or `skipped` row, and a
      * `needs_review` row whose reason is `uncertain_send` — the admin has
      * checked in iDoklad that the invoice does not exist.
+     *
+     * $onlyFrom limits a manual run to rows still in one of those statuses
+     * (the daily run issues a `prepared` or `skipped` live row with it, so a
+     * row an admin moved to another state in between is never posted).
+     *
+     * Only a real send counts as an attempt: preparing a row (IssuePolicy
+     * says „prepare") or skipping it (iDoklad not configured) does not use up
+     * one of the MAX_AUTO_ATTEMPTS. A LIVE row that is only prepared or
+     * skipped alerts the operator once.
+     *
+     * @param list<string>|null $onlyFrom
      */
-    public function issue(int $rowId, bool $manual = false): string
+    public function issue(int $rowId, bool $manual = false, ?array $onlyFrom = null): string
     {
         $row = self::row($rowId);
         if ($row === null) {
             return 'missing';
+        }
+        if ($onlyFrom !== null && !in_array((string) $row['status'], $onlyFrom, true)) {
+            return (string) $row['status'];
         }
         if (!self::canIssue($row, $manual)) {
             return (string) $row['status'];
@@ -318,6 +371,9 @@ final class InvoiceIssuer
         $claimable = $manual
             ? ['pending', 'error', 'prepared', 'skipped', 'needs_review']
             : ['pending', 'error'];
+        if ($onlyFrom !== null) {
+            $claimable = array_values(array_intersect($claimable, $onlyFrom));
+        }
         $stripeInvoice = json_decode((string) ($row['stripe_invoice_json'] ?? ''), true);
         if (!is_array($stripeInvoice)) {
             // A row written before 17. 11. 2026 (no snapshot). The old code
@@ -333,11 +389,16 @@ final class InvoiceIssuer
             : IssuePolicy::decide($livemode);
 
         if (!$policy['send']) {
-            self::claim($rowId, $claimable, 'prepared', $policy['reason'], $payload);
+            if (self::claim($rowId, $claimable, 'prepared', $policy['reason'], $payload, false) && $livemode === true) {
+                self::notifyOnce($rowId, 'Ostrá platba dostala len pripravenú faktúru, do iDokladu sa nič neodoslalo (' . $policy['reason'] . ').');
+            }
             return 'prepared';
         }
         if ($this->api === null && !IDokladClient::isConfigured()) {
-            self::claim($rowId, $claimable, 'skipped', 'iDoklad not configured', $payload);
+            $msg = 'iDoklad nie je nastavený (IDOKLAD_CLIENT_ID / IDOKLAD_CLIENT_SECRET) — faktúra sa neodoslala.';
+            if (self::claim($rowId, $claimable, 'skipped', $msg, $payload, false) && $livemode === true) {
+                self::notifyOnce($rowId, 'Ostrá platba nemá faktúru: ' . $msg);
+            }
             return 'skipped';
         }
         if (!self::claim($rowId, $claimable, 'sending', null, $payload)) {
@@ -360,7 +421,7 @@ final class InvoiceIssuer
             if ((int) ($created['Id'] ?? 0) <= 0) {
                 // A 2xx answer without an invoice id: iDoklad may or may not
                 // have created it. Same as no answer — a person checks.
-                $msg = 'iDoklad answered the invoice POST without an invoice Id. Check in iDoklad whether the invoice exists before „Vystaviť znova".';
+                $msg = 'iDoklad odpovedal na odoslanie faktúry bez jej Id. Pred „Vystaviť znova" over v iDoklade, či faktúra nevznikla.';
                 self::setStatus($rowId, 'needs_review', 'uncertain_send', $msg);
                 InvoiceAlert::notify($rowId, $msg);
                 return 'needs_review';
@@ -394,17 +455,18 @@ final class InvoiceIssuer
         } catch (\Throwable $e) {
             error_log('[idoklad.issue] row=' . $rowId . ' ' . $e->getMessage());
             if ($posting && $e instanceof IDokladTransportException) {
-                $msg = 'iDoklad did not answer the invoice POST (' . $e->getMessage() . '). Check in iDoklad whether the invoice exists before „Vystaviť znova".';
+                $msg = 'iDoklad na odoslanie faktúry neodpovedal (' . $e->getMessage() . '). Pred „Vystaviť znova" over v iDoklade, či faktúra nevznikla.';
                 self::setStatus($rowId, 'needs_review', 'uncertain_send', $msg);
                 InvoiceAlert::notify($rowId, $msg);
                 return 'needs_review';
             }
-            self::setStatus($rowId, 'error', null, $e->getMessage());
+            $msg = 'Chyba pri vystavení v iDoklade: ' . $e->getMessage();
+            self::setStatus($rowId, 'error', null, $msg);
             if ($attempts === 1 && (int) $row['amount_cents'] > 0) {
                 self::sendFallbackEmail($accountId, $stripeInvoice);
             }
             if ($manual || $attempts >= self::MAX_AUTO_ATTEMPTS) {
-                InvoiceAlert::notify($rowId, $e->getMessage());
+                InvoiceAlert::notify($rowId, $msg);
             }
             return 'error';
         }
@@ -417,7 +479,23 @@ final class InvoiceIssuer
      */
     public static function issueAfterResponse(int $rowId): void
     {
-        self::$deferred[] = $rowId;
+        self::$deferred[] = static fn () => (new self())->issue($rowId);
+        self::registerShutdown();
+    }
+
+    /**
+     * Alert the operator about a row once the response has gone back to the
+     * caller (a held invoice recorded by the webhook: no SMTP wait while
+     * Stripe waits for the answer).
+     */
+    public static function alertAfterResponse(int $rowId, string $reason): void
+    {
+        self::$deferred[] = static fn () => InvoiceAlert::notify($rowId, $reason);
+        self::registerShutdown();
+    }
+
+    private static function registerShutdown(): void
+    {
         if (self::$shutdownRegistered) {
             return;
         }
@@ -426,15 +504,24 @@ final class InvoiceIssuer
             if (function_exists('fastcgi_finish_request')) {
                 fastcgi_finish_request();
             }
-            foreach (self::$deferred as $id) {
+            foreach (self::$deferred as $job) {
                 try {
-                    (new self())->issue($id);
+                    $job();
                 } catch (\Throwable $e) {
-                    error_log('[idoklad.deferred] row=' . $id . ' ' . $e->getMessage());
+                    error_log('[idoklad.deferred] ' . $e->getMessage());
                 }
             }
             self::$deferred = [];
         });
+    }
+
+    /** Alert about a row unless the operator was alerted about it already. */
+    private static function notifyOnce(int $rowId, string $reason): void
+    {
+        $row = self::row($rowId);
+        if ($row !== null && $row['operator_alerted_at'] === null) {
+            InvoiceAlert::notify($rowId, $reason);
+        }
     }
 
     /**
@@ -458,6 +545,11 @@ final class InvoiceIssuer
             $qty    = $line['qty'];
             if (!$line['proration'] && $qty > 1 && $amount % $qty === 0) {
                 $items[] = ['Name' => $line['name'], 'Amount' => $qty, 'UnitPrice' => round($amount / $qty / 100, 2), 'Unit' => 'ks'];
+            } elseif (!$line['proration'] && $qty > 1) {
+                // A discounted amount that does not divide by the quantity
+                // goes on as 1 ks: the count moves into the name.
+                $name = preg_replace('/^POapp — /u', 'POapp — ' . $qty . ' × ', $line['name'], 1);
+                $items[] = ['Name' => $name, 'Amount' => 1, 'UnitPrice' => round($amount / 100, 2), 'Unit' => 'ks'];
             } else {
                 $items[] = ['Name' => $line['name'], 'Amount' => 1, 'UnitPrice' => round($amount / 100, 2), 'Unit' => 'ks'];
             }
@@ -591,6 +683,7 @@ final class InvoiceIssuer
         $decision = self::classify($inv);
         if ($decision['decision'] === 'review') {
             self::setStatus($rowId, 'needs_review', $decision['reason'], $decision['detail']);
+            self::notifyOnce($rowId, 'Faktúra čaká na kontrolu: ' . $decision['detail']);
             return 'needs_review';
         }
         if ($decision['decision'] === 'skip') {
@@ -606,18 +699,22 @@ final class InvoiceIssuer
 
     /**
      * Move the row to $to if it is still in one of $from. Stores the payload
-     * and counts the attempt. False when another run took the row first.
+     * and counts the attempt ($attempt: a real send; preparing or skipping a
+     * row is not one). False when another run took the row first.
      *
      * @param list<string> $from
      * @param array<string, mixed> $payload
      */
-    private static function claim(int $rowId, array $from, string $to, ?string $message, array $payload): bool
+    private static function claim(int $rowId, array $from, string $to, ?string $message, array $payload, bool $attempt = true): bool
     {
+        if ($from === []) {
+            return false;
+        }
         $in = implode(',', array_fill(0, count($from), '?'));
+        $count = $attempt ? 'attempts = attempts + 1, last_attempt_at = NOW()' : 'last_attempt_at = NOW()';
         $stmt = Db::pdo()->prepare(
             "UPDATE invoices
-             SET    status = ?, error_message = ?, review_reason = NULL, idoklad_payload_json = ?,
-                    attempts = attempts + 1, last_attempt_at = NOW()
+             SET    status = ?, error_message = ?, review_reason = NULL, idoklad_payload_json = ?, $count
              WHERE  id = ? AND status IN ($in)"
         );
         $stmt->execute([$to, $message, self::json($payload), $rowId, ...$from]);
@@ -671,6 +768,15 @@ final class InvoiceIssuer
     /** @param array<string, mixed> $line */
     private static function isExtraLine(array $line): bool
     {
+        // The plan is never an extra line, whatever else the line matches
+        // (a mis-set STRIPE_PRODUCT_EXTRA_TECHNICIAN, a legacy name in its
+        // description).
+        $priceId = StripeShape::linePriceId($line);
+        $lineProduct = StripeShape::lineProductId($line);
+        if (($priceId !== null && in_array($priceId, StripeClient::basePriceIds(), true))
+            || ($lineProduct !== null && in_array($lineProduct, SeatSync::baseProductIds() ?? [], true))) {
+            return false;
+        }
         $productId = StripeClient::extraTechnicianProductId();
         if ($productId !== '' && StripeShape::lineProductId($line) === $productId) {
             return true;

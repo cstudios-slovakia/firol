@@ -37,10 +37,10 @@ final class IssuePolicy
     {
         $mode = self::mode();
         if ($mode !== 'send') {
-            return ['send' => false, 'reason' => 'IDOKLAD_ISSUE_MODE=prepare (APP_ENV=' . self::appEnv() . ') — payload stored, not sent'];
+            return ['send' => false, 'reason' => 'IDOKLAD_ISSUE_MODE=prepare (APP_ENV=' . self::appEnv() . ') — faktúra sa len pripravila, neodoslala'];
         }
         if ($livemode !== true && !self::allowTestEvents()) {
-            return ['send' => false, 'reason' => 'Stripe test-mode invoice — not sent to iDoklad (IDOKLAD_ALLOW_TEST_EVENTS is off)'];
+            return ['send' => false, 'reason' => 'testovacia platba zo Stripe — do iDokladu sa neposiela (IDOKLAD_ALLOW_TEST_EVENTS je vypnuté)'];
         }
         return ['send' => true, 'reason' => ''];
     }
