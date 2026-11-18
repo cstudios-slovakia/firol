@@ -80,6 +80,13 @@ tree exists.
   kept in `dist-prev/` until the next swap (rollback: rename it back). The
   deploy workflow still runs the plain `npm run build`; switch it to
   `build:safe` on a server where the build may be killed.
+- **Vite reads `vite.config.ts` only.** `tsc -b` used to emit
+  `frontend/vite.config.js` and `frontend/vite.config.d.ts` next to the source,
+  and Vite prefers a `.js` config — so a stale file won over every later edit.
+  `tsconfig.node.json` now sends that output to `node_modules/.tmp/`, and the
+  `dev`, `build`, `build:safe` and `preview` scripts pass
+  `--config vite.config.ts`. **Once per server**, delete the old files:
+  `rm -f frontend/vite.config.js frontend/vite.config.d.ts`.
 
 ### Billing (Stripe + iDoklad)
 

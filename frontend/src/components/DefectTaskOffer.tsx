@@ -251,7 +251,7 @@ export function DefectTaskOfferHost() {
     if (failed > 0) {
       toast.error(failed === chosen.length ? 'Úlohu sa nepodarilo vytvoriť.' : `${failed} z ${chosen.length} úloh sa nepodarilo vytvoriť.`);
     } else if (queued > 0 && created === 0) {
-      toast.success('Uloží sa keď budeš online');
+      toast.success('Uloží sa, keď budeš online');
     } else {
       toast.success(chosen.length === 1 ? 'Úloha vytvorená' : 'Úlohy vytvorené');
     }

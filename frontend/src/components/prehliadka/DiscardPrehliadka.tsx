@@ -108,7 +108,7 @@ export function useDiscardPrehliadka(
     let applied: string | undefined;
     try {
       // A permanent delete never waits in the offline queue.
-      applied = (await Inspections.archive(checked.id, csrfToken, { requireOnline: true }))?.mode;
+      applied = (await Inspections.archive(checked.id, csrfToken, { requireOnline: true, expectDelete: true }))?.mode;
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.message : offlineMessage(err, 'Zahodiť prehliadku sa dá len s pripojením na internet.'),

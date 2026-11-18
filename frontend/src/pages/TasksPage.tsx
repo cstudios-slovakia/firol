@@ -152,7 +152,7 @@ export function TasksPage() {
       toast.success(done ? 'Úloha splnená' : 'Úloha je znova otvorená');
     } catch (err) {
       if (err instanceof OfflineQueuedError) {
-        toast.success('Uloží sa keď budeš online');
+        toast.success('Uloží sa, keď budeš online');
         return;
       }
       setItems((prev) => [...prev, task]);
@@ -529,7 +529,7 @@ function TaskForm({
       onSaved();
     } catch (err) {
       if (err instanceof OfflineQueuedError) {
-        toast.success('Uloží sa keď budeš online');
+        toast.success('Uloží sa, keď budeš online');
         onSaved();
         return;
       }
@@ -549,7 +549,7 @@ function TaskForm({
       onSaved();
     } catch (err) {
       if (err instanceof OfflineQueuedError) {
-        toast.success('Uloží sa keď budeš online');
+        toast.success('Uloží sa, keď budeš online');
         onSaved();
         return;
       }

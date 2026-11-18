@@ -97,7 +97,7 @@ export async function discardUkon(
     throw new Error(DISCARD_OFFLINE_MESSAGE);
   }
   try {
-    const res = await Inspections.archive(id, csrfToken, { requireOnline: permanent });
+    const res = await Inspections.archive(id, csrfToken, { requireOnline: permanent, expectDelete: permanent });
     // An older server answered 204 without a body: fall back to the asked mode.
     return res?.mode === 'delete' || res?.mode === 'archive' ? res.mode : mode;
   } catch (err) {
@@ -106,6 +106,14 @@ export async function discardUkon(
     if (permanent && !(err instanceof ApiError)) throw new Error(DISCARD_OFFLINE_MESSAGE);
     throw err;
   }
+}
+
+/**
+ * A refusal the list must be read again after — the úkon changed meanwhile
+ * (issued, followed up, archived), so its row no longer offers what it did.
+ */
+export function discardNeedsRefresh(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409;
 }
 
 /** The message for a failed discard. */

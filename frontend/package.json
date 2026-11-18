@@ -4,10 +4,10 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "build:safe": "tsc -b && vite build --outDir dist-next && node scripts/swap-dist.mjs",
-    "preview": "vite preview",
+    "dev": "vite --config vite.config.ts",
+    "build": "tsc -b && vite build --config vite.config.ts",
+    "build:safe": "tsc -b && vite build --config vite.config.ts --outDir dist-next && node scripts/swap-dist.mjs",
+    "preview": "vite preview --config vite.config.ts",
     "lint": "eslint . --ext ts,tsx",
     "typecheck": "tsc -b --noEmit"
   },

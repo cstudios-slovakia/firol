@@ -13,7 +13,7 @@
  *   (existing-resource paths like `/api/inspections/123/...` or
  *   `/api/trainings/45/...`), the request is appended to the mutation
  *   outbox and an `OfflineQueuedError` is thrown so the caller can show
- *   a "uloží sa keď budeš online" message. Non-queueable mutations
+ *   a "uloží sa, keď budeš online" message. Non-queueable mutations
  *   (creating new top-level entities, PDF generation, auth, billing)
  *   rethrow the original network error so the UI shows "vyžaduje pripojenie".
  *

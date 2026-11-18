@@ -298,7 +298,7 @@ function Step1Form({
           );
         } catch (err) {
           if (!(err instanceof OfflineQueuedError)) throw err;
-          toast.success('Uloží sa keď budeš online');
+          toast.success('Uloží sa, keď budeš online');
         }
         navigate(knihaPath(editing.inspection.id), { replace: true });
         return;

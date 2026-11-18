@@ -67,6 +67,7 @@ import {
     discardErrorMessage,
     discardModeOf,
     discardUkon,
+    discardNeedsRefresh,
     type DiscardMode,
 } from "@/lib/discard";
 import { clientNouns, clientTypeStyles, facilityNouns, isBytoveDruzstvo } from "@/lib/clientKind";
@@ -150,6 +151,13 @@ export function FacilityDetailPage() {
             toast.success(discardDoneMessage(outcome));
         } catch (err) {
             toast.error(discardErrorMessage(err, mode));
+            if (discardNeedsRefresh(err) && facility) {
+                // The row changed meanwhile (issued, …): show what it is now.
+                setPendingDelete(null);
+                Inspections.list({ facility_id: facility.id })
+                    .then((res) => setInspections(res.items))
+                    .catch(() => undefined);
+            }
         } finally {
             setDeleting(false);
         }

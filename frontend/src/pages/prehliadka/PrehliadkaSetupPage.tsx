@@ -372,7 +372,7 @@ function SetupForm({
           await Inspections.update(editing.inspection.id, patch, csrfToken);
         } catch (err) {
           if (!(err instanceof OfflineQueuedError)) throw err;
-          toast.success('Uloží sa keď budeš online');
+          toast.success('Uloží sa, keď budeš online');
         }
         navigate(prehliadkaPath(editing.inspection.id), { replace: true });
         return;

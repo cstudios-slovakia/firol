@@ -48,6 +48,7 @@ import {
     discardErrorMessage,
     discardModeOf,
     discardUkon,
+    discardNeedsRefresh,
     type DiscardMode,
 } from "@/lib/discard";
 import { useMemberRights } from "@/auth/useMemberRights";
@@ -342,6 +343,11 @@ export function InspectionsListPage({
             toast.success(discardDoneMessage(outcome));
         } catch (err) {
             toast.error(discardErrorMessage(err, mode));
+            if (discardNeedsRefresh(err)) {
+                // The row changed meanwhile (issued, …): show what it is now.
+                setPendingDelete(null);
+                Inspections.list().then((res) => setAllItems(res.items)).catch(() => undefined);
+            }
         } finally {
             setDeleting(false);
         }

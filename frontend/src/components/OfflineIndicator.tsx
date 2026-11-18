@@ -103,7 +103,7 @@ export function OfflineIndicator() {
 
           {!hasQueue && (
             <p className="text-xs leading-relaxed text-ink-500">
-              Bez signálu sa zmeny uložia lokálne a odošlú sa keď budeš online. PDF a fakturácia
+              Bez signálu sa zmeny uložia lokálne a odošlú sa, keď budeš online. PDF a fakturácia
               vyžadujú pripojenie.
             </p>
           )}

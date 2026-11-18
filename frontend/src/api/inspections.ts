@@ -596,8 +596,10 @@ export const Inspections = {
    * offline queue: pass `requireOnline` for a draft. Answers with the mode
    * the server applied.
    */
-  archive: (id: number, csrfToken: string | null, opts: { requireOnline?: boolean } = {}) =>
-    api<{ mode: DiscardMode } | undefined>(`/api/inspections/${id}`, {
+  archive: (id: number, csrfToken: string | null, opts: { requireOnline?: boolean; expectDelete?: boolean } = {}) =>
+    // `expect=delete`: the user confirmed a permanent delete; the server
+    // answers 409 instead of archiving an úkon issued in the meantime.
+    api<{ mode: DiscardMode } | undefined>(`/api/inspections/${id}${opts.expectDelete ? '?expect=delete' : ''}`, {
       method: 'DELETE',
       csrfToken,
       label: 'Archivovanie úkonu',

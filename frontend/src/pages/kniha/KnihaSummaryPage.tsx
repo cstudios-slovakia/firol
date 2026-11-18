@@ -132,7 +132,7 @@ function SummaryForm({
   const composed = composeText({
     sposob: details.sposob,
     uvod: details.uvod ?? '',
-    fixedSentence: fixedSentence(i.executed_on, rows.map((r) => r.name)),
+    fixedSentence: fixedSentence(i.executed_on, rows.map((r) => r.name), i.company_client_type),
     cinnosti: details.cinnosti,
     vlastne: details.vlastne_cinnosti,
     textZapisu: details.text_zapisu,
@@ -188,7 +188,7 @@ function SummaryForm({
     let applied: string | undefined;
     try {
       // A permanent delete never waits in the offline queue.
-      applied = (await Inspections.archive(id, csrfToken, { requireOnline: true }))?.mode;
+      applied = (await Inspections.archive(id, csrfToken, { requireOnline: true, expectDelete: true }))?.mode;
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.message : offlineMessage(err, 'Zahodiť zápis sa dá len s pripojením na internet.'),
