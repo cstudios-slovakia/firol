@@ -972,12 +972,17 @@ function AccountInvoices({ accountId }: { accountId: number }) {
                                     inv.status === "draft"
                                         ? "ok"
                                         : inv.status === "error" ||
-                                            inv.status === "needs_review"
+                                            inv.status === "needs_review" ||
+                                            (inv.status === "prepared" &&
+                                                inv.stripe_livemode === true)
                                           ? "warn"
                                           : "neutral"
                                 }
                             >
-                                {adminInvoiceStatusLabel(inv.status)}
+                                {inv.status === "prepared" &&
+                                inv.stripe_livemode === true
+                                    ? "Ostrá platba bez faktúry"
+                                    : adminInvoiceStatusLabel(inv.status)}
                             </Badge>
                             {inv.can_reissue && (
                                 <button
@@ -991,7 +996,10 @@ function AccountInvoices({ accountId }: { accountId: number }) {
                                     ) : (
                                         <RotateCcw className="size-3.5" />
                                     )}
-                                    Vystaviť znova
+                                    {inv.status === "prepared" ||
+                                    inv.status === "pending"
+                                        ? "Vystaviť"
+                                        : "Vystaviť znova"}
                                 </button>
                             )}
                             {inv.pdf_url ? (
@@ -1054,9 +1062,10 @@ function adminInvoiceStatusLabel(status: string): string {
 const REVIEW_REASON_LABEL: Record<string, string> = {
     credit: "Dobropis / kredit zákazníka — ako ho uviesť na daňovom doklade, rozhodne vlastník s účtovníčkou. Automaticky sa nevystaví.",
     discount: "Zľava alebo daň v Stripe — riadky nesedia so sumou. Automaticky sa nevystaví.",
-    mismatch: "Zaplatená suma nesedí so sumou faktúry. Automaticky sa nevystaví.",
+    mismatch: "Riadky po zľavách alebo zaplatená suma nesedia so sumou faktúry (napr. daň v Stripe). Automaticky sa nevystaví.",
     uncertain_send: "iDoklad neodpovedal jednoznačne — over v iDoklade, či faktúra nevznikla, až potom „Vystaviť znova“.",
-    missing_snapshot: "Chýba uložená faktúra zo Stripe.",
+    missing_snapshot: "Chýba uložená faktúra zo Stripe — denná kontrola ju načíta znova. Najprv skontroluj v iDoklade, či faktúra už neexistuje.",
+    zero: "Faktúra zo Stripe je na 0 € — nič sa nevystavuje.",
 };
 
 function formatEurCents(cents: number | null | undefined): string {

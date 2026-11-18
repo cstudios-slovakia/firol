@@ -32,6 +32,8 @@ export type Account = {
   extra_unit_from_stripe: boolean;
   /** Next regular charge (base + extra technicians, without prorations); null without a subscription. */
   next_charge_cents: number | null;
+  /** A promotion code is on the subscription: next_charge_cents is before the discount. */
+  next_charge_before_discount?: boolean;
   main_user_id: number | null;
   admin_owned: boolean;
   default_php_user_id: number | null;

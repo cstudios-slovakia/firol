@@ -444,7 +444,7 @@ function TrialBanner() {
     const periodWord = account.billing_period === "yearly" ? "rok" : "mesiac";
     const periodPrice =
         account.next_charge_cents !== null
-            ? `${formatCents(account.next_charge_cents)} / ${periodWord}`
+            ? `${formatCents(account.next_charge_cents)} / ${periodWord}${account.next_charge_before_discount ? " pred zľavou" : ""}`
             : periodPriceLabel(
                   pricing,
                   account.billing_period === "yearly" ? "yearly" : "monthly",

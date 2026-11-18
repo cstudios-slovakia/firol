@@ -298,7 +298,7 @@ function BillingSection({
   // customer's Stripe items (prorations for changes come on top).
   const extra = account.extra_technicians;
   const periodPrice = account.next_charge_cents !== null
-    ? `${formatCents(account.next_charge_cents)} / ${isYearly ? 'rok' : 'mesiac'}${extra > 0 ? ` vrátane ${extra} ${extra === 1 ? 'extra technika' : 'extra technikov'}` : ''}`
+    ? `${formatCents(account.next_charge_cents)} / ${isYearly ? 'rok' : 'mesiac'}${extra > 0 ? ` vrátane ${extra} ${extra === 1 ? 'extra technika' : 'extra technikov'}` : ''}${account.next_charge_before_discount ? ' (pred zľavou)' : ''}`
     : periodPriceLabel(pricing, isYearly ? 'yearly' : 'monthly');
 
   const cancelScheduled = account.stripe_cancel_at_period_end && (isActive || isTrialing);

@@ -53,6 +53,8 @@ export type Account = {
   extra_technicians: number;
   /** Next regular charge (base + extra technicians at their Stripe prices, without prorations); null without a subscription. */
   next_charge_cents: number | null;
+  /** A promotion code is on the subscription: next_charge_cents is before the discount. */
+  next_charge_before_discount?: boolean;
 };
 
 /**
