@@ -1857,6 +1857,32 @@ labels). The four part-1 failures were a stale fixture, fixed in round 2.
   its documents rows and PDFs behind).
 - ⏸ Switch the deploy workflow to `npm run build:safe` on servers where the build may be killed.
 
+### Fix list of 16. 11. 2026 — round 4 (review and tests of round 3) — ✅ built, checked at 360 px
+
+- **Photos on „na súhrn"**: `usePhotoStaging` exposes `dirty` (a staged photo or an existing one
+  marked for removal); `isPristine()` is false while it is set in the six fire item forms, in
+  oprava / vyradenie and in the five BOZP forms, so a photo-only change is saved.
+- **Old iPhones**: `facilityPlace()` matches the city without a lookbehind (Safari / iOS before 16.4
+  threw on `(?<!…)` while Dnes, the timeline and the calendar rendered); no lookbehind in the bundle.
+- **Permanent delete**: the row lock and the DELETE skip archived rows (a concept the system has
+  just archived is kept); a refusal under the lock throws `UkonDiscardRefused` with the reason
+  decided there (409), a database error answers 500; the kniha BOZP record of a prehliadka gets its
+  own reason before the „issued" one. `DELETE /api/inspections/{id}` answers `{"mode": "delete" |
+  "archive"}` and the toast follows it, never the cached `discard`.
+- **Backup / restore** export and restore `issued_before`; a backup from before migration 078 sets it
+  on restore for a finalized row, one with the contractor snapshot or one with a restored documents
+  row. Migration 078 uses `ADD COLUMN IF NOT EXISTS`.
+- **Texts**: the remaining item refusals in Slovak („Vyber „Výsledok kontroly"."), labels for
+  `vyradenie.location` and `oprava_ts_php.notes`; an item refusal carries `field`, so „Skontroluj
+  hodnoty" says „Doplň ho vo formulári položky." for an empty field and „Oprav ho tu alebo vo
+  formulári položky." for a wrong value; the pending-changes 404 hint only for úkon and item paths
+  („…zmazal alebo archivoval…"); the list discard dialogs of a prehliadka and of a book entry use
+  their own texts; the import result uses Slovak plurals („2 chyby", „1 firma").
+- **Smaller**: the old-Opakovať completeness rule only for the fire types
+  (`CarryOver::carriesValues`); `optimizeDeps.entries: ['index.html']` — Vite 6.4 crawled
+  `dist-next/` (and would `dist-prev/`). The dev server reads the gitignored `vite.config.js` that
+  `tsc -b` emits, so a config change reaches `npm run dev` only after `npm run build`.
+
 ---
 
 ## Billing fixes (17. 11. 2026) 🟨 built on `poapp-oct-2026`, checked in Stripe test mode; owner decisions pending
