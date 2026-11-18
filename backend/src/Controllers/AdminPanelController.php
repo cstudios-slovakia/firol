@@ -261,8 +261,7 @@ final class AdminPanelController
                 'error_message'            => $r['error_message'],
                 'attempts'                 => (int) $r['attempts'],
                 'last_attempt_at'          => $r['last_attempt_at'],
-                'can_reissue'              => in_array($status, ['pending', 'error', 'prepared', 'skipped'], true)
-                    || ($status === 'needs_review' && in_array($reason, ['uncertain_send', 'missing_snapshot'], true)),
+                'can_reissue'              => \Firol\Idoklad\InvoiceIssuer::manualIssueAllowed($r),
             ];
         }, $stmt->fetchAll());
 
@@ -318,16 +317,13 @@ final class AdminPanelController
         $id = (int) ($params['id'] ?? 0);
         if ($id <= 0) Response::error('Neplatné ID faktúry.', 422);
 
-        $stmt = Db::pdo()->prepare('SELECT id, status, review_reason FROM invoices WHERE id = ?');
+        $stmt = Db::pdo()->prepare('SELECT id, status, review_reason, stripe_invoice_json FROM invoices WHERE id = ?');
         $stmt->execute([$id]);
         $row = $stmt->fetch();
         if (!$row) Response::error('Faktúra sa nenašla.', 404);
 
         $before = (string) $row['status'];
-        $reason = (string) ($row['review_reason'] ?? '');
-        $allowed = in_array($before, ['pending', 'error', 'prepared', 'skipped'], true)
-            || ($before === 'needs_review' && in_array($reason, ['uncertain_send', 'missing_snapshot'], true));
-        if (!$allowed) {
+        if (!\Firol\Idoklad\InvoiceIssuer::manualIssueAllowed($row)) {
             Response::error('Túto faktúru nie je možné vystaviť znova.', 409, ['status' => $before]);
         }
 
@@ -344,29 +340,44 @@ final class AdminPanelController
     }
 
     /**
-     * The account's live Stripe subscription (status read from Stripe), or
-     * null when it has none. Refuses with 502 when Stripe cannot be asked —
-     * an admin action that depends on it must not guess.
+     * The account's live Stripe subscriptions (statuses read from Stripe):
+     * every subscription of its Stripe customer that still bills, plus the
+     * recorded one. Refuses with 502 when Stripe cannot be asked — an admin
+     * action that depends on it must not guess.
      *
-     * @return array{id: string, status: string}|null
+     * @return list<array{id: string, status: string}>
      */
-    private static function liveSubscription(int $accountId): ?array
+    private static function liveSubscriptions(int $accountId): array
     {
-        $stmt = Db::pdo()->prepare('SELECT stripe_subscription_id, stripe_status FROM accounts WHERE id = ?');
+        $stmt = Db::pdo()->prepare('SELECT stripe_customer_id, stripe_subscription_id FROM accounts WHERE id = ?');
         $stmt->execute([$accountId]);
         $row = $stmt->fetch();
-        $subId = (string) ($row['stripe_subscription_id'] ?? '');
-        if ($subId === '' || !\Firol\Stripe\StripeClient::isConfigured()) {
-            return null;
+        $customerId = (string) ($row['stripe_customer_id'] ?? '');
+        $subId      = (string) ($row['stripe_subscription_id'] ?? '');
+        if (($customerId === '' && $subId === '') || !\Firol\Stripe\StripeClient::isConfigured()) {
+            return [];
         }
+        $live = [];
         try {
-            $sub = \Firol\Stripe\StripeClient::get()->subscriptions->retrieve($subId);
+            $stripe = \Firol\Stripe\StripeClient::get();
+            if ($customerId !== '') {
+                foreach ($stripe->subscriptions->all(['customer' => $customerId, 'status' => 'all', 'limit' => 100])->autoPagingIterator() as $sub) {
+                    if (SubscriptionStatus::isLive((string) $sub->status)) {
+                        $live[(string) $sub->id] = ['id' => (string) $sub->id, 'status' => (string) $sub->status];
+                    }
+                }
+            }
+            if ($subId !== '' && !isset($live[$subId])) {
+                $sub = $stripe->subscriptions->retrieve($subId);
+                if (SubscriptionStatus::isLive((string) $sub->status)) {
+                    $live[$subId] = ['id' => $subId, 'status' => (string) $sub->status];
+                }
+            }
         } catch (\Throwable $e) {
-            error_log('[admin.liveSubscription] ' . $e->getMessage());
+            error_log('[admin.liveSubscriptions] ' . $e->getMessage());
             Response::error('Stav predplatného v Stripe sa nepodarilo overiť. Skús to znova.', 502);
         }
-        $status = (string) $sub->status;
-        return SubscriptionStatus::isLive($status) ? ['id' => $subId, 'status' => $status] : null;
+        return array_values($live);
     }
 
     public static function updateAccount(Request $req, array $params): void
@@ -397,7 +408,7 @@ final class AdminPanelController
             // and the next webhook would overwrite a local edit — refuse
             // instead of pretending. (Changing it would mean changing the
             // subscription in Stripe, which also changes what is charged.)
-            $live = self::liveSubscription($id);
+            $live = self::liveSubscriptions($id)[0] ?? null;
             if ($live !== null) {
                 Response::error(
                     "Účet má živé predplatné v Stripe (stav {$live['status']}) — dátum určuje Stripe (koniec zaplateného obdobia) a tu sa meniť nedá.",
@@ -483,25 +494,32 @@ final class AdminPanelController
         // unless the admin confirms that the subscription is cancelled in
         // Stripe right away (no refund of the paid period — that is the
         // admin's call, made in the confirmation dialog).
-        $live = self::liveSubscription($id);
-        if ($live !== null) {
+        $live = self::liveSubscriptions($id);
+        if ($live !== []) {
             if (($_GET['cancel_subscription'] ?? '') !== '1') {
+                $list = implode(', ', array_map(static fn (array $s): string => "{$s['id']} ({$s['status']})", $live));
                 Response::error(
-                    "Účet má živé predplatné v Stripe (stav {$live['status']}). Pred zmazaním ho treba zrušiť.",
+                    count($live) === 1
+                        ? "Účet má živé predplatné v Stripe (stav {$live[0]['status']}). Pred zmazaním ho treba zrušiť."
+                        : 'Zákazník má v Stripe ' . count($live) . " živé predplatné: $list. Pred zmazaním treba zrušiť všetky.",
                     409,
-                    ['code' => 'live_subscription', 'stripe_status' => $live['status']],
+                    ['code' => 'live_subscription', 'stripe_status' => $live[0]['status'], 'subscriptions' => count($live)],
                 );
             }
-            try {
-                \Firol\Stripe\StripeClient::get()->subscriptions->cancel($live['id'], [
-                    'invoice_now' => false,
-                    'prorate'     => false,
-                ]);
-            } catch (\Throwable $e) {
-                error_log('[admin.deleteAccount] cancel ' . $live['id'] . ': ' . $e->getMessage());
-                Response::error('Predplatné v Stripe sa nepodarilo zrušiť — účet sa nezmazal.', 502);
+            // Every live subscription of the customer is cancelled — one left
+            // running would keep charging an account that no longer exists.
+            foreach ($live as $sub) {
+                try {
+                    \Firol\Stripe\StripeClient::get()->subscriptions->cancel($sub['id'], [
+                        'invoice_now' => false,
+                        'prorate'     => false,
+                    ]);
+                } catch (\Throwable $e) {
+                    error_log('[admin.deleteAccount] cancel ' . $sub['id'] . ': ' . $e->getMessage());
+                    Response::error("Predplatné {$sub['id']} v Stripe sa nepodarilo zrušiť — účet sa nezmazal.", 502);
+                }
+                AuditLog::record('account.subscription_cancel', 'accounts', $id, $sub, ['status' => 'canceled']);
             }
-            AuditLog::record('account.subscription_cancel', 'accounts', $id, $live, ['status' => 'canceled']);
         }
 
         $pdo = Db::pdo();

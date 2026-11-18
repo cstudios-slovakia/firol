@@ -21,13 +21,14 @@ use Firol\Stripe\StripeShape;
  *     Stripe invoice with all its lines and decides:
  *       - total 0 and nothing paid (trial start, net-zero change): no row, no
  *         invoice;
- *       - a credit (negative total or line, or part of it paid from the
- *         customer balance), a discount, or totals that do not add up:
- *         status `needs_review` — never issued automatically, shown in the
- *         admin panel with the Stripe numbers (how credits appear on a tax
- *         document is an open owner decision);
+ *       - a credit (negative total, a netted line below zero, or part of the
+ *         total paid from the customer balance) or lines that do not add up
+ *         to the total after discounts: status `needs_review` — never issued
+ *         automatically, shown in the admin panel with the Stripe numbers
+ *         (how credits appear on a tax document is an open owner decision);
  *       - otherwise status `pending`.
- *  2. issue() — builds the iDoklad payload (one item per Stripe line) and,
+ *  2. issue() — builds the iDoklad payload (invoiceLines(): proration pairs
+ *     netted, amounts net of promotion-code discounts) and,
  *     when IssuePolicy allows it, sends it. The webhook runs it only after
  *     the response went back to Stripe (issueAfterResponse), so a slow
  *     iDoklad cannot make Stripe retry. bin/billing-daily.php retries
@@ -39,10 +40,16 @@ use Firol\Stripe\StripeShape;
  * skipped (iDoklad not configured). Rows from before 17. 11. 2026 may say
  * `draft`: those were normal invoices posted to iDoklad.
  *
- * An invoice POST that gets no definite answer (timeout, HTTP 5xx) may have
- * created the invoice in iDoklad, so that row goes to `needs_review`
- * (review_reason `uncertain_send`) instead of being retried blindly. A row
- * left in `sending` by a crash is treated the same way by the daily command.
+ * An invoice POST that gets no definite answer (timeout, HTTP 5xx, or a 2xx
+ * without an invoice Id) may have created the invoice in iDoklad, so that row
+ * goes to `needs_review` (review_reason `uncertain_send`) instead of being
+ * retried blindly. A row left in `sending` by a crash is treated the same way
+ * by the daily command, and so is a row of the old code without a snapshot
+ * (recoverSnapshot()).
+ *
+ * A `prepared` row of a LIVE Stripe invoice is an error state (a real payment
+ * without a tax document): ConfigCheck reports it, the daily run alerts the
+ * operator, and issues it once IssuePolicy allows sending.
  */
 final class InvoiceIssuer
 {
@@ -123,6 +130,16 @@ final class InvoiceIssuer
     /**
      * What to do with a Stripe invoice.
      *
+     * Decided on invoiceLines(), not on Stripe's raw lines: a quantity change
+     * of an existing item is two proration lines („Unused time on N ×",
+     * negative, and „Remaining time on N+1 ×", positive) that are one charge,
+     * and a promotion code lowers the lines by their discount_amounts. Held
+     * for review only for a real credit — a netted group or the total below
+     * zero, or a total paid partly from the customer's balance — and when the
+     * netted lines do not add up to the total (tax, or a discount that could
+     * not be placed). How credits appear on a tax document is an open owner
+     * decision.
+     *
      * @param array<string, mixed> $stripeInvoice with all lines
      * @return array{decision: 'skip'|'review'|'issue', reason: string, detail: string}
      */
@@ -130,7 +147,6 @@ final class InvoiceIssuer
     {
         $total = (int) ($stripeInvoice['total'] ?? 0);
         $paid  = (int) ($stripeInvoice['amount_paid'] ?? 0);
-        $lines = (array) ($stripeInvoice['lines']['data'] ?? []);
         $numbers = sprintf('total %s, paid %s', self::eur($total), self::eur($paid));
 
         if ($total === 0 && $paid === 0) {
@@ -146,17 +162,138 @@ final class InvoiceIssuer
             return ['decision' => 'review', 'reason' => 'mismatch', 'detail' => "paid more than the total ($numbers)"];
         }
         $sum = 0;
-        foreach ($lines as $line) {
-            $amount = (int) ($line['amount'] ?? 0);
-            if ($amount < 0) {
-                return ['decision' => 'review', 'reason' => 'credit', 'detail' => 'a credit line of ' . self::eur($amount) . " ($numbers)"];
+        foreach (self::invoiceLines($stripeInvoice) as $line) {
+            if ($line['amount'] < 0 && $line['kind'] !== 'discount') {
+                return ['decision' => 'review', 'reason' => 'credit', 'detail' => 'a credit of ' . self::eur($line['amount']) . ' — ' . $line['name'] . " ($numbers)"];
             }
-            $sum += $amount;
+            $sum += $line['amount'];
         }
         if ($sum !== $total) {
-            return ['decision' => 'review', 'reason' => 'discount', 'detail' => 'lines add up to ' . self::eur($sum) . " — a discount or tax ($numbers)"];
+            return ['decision' => 'review', 'reason' => 'mismatch', 'detail' => 'the lines add up to ' . self::eur($sum) . " after discounts — tax or a discount that could not be placed ($numbers)"];
         }
         return ['decision' => 'issue', 'reason' => '', 'detail' => ''];
+    }
+
+    /**
+     * The lines of a Stripe invoice as they go onto the iDoklad invoice, in
+     * Stripe's order:
+     *
+     *  - every amount net of its discounts (the line's discount_amounts);
+     *  - the proration lines of one change — same subscription, same kind
+     *    (extra technician / plan), same proration period — netted into one
+     *    line „…, pomerná časť (+1 technik) (period)". A change that nets to
+     *    0 (duplicate extra items merged) gives no line;
+     *  - a discount of the invoice that no line carries → one „Zľava" line;
+     *  - lines of 0 dropped.
+     *
+     * `delta` is the change in technicians of a netted extra-technician
+     * proration (quantity of the positive lines minus that of the negative
+     * ones).
+     *
+     * @param array<string, mixed> $stripeInvoice with all lines
+     * @return list<array{name: string, amount: int, qty: int, kind: 'extra'|'base'|'discount', proration: bool, discounted: bool, period: ?array{0: int, 1: int}, delta: int}>
+     */
+    public static function invoiceLines(array $stripeInvoice): array
+    {
+        $out    = [];
+        $groups = [];
+        $placed = 0;
+        foreach ((array) ($stripeInvoice['lines']['data'] ?? []) as $line) {
+            $line     = (array) $line;
+            $amount   = (int) ($line['amount'] ?? 0);
+            $discount = self::lineDiscount($line);
+            $placed  += $discount;
+            $kind     = self::isExtraLine($line) ? 'extra' : 'base';
+            $period   = StripeShape::linePeriod($line);
+            $qty      = max(0, (int) ($line['quantity'] ?? 1));
+
+            if (StripeShape::lineIsProration($line)) {
+                $key = implode('|', [
+                    StripeShape::lineSubscriptionId($line) ?? '', $kind,
+                    $period[0] ?? '', $period[1] ?? '',
+                ]);
+                if (!isset($groups[$key])) {
+                    $groups[$key] = count($out);
+                    $out[] = ['name' => '', 'amount' => 0, 'qty' => 1, 'kind' => $kind, 'proration' => true,
+                              'discounted' => false, 'period' => $period, 'delta' => 0];
+                }
+                $g = $groups[$key];
+                $out[$g]['amount'] += $amount - $discount;
+                $out[$g]['discounted'] = $out[$g]['discounted'] || $discount !== 0;
+                if ($amount !== 0) {
+                    $out[$g]['delta'] += ($amount < 0 ? -1 : 1) * $qty;
+                }
+                continue;
+            }
+            $out[] = ['name' => '', 'amount' => $amount - $discount, 'qty' => max(1, $qty), 'kind' => $kind,
+                      'proration' => false, 'discounted' => $discount !== 0, 'period' => $period, 'delta' => 0];
+        }
+
+        $invoiceDiscount = 0;
+        foreach ((array) ($stripeInvoice['total_discount_amounts'] ?? []) as $d) {
+            $invoiceDiscount += (int) ((array) $d)['amount'];
+        }
+        if ($invoiceDiscount > $placed) {
+            $out[] = ['name' => '', 'amount' => -($invoiceDiscount - $placed), 'qty' => 1, 'kind' => 'discount',
+                      'proration' => false, 'discounted' => false, 'period' => null, 'delta' => 0];
+        }
+
+        $result = [];
+        foreach ($out as $l) {
+            if ($l['amount'] === 0) {
+                continue;
+            }
+            $l['name'] = self::lineName($l);
+            $result[] = $l;
+        }
+        return $result;
+    }
+
+    /**
+     * @param array{kind: string, proration: bool, discounted: bool, period: ?array{0: int, 1: int}, delta: int} $l
+     */
+    private static function lineName(array $l): string
+    {
+        if ($l['kind'] === 'discount') {
+            return 'Zľava';
+        }
+        $name = $l['kind'] === 'extra' ? 'POapp — extra technik' : 'POapp — predplatné';
+        if ($l['proration']) {
+            $name .= ', pomerná časť';
+            if ($l['kind'] === 'extra' && $l['delta'] !== 0) {
+                $n = abs($l['delta']);
+                $name .= ' (' . ($l['delta'] > 0 ? '+' : '−') . $n . ' ' . self::technicianWord($n) . ')';
+            }
+        }
+        if ($l['discounted']) {
+            $name .= ', po zľave';
+        }
+        return $name . self::periodText($l['period']);
+    }
+
+    /** „technik" in the form that goes with a count (1 technik, 2 technici, 5 technikov). */
+    private static function technicianWord(int $n): string
+    {
+        return match (true) {
+            $n === 1          => 'technik',
+            $n >= 2 && $n <= 4 => 'technici',
+            default           => 'technikov',
+        };
+    }
+
+    /**
+     * Sum of a line's discount_amounts in cents (the same field in the pinned
+     * API version and in 2026-04-22.dahlia).
+     *
+     * @param array<string, mixed> $line
+     */
+    private static function lineDiscount(array $line): int
+    {
+        $sum = 0;
+        foreach ((array) ($line['discount_amounts'] ?? []) as $d) {
+            $sum += (int) (((array) $d)['amount'] ?? 0);
+        }
+        return $sum;
     }
 
     /**
@@ -183,8 +320,9 @@ final class InvoiceIssuer
             : ['pending', 'error'];
         $stripeInvoice = json_decode((string) ($row['stripe_invoice_json'] ?? ''), true);
         if (!is_array($stripeInvoice)) {
-            self::setStatus($rowId, 'needs_review', 'missing_snapshot', 'The Stripe invoice snapshot is missing — issue it by hand.');
-            return 'needs_review';
+            // A row written before 17. 11. 2026 (no snapshot). The old code
+            // may have posted it to iDoklad already — never sent from here.
+            return self::recoverSnapshot($rowId);
         }
 
         $accountId = (int) $row['account_id'];
@@ -218,6 +356,15 @@ final class InvoiceIssuer
             $posting = true;
             $created = $api->post('IssuedInvoices', $full);
             $posting = false;
+
+            if ((int) ($created['Id'] ?? 0) <= 0) {
+                // A 2xx answer without an invoice id: iDoklad may or may not
+                // have created it. Same as no answer — a person checks.
+                $msg = 'iDoklad answered the invoice POST without an invoice Id. Check in iDoklad whether the invoice exists before „Vystaviť znova".';
+                self::setStatus($rowId, 'needs_review', 'uncertain_send', $msg);
+                InvoiceAlert::notify($rowId, $msg);
+                return 'needs_review';
+            }
 
             $publicUrl = self::publicUrl($created);
             // The POST response sometimes omits PublicHtmlUrl — read the
@@ -306,23 +453,13 @@ final class InvoiceIssuer
         $id       = (string) ($stripeInvoice['id'] ?? '');
 
         $items = [];
-        foreach ((array) ($stripeInvoice['lines']['data'] ?? []) as $line) {
-            $amount = (int) ($line['amount'] ?? 0);
-            if ($amount === 0) {
-                continue;
-            }
-            $qty       = max(1, (int) ($line['quantity'] ?? 1));
-            $proration = StripeShape::lineIsProration($line);
-            $name      = self::isExtraLine($line) ? 'POapp — extra technik' : 'POapp — predplatné';
-            if ($proration) {
-                $name .= ', pomerná časť' . ($qty > 1 ? " ($qty technici)" : '');
-            }
-            $name .= self::periodText(StripeShape::linePeriod($line));
-
-            if (!$proration && $amount % $qty === 0) {
-                $items[] = ['Name' => $name, 'Amount' => $qty, 'UnitPrice' => round($amount / $qty / 100, 2), 'Unit' => 'ks'];
+        foreach (self::invoiceLines($stripeInvoice) as $line) {
+            $amount = $line['amount'];
+            $qty    = $line['qty'];
+            if (!$line['proration'] && $qty > 1 && $amount % $qty === 0) {
+                $items[] = ['Name' => $line['name'], 'Amount' => $qty, 'UnitPrice' => round($amount / $qty / 100, 2), 'Unit' => 'ks'];
             } else {
-                $items[] = ['Name' => $name, 'Amount' => 1, 'UnitPrice' => round($amount / 100, 2), 'Unit' => 'ks'];
+                $items[] = ['Name' => $line['name'], 'Amount' => 1, 'UnitPrice' => round($amount / 100, 2), 'Unit' => 'ks'];
             }
         }
 
@@ -380,17 +517,91 @@ final class InvoiceIssuer
     private static function canIssue(array $row, bool $manual): bool
     {
         $status = (string) $row['status'];
+        if ($manual) {
+            return self::manualIssueAllowed($row);
+        }
         if ($status === 'pending') {
             return true;
         }
-        if ($status === 'error') {
-            return $manual || (int) $row['attempts'] < self::MAX_AUTO_ATTEMPTS;
-        }
-        if (!$manual) {
+        return $status === 'error' && (int) $row['attempts'] < self::MAX_AUTO_ATTEMPTS;
+    }
+
+    /**
+     * Whether the admin's „Vystaviť" / „Vystaviť znova" can work for a row:
+     * a pending, failed, prepared or skipped row, or one held because
+     * iDoklad gave no definite answer (after the admin checked in iDoklad).
+     * Not a credit held for review, and not a row without the Stripe invoice
+     * snapshot — the daily run rebuilds that from Stripe first.
+     *
+     * @param array<string, mixed> $row invoices row (status, review_reason, stripe_invoice_json)
+     */
+    public static function manualIssueAllowed(array $row): bool
+    {
+        if (array_key_exists('stripe_invoice_json', $row) && (string) ($row['stripe_invoice_json'] ?? '') === '') {
             return false;
         }
-        return in_array($status, ['prepared', 'skipped'], true)
-            || ($status === 'needs_review' && in_array((string) $row['review_reason'], ['uncertain_send', 'missing_snapshot'], true));
+        $status = (string) ($row['status'] ?? '');
+        return in_array($status, ['pending', 'error', 'prepared', 'skipped'], true)
+            || ($status === 'needs_review' && (string) ($row['review_reason'] ?? '') === 'uncertain_send');
+    }
+
+    /**
+     * A row without the Stripe invoice snapshot — written by the code before
+     * 17. 11. 2026 (left `pending` / `error`), or one whose rebuild failed
+     * (`needs_review` / `missing_snapshot`). Reads the invoice again from
+     * Stripe by its id and stores it. The row is never sent from here: the
+     * old code may have posted it to iDoklad before it stopped, so it goes
+     * to `needs_review` / `uncertain_send` and a person checks iDoklad first
+     * (a credit or a 0 € invoice gets its own reason). When Stripe cannot be
+     * read the row stays `missing_snapshot` and the daily run tries again.
+     *
+     * Returns the row's status afterwards.
+     */
+    public static function recoverSnapshot(int $rowId): string
+    {
+        $row = self::row($rowId);
+        if ($row === null) {
+            return 'missing';
+        }
+        $stripeId = (string) $row['stripe_invoice_id'];
+        try {
+            if (!StripeClient::isConfigured()) {
+                throw new \RuntimeException('Stripe is not configured');
+            }
+            $inv = self::withAllLines(StripeShape::arr(StripeClient::get()->invoices->retrieve($stripeId)));
+        } catch (\Throwable $e) {
+            error_log("[idoklad.recover] row=$rowId $stripeId " . $e->getMessage());
+            self::setStatus($rowId, 'needs_review', 'missing_snapshot',
+                'Faktúru zo Stripe sa nepodarilo načítať (' . mb_substr($e->getMessage(), 0, 300) . '); denná kontrola to skúsi znova. '
+                . 'Riadok je zo staršej verzie aplikácie — najprv skontroluj v iDoklade, či faktúra už neexistuje.');
+            return 'needs_review';
+        }
+
+        Db::pdo()->prepare(
+            'UPDATE invoices
+             SET    stripe_invoice_json = ?, stripe_total_cents = ?, stripe_amount_paid_cents = ?, stripe_livemode = ?
+             WHERE  id = ?'
+        )->execute([
+            json_encode($inv, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            (int) ($inv['total'] ?? 0), (int) ($inv['amount_paid'] ?? 0),
+            isset($inv['livemode']) ? ((bool) $inv['livemode'] ? 1 : 0) : null,
+            $rowId,
+        ]);
+
+        $decision = self::classify($inv);
+        if ($decision['decision'] === 'review') {
+            self::setStatus($rowId, 'needs_review', $decision['reason'], $decision['detail']);
+            return 'needs_review';
+        }
+        if ($decision['decision'] === 'skip') {
+            self::setStatus($rowId, 'needs_review', 'zero', 'Faktúra zo Stripe je na 0 € — nič sa nevystavuje. Ak ju stará verzia aplikácie vystavila v iDoklade, treba ju tam opraviť.');
+            return 'needs_review';
+        }
+        $msg = 'Nedokončená faktúra zo staršej verzie aplikácie (stav „' . $row['status'] . '"). Mohla už v iDoklade vzniknúť — '
+            . 'najprv skontroluj v iDoklade, či faktúra už neexistuje, až potom „Vystaviť znova".';
+        self::setStatus($rowId, 'needs_review', 'uncertain_send', $msg);
+        InvoiceAlert::notify($rowId, $msg);
+        return 'needs_review';
     }
 
     /**
@@ -467,17 +678,32 @@ final class InvoiceIssuer
         if ((string) ($line['metadata']['firol_line_kind'] ?? '') === SeatSync::LINE_KIND) {
             return true;
         }
-        // A legacy item (inline product of an old Checkout): Stripe puts the
-        // product name into the line description („1 × POapp — extra technik
-        // (at …)", „Remaining time on POapp — extra technik after …").
-        return str_contains((string) ($line['description'] ?? ''), SeatSync::LEGACY_PRODUCT_NAME);
+        // A legacy item (inline product of an old Checkout, named „POapp — …"
+        // or, before 28. 7. 2026, „Firol — …"): Stripe puts the product name
+        // into the line description („1 × POapp — extra technik (at …)",
+        // „Remaining time on Firol — extra technik after …").
+        $description = (string) ($line['description'] ?? '');
+        foreach (SeatSync::LEGACY_PRODUCT_NAMES as $name) {
+            if (str_contains($description, $name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    /** @param array{0: int, 1: int}|null $period */
+    /**
+     * „ (01.12.–17.12.2026)" within one year, „ (17.12.2026 – 17.01.2027)"
+     * across a year end.
+     *
+     * @param array{0: int, 1: int}|null $period
+     */
     private static function periodText(?array $period): string
     {
         if ($period === null) {
             return '';
+        }
+        if (date('Y', $period[0]) === date('Y', $period[1])) {
+            return ' (' . date('d.m.', $period[0]) . '–' . date('d.m.Y', $period[1]) . ')';
         }
         return ' (' . date('d.m.Y', $period[0]) . ' – ' . date('d.m.Y', $period[1]) . ')';
     }

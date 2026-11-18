@@ -20,6 +20,13 @@ namespace Firol\Idoklad;
  *
  * IDOKLAD_DRAFT_MODE is no longer read: it only labelled the local row
  * „draft" while a normal, numbered invoice was posted to iDoklad.
+ *
+ * A live Stripe key deliberately does NOT imply `send` (a developer machine
+ * with a live key must still not issue). Instead the mistake is loud:
+ * ConfigCheck reports an error for a live key without `send`, and a
+ * `prepared` row of a live Stripe invoice is an error state that the admin
+ * check shows and the daily run alerts about. Production sets
+ * IDOKLAD_ISSUE_MODE=send explicitly (README deploy checklist).
  */
 final class IssuePolicy
 {
