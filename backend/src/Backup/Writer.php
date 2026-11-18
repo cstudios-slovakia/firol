@@ -132,7 +132,8 @@ final class Writer
     private static function companies(int $accountId, PDO $pdo): array
     {
         $stmt = $pdo->prepare(
-            'SELECT id, name, client_type, ico, street, postal_code, city, contact, contact_email, approver, billing_mode, created_at
+            'SELECT id, name, client_type, ico, street, postal_code, city, contact, contact_email, approver, billing_mode,
+                    book_code, book_last_seq, created_at
              FROM   companies WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
         );
         $stmt->execute([$accountId]);
@@ -159,6 +160,7 @@ final class Writer
         $out = [];
         foreach ($companies as $company) {
             $company['id']         = (int) $company['id'];
+            $company['book_last_seq'] = (int) $company['book_last_seq'];
             $company              = self::withReadableAddress($company);
             $company['facilities'] = $byCompany[$company['id']] ?? [];
             $out[] = $company;
@@ -176,7 +178,8 @@ final class Writer
             'SELECT i.id, i.company_id, i.facility_id, i.source_inspection_id, i.type,
                     i.periodicity_value, i.periodicity_unit, i.periodicity_is_custom,
                     i.is_preventive_inspection, i.executed_on,
-                    i.status, i.issued_before, i.notes, i.details, i.created_at,
+                    i.status, i.issued_before, i.book_number, i.book_number_version,
+                    i.notes, i.details, i.created_at,
                     i.effective_cert_number,
                     i.effective_cert_valid_from, i.effective_cert_valid_to,
                     i.billing_mode, i.invoiced, i.invoiced_at, i.billing_note,

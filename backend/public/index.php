@@ -137,6 +137,7 @@ $router->get('/api/companies',                      [CompanyController::class, '
 $router->post('/api/companies',                     [CompanyController::class, 'store']);
 $router->get('/api/companies/{id}',                 [CompanyController::class, 'show']);
 $router->patch('/api/companies/{id}',               [CompanyController::class, 'update']);
+$router->post('/api/companies/{id}/book-code',      [CompanyController::class, 'updateBookCode']);
 // Spec 25 — a firma / prevádzka is archived and restored, never deleted.
 $router->post('/api/companies/{id}/archive',        [CompanyController::class, 'archive']);
 $router->post('/api/companies/{id}/restore',        [CompanyController::class, 'restore']);

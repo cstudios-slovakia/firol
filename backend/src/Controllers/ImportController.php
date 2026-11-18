@@ -504,6 +504,8 @@ final class ImportController
                 $createdCompanies++;
                 $companyIdByIco[$ico] = $newId;
                 $clientTypeById[$newId] = $clientType;
+                // The code of its požiarna kniha numbers, as for a firma created in the app.
+                \Firol\Documents\BookNumber::assignProposal($accountId, $newId, $name);
             }
 
             $insertFacility = $pdo->prepare(
@@ -1351,7 +1353,9 @@ final class ImportController
                     $body,
                     (string) $entry['executed_on'],
                     $entry['client_type'] === 'bytove_druzstvo',
-                    ['deadline_optional' => true, 'facility_ids' => $ids],
+                    // Historical book defects: „zanik" stays accepted — it is
+                    // history, not a new defect entered in the app (answer 6 B).
+                    ['deadline_optional' => true, 'facility_ids' => $ids, 'allow_new_zanik' => true],
                 );
             } catch (\InvalidArgumentException $e) {
                 $fail($sheet, $rowNum, $e->getMessage());
@@ -1480,6 +1484,7 @@ final class ImportController
             'INSERT INTO companies (account_id, name, ico) VALUES (?, ?, ?)'
         )->execute([$accountId, $name, $ico]);
         $id = (int) $pdo->lastInsertId();
+        \Firol\Documents\BookNumber::assignProposal($accountId, $id, $name);
         $companyIdByIco[$ico] = $id;
         $createdCount++;
         return $id;

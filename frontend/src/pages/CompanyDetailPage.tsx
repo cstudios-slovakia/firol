@@ -12,6 +12,7 @@ import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { BulkSendDialog } from '@/components/BulkSendDialog';
 import { CompanyPersons } from '@/components/CompanyPersons';
+import { BookCodeRow } from '@/components/BookCodeRow';
 import { NewFacilityDialog } from '@/components/NewFacilityDialog';
 import { WorkConfirmationDialog } from '@/components/WorkConfirmationDialog';
 import { CompanyWorkConfirmations } from '@/components/CompanyWorkConfirmations';
@@ -347,6 +348,11 @@ export function CompanyDetailPage() {
                 {!company.ico && !company.address && !company.contact && !company.contact_email && !company.approver && (
                   <div className="py-2 text-ink-400">Žiadne ďalšie údaje. Doplň ich úpravou {client.cases.gen}.</div>
                 )}
+                <BookCodeRow
+                  company={company}
+                  canEdit={canEdit}
+                  onSaved={(next) => setData((prev) => (prev ? { ...prev, company: { ...prev.company, ...next } } : prev))}
+                />
               </dl>
               {/* The persons are edited only while the firm is active. */}
               {!archived && <CompanyPersons companyId={company.id} facilities={facilities} clientType={company.client_type} />}

@@ -9,6 +9,7 @@ use Firol\Auth\Csrf;
 use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Db;
+use Firol\Documents\BookNumber;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Support\Address;
@@ -226,6 +227,11 @@ final class CompanyController
                 ->execute([$billingMode, $id]);
         }
 
+        // The code of its požiarna kniha numbers (PK-<KÓD>-NNN, customer's
+        // answer 3 of 18. 11. 2026) is proposed at once; the user may change it
+        // until the first entry is issued.
+        BookNumber::assignProposal($accountId, $id, $name);
+
         Response::json(['company' => self::shape(self::findOrFail($accountId, $id))], 201);
     }
 
@@ -407,7 +413,7 @@ final class CompanyController
     private static function findOrFail(?int $accountId, int $id, bool $includeArchived = false): array
     {
         $sql = 'SELECT id, account_id, name, client_type, ico, street, postal_code, city, contact, contact_email, approver, billing_mode,
-                       archived_at, archived_reason, created_at
+                       book_code, book_last_seq, archived_at, archived_reason, created_at
                 FROM   companies
                 WHERE  id = ?';
         $params = [$id];
@@ -448,6 +454,73 @@ final class CompanyController
             $row['address'] = Address::format($row['street'] ?? null, $row['postal_code'] ?? null, $row['city'] ?? null);
         }
         $row['id'] = (int) $row['id'];
+        // Customer's answer 3 of 18. 11. 2026 — the code of the firma's
+        // požiarna kniha numbers: locked once an entry took a number; a firma
+        // without one shows what the first issue would propose.
+        if (array_key_exists('book_last_seq', $row)) {
+            $row['book_last_seq'] = (int) $row['book_last_seq'];
+            $row['book_code_locked'] = $row['book_last_seq'] > 0;
+            $row['book_code_suggested'] = ($row['book_code'] ?? null) === null && isset($row['account_id'])
+                ? BookNumber::propose((int) $row['account_id'], (string) $row['name'], $row['id'])
+                : null;
+        }
         return $row;
+    }
+
+    /**
+     * POST /api/companies/{id}/book-code  { code: string }
+     *
+     * Sets the code of the firma's požiarna kniha numbers (PK-<KÓD>-NNN):
+     * 2–4 letters or digits with at least one letter, upper case, unique within
+     * the account, and only until the firma's first entry is issued.
+     */
+    public static function updateBookCode(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
+        $id        = (int) $params['id'];
+
+        $existing = self::findOrFail($isAdmin ? null : $accountId, $id, true);
+        $scopeAccountId = (int) $existing['account_id'];
+
+        try {
+            $code = BookNumber::normalizeCode($req->json()['code'] ?? null);
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422);
+        }
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            // Under the firma's row lock: an issue running at the same moment
+            // either sees the new code or has already locked it.
+            $lock = $pdo->prepare('SELECT book_code, book_last_seq FROM companies WHERE id = ? AND account_id = ? FOR UPDATE');
+            $lock->execute([$id, $scopeAccountId]);
+            $row = $lock->fetch(PDO::FETCH_ASSOC);
+            if ((int) ($row['book_last_seq'] ?? 0) > 0 && $row['book_code'] !== $code) {
+                $pdo->rollBack();
+                Response::error('Kód sa už nedá zmeniť — firma má vystavený zápis do požiarnej knihy.', 409);
+            }
+            $taken = $pdo->prepare('SELECT 1 FROM companies WHERE account_id = ? AND book_code = ? AND id <> ?');
+            $taken->execute([$scopeAccountId, $code, $id]);
+            if ($taken->fetchColumn()) {
+                $pdo->rollBack();
+                Response::error('Kód „' . $code . '" už má iná firma tohto účtu. Zvoľ iný.', 422);
+            }
+            $pdo->prepare('UPDATE companies SET book_code = ? WHERE id = ? AND account_id = ?')
+                ->execute([$code, $id, $scopeAccountId]);
+            $pdo->commit();
+        } catch (\PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if (($e->errorInfo[1] ?? null) === 1062) {
+                Response::error('Kód „' . $code . '" už má iná firma tohto účtu. Zvoľ iný.', 422);
+            }
+            throw $e;
+        }
+
+        Response::json(['company' => self::shape(self::findOrFail($isAdmin ? null : $accountId, $id, true))]);
     }
 }

@@ -8,6 +8,8 @@ use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
+use Firol\Documents\BookNumber;
+use Firol\Documents\BookNumberRefused;
 use Firol\Documents\NumberAllocator;
 use Firol\Documents\PersonProtocol;
 use Firol\Http\Request;
@@ -186,6 +188,15 @@ final class DocumentController
         if ($inspection['executed_on'] === null) {
             return ['error' => 'Doplň dátum vykonania pred generovaním PDF.', 'status' => 422];
         }
+        // A book entry's number needs its firma's code (customer's answer 3 of
+        // 18. 11. 2026); a name the app cannot propose one from is refused
+        // here, before anything is rendered.
+        if ((string) $inspection['type'] === BookEntry::TYPE) {
+            $codeError = BookNumber::missingCodeError($accountId, $inspection);
+            if ($codeError !== null) {
+                return ['error' => $codeError, 'status' => 422];
+            }
+        }
 
         // Year for the sequence is taken from the inspection's executed_on
         // (not "now") so re-issuing in early January for a December
@@ -194,9 +205,10 @@ final class DocumentController
 
         $insType = (string) $inspection['type'];
 
-        // Block 2 — a row carried over from last time (chapter 12) arrives
-        // with its výsledok blank on purpose. The protocol must not print a
-        // blank verdict over the technician's signature.
+        // Block 2 — a row without a výsledok (carried over before 18. 11. 2026,
+        // when the BOZP rows carried identification only, or a source row
+        // that had none) must not print a blank verdict over the technician's
+        // signature.
         if (\Firol\Support\BozpItems::supports($insType)) {
             $unassessed = \Firol\Support\BozpItems::unassessedCount($insType, $items);
             if ($unassessed > 0) {
@@ -307,6 +319,14 @@ final class DocumentController
                 $version = $reuse['version'] + 1;
                 $numberYear = (int) substr($reuse['number'], -8, 4);
                 $year = $numberYear >= 2000 ? $numberYear : $year;
+            } elseif ($insType === BookEntry::TYPE) {
+                // A book entry: the firma's own series, never reset by year; an
+                // entry issued before keeps its number and takes the next
+                // version (BookNumber). The year folder on disk stays the year
+                // of the entry's date, as for every protocol.
+                $book = BookNumber::forIssue($pdo, $accountId, $inspection);
+                $allocated = ['number' => $book['number']];
+                $version = $book['version'];
             } else {
                 $allocated = NumberAllocator::allocate($accountId, $insType, $year);
                 $version = 1;
@@ -338,15 +358,16 @@ final class DocumentController
             } else {
                 $insert = $pdo->prepare(
                     'INSERT INTO documents
-                        (account_id, parent_type, parent_id, type, number, include_photos,
+                        (account_id, parent_type, parent_id, type, number, version, include_photos,
                          file_path, signed, signed_at)
-                     VALUES (?, "inspection", ?, ?, ?, ?, ?, 1, NOW())'
+                     VALUES (?, "inspection", ?, ?, ?, ?, ?, ?, 1, NOW())'
                 );
                 $insert->execute([
                     $accountId,
                     $inspectionId,
                     $inspection['type'],
                     $allocated['number'],
+                    $version,
                     $includePhotos ? 1 : 0,
                     $relPath,
                 ]);
@@ -354,8 +375,8 @@ final class DocumentController
 
                 $pdo->prepare(
                     'INSERT INTO document_versions (document_id, version, file_path)
-                     VALUES (?, 1, ?)'
-                )->execute([$documentId, $relPath]);
+                     VALUES (?, ?, ?)'
+                )->execute([$documentId, $version, $relPath]);
             }
 
             // Which of the two printouts of a test this version is (8.1).
@@ -404,6 +425,10 @@ final class DocumentController
             ]);
 
             $pdo->commit();
+        } catch (BookNumberRefused $e) {
+            // Every variant of the code was taken between the check and the lock.
+            $pdo->rollBack();
+            return ['error' => $e->getMessage(), 'status' => 422];
         } catch (\Throwable $e) {
             $pdo->rollBack();
             // Best-effort cleanup of an orphaned PDF if the rollback
@@ -1360,7 +1385,12 @@ final class DocumentController
         $payload['generated_at'] = date('c');
         $payload['handover'] = $handover;
 
-        $year = (int) substr((string) $number, -8, 4);
+        // The year folder the protocol was filed under (documents/{account}/{year}/…);
+        // a book number (PK-<KÓD>-NNN, 18. 11. 2026) carries no year.
+        $year = preg_match('#^documents/\d+/(\d{4})/#', (string) ($doc['file_path'] ?? ''), $m) === 1 ? (int) $m[1] : 0;
+        if ($year < 2000) {
+            $year = (int) substr((string) $number, -8, 4);
+        }
         if ($year < 2000) {
             // Numbers are PREFIX-YYYY-NNN; fall back to the issue year if the
             // slice ever misses rather than writing outside the year folder.

@@ -1013,6 +1013,14 @@ final class InspectionController
         if ($decision['mode'] === null) {
             Response::error((string) $decision['reason'], 409);
         }
+        // The client asked for a permanent delete (`?expect=delete`, round 5):
+        // the screen offered „Natrvalo zmazať" for a draft that someone has
+        // issued since. Archiving it instead would hide a protocol the user
+        // never asked to archive. A client without the parameter keeps the
+        // behaviour it always had.
+        if ($req->query('expect') === UkonDiscard::DELETE && $decision['mode'] !== UkonDiscard::DELETE) {
+            Response::error('Protokol bol medzitým vystavený, zahodiť ho nemožno.', 409);
+        }
         if ($decision['mode'] === UkonDiscard::DELETE) {
             try {
                 UkonDiscard::delete($scopeAccountId, $existing);
@@ -1060,6 +1068,12 @@ final class InspectionController
      * the next one from the sequence and leaves a gap. That is deliberate: a
      * copy of the old protocol may already sit in the customer's inbox, and two
      * different documents sharing one number is far worse than a gap.
+     *
+     * A požiarna kniha entry is the exception (customer's answer 3 of
+     * 18. 11. 2026, „opravený zápis si ponechá pôvodné číslo"): its number is
+     * kept on the entry (`inspections.book_number`, which this method leaves
+     * alone), and the next issue is the same number as a new version
+     * ({@see \Firol\Documents\BookNumber}).
      *
      * Opakovať stays the right tool for re-issuing the same control on a new
      * date; unlock is for fixing a protocol that was issued wrong.
@@ -1210,11 +1224,10 @@ final class InspectionController
      * "Opakovať" — start this year's inspection from last year's, block 1 /
      * chapter 12.
      *
-     * The devices come across as {@see CarryOver} maps them: a fire-protection
-     * type with its values and result (the draft records where they came from,
-     * `carried_from` / `carried_positions`, shown on its summary), any other
-     * type with its identification only and last time's verdict in
-     * `previous_status`. Photos never travel, and a device disposed of last
+     * The devices come across as {@see CarryOver} maps them: a FULL type (fire
+     * types, BOZP item checks) with its values and result (the draft records
+     * where they came from, `carried_from` / `carried_positions`, shown on its
+     * summary), any other type with its identification only. Photos never travel, and a device disposed of last
      * time is left behind entirely (the response says how many, so the
      * technician can see it was a decision).
      *
@@ -1381,8 +1394,8 @@ final class InspectionController
         if ((string) $source['type'] !== $type || (int) $source['facility_id'] !== (int) $row['facility_id']) {
             Response::error('Prevziať položky možno len z kontroly rovnakého typu na tej istej prevádzke.', 422);
         }
-        // Values and results travel with a fire-protection item: only an issued
-        // protocol is a source, never another draft.
+        // Values and results travel with the item (CarryOver::FULL): only an
+        // issued protocol is a source, never another draft.
         if ((string) $source['status'] !== 'finalized') {
             Response::error('Prevziať položky možno len z ukončenej kontroly (s vystaveným PDF).', 422);
         }
@@ -1433,7 +1446,8 @@ final class InspectionController
     }
 
     /**
-     * Where the values of a fire-protection draft came from, in the shape the
+     * Where the values of a draft of a FULL type (the fire types and, since
+     * 18. 11. 2026, the BOZP item checks) came from, in the shape the
      * checklist after a prehliadka records it ({@see PrehliadkaChecklist}), so
      * the summary says „prevzaté z protokolu č. … zo dňa …" (fix list of
      * 16. 11. 2026, decision 5). Null for a type that carries identification

@@ -50,6 +50,16 @@ export type Company = {
   approver: string | null;
   /** Chapter 22 — the režim a new úkon for this firm starts with. */
   billing_mode: CompanyBillingMode;
+  /**
+   * The code of the firma's požiarna kniha numbers, PK-<KÓD>-NNN (customer's
+   * answer 3 of 18. 11. 2026). Null until proposed or typed; undefined on a
+   * response cached before the field existed.
+   */
+  book_code?: string | null;
+  /** True once an entry took a number: the code is shown read-only. */
+  book_code_locked?: boolean;
+  /** What the first issue would propose for a firma without a code. */
+  book_code_suggested?: string | null;
   /** Spec 25 — set while the firm is archived; it then opens read-only. */
   archived_at?: string | null;
   archived_reason?: string | null;
@@ -154,6 +164,14 @@ export const Companies = {
     api<void>(`/api/companies/${id}/archive`, {
       method: 'POST',
       body: { reason },
+      csrfToken,
+      requireOnline: true,
+    }),
+  /** The code of the firma's book numbers — online only (it must be unique in the account). */
+  updateBookCode: (id: number, code: string, csrfToken: string | null) =>
+    api<{ company: Company }>(`/api/companies/${id}/book-code`, {
+      method: 'POST',
+      body: { code },
       csrfToken,
       requireOnline: true,
     }),
