@@ -97,7 +97,7 @@ function OznacenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
 
   function isPristine() {
     return !location && result === null && !notes && !customKind
-      && photos.total === 0 && defects.rows.length === 0;
+      && photos.total === 0 && !photos.dirty && defects.rows.length === 0;
   }
 
   function getKindsToSave(): string[] {

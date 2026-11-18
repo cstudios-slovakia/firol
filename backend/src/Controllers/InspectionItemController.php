@@ -110,11 +110,11 @@ final class InspectionItemController
         // The follow-ups the checklist after a prehliadka closes (spec 12.2).
         'oprava_ts_php' => [
             'manufacturer' => 'Výrobca', 'type' => 'Typ', 'serial' => 'Výrobné číslo / séria',
-            'year' => 'Rok výroby', 'location' => 'Umiestnenie',
+            'year' => 'Rok výroby', 'location' => 'Umiestnenie', 'notes' => 'Poznámky',
         ],
         'vyradenie' => [
             'manufacturer' => 'Výrobca', 'type' => 'Typ', 'serial' => 'Č. výr. série / tlak. nádoby',
-            'year' => 'Rok výroby', 'reason' => 'Dôvod vyradenia',
+            'year' => 'Rok výroby', 'location' => 'Umiestnenie', 'reason' => 'Dôvod vyradenia',
         ],
         'ts_hadic' => [
             'hose_type' => 'Typ / priemer hadice', 'location' => 'Umiestnenie', 'manufacturer' => 'Výrobca',
@@ -532,7 +532,7 @@ final class InspectionItemController
 
         $status = $body['status'] ?? null;
         if (!is_string($status) || !in_array($status, self::PHP_STATUSES, true)) {
-            self::failValidation('Field status must be one of: A, TS, O, V.', 'status');
+            self::failValidation('Vyber „' . self::labelOf('status') . '".', 'status');
         }
 
         return [
@@ -763,7 +763,7 @@ final class InspectionItemController
     {
         $kind = $body['kind'] ?? null;
         if (!is_string($kind) || !in_array($kind, self::PU_KINDS, true)) {
-            self::failValidation('Field kind must be one of: dvere, okno, klapka.', 'kind');
+            self::failValidation('Vyber „' . self::labelOf('kind') . '".', 'kind');
         }
         $identifier   = self::stringField($body, 'identifier',   required: true,  max: 80);
         $manufacturer = self::stringField($body, 'manufacturer', required: true,  max: 80);
@@ -772,7 +772,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.', 'result');
+            self::failValidation('Vyber „' . self::labelOf('result') . '".', 'result');
         }
 
         return [
@@ -801,7 +801,7 @@ final class InspectionItemController
     {
         $kind = $body['kind'] ?? null;
         if (!is_string($kind) || !in_array($kind, self::PU_KINDS, true)) {
-            self::failValidation('Field kind must be one of: dvere, okno, klapka.', 'kind');
+            self::failValidation('Vyber „' . self::labelOf('kind') . '".', 'kind');
         }
         $identifier      = self::stringField($body, 'identifier',       required: true,  max: 80);
         $manufacturer    = self::stringField($body, 'manufacturer',     required: false, max: 80);
@@ -811,7 +811,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.', 'result');
+            self::failValidation('Vyber „' . self::labelOf('result') . '".', 'result');
         }
 
         return [
@@ -846,7 +846,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.', 'result');
+            self::failValidation('Vyber „' . self::labelOf('result') . '".', 'result');
         }
 
         return [
@@ -889,7 +889,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.', 'result');
+            self::failValidation('Vyber „' . self::labelOf('result') . '".', 'result');
         }
 
         return [
@@ -918,12 +918,12 @@ final class InspectionItemController
     {
         $type      = $body['type'] ?? null;
         if (!is_string($type) || !in_array($type, self::HYDRANTY_TYPES, true)) {
-            self::failValidation('Field type must be one of: DN25, DN33, DN52, C52, other.', 'type');
+            self::failValidation('Vyber „' . self::labelOf('type') . '".', 'type');
         }
 
         $typeOther = self::stringField($body, 'type_other', required: false, max: 60);
         if ($type === 'other' && ($typeOther === null || $typeOther === '')) {
-            self::failValidation('Field type_other is required when type = other.', 'type_other');
+            self::failValidation('Pole „' . self::labelOf('type_other') . '" je povinné.', 'type_other');
         }
         // Drop the free-text label when it's not relevant — keeps payload tidy.
         if ($type !== 'other') {
@@ -940,7 +940,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.', 'result');
+            self::failValidation('Vyber „' . self::labelOf('result') . '".', 'result');
         }
 
         return [
@@ -1039,7 +1039,8 @@ final class InspectionItemController
             self::$problems[] = $key ?? $message;
             return;
         }
-        Response::error($message, 422);
+        // `field` lets „Skontroluj hodnoty" tell an empty field from a wrong value.
+        Response::error($message, 422, $key !== null ? ['field' => $key] : []);
     }
 
     /** @return array<string, mixed> */

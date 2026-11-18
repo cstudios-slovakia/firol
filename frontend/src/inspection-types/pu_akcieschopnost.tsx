@@ -99,6 +99,9 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
   }, [initialItem, inspectionId]);
 
   function isPristine() {
+    // A staged or removed photo is a change too; only saveItemWithPhotos()
+    // commits it, so the shortcut must not skip the save.
+    if (photos.dirty) return false;
     // An existing item: nothing to save only while nothing was changed.
     if (initialItem) {
       return sameFormValues(puAkcieschopnostValues(initialItem.fields as Partial<PuAkcieschopnostItemFields>), { kind, identifier, manufacturer, location, result, notes });

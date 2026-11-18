@@ -62,7 +62,7 @@ import { DiscardPrehliadkaButton, useDiscardPrehliadka } from "@/components/preh
 import { InspectionTags } from "@/components/InspectionTags";
 import { useMemberRights } from "@/auth/useMemberRights";
 import {
-    DISCARD_DIALOG,
+    discardDialog,
     discardDoneMessage,
     discardErrorMessage,
     discardModeOf,
@@ -87,7 +87,7 @@ export function FacilityDetailPage() {
     const [trainings, setTrainings] = useState<TrainingListItem[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [repeatingId, setRepeatingId] = useState<number | null>(null);
-    const [pendingDelete, setPendingDelete] = useState<{ id: number; mode: DiscardMode } | null>(null);
+    const [pendingDelete, setPendingDelete] = useState<{ id: number; mode: DiscardMode; type: string } | null>(null);
     const [deleting, setDeleting] = useState(false);
     const [pendingDeleteTrainingId, setPendingDeleteTrainingId] = useState<number | null>(null);
     const [deletingTraining, setDeletingTraining] = useState(false);
@@ -147,7 +147,7 @@ export function FacilityDetailPage() {
             const outcome = await discardUkon(id, mode, csrfToken);
             setInspections((prev) => prev?.filter((i) => i.id !== id) ?? null);
             setPendingDelete(null);
-            toast.success(discardDoneMessage(mode, outcome));
+            toast.success(discardDoneMessage(outcome));
         } catch (err) {
             toast.error(discardErrorMessage(err, mode));
         } finally {
@@ -740,7 +740,7 @@ export function FacilityDetailPage() {
                                                         type="button"
                                                         title={discardModeOf(ins) === "delete" ? "Natrvalo zmazať" : "Archivovať"}
                                                         aria-label={discardModeOf(ins) === "delete" ? "Natrvalo zmazať" : "Archivovať"}
-                                                        onClick={() => setPendingDelete({ id: ins.id, mode: discardModeOf(ins) as DiscardMode })}
+                                                        onClick={() => setPendingDelete({ id: ins.id, mode: discardModeOf(ins) as DiscardMode, type: ins.type })}
                                                         className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
                                                     >
                                                         <Trash2 className="size-4" />
@@ -913,8 +913,8 @@ export function FacilityDetailPage() {
             <Dialog
                 open={pendingDelete !== null}
                 onClose={() => { if (!deleting) setPendingDelete(null); }}
-                title={pendingDelete ? DISCARD_DIALOG[pendingDelete.mode].title : ""}
-                description={pendingDelete ? DISCARD_DIALOG[pendingDelete.mode].description : ""}
+                title={pendingDelete ? discardDialog(pendingDelete.mode, pendingDelete.type).title : ""}
+                description={pendingDelete ? discardDialog(pendingDelete.mode, pendingDelete.type).description : ""}
                 dismissible={!deleting}
             >
                 <div className="flex justify-end gap-2">
@@ -932,7 +932,7 @@ export function FacilityDetailPage() {
                         loading={deleting}
                         onClick={handleDelete}
                     >
-                        {pendingDelete ? DISCARD_DIALOG[pendingDelete.mode].confirmLabel : ""}
+                        {pendingDelete ? discardDialog(pendingDelete.mode, pendingDelete.type).confirmLabel : ""}
                     </Button>
                 </div>
             </Dialog>

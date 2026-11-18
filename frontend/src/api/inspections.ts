@@ -593,10 +593,11 @@ export const Inspections = {
   /**
    * „Zahodiť" — deletes a never-issued draft for good, archives an issued úkon
    * (the server decides, see `discard`). A permanent delete never waits in the
-   * offline queue: pass `requireOnline` for a draft.
+   * offline queue: pass `requireOnline` for a draft. Answers with the mode
+   * the server applied.
    */
   archive: (id: number, csrfToken: string | null, opts: { requireOnline?: boolean } = {}) =>
-    api<void>(`/api/inspections/${id}`, {
+    api<{ mode: DiscardMode } | undefined>(`/api/inspections/${id}`, {
       method: 'DELETE',
       csrfToken,
       label: 'Archivovanie úkonu',

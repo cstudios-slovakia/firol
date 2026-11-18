@@ -24,6 +24,7 @@ use Firol\Support\PrehliadkaConcepts;
 use Firol\Support\PrehliadkaDefects;
 use Firol\Support\PrehliadkaDetails;
 use Firol\Support\UkonDiscard;
+use Firol\Support\UkonDiscardRefused;
 
 final class InspectionController
 {
@@ -1015,18 +1016,22 @@ final class InspectionController
         if ($decision['mode'] === UkonDiscard::DELETE) {
             try {
                 UkonDiscard::delete($scopeAccountId, $existing);
-            } catch (\RuntimeException) {
-                // Issued, reopened or followed up between the check and the lock.
-                Response::error(UkonDiscard::REFUSE_MADE_FROM, 409);
+            } catch (UkonDiscardRefused $e) {
+                // Issued, reopened, followed up or archived between the check
+                // and the lock: the reason decided under the lock. A database
+                // error is not caught here and answers 500.
+                Response::error($e->reason(), 409);
             }
-            Response::noContent();
+            // The mode actually applied, so the client's toast never trusts a
+            // cached `discard`.
+            Response::json(['mode' => UkonDiscard::DELETE]);
         }
 
         Db::pdo()->prepare(
             'UPDATE inspections SET archived_at = NOW() WHERE id = ? AND account_id = ?'
         )->execute([$id, $scopeAccountId]);
 
-        Response::noContent();
+        Response::json(['mode' => UkonDiscard::ARCHIVE]);
     }
 
     /**

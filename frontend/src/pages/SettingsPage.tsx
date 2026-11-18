@@ -95,6 +95,7 @@ import { Badge } from "@/components/ui/Badge";
 import { SignaturePickerModal } from "@/components/SignaturePickerModal";
 import { FeedbackDialog } from "@/components/FeedbackFloater";
 import { cn } from "@/lib/cn";
+import { plural } from "@/lib/text";
 import { formatDateSk } from "@/lib/clientNoticeEmail";
 
 // ─── Tab definitions ─────────────────────────────────────────────────────────
@@ -2020,8 +2021,20 @@ type ImportSectionDef = {
     Icon: typeof Building;
     color: string;
     bg: string;
-    createdLabels: Record<string, string>;
+    /** Each created count's noun in its three Slovak forms (1 / 2–4 / 5+). */
+    createdLabels: Record<string, [string, string, string]>;
 };
+
+/** „1 prevádzka", „2 prevádzky", „5 prevádzok" — one count of an import result. */
+function createdCount(section: ImportSectionDef, key: string, n: number): string {
+    const forms = section.createdLabels[key];
+    return forms ? plural(n, ...forms) : `${n} ${key}`;
+}
+
+/** „1 chyba", „2 chyby", „5 chýb" in the accusative („obsahuje 1 chybu"). */
+function errorCount(n: number): string {
+    return plural(n, "chybu", "chyby", "chýb");
+}
 
 const IMPORT_DEFS: ImportSectionDef[] = [
     {
@@ -2032,7 +2045,7 @@ const IMPORT_DEFS: ImportSectionDef[] = [
         Icon: Building,
         color: "text-blue-600",
         bg: "bg-blue-50",
-        createdLabels: { companies: "firiem", facilities: "prevádzok" },
+        createdLabels: { companies: ["firma", "firmy", "firiem"], facilities: ["prevádzka", "prevádzky", "prevádzok"] },
     },
     {
         kind: "inspections",
@@ -2042,7 +2055,15 @@ const IMPORT_DEFS: ImportSectionDef[] = [
         Icon: ClipboardList,
         color: "text-firol-600",
         bg: "bg-firol-50",
-        createdLabels: { inspections: "kontrol", items: "položiek", book_entries: "zápisov do požiarnej knihy", book_defects: "nedostatkov v zápisoch", technicians: "nových technikov", companies: "nových firiem", facilities: "nových prevádzok" },
+        createdLabels: {
+            inspections: ["kontrola", "kontroly", "kontrol"],
+            items: ["položka", "položky", "položiek"],
+            book_entries: ["zápis do požiarnej knihy", "zápisy do požiarnej knihy", "zápisov do požiarnej knihy"],
+            book_defects: ["nedostatok v zápisoch", "nedostatky v zápisoch", "nedostatkov v zápisoch"],
+            technicians: ["nový technik", "noví technici", "nových technikov"],
+            companies: ["nová firma", "nové firmy", "nových firiem"],
+            facilities: ["nová prevádzka", "nové prevádzky", "nových prevádzok"],
+        },
     },
     {
         kind: "trainings",
@@ -2052,7 +2073,13 @@ const IMPORT_DEFS: ImportSectionDef[] = [
         Icon: GraduationCap,
         color: "text-violet-600",
         bg: "bg-violet-50",
-        createdLabels: { trainings: "školení", trainees: "účastníkov", trainers: "nových lektorov", companies: "nových firiem", facilities: "nových prevádzok" },
+        createdLabels: {
+            trainings: ["školenie", "školenia", "školení"],
+            trainees: ["účastník", "účastníci", "účastníkov"],
+            trainers: ["nový lektor", "noví lektori", "nových lektorov"],
+            companies: ["nová firma", "nové firmy", "nových firiem"],
+            facilities: ["nová prevádzka", "nové prevádzky", "nových prevádzok"],
+        },
     },
 ];
 
@@ -2089,10 +2116,10 @@ function ImportSubSection({ section }: { section: ImportSectionDef }) {
             const res = await ImportApi.upload(section.kind, file, csrfToken);
             setResult(res);
             if (res.errors.length > 0) {
-                toast.error(`Import zlyhal — ${res.errors.length} chýb v súbore.`);
+                toast.error(`Import zlyhal — ${plural(res.errors.length, "chyba", "chyby", "chýb")} v súbore.`);
             } else if (res.created) {
                 const summary = Object.entries(res.created)
-                    .map(([k, v]) => `${v} ${section.createdLabels[k] ?? k}`)
+                    .map(([k, v]) => createdCount(section, k, Number(v)))
                     .join(", ");
                 toast.success(`Naimportované: ${summary}`);
             }
@@ -2179,7 +2206,7 @@ function ImportSubSection({ section }: { section: ImportSectionDef }) {
                                 {Object.entries(result.created).map(([k, v]) => (
                                     <li key={k}>
                                         <Badge tone="ok">
-                                            {v} {section.createdLabels[k] ?? k}
+                                            {createdCount(section, k, Number(v))}
                                         </Badge>
                                     </li>
                                 ))}
@@ -2191,8 +2218,7 @@ function ImportSubSection({ section }: { section: ImportSectionDef }) {
                         <div className="rounded-xl border border-rose-200 bg-rose-50/40 px-3 py-2.5 text-sm">
                             <p className="flex items-center gap-2 font-semibold text-rose-800">
                                 <AlertTriangle className="size-4" />
-                                Súbor obsahuje {result.errors.length}{" "}
-                                {result.errors.length === 1 ? "chybu" : "chýb"} — neuložilo sa nič.
+                                Súbor obsahuje {errorCount(result.errors.length)} — neuložilo sa nič.
                             </p>
                             <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto pr-1">
                                 {result.errors.map((e, i) => (

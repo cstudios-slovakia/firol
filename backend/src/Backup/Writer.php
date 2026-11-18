@@ -176,7 +176,7 @@ final class Writer
             'SELECT i.id, i.company_id, i.facility_id, i.source_inspection_id, i.type,
                     i.periodicity_value, i.periodicity_unit, i.periodicity_is_custom,
                     i.is_preventive_inspection, i.executed_on,
-                    i.status, i.notes, i.details, i.created_at,
+                    i.status, i.issued_before, i.notes, i.details, i.created_at,
                     i.effective_cert_number,
                     i.effective_cert_valid_from, i.effective_cert_valid_to,
                     i.billing_mode, i.invoiced, i.invoiced_at, i.billing_note,

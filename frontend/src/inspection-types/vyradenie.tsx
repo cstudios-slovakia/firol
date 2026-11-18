@@ -80,7 +80,8 @@ function VyradenieStep2Form({ inspectionId, facilityId, initialItem, csrfToken, 
   }, [initialItem, inspectionId]);
 
   function isPristine() {
-    return !manufacturer && !extType && !serial && !year && !location && !reason;
+    return !manufacturer && !extType && !serial && !year && !location && !reason &&
+      !photos.dirty;
   }
 
   function handleGoToSummary(e: React.SyntheticEvent) {

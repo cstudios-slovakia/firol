@@ -102,6 +102,12 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    // The dependency scan globs every **/*.html and skips only node_modules
+    // and build.outDir (Vite 6.4), so it crawled dist-next/ and dist-prev/ of
+    // `npm run build:safe` too. The app has one entry.
+    optimizeDeps: {
+      entries: ['index.html'],
+    },
     define: {
       __APP_VERSION__: JSON.stringify(APP_VERSION),
     },

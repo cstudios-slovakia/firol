@@ -18,6 +18,9 @@ import { useToast } from '@/lib/toast';
  * event already (see lib/pwa.ts) so the manual retry button is mostly
  * for permanently-failed entries (4xx/5xx).
  */
+/** A queued change of one úkon or of its items (a temp id included). */
+const UKON_PATH = /^\/api\/inspections\/-?\d+(\/|\?|$)/;
+
 export function OfflineIndicator() {
   const online = useOnlineStatus();
   const pending = usePendingMutations();
@@ -141,9 +144,11 @@ export function OfflineIndicator() {
                         <div className="mt-1 text-[11px] text-red-700">
                           {m.lastError}
                           {/* A zmena of an úkon or item that no longer exists — a discarded
-                              draft is deleted for good (17. 11. 2026); retrying cannot help. */}
-                          {m.lastStatus === 404 &&
-                            ' Úkon alebo položku medzitým niekto zmazal, zmenu už nie je kam uložiť — zahoď ju.'}
+                              draft is deleted for good (17. 11. 2026), an issued one is
+                              archived; retrying cannot help. Only úkon and item paths:
+                              a 404 of a training, firma or task means something else. */}
+                          {m.lastStatus === 404 && UKON_PATH.test(m.path) &&
+                            ' Úkon alebo položku medzitým niekto zmazal alebo archivoval, zmenu už nie je kam uložiť — zahoď ju.'}
                         </div>
                       )}
                     </div>

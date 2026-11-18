@@ -39,6 +39,7 @@ final class UkonDiscard
     public const REFUSE_PREHLIADKA_CLOSED = 'Prehliadka už bola uzavretá, zahodiť sa nedá. Dokonči ju a uzavri znova.';
     public const REFUSE_MADE_FROM = 'Z tohto úkonu už vznikli ďalšie záznamy (úlohy, koncepty alebo nadväzujúce úkony), zahodiť sa nedá.';
     public const REFUSE_BOZP_CHILD = 'Zápis do knihy BOZP patrí k preventívnej prehliadke — samostatne sa zahodiť nedá.';
+    public const REFUSE_GONE = 'Úkon bol medzitým zmazaný alebo archivovaný.';
 
     /**
      * The discard of each úkon: DELETE, ARCHIVE, or null with the reason it is
@@ -59,9 +60,14 @@ final class UkonDiscard
                 $out[$id] = ['mode' => self::ARCHIVE, 'reason' => null];
                 continue;
             }
-            $details = $r['details'] ?? ($r['scope_details'] ?? null);
-            $details = is_array($details) ? $details : InspectionDetails::decode($details);
-            if (CarryOver::wasIssued($r, $details)) {
+            // A kniha BOZP draft made from another úkon may be the record of a
+            // prehliadka, whose own refusal comes first (it is never issued on
+            // its own, so „vystav znova" would mislead); it waits for the facts.
+            if (($r['type'] ?? '') === 'kniha_bozp' && !empty($r['source_inspection_id'])) {
+                $draftIds[] = $id;
+                continue;
+            }
+            if (self::issuedBefore($r)) {
                 $out[$id] = ['mode' => null, 'reason' => self::issuedReason((string) $r['type'])];
                 continue;
             }
@@ -85,6 +91,8 @@ final class UkonDiscard
             $type = (string) $r['type'];
             if ($type === 'kniha_bozp' && $f['source_type'] === PrehliadkaDetails::TYPE) {
                 $out[$id] = ['mode' => null, 'reason' => self::REFUSE_BOZP_CHILD];
+            } elseif (self::issuedBefore($r)) {
+                $out[$id] = ['mode' => null, 'reason' => self::issuedReason($type)];
             } elseif ($type === PrehliadkaDetails::TYPE && ($f['closed_audit'] || $f['children'])) {
                 // Anything issued from a prehliadka (its BOZP record, a concept —
                 // archived ones included) is proof it was closed before.
@@ -98,6 +106,14 @@ final class UkonDiscard
             }
         }
         return $out;
+    }
+
+    /** @param array<string, mixed> $r */
+    private static function issuedBefore(array $r): bool
+    {
+        $details = $r['details'] ?? ($r['scope_details'] ?? null);
+        $details = is_array($details) ? $details : InspectionDetails::decode($details);
+        return CarryOver::wasIssued($r, $details);
     }
 
     /**
@@ -114,6 +130,8 @@ final class UkonDiscard
      * {@see self::decide()} and the member's rights.
      *
      * @param array<string, mixed> $row the úkon (`id`, `type`, `facility_id`, …)
+     * @throws UkonDiscardRefused when the decision under the lock is no longer
+     *         DELETE; carries that decision's reason
      */
     public static function delete(int $accountId, array $row): void
     {
@@ -122,21 +140,29 @@ final class UkonDiscard
         $pdo->beginTransaction();
         try {
             // Re-checked under a row lock: an issue, a reopen or a follow-up
-            // arriving meanwhile must not lose its úkon.
+            // arriving meanwhile must not lose its úkon. An archived row is out
+            // of reach: a concept the system archived when its prehliadka was
+            // closed again is kept, not deleted.
             $lock = $pdo->prepare(
                 'SELECT id, account_id, type, status, details, issued_before, source_inspection_id
-                 FROM   inspections WHERE id = ? AND account_id = ? FOR UPDATE'
+                 FROM   inspections
+                 WHERE  id = ? AND account_id = ? AND archived_at IS NULL FOR UPDATE'
             );
             $lock->execute([$id, $accountId]);
             $current = $lock->fetch();
-            if (!$current || self::decide($accountId, $current)['mode'] !== self::DELETE) {
-                $pdo->rollBack();
-                throw new \RuntimeException('not deletable');
+            if (!$current) {
+                throw new UkonDiscardRefused(self::REFUSE_GONE);
+            }
+            $decision = self::decide($accountId, $current);
+            if ($decision['mode'] !== self::DELETE) {
+                throw new UkonDiscardRefused((string) ($decision['reason'] ?? self::REFUSE_ISSUED));
             }
             // Items, their photo rows, the prevádzky of a book entry, calendar
             // plans and deadline notices go by CASCADE (fk_* ON DELETE CASCADE).
-            $pdo->prepare('DELETE FROM inspections WHERE id = ? AND account_id = ? AND status = "draft"')
-                ->execute([$id, $accountId]);
+            $pdo->prepare(
+                'DELETE FROM inspections
+                 WHERE  id = ? AND account_id = ? AND status = "draft" AND archived_at IS NULL'
+            )->execute([$id, $accountId]);
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {

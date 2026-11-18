@@ -43,7 +43,7 @@ import { SkeletonList } from "@/components/ui/Skeleton";
 import { Spinner } from "@/components/ui/Spinner";
 import { InvoiceTickButton } from "@/components/InvoicingBlock";
 import {
-    DISCARD_DIALOG,
+    discardDialog,
     discardDoneMessage,
     discardErrorMessage,
     discardModeOf,
@@ -143,7 +143,7 @@ export function InspectionsListPage({
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState<InspectionType | "">("");
     const [statusFilter, setStatusFilter] = useState<GroupKey | "">("");
-    const [pendingDelete, setPendingDelete] = useState<{ id: number; mode: DiscardMode } | null>(null);
+    const [pendingDelete, setPendingDelete] = useState<{ id: number; mode: DiscardMode; type: string } | null>(null);
     const [deleting, setDeleting] = useState(false);
     const [repeatingId, setRepeatingId] = useState<number | null>(null);
     const [page, setPage] = useState(1);
@@ -339,7 +339,7 @@ export function InspectionsListPage({
             const outcome = await discardUkon(id, mode, csrfToken);
             setAllItems((prev) => prev?.filter((i) => i.id !== id) ?? null);
             setPendingDelete(null);
-            toast.success(discardDoneMessage(mode, outcome));
+            toast.success(discardDoneMessage(outcome));
         } catch (err) {
             toast.error(discardErrorMessage(err, mode));
         } finally {
@@ -577,7 +577,7 @@ export function InspectionsListPage({
                                     <ul className="flex flex-col gap-2">
                                         {pagedGroups[key].map((it) => (
                                             <li key={it.id}>
-                                                <InspectionRow it={it} onDelete={(id, mode) => setPendingDelete({ id, mode })} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} onInvoiced={uninvoicedOnly ? handleInvoiced : undefined} />
+                                                <InspectionRow it={it} onDelete={(id, mode) => setPendingDelete({ id, mode, type: it.type })} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} onInvoiced={uninvoicedOnly ? handleInvoiced : undefined} />
                                             </li>
                                         ))}
                                     </ul>
@@ -600,8 +600,8 @@ export function InspectionsListPage({
                 onClose={() => {
                     if (!deleting) setPendingDelete(null);
                 }}
-                title={pendingDelete ? DISCARD_DIALOG[pendingDelete.mode].title : ""}
-                description={pendingDelete ? DISCARD_DIALOG[pendingDelete.mode].description : ""}
+                title={pendingDelete ? discardDialog(pendingDelete.mode, pendingDelete.type).title : ""}
+                description={pendingDelete ? discardDialog(pendingDelete.mode, pendingDelete.type).description : ""}
                 dismissible={!deleting}
             >
                 <div className="flex justify-end gap-2">
@@ -619,7 +619,7 @@ export function InspectionsListPage({
                         loading={deleting}
                         onClick={handleDelete}
                     >
-                        {pendingDelete ? DISCARD_DIALOG[pendingDelete.mode].confirmLabel : ""}
+                        {pendingDelete ? discardDialog(pendingDelete.mode, pendingDelete.type).confirmLabel : ""}
                     </Button>
                 </div>
             </Dialog>

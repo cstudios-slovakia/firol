@@ -119,6 +119,9 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
   }
 
   function isPristine() {
+    // A staged or removed photo is a change too; only saveItemWithPhotos()
+    // commits it, so the shortcut must not skip the save.
+    if (photos.dirty) return false;
     // An existing item: nothing to save only while nothing was changed.
     if (initialItem) {
       return sameFormValues(tsHadicValues(initialItem.fields as Partial<TsHadicItemFields>), { hoseType, location, manufacturer, workingPressure, testPressure, length, yearOfManufacture, result, notes });

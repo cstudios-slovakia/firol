@@ -76,7 +76,7 @@ function PpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
 
   function isPristine() {
     return !name && !manufacturerType && !inventoryNumber && !location && !faults
-      && result === null && photos.total === 0 && defects.rows.length === 0;
+      && result === null && photos.total === 0 && !photos.dirty && defects.rows.length === 0;
   }
 
   function validate(): FieldErrors {

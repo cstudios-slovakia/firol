@@ -118,6 +118,9 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
   }, [initialItem, inspectionId]);
 
   function isPristine() {
+    // A staged or removed photo is a change too; only saveItemWithPhotos()
+    // commits it, so the shortcut must not skip the save.
+    if (photos.dirty) return false;
     // An existing item: nothing to save only while nothing was changed.
     if (initialItem) {
       return sameFormValues(hydrantyValues(initialItem.fields as Partial<HydrantItemFields>), { hydrantType, typeOther, location, hoseCount, hs, hd, q, defects, result });

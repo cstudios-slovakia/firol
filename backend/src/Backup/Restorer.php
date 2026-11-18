@@ -9,6 +9,7 @@ use Firol\Documents\NumberAllocator;
 use Firol\Storage\Storage;
 use Firol\Support\AccountPurge;
 use Firol\Support\Address;
+use Firol\Support\Contractor;
 use Firol\Support\Invoicing;
 use Firol\Support\Periodicity;
 use PDO;
@@ -97,6 +98,12 @@ final class Restorer
     private array $conceptInspectionIds = [];
     /** @var list<int> new ids of the new-format požiarna kniha entries this run inserted */
     private array $bookInspectionIds = [];
+    /**
+     * @var list<int> new ids of drafts restored from an archive written before
+     *      `issued_before` existed (migration 078) and not yet known to be issued;
+     *      a restored documents row still proves it ({@see self::markIssuedFromDocuments()})
+     */
+    private array $issuedUnknownIds = [];
     /** @var array<int, int> old training id → new */
     private array $trainingMap = [];
     /** @var array<int, int> old own číselník item id → new (shipped ids are the same everywhere) */
@@ -216,6 +223,8 @@ final class Restorer
             // Chapter 21 — before the documents, which map výdajky onto it.
             $this->restoreStock(is_array($manifest['stock'] ?? null) ? $manifest['stock'] : []);
             $this->restoreDocuments($this->list($manifest, 'documents'));
+            // After the documents: an old archive's draft that owns one was issued.
+            $this->markIssuedFromDocuments();
             // Phase 6 — termíny cudzích revízií, onto the restored firms and prevádzky.
             $this->restoreExternalTerms($this->list($manifest, 'external_terms'));
             // Phase 7b — the firms' own „vykonané činnosti".
@@ -392,8 +401,8 @@ final class Restorer
                  is_preventive_inspection, executed_on, inspector_user_id,
                  effective_inspector_user_id, effective_cert_number,
                  effective_cert_valid_from, effective_cert_valid_to,
-                 status, notes, details, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 status, issued_before, notes, details, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insertItem = $this->pdo->prepare(
             'INSERT INTO inspection_items (inspection_id, position, fields, created_at)
@@ -455,6 +464,9 @@ final class Restorer
                 continue;
             }
 
+            $status       = $this->status($inspection);
+            $details      = self::details($inspection['details'] ?? null);
+            $issuedBefore = $this->issuedBefore($inspection, $status, $details);
             $insert->execute([
                 $this->accountId,
                 $companyId,
@@ -468,14 +480,18 @@ final class Restorer
                 $this->str($inspection, 'effective_cert_number'),
                 $this->date($inspection, 'effective_cert_valid_from'),
                 $this->date($inspection, 'effective_cert_valid_to'),
-                $this->status($inspection),
+                $status,
+                $issuedBefore ? 1 : 0,
                 $this->str($inspection, 'notes'),
                 // Header data of a block 2 úkon (inspections.details); absent in
                 // archives written before it existed.
-                self::details($inspection['details'] ?? null),
+                $details,
                 $createdAt,
             ]);
             $inspectionId = (int) $this->pdo->lastInsertId();
+            if (!$issuedBefore && !array_key_exists('issued_before', $inspection)) {
+                $this->issuedUnknownIds[] = $inspectionId;
+            }
             $this->restoreInvoicing('inspections', $inspectionId, $inspection);
             $this->inspectionMap[$oldId] = $inspectionId;
             $existing[$key] = $inspectionId;
@@ -1873,6 +1889,49 @@ final class Restorer
     {
         $email = $this->str($row, $key);
         return $email !== null ? ($this->userMap[mb_strtolower($email)] ?? null) : null;
+    }
+
+    /**
+     * Whether a restored úkon was issued before (inspections.issued_before,
+     * migration 078). Without it an unlocked old protocol would come back as a
+     * never-issued draft and could be deleted for good. An archive written
+     * before the column existed has no key: then a finalized row or one with
+     * the contractor snapshot counts as issued here, and one with a restored
+     * documents row later ({@see self::markIssuedFromDocuments()}).
+     *
+     * @param array<string, mixed> $inspection
+     */
+    private function issuedBefore(array $inspection, string $status, ?string $details): bool
+    {
+        if ($status === 'finalized') {
+            return true;
+        }
+        if (array_key_exists('issued_before', $inspection)) {
+            return !empty($inspection['issued_before']);
+        }
+        $decoded = $details !== null ? json_decode($details, true) : null;
+        return is_array($decoded) && array_key_exists(Contractor::SNAPSHOT_KEY, $decoded);
+    }
+
+    /**
+     * An archive from before migration 078: a restored draft that owns a
+     * restored documents row (a test printed blank and reopened with „Doplniť
+     * výsledky") was issued.
+     */
+    private function markIssuedFromDocuments(): void
+    {
+        foreach (array_chunk($this->issuedUnknownIds, 500) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $this->pdo->prepare(
+                "UPDATE inspections i
+                 SET    i.issued_before = 1
+                 WHERE  i.account_id = ? AND i.id IN ($in)
+                   AND  EXISTS (SELECT 1 FROM documents d
+                                WHERE  d.account_id = i.account_id
+                                  AND  d.parent_type = 'inspection'
+                                  AND  d.parent_id = i.id)"
+            )->execute([$this->accountId, ...$chunk]);
+        }
     }
 
     /** @param array<string, mixed> $row */

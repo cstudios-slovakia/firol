@@ -34,6 +34,12 @@ export type PhotoStaging = {
     staged: StagedPhoto[];
     /** Photos that will exist after commit — drives the counter and the cap. */
     total: number;
+    /**
+     * True while there is something for `commit` to do: a staged photo, or an
+     * existing photo marked for removal. A form's "nothing changed" shortcut
+     * must not skip the save while this is set, or the photo change is lost.
+     */
+    dirty: boolean;
     processing: boolean;
     error: string | null;
     addFiles: (files: FileList | File[]) => Promise<void>;
@@ -218,6 +224,7 @@ export function usePhotoStaging(
         existing: kept,
         staged,
         total,
+        dirty: staged.length > 0 || removedIds.length > 0,
         processing,
         error,
         addFiles,

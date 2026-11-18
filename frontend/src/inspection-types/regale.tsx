@@ -92,7 +92,7 @@ function RegaleStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
 
   function isPristine() {
     return !label && !type && !capacity && !location && capacityMarked === null && !faults
-      && result === null && photos.total === 0 && defects.rows.length === 0;
+      && result === null && photos.total === 0 && !photos.dirty && defects.rows.length === 0;
   }
 
   function validate(): FieldErrors {

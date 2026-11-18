@@ -70,7 +70,8 @@ function OpravaStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
 
   function isPristine() {
     return (
-      !manufacturer && !extType && !serial && !year && !location && !notes
+      !manufacturer && !extType && !serial && !year && !location && !notes &&
+      !photos.dirty
     );
   }
 

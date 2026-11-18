@@ -166,8 +166,9 @@ final class CarryOver
      *  - a draft with a recorded origin (`carried_from` — Opakovať, „Prevziať
      *    položky", the follow-ups built from another úkon, the checklist),
      *    whatever its type: an oprava / vyradenie follow-up included;
-     *  - a draft made with Opakovať before the origin was recorded: it has
-     *    `carried_over_from_id` and was never issued.
+     *  - a draft of a fire type ({@see self::carriesValues()}) made with
+     *    Opakovať before the origin was recorded: it has `carried_over_from_id`
+     *    and was never issued.
      *
      * A draft typed through the forms, an Excel import (a draft, `''` for an
      * empty cell) and an issued protocol opened again with „Upraviť" (it keeps
@@ -188,7 +189,11 @@ final class CarryOver
         if (is_array($details) && array_key_exists(PrehliadkaChecklist::CARRIED_FROM_KEY, $details)) {
             return true;
         }
-        return !empty($row['carried_over_from_id']) && !self::wasIssued($row, $details);
+        // Only the fire types carry values over whole (round 2); a BOZP or other
+        // Opakovať draft carries no assessment and stays unchecked.
+        return !empty($row['carried_over_from_id'])
+            && self::carriesValues((string) ($row['type'] ?? ''))
+            && !self::wasIssued($row, $details);
     }
 
     /**

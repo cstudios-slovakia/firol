@@ -20,7 +20,12 @@ declare(strict_types=1);
  *      and the carried positions when items are deleted;
  *   5. round 3: the completeness rule for follow-ups of other types and for old
  *      Opakovať drafts, and what discarding an úkon does — a never-issued draft
- *      deleted for good, an issued úkon archived, the rest refused.
+ *      deleted for good, an issued úkon archived, the rest refused;
+ *   6. round 4: the old-Opakovať rule only for the fire types, the reason of
+ *      the BOZP record of a prehliadka, the permanent delete re-decided under
+ *      its lock (archived, issued or followed up meanwhile), and backup /
+ *      restore keeping `issued_before` (also for a backup from before it).
+ *      This part writes scratch accounts and removes them at the end.
  *
  *     docker compose exec php php bin/test-prehliadka-followups.php
  *
@@ -43,11 +48,16 @@ use Firol\Support\PrehliadkaChecklist;
 use Firol\Support\PrehliadkaConcepts;
 use Firol\Support\PrehliadkaDefects;
 use Firol\Support\UkonDiscard;
+use Firol\Support\UkonDiscardRefused;
 
 if (($_ENV['APP_ENV'] ?? getenv('APP_ENV') ?: '') === 'production') {
     fwrite(STDERR, "Refusing to run in production.\n");
     exit(1);
 }
+
+// Part 6 runs code that names its actor (the audit row of a permanent
+// delete); the session has to exist before the first line is printed.
+\Firol\Auth\Session::start();
 
 $failures = 0;
 $expect = static function (string $name, mixed $actual, mixed $expected) use (&$failures): void {
@@ -410,6 +420,13 @@ try {
         CarryOver::checksCompleteness($row('php', ['issued_contractor' => ['name' => 'X']], 455)), false);
     $expect('5 not checked: an unlocked old protocol (carried_over_from_id, issued_before)',
         CarryOver::checksCompleteness($row('php', null, 455, 1)), false);
+    // Round 4, item 7: the old-Opakovať rule is for the fire types only.
+    $expect('6 not checked: a BOZP Opakovať draft from before round 1',
+        CarryOver::checksCompleteness($row('rebriky', null, 468)), false);
+    $expect('6 not checked: a book entry with carried_over_from_id',
+        CarryOver::checksCompleteness($row('poziarna_kniha', null, 468)), false);
+    $expect('6 still checked: a hydranty Opakovať draft from before round 1',
+        CarryOver::checksCompleteness($row('hydranty', null, 468)), true);
     $expect('5 the oprava follow-up refuses a missing Rok výroby',
         PrehliadkaConcepts::incompleteItems('oprava_ts_php', [['id' => 1, 'position' => 1, 'fields' => ['manufacturer' => 'Hasma', 'type' => 'P6', 'serial' => 'X1', 'year' => null, 'location' => 'Sklad']]])[0]['missing'] ?? null,
         ['Rok výroby']);
@@ -466,12 +483,185 @@ try {
     $expect('5 the reopened prehliadka counts as closed before', UkonDiscard::prehliadkaClosedBefore($load($reopened)), true);
     $expect('5 the open one does not', UkonDiscard::prehliadkaClosedBefore($load($openPp)), false);
 
+    // Round 4, item 3: the BOZP record of a reopened prehliadka was issued with
+    // it (issued_before) but cannot be issued on its own — its own reason wins.
+    $pdo->exec('UPDATE inspections SET issued_before = 1 WHERE id = ' . $bozp);
+    $expect('6 refused: an issued BOZP record of a prehliadka names the prehliadka, not „vystav znova"',
+        $mode($bozp), ['mode' => null, 'reason' => UkonDiscard::REFUSE_BOZP_CHILD]);
+    $expect('6 … also in the list', UkonDiscard::decideMany($accountId, [$load($bozp)])[$bozp]['reason'], UkonDiscard::REFUSE_BOZP_CHILD);
+    $loneBozp = $ukon($f5, 'kniha_bozp', '2026-11-17', 'draft');
+    $pdo->exec('UPDATE inspections SET issued_before = 1 WHERE id = ' . $loneBozp);
+    $expect('6 a kniha BOZP record of its own issued before keeps „vystav znova"', $mode($loneBozp)['reason'], UkonDiscard::REFUSE_ISSUED);
+
     $many = UkonDiscard::decideMany($accountId, [$load($typed), $load($issued), $load($withTask)]);
     $expect('5 the list decides every row at once', [$many[$typed]['mode'], $many[$issued]['mode'], $many[$withTask]['mode']],
         [UkonDiscard::DELETE, UkonDiscard::ARCHIVE, null]);
     $expect('5 another account sees nothing to delete', UkonDiscard::decideMany($otherAccountId, [$load($typed)])[$typed]['mode'], null);
 } finally {
     $pdo->rollBack();
+}
+
+// ── Part 6 — round 4: the permanent delete under its lock, backup / restore ──
+// UkonDiscard::delete() and Restorer::run() open transactions of their own, so
+// this part cannot sit inside the rolled-back one above: it writes scratch
+// accounts (users test-followups-r4-…@firol.test) and removes them, their rows
+// and files at the end.
+$r4Users = [];
+$r4Accounts = [];
+$r4Files = [];
+try {
+    $r4Account = static function (string $label) use ($pdo, &$r4Users, &$r4Accounts): array {
+        $pdo->prepare(
+            'INSERT INTO users (fullname, email, password_hash, is_pending, is_admin) VALUES (?, ?, ?, 0, 0)'
+        )->execute(['Test R4 ' . $label, 'test-followups-r4-' . bin2hex(random_bytes(4)) . '@firol.test', 'x']);
+        $userId = (int) $pdo->lastInsertId();
+        $r4Users[] = $userId;
+        $pdo->prepare(
+            "INSERT INTO accounts (invoice_company_name, invoice_street, invoice_postal_code, invoice_city,
+                                   invoice_ico, main_user_id, subscription_end_date, member_rights)
+             VALUES ('R4 Test s.r.o.', 'Skúšobná 1', '949 01', 'Nitra', '12345678', ?, '2030-12-31', 'plne')"
+        )->execute([$userId]);
+        $accountId = (int) $pdo->lastInsertId();
+        $r4Accounts[] = $accountId;
+        return [$accountId, $userId];
+    };
+    [$a6, $u6] = $r4Account('zdroj');
+    $_SESSION['user_id'] = $u6;
+    $pdo->prepare('INSERT INTO companies (account_id, name, client_type, street, postal_code, city, ico) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        ->execute([$a6, 'R4 Firma', 'firma', 'Ulica 1', '949 01', 'Nitra', '87654321']);
+    $c6 = (int) $pdo->lastInsertId();
+    $pdo->prepare('INSERT INTO facilities (account_id, company_id, name, street, postal_code, city) VALUES (?, ?, ?, ?, ?, ?)')
+        ->execute([$a6, $c6, 'R4 Prevádzka', 'Ulica 2', '949 01', 'Nitra']);
+    $f6 = (int) $pdo->lastInsertId();
+    $ins6 = $pdo->prepare(
+        'INSERT INTO inspections (account_id, company_id, facility_id, type, executed_on, inspector_user_id, status,
+                                  issued_before, created_by_user_id, details, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    // A merge restore matches an úkon by prevádzka, type and date, so each row
+    // of the backup check gets a date of its own.
+    $u6row = static function (string $type, string $status, int $issued = 0, ?array $details = null, ?string $notes = null, string $on = '2026-11-18')
+        use ($ins6, $pdo, $a6, $c6, $f6, $u6): int {
+        $ins6->execute([$a6, $c6, $f6, $type, $on, $u6, $status, $issued, $u6,
+            $details === null ? null : json_encode($details, JSON_UNESCAPED_UNICODE), $notes]);
+        return (int) $pdo->lastInsertId();
+    };
+    $row6 = static fn (int $id): array|false => $pdo->query(
+        'SELECT id, account_id, type, status, details, issued_before, source_inspection_id, facility_id, company_id, executed_on
+         FROM inspections WHERE id = ' . $id
+    )->fetch(PDO::FETCH_ASSOC);
+    $refusal = static function (int $id, array $snapshot) use ($a6): ?string {
+        try {
+            UkonDiscard::delete($a6, $snapshot);
+            return null;
+        } catch (UkonDiscardRefused $e) {
+            return $e->reason();
+        }
+    };
+
+    // Item 3 — what changes between the check and the lock. Each snapshot is
+    // the row as the controller decided on it; the change lands after.
+    $race = $u6row('hydranty', 'draft');
+    $snapshot = $row6($race);
+    $expect('6 race: decided as a permanent delete', UkonDiscard::decide($a6, $snapshot)['mode'], UkonDiscard::DELETE);
+    $pdo->exec('UPDATE inspections SET archived_at = NOW() WHERE id = ' . $race);
+    $expect('6 race: a draft archived meanwhile is refused with its own reason', $refusal($race, $snapshot), UkonDiscard::REFUSE_GONE);
+    $expect('6 race: … and is still there', $row6($race) !== false, true);
+
+    $race = $u6row('php', 'draft');
+    $snapshot = $row6($race);
+    $pdo->exec('UPDATE inspections SET issued_before = 1 WHERE id = ' . $race);
+    $expect('6 race: a draft issued meanwhile answers „vystav znova"', $refusal($race, $snapshot), UkonDiscard::REFUSE_ISSUED);
+
+    $race = $u6row('php', 'draft');
+    $snapshot = $row6($race);
+    $u6row('oprava_ts_php', 'draft');
+    $pdo->exec('UPDATE inspections SET source_inspection_id = ' . $race . ' WHERE id = LAST_INSERT_ID()');
+    $expect('6 race: a draft followed up meanwhile answers „vznikli ďalšie záznamy"', $refusal($race, $snapshot), UkonDiscard::REFUSE_MADE_FROM);
+
+    $gone = $u6row('hydranty', 'draft');
+    $snapshot = $row6($gone);
+    $expect('6 a never-issued draft is deleted', [$refusal($gone, $snapshot), $row6($gone)], [null, false]);
+    $expect('6 a refusal is not a RuntimeException, so a database error is never read as one',
+        is_subclass_of(UkonDiscardRefused::class, RuntimeException::class), false);
+
+    // Item 4 — backup and restore keep issued_before.
+    $u6row('php', 'draft', 1, null, 'R4-unlocked', '2026-10-01');
+    $u6row('php', 'draft', 0, null, 'R4-never', '2026-10-02');
+    $u6row('php', 'finalized', 1, ['issued_contractor' => ['name' => 'X']], 'R4-final', '2026-10-03');
+    $u6row('php', 'draft', 1, ['issued_contractor' => ['name' => 'X']], 'R4-snapshot', '2026-10-04');
+    $blank6 = $u6row('dychova_skuska', 'draft', 1, null, 'R4-document', '2026-10-05');
+    $number6 = 'R4-T-' . $blank6;
+    $docRel = \Firol\Storage\Storage::documentRelative($a6, 2026, $number6);
+    $docAbs = \Firol\Storage\Storage::absolute($docRel);
+    @mkdir(dirname($docAbs), 0775, true);
+    file_put_contents($docAbs, "%PDF-1.4\n% R4 test\n");
+    $r4Files[] = $docAbs;
+    $pdo->prepare("INSERT INTO documents (account_id, parent_type, parent_id, type, number, form_variant, file_path, generated_at)
+                   VALUES (?, 'inspection', ?, 'dychova_skuska', ?, 'prazdny', ?, '2026-11-18 10:00:00')")
+        ->execute([$a6, $blank6, $number6, $docRel]);
+
+    $archive = \Firol\Backup\Writer::build($a6, false, true);
+    $r4Files[] = $archive['path'];
+    $zip = new ZipArchive();
+    $zip->open($archive['path']);
+    $manifest = json_decode((string) $zip->getFromName(\Firol\Backup\Archive::MANIFEST), true);
+    $zip->close();
+    $exported = array_column($manifest['inspections'], 'issued_before', 'notes');
+    $expect('6 the backup carries issued_before', isset($exported['R4-unlocked']) ? (int) $exported['R4-unlocked'] : null, 1);
+
+    $issuedAfter = static function (int $accountId) use ($pdo): array {
+        $stmt = $pdo->prepare('SELECT notes, issued_before FROM inspections WHERE account_id = ? AND notes LIKE "R4-%" ORDER BY notes');
+        $stmt->execute([$accountId]);
+        return array_map('intval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'issued_before', 'notes'));
+    };
+    [$b6, $ub6] = $r4Account('obnova');
+    \Firol\Backup\Restorer::run($b6, $ub6, $archive['path'], \Firol\Backup\Restorer::MODE_MERGE);
+    $expect('6 restore keeps issued_before of every úkon', $issuedAfter($b6), [
+        'R4-document' => 1, 'R4-final' => 1, 'R4-never' => 0, 'R4-snapshot' => 1, 'R4-unlocked' => 1,
+    ]);
+    $restoredUnlocked = $pdo->query("SELECT id, account_id, type, status, details, issued_before, source_inspection_id
+                                     FROM inspections WHERE account_id = $b6 AND notes = 'R4-unlocked'")->fetch(PDO::FETCH_ASSOC);
+    $expect('6 … so a restored unlocked protocol cannot be deleted for good',
+        UkonDiscard::decide($b6, $restoredUnlocked), ['mode' => null, 'reason' => UkonDiscard::REFUSE_ISSUED]);
+
+    // A backup written before the column existed: the same archive without it.
+    $legacyPath = $archive['path'] . '-legacy.zip';
+    copy($archive['path'], $legacyPath);
+    $r4Files[] = $legacyPath;
+    foreach ($manifest['inspections'] as &$legacyRow) {
+        unset($legacyRow['issued_before']);
+    }
+    unset($legacyRow);
+    $zip = new ZipArchive();
+    $zip->open($legacyPath);
+    $zip->addFromString(\Firol\Backup\Archive::MANIFEST, json_encode($manifest, JSON_UNESCAPED_UNICODE));
+    $zip->close();
+    [$l6, $ul6] = $r4Account('stara-zaloha');
+    \Firol\Backup\Restorer::run($l6, $ul6, $legacyPath, \Firol\Backup\Restorer::MODE_MERGE);
+    $expect('6 an old backup: finalized, snapshot and documents row count as issued', $issuedAfter($l6), [
+        // R4-unlocked has none of the three in the archive — nothing can tell.
+        'R4-document' => 1, 'R4-final' => 1, 'R4-never' => 0, 'R4-snapshot' => 1, 'R4-unlocked' => 0,
+    ]);
+} catch (Throwable $e) {
+    $failures++;
+    echo 'FAIL part 6 stopped: ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ")\n";
+} finally {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    foreach ($r4Accounts as $acc) {
+        \Firol\Support\AccountPurge::everything($acc);
+        $pdo->prepare('DELETE FROM inspections WHERE account_id = ?')->execute([$acc]);
+        $pdo->prepare('DELETE FROM accounts WHERE id = ?')->execute([$acc]);
+    }
+    foreach ($r4Users as $uid) {
+        $pdo->prepare("DELETE FROM audit_log WHERE actor_user_id = ?")->execute([$uid]);
+        $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$uid]);
+    }
+    foreach ($r4Files as $file) {
+        @unlink($file);
+    }
 }
 
 echo $failures === 0 ? "\nAll checks passed.\n" : "\n$failures check(s) failed.\n";

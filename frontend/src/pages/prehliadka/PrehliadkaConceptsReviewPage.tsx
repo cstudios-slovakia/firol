@@ -185,6 +185,20 @@ function mergedFields(type: InspectionType, item: ReviewItem, edits: Edits): Rec
   return out;
 }
 
+/**
+ * The sentence after an item refusal. The server names the refused field
+ * (`field`); an empty one is to be filled in the item's form, one with a value
+ * (a range or length refusal) is to be corrected here or there.
+ */
+function refusalHint(err: ApiError, fields: Record<string, unknown>): string {
+  const key = err.body && typeof err.body === 'object' && 'field' in err.body
+    ? String((err.body as { field: unknown }).field)
+    : null;
+  const value = key !== null ? fields[key] : undefined;
+  const filled = value !== null && value !== undefined && String(value).trim() !== '';
+  return filled ? 'Oprav ho tu alebo vo formulári položky.' : 'Doplň ho vo formulári položky.';
+}
+
 export function PrehliadkaConceptsReviewPage() {
   const { id: idStr } = useParams<{ id: string }>();
   const prehliadkaId = Number(idStr);
@@ -298,7 +312,7 @@ export function PrehliadkaConceptsReviewPage() {
     } catch (err) {
       setItemErrors((prev) => ({
         ...prev,
-        [item.id]: err instanceof ApiError ? `${err.message} Doplň ho vo formulári položky.` : 'Položku sa nepodarilo uložiť.',
+        [item.id]: err instanceof ApiError ? `${err.message} ${refusalHint(err, fields)}` : 'Položku sa nepodarilo uložiť.',
       }));
       return false;
     } finally {

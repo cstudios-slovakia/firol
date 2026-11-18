@@ -8,7 +8,7 @@ import { Inspections, documentDownloadUrl, type InspectionDetail } from '@/api/i
 import { invoicingOf } from '@/api/invoicing';
 import { Kniha, type KnihaContext } from '@/api/kniha';
 import { ApiError } from '@/lib/api';
-import { PERMANENT_SENTENCE } from '@/lib/discard';
+import { DISCARD_BOOK_ENTRY_DIALOG, discardDoneMessage } from '@/lib/discard';
 import { useCertMissingToast } from '@/lib/certMissing';
 import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
@@ -182,16 +182,13 @@ function SummaryForm({
       toast.error('Zahodiť zápis sa dá len s pripojením na internet.');
       return;
     }
-    const ok = await confirm({
-      title: 'Zahodiť rozpracovaný zápis?',
-      description: `Zápis sa natrvalo zmaže aj so zapísanými nedostatkami a fotkami. ${PERMANENT_SENTENCE}`,
-      confirmLabel: 'Natrvalo zmazať',
-    });
+    const ok = await confirm(DISCARD_BOOK_ENTRY_DIALOG);
     if (!ok) return;
     setDiscarding(true);
+    let applied: string | undefined;
     try {
       // A permanent delete never waits in the offline queue.
-      await Inspections.archive(id, csrfToken, { requireOnline: true });
+      applied = (await Inspections.archive(id, csrfToken, { requireOnline: true }))?.mode;
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.message : offlineMessage(err, 'Zahodiť zápis sa dá len s pripojením na internet.'),
@@ -199,7 +196,8 @@ function SummaryForm({
       setDiscarding(false);
       return;
     }
-    toast.success('Zápis natrvalo zmazaný');
+    // The toast follows what the server did, not the cached `discard`.
+    toast.success(applied === 'archive' ? discardDoneMessage('archive') : 'Zápis natrvalo zmazaný');
     navigate(
       i.visit_id !== null ? `/visits/${i.visit_id}` : rows.length > 1 ? `/companies/${i.company_id}` : `/facilities/${i.facility_id}`,
       { replace: true },

@@ -77,7 +77,7 @@ function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved, hasNextI
 
   function isPristine() {
     return !position && !equipment && provided === null && used === null && condition === null
-      && !notes && photos.total === 0 && defects.rows.length === 0;
+      && !notes && photos.total === 0 && !photos.dirty && defects.rows.length === 0;
   }
 
   function validate(): FieldErrors {

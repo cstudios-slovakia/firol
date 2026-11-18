@@ -8,7 +8,7 @@
 -- a column of its own, set when a protocol is issued and when it is reopened.
 
 ALTER TABLE inspections
-    ADD COLUMN issued_before TINYINT(1) NOT NULL DEFAULT 0 AFTER status;
+    ADD COLUMN IF NOT EXISTS issued_before TINYINT(1) NOT NULL DEFAULT 0 AFTER status;
 
 UPDATE inspections i
 SET    i.issued_before = 1

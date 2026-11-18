@@ -55,7 +55,10 @@ export function facilityPlace(name: string | null | undefined, city: string | nu
 function containsWord(text: string, word: string): boolean {
   const t = text.toLocaleLowerCase('sk');
   const w = word.toLocaleLowerCase('sk').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?<![\\p{L}\\p{N}])${w}(?![\\p{L}\\p{N}])`, 'u').test(t);
+  // No lookbehind: Safari / iOS before 16.4 throws on `(?<!…)`, and this runs
+  // while Dnes, the timeline and the calendar render. The start of the text or
+  // a character that is not a letter or digit in front does the same job.
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${w}(?![\\p{L}\\p{N}])`, 'u').test(t);
 }
 
 /** Set the planned visit date on whichever úkon defines the deadline. */

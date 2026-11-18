@@ -23,7 +23,7 @@ import { useMemberRights } from '@/auth/useMemberRights';
 import { Inspections, type InspectionDetail } from '@/api/inspections';
 import { Tasks } from '@/api/tasks';
 import { ApiError } from '@/lib/api';
-import { PERMANENT_SENTENCE } from '@/lib/discard';
+import { DISCARD_PREHLIADKA_DIALOG, discardDoneMessage } from '@/lib/discard';
 import { cn } from '@/lib/cn';
 import { useConfirm } from '@/lib/confirm';
 import { offlineMessage } from '@/lib/offline';
@@ -102,16 +102,13 @@ export function useDiscardPrehliadka(
       toast.error('Zahodiť prehliadku sa dá len s pripojením na internet.');
       return;
     }
-    const ok = await confirm({
-      title: 'Zahodiť rozrobenú prehliadku?',
-      description: `Prehliadka sa natrvalo zmaže aj so zapísanými nedostatkami a fotkami. Nevznikne z nej žiadny záznam. ${PERMANENT_SENTENCE}`,
-      confirmLabel: 'Natrvalo zmazať',
-    });
+    const ok = await confirm(DISCARD_PREHLIADKA_DIALOG);
     if (!ok) return;
     setDiscarding(true);
+    let applied: string | undefined;
     try {
       // A permanent delete never waits in the offline queue.
-      await Inspections.archive(checked.id, csrfToken, { requireOnline: true });
+      applied = (await Inspections.archive(checked.id, csrfToken, { requireOnline: true }))?.mode;
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.message : offlineMessage(err, 'Zahodiť prehliadku sa dá len s pripojením na internet.'),
@@ -120,7 +117,8 @@ export function useDiscardPrehliadka(
       return;
     }
     setDiscarding(false);
-    toast.success('Prehliadka zahodená');
+    // The toast follows what the server did, not the cached `discard`.
+    toast.success(applied === 'archive' ? discardDoneMessage('archive') : 'Prehliadka zahodená');
     onDiscarded(facilityId);
   }
 
