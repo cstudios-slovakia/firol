@@ -100,6 +100,13 @@ jobs:
             ( crontab -l 2>/dev/null | grep -qF "$ROOT/backend/bin/send-deadline-notices.php" ) \
               || ( crontab -l 2>/dev/null; echo "$NOTICE_CMD" ) | crontab -
 
+            # Daily billing run: re-runs failed Stripe events, syncs seats to
+            # Stripe (report only while BILLING_RECONCILE=off), retries failed
+            # iDoklad invoices and alerts ADMIN_EMAIL.
+            BILLING_CMD="30 5 * * * php $ROOT/backend/bin/billing-daily.php >> $BACKUP_DIR/billing-daily.log 2>&1"
+            ( crontab -l 2>/dev/null | grep -qF "$ROOT/backend/bin/billing-daily.php" ) \
+              || ( crontab -l 2>/dev/null; echo "$BILLING_CMD" ) | crontab -
+
       # Smoke-test the freshly deployed app from the GitHub runner. Fails
       # the workflow if /api/health doesn't return 200 — a stronger signal
       # than "ssh command succeeded" because it exercises the actual

@@ -16,9 +16,17 @@ declare(strict_types=1);
  * charges them from now on.
  *
  * Also flagged: a higher Stripe quantity than wanted („OVERCHARGED"),
- * duplicate extra items, a legacy extra item (created before the fixed
- * product), and a customer with more than one live subscription.
+ * duplicate extra items, a legacy extra item recognised by the name of an
+ * old Checkout's inline product („POapp — extra technik" / „Firol — extra
+ * technik"), an UNVERIFIED item (only the id recorded on the account says it
+ * is an extra item — the reconcile never touches it and leaves the whole
+ * subscription to a person), and a customer with more than one live
+ * subscription (the report then says which one it checked and why).
  * --all prints every checked account, not only the flagged ones.
+ *
+ * Meant to run against production right after a deploy with
+ * BILLING_RECONCILE=off (nothing is pushed to Stripe yet), before the owner
+ * decides and the switch goes on — see the README deploy checklist.
  *
  * Reads the database and Stripe (GET requests only).
  */
@@ -51,7 +59,13 @@ if (!StripeClient::isConfigured()) {
     exit(2);
 }
 $stripe = StripeClient::get();
-echo 'Stripe mode: ', StripeClient::isTestKey() ? 'TEST' : 'LIVE', "\n";
+echo 'Stripe mode: ', StripeClient::isTestKey() ? 'TEST' : 'LIVE',
+    ', reconcile ', SeatSync::pushEnabled() ? 'ON (seat changes are pushed to Stripe)' : 'OFF (BILLING_RECONCILE=off — nothing is pushed)', "\n";
+$baseProducts = SeatSync::baseProductIds();
+if ($baseProducts === null) {
+    fwrite(STDERR, "The products of STRIPE_PRICE_MONTHLY / _YEARLY could not be read from Stripe.\n");
+    exit(2);
+}
 
 $sql = "SELECT id, invoice_company_name, included_technicians, stripe_customer_id,
                stripe_subscription_id, stripe_status, stripe_extra_subscription_item_id, billing_period
@@ -99,6 +113,11 @@ foreach ($stmt->fetchAll() as $a) {
             $current = $s;
         }
     }
+    if (count($live) > 1) {
+        $flags[] = $current !== null
+            ? "checked {$current->id} — the one recorded on the account"
+            : 'checked ' . $live[0]->id . ' — none is recorded on the account (db ' . ($a['stripe_subscription_id'] ?: '-') . '), the first live one Stripe lists';
+    }
     $current ??= $live[0] ?? null;
 
     if ($current === null) {
@@ -119,7 +138,7 @@ foreach ($stmt->fetchAll() as $a) {
         echo "  $label: ERROR reading subscription {$current->id}: ", $e->getMessage(), "\n";
         continue;
     }
-    $split = SeatSync::classifyItems((array) ($data['items']['data'] ?? []), (string) ($a['stripe_extra_subscription_item_id'] ?? ''));
+    $split = SeatSync::classifyItems((array) ($data['items']['data'] ?? []), (string) ($a['stripe_extra_subscription_item_id'] ?? ''), $baseProducts);
     $qty   = array_sum(array_map(static fn (array $i): int => (int) ($i['quantity'] ?? 0), $split['extras']));
     $unit  = isset($split['extras'][0]['price']['unit_amount']) ? (int) $split['extras'][0]['price']['unit_amount'] : null;
     $interval = $split['base'] !== null ? StripeShape::itemInterval($split['base']) : '?';
@@ -134,8 +153,17 @@ foreach ($stmt->fetchAll() as $a) {
     if (count($split['extras']) > 1) {
         $flags[] = 'DUPLICATE extra items: ' . implode(', ', array_map(static fn (array $i): string => $i['id'] . '×' . (int) $i['quantity'], $split['extras']));
     }
+    foreach ($split['extras'] as $item) {
+        if (SeatSync::isLegacyNamedItem($item)) {
+            $flags[] = "LEGACY item {$item['id']} recognised by its product name „{$item['price']['product']['name']}\" (old Checkout, not under STRIPE_PRODUCT_EXTRA_TECHNICIAN)";
+        }
+    }
+    foreach ($split['unverified'] as $item) {
+        $flags[] = "UNVERIFIED item {$item['id']} (qty " . (int) ($item['quantity'] ?? 0) . ', price ' . (string) ($item['price']['id'] ?? '?')
+            . ') — only the recorded id calls it an extra item; the reconcile leaves this subscription to a person';
+    }
     foreach ($split['notes'] as $note) {
-        if (str_starts_with($note, 'legacy') || str_contains($note, 'base item')) {
+        if (str_contains($note, 'base item') || str_contains($note, 'base-plan') || str_contains($note, 'unrecognised')) {
             $flags[] = $note;
         }
     }
