@@ -13,12 +13,16 @@ use Firol\Stripe\StripeClient;
 /**
  * Billing configuration check shown in the admin panel („Kontrola
  * fakturácie") and printed by bin/billing-daily.php. Reads env and the
- * database only — never calls Stripe or iDoklad.
+ * database; asks Stripe only for the extra-technician product and the
+ * products of the base prices (GET requests). Never calls iDoklad.
  */
 final class ConfigCheck
 {
     /** system_settings key the daily command stamps after each run. */
     public const DAILY_RUN_KEY = 'billing_daily_last_run';
+
+    /** Minutes after which a webhook event still `processing` is reported. */
+    public const STALE_EVENT_MINUTES = 10;
 
     /**
      * @return list<array{key: string, level: 'ok'|'warn'|'error', message: string}>
@@ -50,15 +54,29 @@ final class ConfigCheck
             }
         }
 
-        if (StripeClient::extraTechnicianProductId() === '') {
+        $productId = StripeClient::extraTechnicianProductId();
+        if ($productId === '') {
             $add('stripe_product_extra', 'error',
-                'STRIPE_PRODUCT_EXTRA_TECHNICIAN nie je nastavený — extra technikov nemožno pridať do predplatného ani do Checkoutu, '
-                . 'zákazník za nich neplatí. Založ v Stripe produkt „POapp — extra technik" a jeho ID (prod_…) daj do .env.');
+                'STRIPE_PRODUCT_EXTRA_TECHNICIAN nie je nastavený — extra technika nemožno pridať do existujúceho predplatného '
+                . '(zákazník za neho neplatí); Checkout použije náhradný produkt. Založ v Stripe produkt „POapp — extra technik" a jeho ID (prod_…) daj do .env.');
+        } elseif ($key !== '') {
+            $add(...self::checkExtraProduct($productId));
         } else {
-            $add('stripe_product_extra', 'ok', 'Produkt pre extra technika je nastavený.');
+            $add('stripe_product_extra', 'warn', 'Produkt pre extra technika je nastavený, bez kľúča Stripe sa nedá overiť.');
+        }
+
+        if (!SeatSync::pushEnabled()) {
+            $add('billing_reconcile', 'warn',
+                'BILLING_RECONCILE=off — počet extra technikov sa do Stripe neposiela (webhooky len zapisujú stav, denná kontrola len hlási). '
+                . 'Po kontrole výpisu bin/billing-seat-report.php ho zapni.');
         }
 
         $mode = IssuePolicy::mode();
+        if ($key !== '' && !StripeClient::isTestKey() && $mode !== 'send') {
+            $add('idoklad_live_mode', 'error',
+                'Ostrý kľúč Stripe, ale IDOKLAD_ISSUE_MODE nie je „send" (APP_ENV=' . ($_ENV['APP_ENV'] ?? '') . ') — '
+                . 'skutočné platby nedostanú faktúru. V produkcii nastav IDOKLAD_ISSUE_MODE=send.');
+        }
         if (!IDokladClient::isConfigured()) {
             $add('idoklad', $prod ? 'warn' : 'ok', 'iDoklad nie je nastavený — faktúry sa nevystavujú (stav „skipped").');
         } elseif ($mode === 'send') {
@@ -93,6 +111,28 @@ final class ConfigCheck
                 $add('invoices', 'warn', "Faktúry na kontrolu: $review, chybné alebo nedokončené: $error (Účty → faktúry účtu).");
             }
 
+            // A real payment whose invoice was only prepared, never sent.
+            $preparedLive = (int) $pdo->query(
+                "SELECT COUNT(*) FROM invoices WHERE status = 'prepared' AND stripe_livemode = 1"
+            )->fetchColumn();
+            if ($preparedLive > 0) {
+                $add('invoices_prepared_live', 'error',
+                    "Ostré platby bez faktúry: $preparedLive (stav „pripravená, neodoslaná“). "
+                    . 'Nastav IDOKLAD_ISSUE_MODE=send a vystav ich (Účty → faktúry účtu → „Vystaviť“); denná kontrola ich potom vystaví sama.');
+            }
+
+            $events = $pdo->query(
+                "SELECT SUM(status = 'failed') AS failed,
+                        SUM(status = 'processing' AND updated_at < NOW() - INTERVAL " . self::STALE_EVENT_MINUTES . " MINUTE) AS stuck
+                 FROM   stripe_webhook_events"
+            )->fetch();
+            $failed = (int) ($events['failed'] ?? 0);
+            $stuck  = (int) ($events['stuck'] ?? 0);
+            if ($failed + $stuck > 0) {
+                $add('webhook_events', 'warn',
+                    "Udalosti zo Stripe, ktoré sa nespracovali: $failed zlyhaných, $stuck zaseknutých. Denná kontrola ich spustí znova a upozorní správcu.");
+            }
+
             $stmt = $pdo->prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?');
             $stmt->execute([self::DAILY_RUN_KEY]);
             $last = $stmt->fetchColumn();
@@ -107,5 +147,34 @@ final class ConfigCheck
         }
 
         return $out;
+    }
+
+    /**
+     * Reads STRIPE_PRODUCT_EXTRA_TECHNICIAN from Stripe: it must exist, be
+     * active and must not be the product of STRIPE_PRICE_MONTHLY / _YEARLY
+     * (the plan's own item would then be taken for the extra item).
+     *
+     * @return array{0: string, 1: 'ok'|'warn'|'error', 2: string}
+     */
+    private static function checkExtraProduct(string $productId): array
+    {
+        $baseProducts = SeatSync::baseProductIds();
+        if ($baseProducts === null) {
+            return ['stripe_product_extra', 'warn', 'Produkty základných cien (STRIPE_PRICE_MONTHLY / _YEARLY) sa zo Stripe nepodarilo načítať — produkt pre extra technika sa nedá overiť.'];
+        }
+        if (in_array($productId, $baseProducts, true)) {
+            return ['stripe_product_extra', 'error',
+                'STRIPE_PRODUCT_EXTRA_TECHNICIAN je produkt základného predplatného (cena STRIPE_PRICE_MONTHLY / _YEARLY). '
+                . 'Synchronizácia technikov sa preto zastavila. Nastav ID samostatného produktu „POapp — extra technik".'];
+        }
+        try {
+            $product = StripeClient::get()->products->retrieve($productId);
+        } catch (\Throwable $e) {
+            return ['stripe_product_extra', 'error', "Produkt STRIPE_PRODUCT_EXTRA_TECHNICIAN ($productId) sa v Stripe nenašiel: " . $e->getMessage()];
+        }
+        if (!$product->active) {
+            return ['stripe_product_extra', 'error', "Produkt STRIPE_PRODUCT_EXTRA_TECHNICIAN ($productId) je v Stripe archivovaný — nové položky extra technika nevzniknú."];
+        }
+        return ['stripe_product_extra', 'ok', 'Produkt pre extra technika: „' . $product->name . '".'];
     }
 }

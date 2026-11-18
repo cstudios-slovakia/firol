@@ -77,9 +77,30 @@ final class BillingController
         $account = self::loadAccountFull($accountId);
 
         // Never stack a second subscription on a live one — also not on one
-        // whose payment failed: that one is paid through the portal.
+        // whose payment failed: that one is paid through the portal. The DB
+        // status may be stale (a lost or failed event), so a live DB status
+        // is checked against Stripe and Stripe's status decides.
         $existingStatus = (string) ($account['stripe_status'] ?? '');
-        self::refuseLiveSubscription($existingStatus);
+        $existingSubId  = (string) ($account['stripe_subscription_id'] ?? '');
+        if (SubscriptionStatus::isLive($existingStatus) && $existingSubId !== '') {
+            try {
+                $current = StripeClient::get()->subscriptions->retrieve($existingSubId, SeatSync::RETRIEVE_EXPAND);
+            } catch (\Stripe\Exception\InvalidRequestException $e) {
+                $current = null;
+                if ($e->getHttpStatus() !== 404) {
+                    error_log('[billing.checkout] ' . $e->getMessage());
+                    Response::error('Stripe sa nepodarilo overiť. Skús to o chvíľu znova.', 502);
+                }
+                error_log("[billing.checkout] account=$accountId: subscription $existingSubId not found in Stripe");
+            } catch (\Throwable $e) {
+                error_log('[billing.checkout] ' . $e->getMessage());
+                Response::error('Stripe sa nepodarilo overiť. Skús to o chvíľu znova.', 502);
+            }
+            if ($current !== null) {
+                self::handleSubscriptionUpsert($current, false);
+                self::refuseLiveSubscription((string) $current->status);
+            }
+        }
 
         // Billing details (address + IČO) are required before any Stripe session
         // can be created — iDoklad needs them to issue a proper Slovak invoice.
@@ -138,12 +159,7 @@ final class BillingController
         // The wanted extra quantity is computed fresh, so a technician
         // invited a moment ago is on the first invoice.
         $extra = SeatSync::wantedExtra($accountId, (int) $account['included_technicians']);
-        try {
-            $lineItems = self::checkoutLineItems($billingPeriod, $extra);
-        } catch (\RuntimeException $e) {
-            error_log('[billing.checkout] ' . $e->getMessage());
-            Response::error('Platobná brána nemá na serveri nastavený produkt pre extra technika (STRIPE_PRODUCT_EXTRA_TECHNICIAN).', 500);
-        }
+        $lineItems = self::checkoutLineItems($billingPeriod, $extra);
 
         try {
             $session = StripeClient::get()->checkout->sessions->create([
@@ -181,10 +197,11 @@ final class BillingController
 
     /**
      * Line items of a new subscription: the base Price, plus the extra
-     * technicians beyond the included count under the fixed extra product.
+     * technicians beyond the included count under the fixed extra product
+     * (an inline product when STRIPE_PRODUCT_EXTRA_TECHNICIAN is missing —
+     * see SeatSync::checkoutExtraPriceData()).
      *
      * @return list<array<string, mixed>>
-     * @throws \RuntimeException when extras are wanted and the product is not configured
      */
     public static function checkoutLineItems(string $billingPeriod, int $extra): array
     {
@@ -194,7 +211,7 @@ final class BillingController
         ]];
         if ($extra > 0) {
             $lineItems[] = [
-                'price_data' => SeatSync::extraPriceData($billingPeriod),
+                'price_data' => SeatSync::checkoutExtraPriceData($billingPeriod),
                 'quantity'   => $extra,
             ];
         }
@@ -613,6 +630,33 @@ final class BillingController
     }
 
     /**
+     * The daily run: handle again a webhook event that failed (or was left
+     * `processing`), read from Stripe by its id. Returns 'done', 'failed:
+     * <message>', or 'skipped' (another delivery is handling it, or it is
+     * done already).
+     */
+    public static function reprocessEvent(string $eventId): string
+    {
+        try {
+            $event = StripeClient::get()->events->retrieve($eventId);
+        } catch (\Throwable $e) {
+            return 'failed: could not read the event from Stripe — ' . $e->getMessage();
+        }
+        $claim = self::claimEvent($eventId, (string) $event->type);
+        if ($claim !== 'process') {
+            return 'skipped';
+        }
+        try {
+            self::dispatchEvent($event);
+        } catch (\Throwable $e) {
+            self::finishEvent($eventId, 'failed', $e->getMessage());
+            return 'failed: ' . $e->getMessage();
+        }
+        self::finishEvent($eventId, 'done', null);
+        return 'done';
+    }
+
+    /**
      * Record the event as being processed. Returns 'process' (go on), 'done'
      * (already handled — skip) or 'busy' (another delivery is handling it
      * right now).
@@ -678,12 +722,11 @@ final class BillingController
         if ($subId === '') {
             return;
         }
-        if ($refetch) {
-            $sub = StripeClient::get()->subscriptions->retrieve($subId, SeatSync::RETRIEVE_EXPAND);
+        $customerId = self::customerOf(StripeShape::arr($sub));
+        if ($customerId === '' && $refetch) {
+            // checkout.session.completed passes the id only.
+            $customerId = self::customerOf(StripeShape::arr(StripeClient::get()->subscriptions->retrieve($subId)));
         }
-        $data = StripeShape::arr($sub);
-
-        $customerId = is_array($data['customer'] ?? null) ? (string) ($data['customer']['id'] ?? '') : (string) ($data['customer'] ?? '');
         if ($customerId === '') {
             return;
         }
@@ -693,19 +736,53 @@ final class BillingController
             return;
         }
         $accountId = (int) $account['id'];
+
+        // Refetch and write under the account's subscription lock, so an
+        // older event handled at the same time cannot write a stale state
+        // back after a newer one (the reverse-order replay once left
+        // cancel_at_period_end = 1 on a cancelled account).
+        self::withSubscriptionLock($accountId, static function () use ($accountId, $subId, $sub, $refetch): void {
+            if ($refetch) {
+                $sub = StripeClient::get()->subscriptions->retrieve($subId, SeatSync::RETRIEVE_EXPAND);
+            }
+            $data    = StripeShape::arr($sub);
+            $account = self::findAccountRowById($accountId);
+            $status  = (string) ($data['status'] ?? '');
+            if ($account === null) {
+                return;
+            }
+            if (!self::isCurrentSubscription($account, $subId, $status)) {
+                error_log(sprintf(
+                    '[billing.webhook] account=%d ignores subscription %s (%s): current is %s (%s)%s',
+                    $accountId, $subId, $status,
+                    (string) $account['stripe_subscription_id'], (string) $account['stripe_status'],
+                    SubscriptionStatus::isLive($status) && SubscriptionStatus::isLive((string) $account['stripe_status'])
+                        ? ' — SECOND LIVE SUBSCRIPTION, check the customer in Stripe' : '',
+                ));
+                return;
+            }
+            self::storeSubscriptionState($account, $subId, $data);
+        });
+
+        // Stripe's quantity is never copied into the DB — the DB's wanted
+        // quantity is pushed to Stripe instead (repairs a failed SeatSync
+        // call and a technician invited while Checkout was open).
+        SeatSync::recompute($accountId);
+    }
+
+    /**
+     * Write a subscription's state onto its account: id, status, billing
+     * period, cancel flag, end of the paid period (or of the trial), and
+     * whether a discount is on it. A subscription that is over carries no
+     * cancel flag (Stripe keeps cancel_at_period_end on a cancelled one).
+     *
+     * @param array<string, mixed> $account accounts row (id, stripe_extra_subscription_item_id)
+     * @param array<string, mixed> $data    the subscription
+     */
+    private static function storeSubscriptionState(array $account, string $subId, array $data): void
+    {
+        $accountId = (int) $account['id'];
         $status    = (string) ($data['status'] ?? '');
-
-        if (!self::isCurrentSubscription($account, $subId, $status)) {
-            error_log(sprintf(
-                '[billing.webhook] account=%d ignores subscription %s (%s): current is %s (%s)%s',
-                $accountId, $subId, $status,
-                (string) $account['stripe_subscription_id'], (string) $account['stripe_status'],
-                SubscriptionStatus::isLive($status) && SubscriptionStatus::isLive((string) $account['stripe_status'])
-                    ? ' — SECOND LIVE SUBSCRIPTION, check the customer in Stripe' : '',
-            ));
-            return;
-        }
-
         $items = (array) ($data['items']['data'] ?? []);
         $split = SeatSync::classifyItems($items, (string) ($account['stripe_extra_subscription_item_id'] ?? ''));
         $interval = $split['base'] !== null ? StripeShape::itemInterval($split['base']) : null;
@@ -722,7 +799,7 @@ final class BillingController
         if ($endDate === null && isset($data['trial_end']) && is_int($data['trial_end'])) {
             $endDate = date('Y-m-d', $data['trial_end']);
         }
-        $cancelFlag = !empty($data['cancel_at_period_end']) ? 1 : 0;
+        $cancelFlag = !SubscriptionStatus::isTerminal($status) && !empty($data['cancel_at_period_end']) ? 1 : 0;
 
         Db::pdo()->prepare(
             'UPDATE accounts
@@ -730,16 +807,44 @@ final class BillingController
                     stripe_status               = ?,
                     billing_period              = COALESCE(?, billing_period),
                     stripe_cancel_at_period_end = ?,
-                    subscription_end_date       = COALESCE(?, subscription_end_date)
+                    subscription_end_date       = COALESCE(?, subscription_end_date),
+                    stripe_has_discount         = ?
              WHERE  id = ?'
-        )->execute([$subId, $status, $period, $cancelFlag, $endDate, $accountId]);
+        )->execute([$subId, $status, $period, $cancelFlag, $endDate,
+                    StripeShape::subscriptionHasDiscount($data) ? 1 : 0, $accountId]);
 
         error_log("[billing.webhook] account=$accountId subscription=$subId status=$status end=$endDate");
+    }
 
-        // Stripe's quantity is never copied into the DB — the DB's wanted
-        // quantity is pushed to Stripe instead (repairs a failed SeatSync
-        // call and a technician invited while Checkout was open).
-        SeatSync::recompute($accountId);
+    /**
+     * The daily run: read the account's current subscription from Stripe and
+     * write its status, period end and cancel flag (repairs a state left
+     * stale by a lost or failed event). Returns what changed, or null.
+     * Throws when Stripe cannot be read.
+     */
+    public static function syncSubscriptionState(int $accountId, bool $dryRun = false): ?string
+    {
+        return self::withSubscriptionLock($accountId, static function () use ($accountId, $dryRun): ?string {
+            $before = self::findAccountRowById($accountId);
+            $subId  = (string) ($before['stripe_subscription_id'] ?? '');
+            if ($before === null || $subId === '') {
+                return null;
+            }
+            $data = StripeShape::arr(StripeClient::get()->subscriptions->retrieve($subId, SeatSync::RETRIEVE_EXPAND));
+            $periodEnd = StripeShape::subscriptionPeriodEnd($data);
+            $status = (string) ($data['status'] ?? '');
+            $diff = [];
+            if ($status !== (string) $before['stripe_status']) {
+                $diff[] = "status {$before['stripe_status']} → $status";
+            }
+            if ($periodEnd !== null && date('Y-m-d', $periodEnd) !== (string) $before['subscription_end_date']) {
+                $diff[] = "end {$before['subscription_end_date']} → " . date('Y-m-d', $periodEnd);
+            }
+            if (!$dryRun) {
+                self::storeSubscriptionState($before, $subId, $data);
+            }
+            return $diff === [] ? null : implode(', ', $diff);
+        });
     }
 
     public static function handleSubscriptionDeleted(\Stripe\StripeObject $sub): void
@@ -748,37 +853,78 @@ final class BillingController
         if ($subId === '') {
             return;
         }
-        $data = StripeShape::arr(StripeClient::get()->subscriptions->retrieve($subId));
-        $customerId = is_array($data['customer'] ?? null) ? (string) ($data['customer']['id'] ?? '') : (string) ($data['customer'] ?? '');
+        $customerId = self::customerOf(StripeShape::arr($sub));
+        if ($customerId === '') {
+            $customerId = self::customerOf(StripeShape::arr(StripeClient::get()->subscriptions->retrieve($subId)));
+        }
         $account = self::findAccountRowByCustomer($customerId);
         if ($account === null) {
             return;
         }
-        $current = (string) ($account['stripe_subscription_id'] ?? '');
-        if ($current !== '' && $current !== $subId) {
-            error_log("[billing.webhook] account={$account['id']} ignores deletion of old subscription $subId (current $current)");
-            return;
+        $accountId = (int) $account['id'];
+        self::withSubscriptionLock($accountId, static function () use ($accountId, $subId): void {
+            $data    = StripeShape::arr(StripeClient::get()->subscriptions->retrieve($subId));
+            $account = self::findAccountRowById($accountId);
+            $current = (string) ($account['stripe_subscription_id'] ?? '');
+            if ($account === null || ($current !== '' && $current !== $subId)) {
+                error_log("[billing.webhook] account=$accountId ignores deletion of old subscription $subId (current $current)");
+                return;
+            }
+            // Don't yank `subscription_end_date` backwards — let the user keep
+            // access until the period they already paid for ends. Stripe sets
+            // status='canceled' on the final delete event.
+            Db::pdo()->prepare(
+                'UPDATE accounts
+                 SET    stripe_subscription_id      = ?,
+                        stripe_status               = ?,
+                        stripe_cancel_at_period_end = 0
+                 WHERE  id = ?'
+            )->execute([$subId, (string) ($data['status'] ?? 'canceled'), $accountId]);
+        });
+    }
+
+    /**
+     * Run $fn under the account's subscription lock (MariaDB GET_LOCK).
+     * Throws when the lock is not free within 20 s, so a webhook answers 500
+     * and Stripe delivers the event again.
+     *
+     * @template T
+     * @param callable(): T $fn
+     * @return T
+     */
+    private static function withSubscriptionLock(int $accountId, callable $fn): mixed
+    {
+        $name = 'firol_subscription_' . $accountId;
+        $stmt = Db::pdo()->prepare('SELECT GET_LOCK(?, 20)');
+        $stmt->execute([$name]);
+        if ((int) $stmt->fetchColumn() !== 1) {
+            throw new \RuntimeException("subscription lock of account $accountId busy");
         }
-        // Don't yank `subscription_end_date` backwards — let the user keep
-        // access until the period they already paid for ends. Stripe sets
-        // status='canceled' on the final delete event.
-        Db::pdo()->prepare(
-            'UPDATE accounts
-             SET    stripe_subscription_id      = ?,
-                    stripe_status               = ?,
-                    stripe_cancel_at_period_end = 0
-             WHERE  id = ?'
-        )->execute([$subId, (string) ($data['status'] ?? 'canceled'), (int) $account['id']]);
+        try {
+            return $fn();
+        } finally {
+            Db::pdo()->prepare('SELECT RELEASE_LOCK(?)')->execute([$name]);
+        }
+    }
+
+    /** @param array<string, mixed> $data a Subscription */
+    private static function customerOf(array $data): string
+    {
+        $customer = $data['customer'] ?? '';
+        return is_array($customer) ? (string) ($customer['id'] ?? '') : (string) $customer;
     }
 
     /**
      * Whether an event of subscription $subId may change the account.
      *
      * Yes when the account has no subscription yet, when it is the account's
-     * current subscription, or when the current one is over (canceled /
+     * current subscription, when the current one is over (canceled /
      * expired) and this one is not — a new subscription after the old one
-     * ended. An event of any other subscription (an old one, or a second one
-     * started in parallel) is ignored.
+     * ended — and when this one is paid (active / trialing) while the
+     * current one is not (past_due / unpaid / paused): a customer who started
+     * a new subscription next to an unpaid one before 17. 11. 2026 must not
+     * stay read-only with its technicians pushed onto the unpaid one. Any
+     * other subscription (an old one, a second unpaid one) is ignored.
      *
      * @param array<string, mixed> $account
      */
@@ -789,8 +935,18 @@ final class BillingController
             return true;
         }
         $currentStatus = (string) ($account['stripe_status'] ?? '');
-        return ($currentStatus === '' || SubscriptionStatus::isTerminal($currentStatus))
-            && !SubscriptionStatus::isTerminal($status);
+        if ($currentStatus === '' || SubscriptionStatus::isTerminal($currentStatus)) {
+            return !SubscriptionStatus::isTerminal($status);
+        }
+        if (in_array($status, ['active', 'trialing'], true)
+            && in_array($currentStatus, ['past_due', 'unpaid', 'paused'], true)) {
+            error_log(sprintf(
+                '[billing.webhook] account=%d takes paid subscription %s (%s) over %s (%s) — the old one still bills, check the customer in Stripe',
+                (int) $account['id'], $subId, $status, $current, $currentStatus,
+            ));
+            return true;
+        }
+        return false;
     }
 
     /** @return array<string, mixed> */
@@ -811,7 +967,7 @@ final class BillingController
     {
         $stmt = Db::pdo()->prepare(
             'SELECT id, invoice_company_name, stripe_customer_id, subscription_end_date,
-                    stripe_status,
+                    stripe_status, stripe_subscription_id,
                     invoice_street, invoice_postal_code, invoice_city, invoice_country,
                     invoice_ico, invoice_dic, invoice_ic_dph,
                     included_technicians, extra_technicians
@@ -970,6 +1126,18 @@ final class BillingController
     {
         $row = self::findAccountRowByCustomer($customerId);
         return $row === null ? null : (int) $row['id'];
+    }
+
+    /** @return array<string, mixed>|null */
+    private static function findAccountRowById(int $accountId): ?array
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT id, stripe_subscription_id, stripe_status, stripe_extra_subscription_item_id, subscription_end_date
+             FROM   accounts WHERE id = ?'
+        );
+        $stmt->execute([$accountId]);
+        $row = $stmt->fetch();
+        return $row ?: null;
     }
 
     /** @return array<string, mixed>|null */

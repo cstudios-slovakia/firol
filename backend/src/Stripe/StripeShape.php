@@ -53,6 +53,17 @@ final class StripeShape
         return $best;
     }
 
+    /**
+     * Whether a discount (promotion code / coupon) is on the subscription:
+     * `discount` in the pinned version, `discounts` in both.
+     *
+     * @param array<string, mixed> $sub
+     */
+    public static function subscriptionHasDiscount(array $sub): bool
+    {
+        return !empty($sub['discount']) || !empty($sub['discounts']);
+    }
+
     /** @param array<string, mixed> $invoice */
     public static function invoiceSubscriptionId(array $invoice): ?string
     {
@@ -87,6 +98,25 @@ final class StripeShape
             return $line['type'] === 'subscription';
         }
         return (string) ($line['parent']['type'] ?? '') === 'subscription_item_details';
+    }
+
+    /**
+     * Subscription a line belongs to: `subscription` in the pinned version,
+     * under parent.(subscription_item_details|invoice_item_details) in newer
+     * ones.
+     *
+     * @param array<string, mixed> $line
+     */
+    public static function lineSubscriptionId(array $line): ?string
+    {
+        $parent = (array) ($line['parent'] ?? []);
+        $sub = $line['subscription']
+            ?? ($parent['subscription_item_details']['subscription']
+                ?? ($parent['invoice_item_details']['subscription'] ?? null));
+        if (is_array($sub)) {
+            $sub = $sub['id'] ?? null;
+        }
+        return is_string($sub) && $sub !== '' ? $sub : null;
     }
 
     /** @param array<string, mixed> $line */

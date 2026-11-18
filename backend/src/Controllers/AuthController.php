@@ -343,7 +343,7 @@ final class AuthController
                     a.billing_period, a.stripe_customer_id,
                     a.included_technicians, a.extra_technicians,
                     a.stripe_extra_subscription_item_id, a.stripe_extra_unit_amount_cents,
-                    a.stripe_base_unit_amount_cents,
+                    a.stripe_base_unit_amount_cents, a.stripe_has_discount,
                     a.invoice_street, a.invoice_postal_code, a.invoice_city, a.invoice_ico
              FROM   accounts a
              JOIN   account_users au ON au.account_id = a.id
@@ -387,9 +387,11 @@ final class AuthController
             // The next regular charge: base + extra technicians at their
             // Stripe unit amounts (no prorations); null without a subscription.
             $a['next_charge_cents'] = \Firol\Billing\SeatSync::nextChargeCents($a);
+            $a['next_charge_before_discount'] = !empty($a['stripe_has_discount']);
             unset(
                 $a['stripe_subscription_id'], $a['stripe_extra_subscription_item_id'],
                 $a['stripe_extra_unit_amount_cents'], $a['stripe_base_unit_amount_cents'],
+                $a['stripe_has_discount'],
             );
             return $a;
         }, $accountsRaw);
