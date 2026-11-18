@@ -1964,9 +1964,100 @@ captured events and three code audits). Migration 079.
 - ⏸ iDoklad invoice e-mailed to the customer and marked paid.
 - ⏸ Monthly ↔ yearly switch with extra technicians.
 - ⏸ Registration claiming a pending imported technician (security question, unchanged).
-- ⏸ Before deploying: run `bin/billing-seat-report.php` on live; „NOT CHARGED" accounts start being
-  charged from the first sync after the deploy. Create the live `STRIPE_PRODUCT_EXTRA_TECHNICIAN`
-  product, add the daily cron, remove `IDOKLAD_DRAFT_MODE`.
+- ⏸ Before deploying: follow the README „Production deploy checklist" (round 2: deploy with
+  `BILLING_RECONCILE=off`, run `bin/billing-seat-report.php`, owner decides, switch on; the cron is
+  installed by the workflow).
+
+### Billing fixes, round 2 (18. 11. 2026) 🟨 built on `poapp-oct-2026`, checked in Stripe test mode; owner decisions pending
+
+Source: `docs/prompts/billing-fixes-2026-11-round-2.md` (three reviews of round 1 and a re-run on
+11 test clocks with 141 events replayed). Round 1 charged the right money in every scenario; this
+round fixes what the reviews found. Migration `079` edited (not deployed anywhere yet).
+
+**What was wrong**
+- A paid renewal after a quantity change got no invoice: Stripe writes a quantity change as two
+  proration lines (−„Unused time on N ×", +„Remaining time on N+1 ×") and every negative line
+  held the invoice as a credit. Every account with a second or later extra technician paid and
+  got no tax document; „Vystaviť znova" refused it.
+- Promotion codes: line amounts are before the discount, so every discounted invoice was held.
+- The base plan item could still be taken for the extra item: the Firol-era inline product name
+  („Firol — extra technik", 17. 5.–28. 7. 2026) was not recognised, an item matched only by the
+  recorded id was changed or deleted, and a `STRIPE_PRODUCT_EXTRA_TECHNICIAN` set to the plan's
+  own product made the base item the extra one.
+- Production could silently stop issuing invoices (`APP_ENV` other than `production` → every
+  live payment `prepared`, shown as OK); the daily cron was not installed; failed webhook events
+  were never looked at; a 2xx from iDoklad without an Id counted as issued; rows of the old code
+  kept a button that could not work; the daily run with a live key pushed a local roster to live
+  customers.
+- A newer paid subscription next to an older unpaid one was ignored; checkout trusted a stale DB
+  status; an older event could write a stale state back (cancel flag left on a cancelled
+  account); admin delete cancelled only the recorded subscription.
+- A missing product variable made Checkout answer 500; migration 079 could not be re-run; the
+  seat report could only run after the first charge.
+
+**What changed**
+- ✅ `InvoiceIssuer::invoiceLines()`: proration lines of one change (same subscription, kind,
+  proration period) are netted into one line „POapp — extra technik, pomerná časť (+1 technik)
+  (01.12.–17.12.2026)"; a duplicate merge nets to 0 → no line. Amounts are net of the line's
+  `discount_amounts` („…, po zľave"), an unplaced invoice discount becomes one „Zľava" line.
+  Held only for a negative netted line or total, a total paid partly from the balance, or lines
+  that do not add up (tax). Departure: the prompt said „per subscription item"; per item a merge
+  leaves a negative group for the deleted item, so the group is per kind (extra / plan).
+- ✅ `SeatSync::classifyItems()`: legacy names `LEGACY_PRODUCT_NAMES` (POapp and Firol, also for
+  invoice lines); an item under a base price or the product of one is never an extra item
+  (products cached in `system_settings`); an item only the recorded id points to is UNVERIFIED —
+  never touched, the reconcile leaves the subscription to a person (`action: manual`), the seat
+  report lists it; the last item of a subscription is never removed or changed; the reconcile
+  refuses when the extra product is the plan's product. `ConfigCheck` reads the extra product
+  from Stripe (exists, active, not the plan's).
+- ✅ Item 3: `ConfigCheck` errors for a live key without `IDOKLAD_ISSUE_MODE=send` and for a
+  `prepared` row of a live invoice; the daily run issues such rows once sending is allowed, else
+  alerts; the admin list shows „Ostrá platba bez faktúry" with „Vystaviť". A live key still does
+  not imply `send`.
+- ✅ Item 5: `deploy.yml` installs `billing-daily.php` (05:30) like the other crons; the daily run
+  re-runs `failed` / stuck `processing` webhook events from Stripe by id and e-mails the operator
+  once per event (`stripe_webhook_events.operator_alerted_at`), `ConfigCheck` warns about them;
+  a 2xx without Id → `needs_review / uncertain_send` + alert; rows without a snapshot (old code)
+  are rebuilt from Stripe and held „najprv skontroluj v iDoklade, či faktúra už neexistuje",
+  without a button until rebuilt; the daily run refuses a live key unless `APP_ENV=production`
+  or `--allow-live`.
+- ✅ Item 6: an active / trialing subscription takes over from a past_due / unpaid / paused one
+  (logged); checkout re-reads a live DB status from Stripe; the daily run writes status, period
+  end and cancel flag from Stripe; subscription refetch + write under a per-account lock
+  (`firol_subscription_<id>`), a cancelled subscription never keeps the cancel flag; admin delete
+  lists all of the customer's subscriptions and cancels every live one.
+- ✅ Item 7: Checkout falls back to an inline product (current POapp name + `firol_line_kind`)
+  when the variable is missing or is the plan's product; migration 079 `IF NOT EXISTS`
+  throughout (re-run twice locally); `BILLING_RECONCILE=off` — webhooks record, nothing is pushed,
+  the daily run reports; the seat report flags legacy-named and UNVERIFIED items and says which
+  subscription it checked. README: the full production deploy checklist.
+- ✅ Next charge with a promotion code on the subscription shows „pred zľavou"
+  (`accounts.stripe_has_discount`).
+- ✅ Tests: the iDoklad recorder (`bin/lib/idoklad-recorder.php`) IS `Firol\Idoklad\IDokladClient`
+  in the test processes (loaded before the autoloader, checked). `test-billing-invoices.php`: the
+  policy matrix, netting, discounts, 2xx without Id, legacy rows, the daily live-key guard.
+  `test-billing-stripe.php`: scenarios F (both legacy names, down to 0), H, K, L, S, W, O and the
+  replay again + reversed.
+
+**Stripe test mode, 18. 11. 2026** — scenarios A–G, F1/F2, H, O and K passed (69 checks, 0
+  failures); L, S and W passed in a separate run. The full run's output was lost after K (the
+  local shell was stopped for low memory; the process finished in the container and its cleanup
+  deleted every test clock and coupon), so P and the replay R (again + reversed) were not
+  observed this round. Recorded iDoklad payloads: H1 monthly renewal 53,66 € (two „+1 technik"
+  lines 5,66 + 9,00, plan 19,00, 2 × 10,00), H2 yearly 557,91 €, H3 Firol-named legacy item 45,00 €,
+  H4 first extra only 34,33 €, H5 after a merge 39,00 € with no proration line — all issued,
+  items = amount paid; H6 removal held (credit −6,66 €). K1 20 %: 23,20 € and 36,27 €; K2 3 €:
+  26,00 € and 42,34 € — issued, items = amount paid. iDoklad never called (recorder).
+
+**Owner questions (report only, not built)**
+- ⏸ When the extra quantity reaches 0 the item is deleted; the next technician creates a new item
+  at today's admin price — a price rise without the 30 days' notice of terms 5.5. Options: keep
+  the item at quantity 0, or create the new item at the stored unit amount
+  (`accounts.stripe_extra_unit_amount_cents`).
+- ⏸ `PATCH /api/account` (company name, IČO, address on invoices) is open to every team member.
+- ⏸ Registration claiming an import-created pending technician (round 1, item 11), unchanged.
+- ⏸ Round 1 Part 2 (VAT, charging additions at once, failed-renewal access, credits on tax
+  documents, invoice delivery, monthly ↔ yearly) still waits.
 
 ---
 
