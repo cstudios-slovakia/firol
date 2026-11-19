@@ -382,7 +382,7 @@ final class Writer
         // in the archive that can never come back out — and would make the
         // "27 protocols in, 25 restored" arithmetic look like data loss.
         $stmt = $pdo->prepare(
-            "SELECT d.id, d.parent_type, d.parent_id, d.type, d.number, d.form_variant, d.file_path,
+            "SELECT d.id, d.parent_type, d.parent_id, d.type, d.number, d.version, d.form_variant, d.file_path,
                     d.generated_at, d.signed, d.signed_at
              FROM   documents d
              LEFT   JOIN inspections i ON d.parent_type = 'inspection' AND i.id = d.parent_id
@@ -409,6 +409,10 @@ final class Writer
                 'parent_id'    => (int) $doc['parent_id'],
                 'type'         => $doc['type'],
                 'number'       => $doc['number'],
+                // Round 6 — the version the restore keeps, and the printout of a
+                // test (chapter 8.1), which the restore read but no archive carried.
+                'version'      => (int) $doc['version'],
+                'form_variant' => $doc['form_variant'],
                 'generated_at' => $doc['generated_at'],
                 'signed'       => (int) $doc['signed'],
                 'signed_at'    => $doc['signed_at'],

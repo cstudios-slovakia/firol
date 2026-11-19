@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Firol\Documents;
 
 use Firol\Db;
+use Firol\Support\ClientKind;
 use PDO;
 
 /**
@@ -136,14 +137,14 @@ final class BookNumber
      *
      * @throws \InvalidArgumentException with a Slovak message
      */
-    public static function normalizeCode(mixed $raw): string
+    public static function normalizeCode(mixed $raw, string $clientType = ClientKind::FIRMA): string
     {
         $code = is_string($raw) ? strtoupper(trim($raw)) : '';
         if (preg_match('/^[A-Z0-9]{2,4}$/', $code) !== 1) {
-            throw new \InvalidArgumentException('Kód firmy musí mať 2 až 4 znaky — písmená bez diakritiky alebo číslice.');
+            throw new \InvalidArgumentException(ClientKind::bookCodeShape($clientType));
         }
         if (preg_match('/[A-Z]/', $code) !== 1) {
-            throw new \InvalidArgumentException('Kód firmy musí obsahovať aspoň jedno písmeno.');
+            throw new \InvalidArgumentException(ClientKind::bookCodeLetter($clientType));
         }
         return $code;
     }
@@ -205,7 +206,7 @@ final class BookNumber
 
         $companyId = (int) $inspection['company_id'];
         $lock = $pdo->prepare(
-            'SELECT name, book_code, book_last_seq FROM companies WHERE id = ? AND account_id = ? FOR UPDATE'
+            'SELECT name, client_type, book_code, book_last_seq FROM companies WHERE id = ? AND account_id = ? FOR UPDATE'
         );
         $lock->execute([$companyId, $accountId]);
         $company = $lock->fetch(PDO::FETCH_ASSOC);
@@ -215,10 +216,19 @@ final class BookNumber
 
         $code = is_string($company['book_code']) && $company['book_code'] !== '' ? $company['book_code'] : null;
         if ($code === null) {
-            $code = self::claimCode($pdo, $accountId, $companyId, (string) $company['name']);
+            $code = self::claimCode($pdo, $accountId, $companyId, (string) $company['name'], (string) $company['client_type']);
         }
 
+        // A number of this series may exist already without the counter knowing
+        // it — entries a merge restore brought back under a code that another
+        // firma holds now (round 6). It is skipped: a gap is better than an
+        // issue refused by the unique key on every retry. Read after the firma's
+        // lock, so a restore that held it has committed by now.
         $next = (int) $company['book_last_seq'] + 1;
+        $used = self::usedSequences($pdo, $accountId, $code, $next);
+        while (isset($used[$next])) {
+            $next++;
+        }
         $pdo->prepare('UPDATE companies SET book_last_seq = ? WHERE id = ? AND account_id = ?')
             ->execute([$next, $companyId, $accountId]);
 
@@ -243,7 +253,7 @@ final class BookNumber
         if (is_string($number) && $number !== '') {
             return null;
         }
-        $stmt = $pdo->prepare('SELECT name, book_code FROM companies WHERE id = ? AND account_id = ?');
+        $stmt = $pdo->prepare('SELECT name, client_type, book_code FROM companies WHERE id = ? AND account_id = ?');
         $stmt->execute([(int) $inspection['company_id'], $accountId]);
         $company = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$company || (is_string($company['book_code']) && $company['book_code'] !== '')) {
@@ -252,9 +262,10 @@ final class BookNumber
         if (self::propose($accountId, (string) $company['name'], (int) $inspection['company_id']) !== null) {
             return null;
         }
-        return self::NO_CODE_MESSAGE;
+        return ClientKind::bookCodeMissing((string) $company['client_type']);
     }
 
+    /** The refusal for a firma (ClientKind::bookCodeMissing() words it for a bytové družstvo). */
     public const NO_CODE_MESSAGE = 'Firma nemá kód pre čísla zápisov do požiarnej knihy a z názvu sa nedá navrhnúť. Doplň ho na detaile firmy (2 – 4 písmená alebo číslice).';
 
     /** PK-STA-001 — at least three digits, more when the series outgrows them. */
@@ -275,7 +286,7 @@ final class BookNumber
     }
 
     /** The code under the firma's row lock: the first free proposal, written at once. */
-    private static function claimCode(PDO $pdo, int $accountId, int $companyId, string $name): string
+    private static function claimCode(PDO $pdo, int $accountId, int $companyId, string $name, string $clientType): string
     {
         foreach (self::candidates($name) as $code) {
             if (isset(self::takenCodes($accountId, $companyId)[$code])) {
@@ -291,10 +302,52 @@ final class BookNumber
                 }
             }
         }
-        throw new BookNumberRefused(self::NO_CODE_MESSAGE);
+        throw new BookNumberRefused(ClientKind::bookCodeMissing($clientType));
     }
 
-    /** @return array<string, true> */
+    /**
+     * The sequences from `$from` up that already exist as PK-<code>-n in the
+     * account — on an entry or as a document number.
+     *
+     * @return array<int, true>
+     */
+    private static function usedSequences(PDO $pdo, int $accountId, string $code, int $from): array
+    {
+        $like = self::PREFIX . '-' . $code . '-%';
+        $stmt = $pdo->prepare(
+            'SELECT book_number FROM inspections WHERE account_id = ? AND book_number LIKE ?
+             UNION
+             SELECT number FROM documents WHERE account_id = ? AND number LIKE ?'
+        );
+        $stmt->execute([$accountId, $like, $accountId, $like]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $number) {
+            $seq = self::sequenceOf((string) $number, $code);
+            if ($seq !== null && $seq >= $from) {
+                $out[$seq] = true;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Whether another firma of the account holds the code, or any number of
+     * its series exists in the account (round 6 — numbers a merge restore
+     * brought back after their firma got another code).
+     */
+    public static function isCodeTaken(int $accountId, string $code, ?int $exceptCompanyId = null): bool
+    {
+        return isset(self::takenCodes($accountId, $exceptCompanyId)[$code]);
+    }
+
+    /**
+     * Codes no other firma may take: the codes other firms hold, and the code
+     * of every PK-<KÓD>-n number in the account (an entry's or a document's)
+     * that is not the firma's own. The old PK-RRRR-NNN numbers name no code —
+     * a code always has a letter.
+     *
+     * @return array<string, true>
+     */
     private static function takenCodes(int $accountId, ?int $exceptCompanyId): array
     {
         $sql = 'SELECT book_code FROM companies WHERE account_id = ? AND book_code IS NOT NULL';
@@ -308,6 +361,21 @@ final class BookNumber
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $c) {
             $out[(string) $c] = true;
+        }
+
+        $numbers = Db::pdo()->prepare(
+            "SELECT i.book_number FROM inspections i
+             WHERE  i.account_id = ? AND i.book_number LIKE 'PK-%' AND (? IS NULL OR i.company_id <> ?)
+             UNION
+             SELECT d.number FROM documents d
+             LEFT   JOIN inspections i ON d.parent_type = 'inspection' AND i.id = d.parent_id
+             WHERE  d.account_id = ? AND d.number LIKE 'PK-%' AND (? IS NULL OR i.company_id IS NULL OR i.company_id <> ?)"
+        );
+        $numbers->execute([$accountId, $exceptCompanyId, $exceptCompanyId, $accountId, $exceptCompanyId, $exceptCompanyId]);
+        foreach ($numbers->fetchAll(PDO::FETCH_COLUMN) as $number) {
+            if (preg_match('/^' . self::PREFIX . '-([A-Z0-9]{2,4})-\d+$/', (string) $number, $m) === 1 && preg_match('/[A-Z]/', $m[1]) === 1) {
+                $out[$m[1]] = true;
+            }
         }
         return $out;
     }

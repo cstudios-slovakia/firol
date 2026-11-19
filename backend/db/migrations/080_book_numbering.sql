@@ -15,7 +15,8 @@
 --
 -- Re-runnable (IF NOT EXISTS). Entries already issued keep the number they
 -- were issued with (PK-RRRR-NNN): it is copied onto the entry, so a later
--- „Upraviť" + issue keeps it too.
+-- „Upraviť" + issue keeps it too. Migration 081 then stores a code proposal
+-- on every firma that has none.
 
 ALTER TABLE companies
     ADD COLUMN IF NOT EXISTS book_code VARCHAR(4) NULL AFTER billing_mode,
@@ -29,11 +30,17 @@ ALTER TABLE inspections
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_inspections_book_number ON inspections (account_id, book_number);
 
+-- An entry with more than one documents row takes the newest version (then
+-- the newest row), so the backfill does not depend on the join order.
 UPDATE inspections i
 JOIN   documents d
-       ON  d.account_id = i.account_id
-       AND d.parent_type = 'inspection'
-       AND d.parent_id = i.id
+       ON  d.id = (SELECT d2.id
+                   FROM   documents d2
+                   WHERE  d2.account_id = i.account_id
+                     AND  d2.parent_type = 'inspection'
+                     AND  d2.parent_id = i.id
+                   ORDER  BY d2.version DESC, d2.id DESC
+                   LIMIT  1)
 SET    i.book_number = d.number,
        i.book_number_version = d.version
 WHERE  i.type = 'poziarna_kniha'

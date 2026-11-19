@@ -481,11 +481,13 @@ final class CompanyController
         $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
         $id        = (int) $params['id'];
 
-        $existing = self::findOrFail($isAdmin ? null : $accountId, $id, true);
+        // An archived firma is read-only — 404 here as in update() (round 6).
+        $existing = self::findOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = (int) $existing['account_id'];
+        $clientType = (string) $existing['client_type'];
 
         try {
-            $code = BookNumber::normalizeCode($req->json()['code'] ?? null);
+            $code = BookNumber::normalizeCode($req->json()['code'] ?? null, $clientType);
         } catch (\InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422);
         }
@@ -500,13 +502,16 @@ final class CompanyController
             $row = $lock->fetch(PDO::FETCH_ASSOC);
             if ((int) ($row['book_last_seq'] ?? 0) > 0 && $row['book_code'] !== $code) {
                 $pdo->rollBack();
-                Response::error('Kód sa už nedá zmeniť — firma má vystavený zápis do požiarnej knihy.', 409);
+                Response::error(ClientKind::bookCodeLocked($clientType), 409);
             }
-            $taken = $pdo->prepare('SELECT 1 FROM companies WHERE account_id = ? AND book_code = ? AND id <> ?');
-            $taken->execute([$scopeAccountId, $code, $id]);
-            if ($taken->fetchColumn()) {
+            // Taken by another firma, or by numbers of its series already in the
+            // account (a merge restore — round 6).
+            $holder = $pdo->prepare('SELECT client_type FROM companies WHERE account_id = ? AND book_code = ? AND id <> ?');
+            $holder->execute([$scopeAccountId, $code, $id]);
+            $holderType = $holder->fetchColumn();
+            if ($holderType !== false || BookNumber::isCodeTaken($scopeAccountId, $code, $id)) {
                 $pdo->rollBack();
-                Response::error('Kód „' . $code . '" už má iná firma tohto účtu. Zvoľ iný.', 422);
+                Response::error(ClientKind::bookCodeTaken($code, $holderType !== false ? (string) $holderType : null), 422);
             }
             $pdo->prepare('UPDATE companies SET book_code = ? WHERE id = ? AND account_id = ?')
                 ->execute([$code, $id, $scopeAccountId]);
@@ -516,11 +521,11 @@ final class CompanyController
                 $pdo->rollBack();
             }
             if (($e->errorInfo[1] ?? null) === 1062) {
-                Response::error('Kód „' . $code . '" už má iná firma tohto účtu. Zvoľ iný.', 422);
+                Response::error(ClientKind::bookCodeTaken($code, ClientKind::FIRMA), 422);
             }
             throw $e;
         }
 
-        Response::json(['company' => self::shape(self::findOrFail($isAdmin ? null : $accountId, $id, true))]);
+        Response::json(['company' => self::shape(self::findOrFail($isAdmin ? null : $accountId, $id))]);
     }
 }

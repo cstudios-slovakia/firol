@@ -42,6 +42,52 @@ final class ClientKind
             : 'Zadaj názov firmy.';
     }
 
+    // ── The code of the client's požiarna kniha numbers (PK-<KÓD>-NNN) ───────
+
+    /** A typed code that is not 2–4 letters or digits. */
+    public static function bookCodeShape(string $type): string
+    {
+        return (self::isBytovyDom($type) ? 'Kód bytového družstva' : 'Kód firmy')
+            . ' musí mať 2 až 4 znaky — písmená bez diakritiky alebo číslice.';
+    }
+
+    /** A typed code of digits only. */
+    public static function bookCodeLetter(string $type): string
+    {
+        return (self::isBytovyDom($type) ? 'Kód bytového družstva' : 'Kód firmy')
+            . ' musí obsahovať aspoň jedno písmeno.';
+    }
+
+    /** The code is locked: the client has an issued entry. */
+    public static function bookCodeLocked(string $type): string
+    {
+        return 'Kód sa už nedá zmeniť — '
+            . (self::isBytovyDom($type) ? 'bytové družstvo' : 'firma')
+            . ' má vystavený zápis do požiarnej knihy.';
+    }
+
+    /**
+     * The code is taken. `$holderType` is the kind of the client holding it;
+     * null when only numbers of its series hold it (a merge restore).
+     */
+    public static function bookCodeTaken(string $code, ?string $holderType): string
+    {
+        $holder = match (true) {
+            $holderType === null            => 'už majú čísla zápisov tohto účtu',
+            self::isBytovyDom($holderType) => 'už má iné bytové družstvo tohto účtu',
+            default                         => 'už má iná firma tohto účtu',
+        };
+        return 'Kód „' . $code . '" ' . $holder . '. Zvoľ iný.';
+    }
+
+    /** No code, and the name gives no proposal. */
+    public static function bookCodeMissing(string $type): string
+    {
+        return self::isBytovyDom($type)
+            ? 'Bytové družstvo nemá kód pre čísla zápisov do požiarnej knihy a z názvu sa nedá navrhnúť. Doplň ho na detaile bytového družstva (2 – 4 písmená alebo číslice).'
+            : 'Firma nemá kód pre čísla zápisov do požiarnej knihy a z názvu sa nedá navrhnúť. Doplň ho na detaile firmy (2 – 4 písmená alebo číslice).';
+    }
+
     public static function companyAlreadyArchived(string $type): string
     {
         return self::isBytovyDom($type)

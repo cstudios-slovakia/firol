@@ -7,6 +7,26 @@ import { useAuth } from '@/auth/AuthContext';
 import { useToast } from '@/lib/toast';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
+import { clientNouns } from '@/lib/clientKind';
+
+/** Letters BookNumber::letters() maps by hand; the rest lose their marks below. */
+const EXTRA: Record<string, string> = {
+  ß: 'SS', Æ: 'AE', æ: 'AE', Œ: 'OE', œ: 'OE', Ø: 'O', ø: 'O', Ł: 'L', ł: 'L', Đ: 'D', đ: 'D', Þ: 'TH', þ: 'TH',
+};
+
+/**
+ * What the user types, as the server reads names (BookNumber::letters): „šta"
+ * → „STA". Nothing is dropped — a fifth character or a symbol stays, and the
+ * server's message says what is wrong (round 6: the field silently cut „KOVOX"
+ * to „KOVO" and „šta" to „TA").
+ */
+function transliterate(raw: string): string {
+  return raw
+    .replace(/[ßÆæŒœØøŁłĐđÞþ]/g, (c) => EXTRA[c] ?? c)
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toUpperCase();
+}
 
 /**
  * „Kód pre čísla zápisov do požiarnej knihy" on the firma's detail (customer's
@@ -29,6 +49,7 @@ export function BookCodeRow({
   const stored = company.book_code ?? null;
   const suggested = company.book_code_suggested ?? null;
   const locked = company.book_code_locked === true;
+  const nouns = clientNouns(company.client_type);
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -48,15 +69,8 @@ export function BookCodeRow({
   }
 
   async function save() {
-    const code = value.trim().toUpperCase();
-    if (!/^[A-Z0-9]{2,4}$/.test(code)) {
-      setError('Kód má 2 až 4 znaky — písmená bez diakritiky alebo číslice.');
-      return;
-    }
-    if (!/[A-Z]/.test(code)) {
-      setError('Kód musí obsahovať aspoň jedno písmeno.');
-      return;
-    }
+    // The server checks the shape and says what is wrong, in the client's words.
+    const code = value.trim();
     setSaving(true);
     try {
       const res = await Companies.updateBookCode(company.id, code, csrfToken);
@@ -87,13 +101,12 @@ export function BookCodeRow({
                 ref={inputRef}
                 id="company-book-code-input"
                 value={value}
-                maxLength={4}
                 autoCapitalize="characters"
                 autoComplete="off"
-                aria-label="Kód firmy"
+                aria-label={`Kód ${nouns.cases.gen}`}
                 aria-invalid={error !== null}
                 onChange={(e) => {
-                  setValue(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+                  setValue(transliterate(e.target.value));
                   setError(null);
                 }}
                 onKeyDown={(e) => {
@@ -131,7 +144,7 @@ export function BookCodeRow({
             {shown && <span className="text-xs text-ink-500">zápisy PK-{shown}-001, PK-{shown}-002, …</span>}
             {!stored && suggested && <span className="text-xs text-ink-400">(navrhnutý)</span>}
             {locked ? (
-              <span className="inline-flex items-center gap-1 text-xs text-ink-500" title="Firma už má vystavený zápis — kód sa nedá zmeniť.">
+              <span className="inline-flex items-center gap-1 text-xs text-ink-500" title={`${nouns.singular} už má vystavený zápis — kód sa nedá zmeniť.`}>
                 <Lock className="size-3" /> uzamknutý
               </span>
             ) : (
