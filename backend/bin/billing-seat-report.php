@@ -20,8 +20,12 @@ declare(strict_types=1);
  * old Checkout's inline product („POapp — extra technik" / „Firol — extra
  * technik"), an UNVERIFIED item (only the id recorded on the account says it
  * is an extra item — the reconcile never touches it and leaves the whole
- * subscription to a person), and a customer with more than one live
- * subscription (the report then says which one it checked and why).
+ * subscription to a person), and a customer with more than one live POapp
+ * subscription (a subscription of another product on the same customer is
+ * not counted). The report says which subscription the daily run will
+ * charge — by its take-over rule: the recorded one while paid, else the
+ * newest paid one, else (the recorded one over) the newest live one — and
+ * checks that one.
  * --all prints every checked account, not only the flagged ones.
  *
  * Meant to run against production right after a deploy with
@@ -92,7 +96,7 @@ foreach ($stmt->fetchAll() as $a) {
     try {
         // The same reading as the daily run (SeatSync::liveSubscriptions):
         // every live subscription of the customer, expanded, newest first.
-        $live = SeatSync::liveSubscriptions((string) $a['stripe_customer_id']);
+        $live = SeatSync::liveSubscriptions((string) $a['stripe_customer_id'], (string) ($a['stripe_base_subscription_item_id'] ?? ''));
     } catch (\Throwable $e) {
         $errors++;
         echo "  $label: ERROR reading Stripe: ", $e->getMessage(), "\n";
@@ -105,18 +109,32 @@ foreach ($stmt->fetchAll() as $a) {
             . ($s['extra_qty'] > 0 ? ' with ' . $s['extra_qty'] . ' extra' : ''), $live)) . ')';
     }
 
-    $current = null;
+    // The subscription the daily run will charge — its take-over rule
+    // (BillingController::syncSubscriptionState): the recorded one while it
+    // is paid (active / trialing); otherwise the newest paid POapp one, or —
+    // when the recorded one is over or missing — the newest live one.
+    $recorded = null;
     foreach ($live as $s) {
         if ($s['id'] === $a['stripe_subscription_id']) {
-            $current = $s;
+            $recorded = $s;
         }
     }
-    if (count($live) > 1) {
-        $flags[] = $current !== null
-            ? "checked {$current['id']} — the one recorded on the account"
-            : 'checked ' . $live[0]['id'] . ' — none is recorded on the account (db ' . ($a['stripe_subscription_id'] ?: '-') . '), the newest live one';
+    $isPaid = static fn (array $s): bool => in_array((string) ($s['status'] ?? ''), SeatSync::PAID_STATUSES, true);
+    $candidates = $live;
+    usort($candidates, static fn (array $x, array $y): int => [!$isPaid($x), -(int) ($x['created'] ?? 0)] <=> [!$isPaid($y), -(int) ($y['created'] ?? 0)]);
+    $current = $recorded;
+    $why = 'the one recorded on the account';
+    if ($recorded === null && $candidates !== []) {
+        $current = $candidates[0];
+        $why = 'the recorded one (' . ($a['stripe_subscription_id'] ?: '-') . ', db ' . ($a['stripe_status'] ?? '-') . ') is over or missing — the newest ' . ($isPaid($current) ? 'paid' : 'live') . ' one is taken over';
+    } elseif ($recorded !== null && !$isPaid($recorded) && $candidates !== [] && $isPaid($candidates[0]) && $candidates[0]['id'] !== $recorded['id']
+        && in_array((string) $recorded['status'], ['past_due', 'unpaid', 'paused', 'incomplete'], true)) {
+        $current = $candidates[0];
+        $why = "the recorded one ({$recorded['id']}) is {$recorded['status']} — the paid one is taken over";
     }
-    $current ??= $live[0] ?? null;
+    if ($current !== null && (count($live) > 1 || $current !== $recorded)) {
+        $flags[] = "the daily run charges {$current['id']} ({$current['status']}) — $why";
+    }
 
     if ($current === null) {
         if ($all) {
