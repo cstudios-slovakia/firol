@@ -68,10 +68,12 @@ final class SeatSync
     private const PRICE_PRODUCT_KEY = 'stripe_price_product:';
 
     /**
-     * Retrieve options that expand what classifyItems() can use, and the
-     * customer (a coupon on the customer is a discount of the subscription).
+     * Retrieve options that expand what classifyItems() can use, the
+     * customer (a coupon on the customer is a discount of the subscription)
+     * and the latest invoice (a failed renewal of a past_due subscription is
+     * recorded from it — PaymentGrace).
      */
-    public const RETRIEVE_EXPAND = ['expand' => ['items.data.price.product', 'customer']];
+    public const RETRIEVE_EXPAND = ['expand' => ['items.data.price.product', 'customer', 'latest_invoice']];
 
     /** Seconds to wait for another request holding the account's seat lock. */
     private const LOCK_TIMEOUT = 20;
@@ -226,17 +228,6 @@ final class SeatSync
                     $manual = "NOT CHANGED — subscription $subId is $status while the customer has the paid subscription {$paid['id']} ({$paid['status']}); the daily run takes it over";
                 }
             }
-            if ($manual !== null) {
-                $result['action'] = 'manual';
-                $result['notes'][] = $manual;
-                if (!$dryRun) {
-                    self::storeStripeSnapshot($accountId, $sub, $base, $before);
-                    self::recordState($accountId, 'manual', $manual);
-                }
-                error_log("[seat-sync] account=$accountId sub=$subId left for a person: " . implode('; ', $result['notes']));
-                return $result;
-            }
-
             // Stripe is written only when the reconcile switch is on; with
             // BILLING_RECONCILE=off the wanted quantity is still saved and
             // the difference reported (deploy order: report first).
@@ -252,6 +243,35 @@ final class SeatSync
                     (self::$afterStripeWrite)($what);
                 }
             };
+
+            // VAT: every live subscription carries the exclusive tax rate
+            // STRIPE_TAX_RATE_ID as its only default tax rate (Checkout sets
+            // it on new ones) — also one left for a person: the rate is not
+            // about the items. Changing it creates no proration; Stripe
+            // applies it to the next invoice, pending prorations included
+            // (test clock, 19. 11. 2026).
+            $actions = [];
+            $taxRate = Vat::stripeTaxRateId();
+            $rates = StripeShape::subscriptionTaxRateIds($sub);
+            if ($taxRate !== '' && $rates !== [$taxRate]) {
+                if ($push) {
+                    $stripe->subscriptions->update($subId, ['default_tax_rates' => [$taxRate], 'proration_behavior' => 'none']);
+                    $sub['default_tax_rates'] = [$taxRate];
+                    $wrote('tax rate ' . $taxRate);
+                }
+                $actions[] = $would('set', 'would set') . " default tax rate $taxRate" . ($rates !== [] ? ' (was ' . implode(', ', $rates) . ')' : '');
+            }
+
+            if ($manual !== null) {
+                $result['action'] = 'manual';
+                $result['notes'] = array_merge($result['notes'], $actions, [$manual]);
+                if (!$dryRun) {
+                    self::storeStripeSnapshot($accountId, $sub, $base, $before);
+                    self::recordState($accountId, 'manual', $manual);
+                }
+                error_log("[seat-sync] account=$accountId sub=$subId left for a person: " . implode('; ', $result['notes']));
+                return $result;
+            }
 
             $interval = $base !== null ? StripeShape::itemInterval($base) : null;
 
@@ -272,7 +292,6 @@ final class SeatSync
 
             // Never remove or change the last item of a subscription.
             $remaining = count($items);
-            $actions = [];
             foreach ($duplicates as $dup) {
                 if ($remaining <= 1) {
                     $actions[] = 'kept ' . $dup['id'] . ' (last item of the subscription)';
@@ -380,6 +399,7 @@ final class SeatSync
             'stripe_base_subscription_item_id' => $base !== null ? (string) $base['id'] : null,
             'stripe_extra_quantity'            => $extraQty,
             'stripe_has_discount'              => StripeShape::subscriptionHasDiscount($sub) ? 1 : 0,
+            'stripe_tax_rate_ids'              => implode(',', StripeShape::subscriptionTaxRateIds($sub)),
         ];
         if ($keep !== 'unchanged') {
             $sets['stripe_extra_subscription_item_id'] = is_array($keep) ? (string) $keep['id'] : null;
@@ -393,22 +413,36 @@ final class SeatSync
     /**
      * The moment the prorations of one reconcile run are computed for: now,
      * or the frozen time of the subscription's Stripe test clock (a test
-     * clock's „now" is not the real time).
+     * clock's „now" is not the real time) — clamped into the subscription's
+     * current period as read (max(period start, min(now, period end − 1))).
+     * Stripe refuses a proration_date outside the period, which a clock a few
+     * seconds behind Stripe's, or a run right after a renewal, produced.
      *
      * @param array<string, mixed> $sub
      */
-    private static function prorationDate(array $sub): int
+    public static function prorationDate(array $sub, ?int $now = null): int
     {
-        $clock = $sub['test_clock'] ?? null;
-        $clockId = is_array($clock) ? (string) ($clock['id'] ?? '') : (string) $clock;
-        if ($clockId !== '') {
-            try {
-                return (int) StripeClient::get()->testHelpers->testClocks->retrieve($clockId)->frozen_time;
-            } catch (\Throwable $e) {
-                error_log('[seat-sync] test clock ' . $clockId . ': ' . $e->getMessage());
+        if ($now === null) {
+            $now = time();
+            $clock = $sub['test_clock'] ?? null;
+            $clockId = is_array($clock) ? (string) ($clock['id'] ?? '') : (string) $clock;
+            if ($clockId !== '') {
+                try {
+                    $now = (int) StripeClient::get()->testHelpers->testClocks->retrieve($clockId)->frozen_time;
+                } catch (\Throwable $e) {
+                    error_log('[seat-sync] test clock ' . $clockId . ': ' . $e->getMessage());
+                }
             }
         }
-        return time();
+        $start = StripeShape::subscriptionPeriodStart($sub);
+        $end   = StripeShape::subscriptionPeriodEnd($sub);
+        if ($end !== null) {
+            $now = min($now, $end - 1);
+        }
+        if ($start !== null) {
+            $now = max($now, $start);
+        }
+        return $now;
     }
 
     /**
@@ -426,15 +460,17 @@ final class SeatSync
     }
 
     /**
-     * Every subscription of a Stripe customer that still bills (status in
-     * SubscriptionStatus::LIVE), newest first, each read with RETRIEVE_EXPAND
+     * Every POapp subscription (isOurSubscription()) of a Stripe customer that
+     * still bills (status in SubscriptionStatus::LIVE) — a subscription of
+     * another product on the same customer is left out — newest first, each
+     * read with RETRIEVE_EXPAND
      * and annotated with `extra_qty` (the extra technicians on it, as
      * classifyItems() sees them). Used by the daily run, the seat report and
      * reconcile().
      *
      * @return list<array<string, mixed>>
      */
-    public static function liveSubscriptions(string $customerId): array
+    public static function liveSubscriptions(string $customerId, string $rememberedBaseItemId = ''): array
     {
         if ($customerId === '') {
             return [];
@@ -442,7 +478,8 @@ final class SeatSync
         $stripe = StripeClient::get();
         $out = [];
         foreach ($stripe->subscriptions->all(['customer' => $customerId, 'status' => 'all', 'limit' => 20])->data as $s) {
-            if (!SubscriptionStatus::isLive((string) $s->status)) {
+            if (!SubscriptionStatus::isLive((string) $s->status)
+                || !self::isOurSubscription(StripeShape::arr($s), $rememberedBaseItemId)) {
                 continue;
             }
             $data = StripeShape::arr($stripe->subscriptions->retrieve((string) $s->id, self::RETRIEVE_EXPAND));
@@ -467,7 +504,8 @@ final class SeatSync
         }
         $best = null;
         foreach (StripeClient::get()->subscriptions->all(['customer' => $customerId, 'status' => 'all', 'limit' => 20])->data as $s) {
-            if ((string) $s->id === $exceptId || !in_array((string) $s->status, self::PAID_STATUSES, true)) {
+            if ((string) $s->id === $exceptId || !in_array((string) $s->status, self::PAID_STATUSES, true)
+                || !self::isOurSubscription(StripeShape::arr($s))) {
                 continue;
             }
             if ($best === null || (int) $s->created > (int) $best->created) {
@@ -475,6 +513,36 @@ final class SeatSync
             }
         }
         return $best === null ? null : ['id' => (string) $best->id, 'status' => (string) $best->status];
+    }
+
+    /**
+     * Whether a subscription is a POapp subscription: one of its items is the
+     * plan, recognised by a configured base price (STRIPE_PRICE_MONTHLY /
+     * _YEARLY) or the product of one, or it is the plan item remembered on
+     * the account. Never through classifyItems()'s fallback of a lone
+     * unrecognised item — a subscription of another product on the same
+     * Stripe customer is not a candidate for a take-over, not a paid
+     * sibling and not a second live subscription of the account.
+     *
+     * Reads only the items' price and product ids (the list endpoint's shape
+     * is enough); the base products come from the system_settings cache.
+     *
+     * @param array<string, mixed> $sub
+     */
+    public static function isOurSubscription(array $sub, string $rememberedBaseItemId = ''): bool
+    {
+        $basePrices   = StripeClient::basePriceIds();
+        $baseProducts = self::baseProductIds() ?? [];
+        foreach ((array) ($sub['items']['data'] ?? []) as $item) {
+            $item = StripeShape::arr($item);
+            $product = StripeShape::itemProductId($item);
+            if (in_array((string) ($item['price']['id'] ?? ''), $basePrices, true)
+                || ($product !== null && in_array($product, $baseProducts, true))
+                || ($rememberedBaseItemId !== '' && (string) ($item['id'] ?? '') === $rememberedBaseItemId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -897,16 +965,22 @@ final class SeatSync
      * recognised).
      *
      * The extra technicians are the wanted count — what Stripe is told to
-     * charge — except while nothing is pushed: with the reconcile switch off
-     * or the account left for a person (seat_sync_state `manual`) the count
-     * Stripe really has is shown (stripe_extra_quantity).
+     * charge — except while the reconcile switch is off: then the count
+     * Stripe really has is shown (stripe_extra_quantity). No figure at all
+     * while the account is left for a person or its sync fails
+     * (seat_sync_state `manual` / `error`): the items that made it so are not
+     * in either count, so any figure would be wrong.
+     *
+     * The amount is net (list prices are without VAT); the screens add VAT
+     * (Billing\Vat).
      *
      * @param array<string, mixed> $account accounts row
      */
     public static function nextChargeCents(array $account): ?int
     {
         if ((string) ($account['stripe_subscription_id'] ?? '') === ''
-            || !isset($account['stripe_base_unit_amount_cents'])) {
+            || !isset($account['stripe_base_unit_amount_cents'])
+            || in_array($account['seat_sync_state'] ?? null, ['manual', 'error'], true)) {
             return null;
         }
         $base  = (int) $account['stripe_base_unit_amount_cents'];

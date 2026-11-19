@@ -25,10 +25,20 @@ final class InvoiceOperatorAlertEmail
         $total    = $row['stripe_total_cents'] !== null ? number_format((int) $row['stripe_total_cents'] / 100, 2, ',', ' ') . " $cur" : '—';
         $paid     = $row['stripe_amount_paid_cents'] !== null ? number_format((int) $row['stripe_amount_paid_cents'] / 100, 2, ',', ' ') . " $cur" : '—';
         $adminUrl = Url::appBase() . '/admin';
+        // A Stripe TEST-mode payment is labelled, so a test row never reads
+        // like a real customer's.
+        $test     = ($row['stripe_livemode'] ?? null) !== null && (int) $row['stripe_livemode'] === 0;
+        $issued   = (string) ($row['document_number'] ?? '') !== '' && (string) ($row['status'] ?? '') === 'issued';
+        $intro    = $issued
+            ? 'Faktúra k platbe cez Stripe je v iDoklade vystavená (' . (string) $row['document_number'] . '), ďalší krok sa nepodaril.'
+            : 'Platba cez Stripe nemá faktúru v iDoklade — automaticky sa nevystavila.';
+        if ($test) {
+            $intro .= ' Ide o testovaciu platbu (Stripe test mode).';
+        }
 
         $e = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 
-        $bodyHtml = '<p style="margin:0 0 16px 0;">Platba cez Stripe nemá faktúru v iDoklade — automaticky sa nevystavila.</p>'
+        $bodyHtml = '<p style="margin:0 0 16px 0;">' . $e($intro) . '</p>'
             . '<table style="border-collapse:collapse;font-size:14px;margin:0 0 16px 0;">'
             . '<tr><td style="padding:2px 12px 2px 0;color:#7a8494;">Účet</td><td>' . $e($company) . ' (#' . (int) $row['account_id'] . ')</td></tr>'
             . '<tr><td style="padding:2px 12px 2px 0;color:#7a8494;">Stripe faktúra</td><td>' . $e($stripeId) . '</td></tr>'
@@ -39,7 +49,7 @@ final class InvoiceOperatorAlertEmail
             . '<p style="margin:0 0 16px 0;">' . $e($action) . '</p>'
             . Layout::button($adminUrl, 'Otvoriť administráciu');
 
-        $text = "Platba cez Stripe nemá faktúru v iDoklade — automaticky sa nevystavila.\n\n"
+        $text = $intro . "\n\n"
             . "Účet: $company (#" . (int) $row['account_id'] . ")\n"
             . "Stripe faktúra: $stripeId\n"
             . "Spolu / zaplatené: $total / $paid\n"
@@ -50,7 +60,7 @@ final class InvoiceOperatorAlertEmail
 
         return new Message(
             to:      $to,
-            subject: 'POapp — platba bez faktúry (' . $company . ')',
+            subject: ($test ? '[TEST] ' : '') . 'POapp — ' . ($issued ? 'faktúra potrebuje zásah' : 'platba bez faktúry') . ' (' . $company . ')',
             html:    Layout::render('Faktúra nevystavená', 'Faktúra potrebuje zásah', $bodyHtml, 'Faktúru pre ' . $company . ' sa nepodarilo vystaviť.'),
             text:    $text,
         );

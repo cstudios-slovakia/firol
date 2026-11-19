@@ -284,6 +284,11 @@ final class AccountController
             // A promotion code is on the subscription: the figure above is
             // the price before the discount (the screens say so).
             'next_charge_before_discount'    => !empty($row['stripe_has_discount']),
+            // Every price above is net; the customer pays it plus VAT
+            // (Billing\Vat). The screens show „+ DPH" and the gross amount.
+            'vat_rate_percent'               => \Firol\Billing\Vat::percent(),
+            // A failed renewal: amount, and the first read-only day.
+            'payment_failed'                 => \Firol\Billing\PaymentGrace::bannerFor($accountId, $row['stripe_status'] ?? null),
         ];
     }
 }

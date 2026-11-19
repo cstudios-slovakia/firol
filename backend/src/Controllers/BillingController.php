@@ -7,9 +7,12 @@ namespace Firol\Controllers;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Billing\BillingLock;
+use Firol\Billing\ConfigCheck;
 use Firol\Billing\OperatorAlert;
+use Firol\Billing\PaymentGrace;
 use Firol\Billing\SeatSync;
 use Firol\Billing\SubscriptionStatus;
+use Firol\Billing\Vat;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
@@ -149,11 +152,20 @@ final class BillingController
         // should not bill until then — pass `trial_end` so Stripe runs
         // its own trial that aligns with ours. Skip when there's no
         // remaining trial (e.g. they already lapsed).
+        // Prices are net: Stripe adds VAT with the exclusive tax rate
+        // STRIPE_TAX_RATE_ID on every invoice of the subscription. Without
+        // it a customer would pay the bare price — no checkout then.
+        $taxRate = Vat::stripeTaxRateId();
+        if ($taxRate === '') {
+            error_log('[billing.checkout] STRIPE_TAX_RATE_ID is not set — checkout refused');
+            Response::error('Platobná brána nie je úplne nastavená (DPH). Skús to neskôr alebo kontaktuj podporu.', 503);
+        }
         $subscriptionData = [
             'metadata' => [
                 'firol_account_id' => (string) $accountId,
                 'billing_period'   => $billingPeriod,
             ],
+            'default_tax_rates' => [$taxRate],
         ];
         $trialEnd = self::trialEndUnix($account['subscription_end_date'] ?? null);
         if ($trialEnd !== null) {
@@ -500,6 +512,9 @@ final class BillingController
             'paused'             => 0,
         ];
         foreach ($list->data as $s) {
+            if (!SeatSync::isOurSubscription(StripeShape::arr($s))) {
+                continue; // a subscription of another product
+            }
             $r = $rank[$s->status] ?? -1;
             if ($r > $bestRank || ($r === $bestRank && (int) $s->created > (int) ($best->created ?? 0))) {
                 $best = $s;
@@ -526,7 +541,7 @@ final class BillingController
             Response::error('Stripe sa nepodarilo overiť. Skús to o chvíľu znova.', 502);
         }
         foreach ($list->data as $s) {
-            if (SubscriptionStatus::isLive((string) $s->status)) {
+            if (SubscriptionStatus::isLive((string) $s->status) && SeatSync::isOurSubscription(StripeShape::arr($s))) {
                 return $s;
             }
         }
@@ -602,6 +617,18 @@ final class BillingController
         }
 
         self::finishEvent($eventId, 'done', null);
+        // The daily run cannot report its own missing cron: the webhook does,
+        // once, after the response.
+        register_shutdown_function(static function (): void {
+            if (function_exists('fastcgi_finish_request')) {
+                fastcgi_finish_request();
+            }
+            try {
+                ConfigCheck::alertIfDailyStale();
+            } catch (\Throwable $e) {
+                error_log('[billing.daily-stale] ' . $e->getMessage());
+            }
+        });
         Response::noContent();
     }
 
@@ -645,6 +672,15 @@ final class BillingController
                 if ($rowId !== null) {
                     InvoiceIssuer::issueAfterResponse($rowId);
                 }
+                // A failed renewal paid: access comes back at once (the
+                // subscription is read again and its period end written).
+                PaymentGrace::resolveInvoice((string) $obj->id);
+                $paidSub = StripeShape::invoiceSubscriptionId($obj->toArray());
+                $acc = self::findAccountRowById($accId);
+                if ($paidSub !== null && $acc !== null && (string) $acc['stripe_subscription_id'] === $paidSub
+                    && in_array((string) $acc['stripe_status'], PaymentGrace::UNPAID_STATUSES, true)) {
+                    self::handleSubscriptionUpsert(\Stripe\Subscription::constructFrom(['id' => $paidSub, 'customer' => (string) $obj->customer]));
+                }
                 break;
 
             case 'invoice.finalized':
@@ -661,9 +697,20 @@ final class BillingController
                 break;
 
             case 'invoice.payment_failed':
-                // Access rules and the customer notice for a failed renewal
-                // are an open owner decision (docs/development-roadmap.md).
+                // A failed payment of the account's subscription: recorded
+                // once per invoice (the grace period counts from it), the
+                // main user e-mailed after the response, the subscription
+                // read again so its paid-until date is capped (PaymentGrace).
                 error_log("[billing.webhook] payment FAILED customer={$obj->customer} amount={$obj->amount_due}");
+                $failedAcc = self::findAccountRowByCustomer((string) $obj->customer);
+                $failedSub = StripeShape::invoiceSubscriptionId($obj->toArray());
+                if ($failedAcc === null || $failedSub === null || (string) $failedAcc['stripe_subscription_id'] !== $failedSub) {
+                    break; // not the account's current subscription
+                }
+                if (PaymentGrace::recordFailure((int) $failedAcc['id'], $obj->toArray())) {
+                    PaymentGrace::notifyAfterResponse();
+                }
+                self::handleSubscriptionUpsert(\Stripe\Subscription::constructFrom(['id' => $failedSub, 'customer' => (string) $obj->customer]));
                 break;
 
             default:
@@ -824,6 +871,13 @@ final class BillingController
             if ($account === null) {
                 return;
             }
+            if ($subId !== (string) ($account['stripe_subscription_id'] ?? '')
+                && !SeatSync::isOurSubscription($data, (string) ($account['stripe_base_subscription_item_id'] ?? ''))) {
+                // A subscription of another product on the same Stripe
+                // customer: never the account's subscription.
+                error_log("[billing.webhook] account=$accountId ignores subscription $subId ($status): no POapp plan item");
+                return;
+            }
             if (!self::isCurrentSubscription($account, $subId, $status)) {
                 error_log(sprintf(
                     '[billing.webhook] account=%d ignores subscription %s (%s): current is %s (%s)%s',
@@ -893,6 +947,10 @@ final class BillingController
         if (in_array($status, ['incomplete', 'incomplete_expired'], true)) {
             $endDate = null;
         }
+        // A failed renewal (past_due / unpaid): usable until the end of the
+        // grace period, then read-only — the period end Stripe moved ahead
+        // is capped. A paid subscription resolves the failures.
+        $endDate = PaymentGrace::endDateFor($accountId, $status, $data, $endDate);
         $cancelFlag = !SubscriptionStatus::isTerminal($status) && !empty($data['cancel_at_period_end']) ? 1 : 0;
 
         Db::pdo()->prepare(
@@ -902,10 +960,12 @@ final class BillingController
                     billing_period              = COALESCE(?, billing_period),
                     stripe_cancel_at_period_end = ?,
                     subscription_end_date       = COALESCE(?, subscription_end_date),
-                    stripe_has_discount         = ?
+                    stripe_has_discount         = ?,
+                    stripe_tax_rate_ids         = ?
              WHERE  id = ?'
         )->execute([$subId, $status, $period, $cancelFlag, $endDate,
-                    StripeShape::subscriptionHasDiscount($data) ? 1 : 0, $accountId]);
+                    StripeShape::subscriptionHasDiscount($data) ? 1 : 0,
+                    implode(',', StripeShape::subscriptionTaxRateIds($data)), $accountId]);
 
         error_log("[billing.webhook] account=$accountId subscription=$subId status=$status end=$endDate");
     }
@@ -929,13 +989,23 @@ final class BillingController
      * Also stores the customer's other live subscriptions on the account
      * when it has two or more (stripe_other_subscriptions, JSON: id, status,
      * extra_qty) for ConfigCheck and the daily run's alert; NULL otherwise.
+     *
+     * Runs for accounts whose recorded subscription is over (canceled /
+     * incomplete_expired) too: a customer who pays a second subscription
+     * after the first ended is taken over here. Only POapp subscriptions are
+     * candidates (SeatSync::isOurSubscription).
+     *
+     * $dryRun changes nothing; with $storeFindings as well (Stripe writes
+     * refused) only stripe_other_subscriptions is written, so ConfigCheck
+     * names a take-over the run did not make.
      */
-    public static function syncSubscriptionState(int $accountId, bool $dryRun = false): ?string
+    public static function syncSubscriptionState(int $accountId, bool $dryRun = false, bool $storeFindings = false): ?string
     {
         $takeOver = null;
-        $result = self::withSubscriptionLock($accountId, static function () use ($accountId, $dryRun, &$takeOver): ?string {
+        $result = self::withSubscriptionLock($accountId, static function () use ($accountId, $dryRun, $storeFindings, &$takeOver): ?string {
             $before = self::findAccountRowById($accountId);
             $subId  = (string) ($before['stripe_subscription_id'] ?? '');
+            $recordedId = $subId;
             if ($before === null || $subId === '') {
                 return null;
             }
@@ -945,7 +1015,7 @@ final class BillingController
             $diff = [];
 
             $customerId = self::customerOf($data) ?: (string) ($before['stripe_customer_id'] ?? '');
-            $live = SeatSync::liveSubscriptions($customerId);
+            $live = SeatSync::liveSubscriptions($customerId, (string) ($before['stripe_base_subscription_item_id'] ?? ''));
             // The webhook's rule on Stripe's statuses, paid candidates first
             // (newest first within each group).
             $candidates = $live;
@@ -977,15 +1047,27 @@ final class BillingController
                 $diff[] = "end {$before['subscription_end_date']} → " . date('Y-m-d', $periodEnd);
             }
 
-            // Only a customer with two or more live subscriptions is flagged.
+            // Only a customer with two or more live subscriptions is flagged —
+            // or, in a run that may not write the take-over ($storeFindings:
+            // the daily run with Stripe writes refused), a recorded
+            // subscription that is over while another one is live (ConfigCheck
+            // „DB canceled, customer has a live subscription").
             $others = [];
-            foreach (count($live) >= 2 ? $live : [] as $s) {
-                if ((string) $s['id'] !== $subId) {
+            $relativeTo = $subId;
+            $flagAll = count($live) >= 2;
+            if ($dryRun && $storeFindings && $takeOver !== null) {
+                $relativeTo = $recordedId;
+                $flagAll = true;
+            }
+            foreach ($flagAll ? $live : [] as $s) {
+                if ((string) $s['id'] !== $relativeTo) {
                     $others[] = ['id' => (string) $s['id'], 'status' => (string) ($s['status'] ?? ''), 'extra_qty' => (int) ($s['extra_qty'] ?? 0)];
                 }
             }
             if (!$dryRun) {
                 self::storeSubscriptionState($before, $subId, $data);
+            }
+            if (!$dryRun || $storeFindings) {
                 Db::pdo()->prepare('UPDATE accounts SET stripe_other_subscriptions = ? WHERE id = ?')
                     ->execute([$others === [] ? null : json_encode($others), $accountId]);
             }
@@ -1320,7 +1402,8 @@ final class BillingController
     private static function findAccountRowById(int $accountId): ?array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT id, stripe_subscription_id, stripe_status, stripe_extra_subscription_item_id, subscription_end_date
+            'SELECT id, invoice_company_name, stripe_customer_id, stripe_subscription_id, stripe_status,
+                    stripe_extra_subscription_item_id, stripe_base_subscription_item_id, subscription_end_date
              FROM   accounts WHERE id = ?'
         );
         $stmt->execute([$accountId]);
@@ -1335,7 +1418,8 @@ final class BillingController
             return null;
         }
         $stmt = Db::pdo()->prepare(
-            'SELECT id, stripe_subscription_id, stripe_status, stripe_extra_subscription_item_id
+            'SELECT id, stripe_subscription_id, stripe_status, stripe_extra_subscription_item_id,
+                    stripe_base_subscription_item_id
              FROM   accounts WHERE stripe_customer_id = ?'
         );
         $stmt->execute([$customerId]);

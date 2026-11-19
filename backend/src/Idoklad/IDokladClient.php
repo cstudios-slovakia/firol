@@ -70,6 +70,24 @@ final class IDokladClient implements IDokladApi
      * @param array<string, mixed>|null $payload
      * @return array<string, mixed>
      */
+    public function put(string $path, ?array $payload = null): array
+    {
+        return $this->request('PUT', $path, $payload);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    public function patch(string $path, array $payload): array
+    {
+        return $this->request('PATCH', $path, $payload);
+    }
+
+    /**
+     * @param array<string, mixed>|null $payload
+     * @return array<string, mixed>
+     */
     private function request(string $method, string $path, ?array $payload): array
     {
         $token = $this->accessToken();
@@ -102,7 +120,10 @@ final class IDokladClient implements IDokladApi
             throw new IDokladTransportException("iDoklad $method $path failed: HTTP $status — $body");
         }
         if ($status < 200 || $status >= 300) {
-            throw new \RuntimeException("iDoklad $method $path failed: HTTP $status — $body");
+            // The error envelope carries iDoklad's ErrorCode (e.g. 110
+            // „Document has already been paid"); it becomes the exception code.
+            $err = json_decode($body, true);
+            throw new \RuntimeException("iDoklad $method $path failed: HTTP $status — $body", is_array($err) ? (int) ($err['ErrorCode'] ?? 0) : 0);
         }
         $decoded = json_decode($body, true);
         if (!is_array($decoded)) {
@@ -114,9 +135,12 @@ final class IDokladClient implements IDokladApi
         if (array_key_exists('IsSuccess', $decoded)) {
             if ($decoded['IsSuccess'] === false) {
                 $msg = (string) ($decoded['Message'] ?? 'unknown error');
-                throw new \RuntimeException("iDoklad $method $path: $msg");
+                $code = (int) ($decoded['ErrorCode'] ?? 0);
+                throw new \RuntimeException("iDoklad $method $path: $msg" . ($code !== 0 ? " (ErrorCode $code)" : ''), $code);
             }
-            return is_array($decoded['Data'] ?? null) ? $decoded['Data'] : [];
+            // FullyPay answers Data: true — wrapped so callers get an array.
+            $data = $decoded['Data'] ?? null;
+            return is_array($data) ? $data : ($data === null ? [] : ['Value' => $data]);
         }
         return $decoded;
     }

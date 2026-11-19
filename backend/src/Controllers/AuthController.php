@@ -390,6 +390,9 @@ final class AuthController
             $a['next_charge_cents'] = \Firol\Billing\SeatSync::nextChargeCents($a);
             $a['next_charge_extra_technicians'] = \Firol\Billing\SeatSync::chargedExtraCount($a);
             $a['next_charge_before_discount'] = !empty($a['stripe_has_discount']);
+            // A failed renewal: every member sees the banner with the day the
+            // account becomes read-only (null otherwise).
+            $a['payment_failed'] = \Firol\Billing\PaymentGrace::bannerFor((int) $a['id'], $a['stripe_status'] ?? null);
             unset(
                 $a['stripe_subscription_id'], $a['stripe_extra_subscription_item_id'],
                 $a['stripe_extra_unit_amount_cents'], $a['stripe_base_unit_amount_cents'],

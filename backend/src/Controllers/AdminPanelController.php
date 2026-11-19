@@ -227,8 +227,10 @@ final class AdminPanelController
         $stmt = $pdo->prepare(
             'SELECT id, stripe_invoice_id, idoklad_invoice_id, document_number,
                     idoklad_public_url, stripe_invoice_pdf_url,
-                    amount_cents, stripe_total_cents, stripe_amount_paid_cents, stripe_livemode,
+                    amount_cents, stripe_total_cents, stripe_amount_paid_cents, stripe_tax_cents, stripe_livemode,
                     currency, status, review_reason, error_message, attempts, last_attempt_at,
+                    paid_mark_state, paid_mark_attempts, paid_marked_at, paid_mark_error,
+                    send_state, send_attempts, sent_at, sent_to, send_error,
                     stripe_invoice_json, issued_at
              FROM   invoices
              WHERE  account_id = ? AND YEAR(issued_at) = ?
@@ -262,6 +264,19 @@ final class AdminPanelController
                 'attempts'                 => (int) $r['attempts'],
                 'last_attempt_at'          => $r['last_attempt_at'],
                 'can_reissue'              => \Firol\Idoklad\InvoiceIssuer::manualIssueAllowed($r),
+                'stripe_tax_cents'         => $r['stripe_tax_cents'] !== null ? (int) $r['stripe_tax_cents'] : null,
+                // The two steps after issuing: marking paid in iDoklad and
+                // iDoklad's e-mail to the customer.
+                'paid_mark_state'          => $r['paid_mark_state'],
+                'paid_mark_attempts'       => (int) $r['paid_mark_attempts'],
+                'paid_marked_at'           => $r['paid_marked_at'],
+                'paid_mark_error'          => $r['paid_mark_error'],
+                'send_state'               => $r['send_state'],
+                'send_attempts'            => (int) $r['send_attempts'],
+                'sent_at'                  => $r['sent_at'],
+                'sent_to'                  => $r['sent_to'],
+                'send_error'               => $r['send_error'],
+                'can_resend'               => \Firol\Idoklad\InvoiceIssuer::manualFollowUpAllowed($r),
             ];
         }, $stmt->fetchAll());
 
@@ -322,12 +337,22 @@ final class AdminPanelController
         $row = $stmt->fetch();
         if (!$row) Response::error('Faktúra sa nenašla.', 404);
 
+        // The state the admin saw: a row that moved on meanwhile (e.g. to
+        // uncertain_send after a timeout) is never posted on a stale screen.
+        $seenStatus = $req->jsonString('expected_status');
+        $seenReason = $req->jsonString('expected_reason') ?? '';
         $before = (string) $row['status'];
+        if ($seenStatus === null) {
+            Response::error('Chýba stav faktúry, ktorý si videl — obnov stránku.', 422);
+        }
+        if ($seenStatus !== $before || $seenReason !== (string) ($row['review_reason'] ?? '')) {
+            Response::error('Stav faktúry sa medzitým zmenil — obnov zoznam a skontroluj ju znova.', 409, ['status' => $before]);
+        }
         if (!\Firol\Idoklad\InvoiceIssuer::manualIssueAllowed($row)) {
             Response::error('Túto faktúru nie je možné vystaviť znova.', 409, ['status' => $before]);
         }
 
-        $after = (new \Firol\Idoklad\InvoiceIssuer())->issue($id, true);
+        $after = (new \Firol\Idoklad\InvoiceIssuer())->issue($id, true, [$before]);
         AuditLog::record('invoice.reissue', 'invoices', $id, ['status' => $before], ['status' => $after]);
 
         $msgStmt = Db::pdo()->prepare('SELECT error_message FROM invoices WHERE id = ?');
@@ -340,8 +365,76 @@ final class AdminPanelController
     }
 
     /**
+     * POST /api/admin/invoices/{id}/resend — „Poslať znova".
+     *
+     * Repeats the follow-up steps of an issued invoice whose marking as paid
+     * or whose e-mail to the customer failed (also past the automatic cap) or
+     * is uncertain (after the admin checked in iDoklad that no e-mail went
+     * out). Body: the send / paid states the admin saw; a row that moved on
+     * meanwhile is refused (409). Never issues the invoice again.
+     *
+     * @param array<string, string> $params
+     */
+    public static function resendInvoice(Request $req, array $params): void
+    {
+        Admin::require();
+        Csrf::require($req);
+
+        $id = (int) ($params['id'] ?? 0);
+        if ($id <= 0) Response::error('Neplatné ID faktúry.', 422);
+        $stmt = Db::pdo()->prepare('SELECT id, status, send_state, paid_mark_state FROM invoices WHERE id = ?');
+        $stmt->execute([$id]);
+        $row = $stmt->fetch();
+        if (!$row) Response::error('Faktúra sa nenašla.', 404);
+
+        if (($req->jsonString('expected_send_state') ?? '') !== (string) ($row['send_state'] ?? '')
+            || ($req->jsonString('expected_paid_state') ?? '') !== (string) ($row['paid_mark_state'] ?? '')) {
+            Response::error('Stav faktúry sa medzitým zmenil — obnov zoznam a skontroluj ju znova.', 409);
+        }
+        if (!\Firol\Idoklad\InvoiceIssuer::manualFollowUpAllowed($row)) {
+            Response::error('Túto faktúru nie je možné poslať znova.', 409);
+        }
+        $r = (new \Firol\Idoklad\InvoiceIssuer())->followUps($id, true);
+        AuditLog::record('invoice.resend', 'invoices', $id,
+            ['send' => $row['send_state'], 'paid' => $row['paid_mark_state']], ['send' => $r['send'], 'paid' => $r['paid']]);
+
+        $msg = Db::pdo()->prepare('SELECT send_error, paid_mark_error FROM invoices WHERE id = ?');
+        $msg->execute([$id]);
+        $m = $msg->fetch() ?: [];
+        $ok = in_array($r['send'], ['sent', null], true) && in_array($r['paid'], ['done', null], true);
+        Response::json([
+            'ok'         => $ok,
+            'send_state' => $r['send'],
+            'paid_state' => $r['paid'],
+            'message'    => $ok ? null : (trim(implode(' ', array_filter([(string) ($m['send_error'] ?? ''), (string) ($m['paid_mark_error'] ?? '')]))) ?: null),
+        ]);
+    }
+
+    /**
+     * POST /api/admin/billing/events/{id}/dismiss — „Vyriešené" for a Stripe
+     * event the daily run gave up on (`gone`): an admin checked the account
+     * by hand. A gone invoice.* event is an error in the billing check until
+     * then.
+     *
+     * @param array<string, string> $params
+     */
+    public static function dismissEvent(Request $req, array $params): void
+    {
+        Admin::require();
+        Csrf::require($req);
+        $eventId = (string) ($params['id'] ?? '');
+        if (!preg_match('/^evt_[A-Za-z0-9_]+$/', $eventId)) Response::error('Neplatné ID udalosti.', 422);
+        $stmt = Db::pdo()->prepare("UPDATE stripe_webhook_events SET dismissed_at = NOW() WHERE event_id = ? AND status = 'gone' AND dismissed_at IS NULL");
+        $stmt->execute([$eventId]);
+        if ($stmt->rowCount() !== 1) Response::error('Udalosť sa nenašla alebo už bola vyriešená.', 404);
+        AuditLog::record('billing.event_dismiss', 'stripe_webhook_events', 0, null, ['event_id' => $eventId]);
+        Response::json(['ok' => true]);
+    }
+
+    /**
      * The account's live Stripe subscriptions (statuses read from Stripe):
-     * every subscription of its Stripe customer that still bills, plus the
+     * every POapp subscription of its Stripe customer that still bills
+     * (SeatSync::isOurSubscription — not one of another product), plus the
      * recorded one. Refuses with 502 when Stripe cannot be asked — an admin
      * action that depends on it must not guess.
      *
@@ -362,7 +455,10 @@ final class AdminPanelController
             $stripe = \Firol\Stripe\StripeClient::get();
             if ($customerId !== '') {
                 foreach ($stripe->subscriptions->all(['customer' => $customerId, 'status' => 'all', 'limit' => 100])->autoPagingIterator() as $sub) {
-                    if (SubscriptionStatus::isLive((string) $sub->status)) {
+                    // A subscription of another product on the same customer
+                    // is not the app's to cancel.
+                    if (SubscriptionStatus::isLive((string) $sub->status)
+                        && \Firol\Billing\SeatSync::isOurSubscription(\Firol\Stripe\StripeShape::arr($sub))) {
                         $live[(string) $sub->id] = ['id' => (string) $sub->id, 'status' => (string) $sub->status];
                     }
                 }

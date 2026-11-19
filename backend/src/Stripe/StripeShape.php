@@ -54,6 +54,27 @@ final class StripeShape
     }
 
     /**
+     * Start of the current period of a subscription (unix time), or null.
+     * New versions carry it per item; the base item's (or the latest) wins.
+     *
+     * @param array<string, mixed> $sub
+     */
+    public static function subscriptionPeriodStart(array $sub): ?int
+    {
+        if (isset($sub['current_period_start']) && is_int($sub['current_period_start'])) {
+            return $sub['current_period_start'];
+        }
+        $best = null;
+        foreach ((array) ($sub['items']['data'] ?? []) as $item) {
+            $start = $item['current_period_start'] ?? null;
+            if (is_int($start) && ($best === null || $start > $best)) {
+                $best = $start;
+            }
+        }
+        return $best;
+    }
+
+    /**
      * Whether a discount (promotion code / coupon) applies to the
      * subscription: `discount` in the pinned version, `discounts` in both,
      * or a coupon on the customer (Stripe applies it to every subscription
@@ -67,6 +88,58 @@ final class StripeShape
         $customer = $sub['customer'] ?? null;
         return !empty($sub['discount']) || !empty($sub['discounts'])
             || (is_array($customer) && (!empty($customer['discount']) || !empty($customer['discounts'])));
+    }
+
+    /**
+     * Tax of an invoice line in cents: `tax_amounts[].amount` in the pinned
+     * version, `taxes[].amount` in 2026-04-22.dahlia (sum over all rates).
+     *
+     * @param array<string, mixed> $line
+     */
+    public static function lineTax(array $line): int
+    {
+        $sum = 0;
+        foreach ((array) ($line['tax_amounts'] ?? $line['taxes'] ?? []) as $t) {
+            $sum += (int) (((array) $t)['amount'] ?? 0);
+        }
+        return $sum;
+    }
+
+    /**
+     * Tax of an invoice in cents: `tax` in the pinned version, the sum of
+     * `total_taxes[].amount` in dahlia (where `tax` is gone); else the sum
+     * of `total_tax_amounts`.
+     *
+     * @param array<string, mixed> $invoice
+     */
+    public static function invoiceTax(array $invoice): int
+    {
+        if (isset($invoice['tax']) && is_int($invoice['tax'])) {
+            return $invoice['tax'];
+        }
+        $sum = 0;
+        foreach ((array) ($invoice['total_taxes'] ?? $invoice['total_tax_amounts'] ?? []) as $t) {
+            $sum += (int) (((array) $t)['amount'] ?? 0);
+        }
+        return $sum;
+    }
+
+    /**
+     * Ids of a subscription's default tax rates (expanded objects or ids).
+     *
+     * @param array<string, mixed> $sub
+     * @return list<string>
+     */
+    public static function subscriptionTaxRateIds(array $sub): array
+    {
+        $out = [];
+        foreach ((array) ($sub['default_tax_rates'] ?? []) as $r) {
+            $id = is_array($r) ? (string) ($r['id'] ?? '') : (string) $r;
+            if ($id !== '') {
+                $out[] = $id;
+            }
+        }
+        return $out;
     }
 
     /** @param array<string, mixed> $invoice */

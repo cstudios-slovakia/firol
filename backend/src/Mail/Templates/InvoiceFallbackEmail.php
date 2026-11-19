@@ -12,9 +12,10 @@ use Firol\Mail\Message;
  * faktúra. Sent once, on the first failed attempt. It says what really
  * happens next: bin/billing-daily.php retries, the operator is alerted
  * when the retries run out (InvoiceAlert) and re-issues from the admin
- * panel („Vystaviť znova"), and the issued invoice shows in the app's
- * billing history — iDoklad does not e-mail it (an open owner decision).
- * Until then the Stripe-hosted receipt is linked.
+ * panel („Vystaviť znova"); once issued, iDoklad e-mails the invoice to the
+ * customer (InvoiceIssuer::followUps) and it shows in the app's billing
+ * history. Until then the Stripe-hosted receipt is linked. The amount is
+ * what Stripe charged — with VAT.
  */
 final class InvoiceFallbackEmail
 {
@@ -34,8 +35,8 @@ final class InvoiceFallbackEmail
 
         $bodyHtml = <<<HTML
 <p style="margin:0 0 16px 0;">Ahoj,</p>
-<p style="margin:0 0 16px 0;">tvoja platba za predplatné POapp pre <strong>{$accEsc}</strong> vo výške <strong>{$amount}&nbsp;{$cur}</strong> bola úspešne prijatá.</p>
-<p style="margin:0 0 16px 0;">Faktúru k platbe sa nám nepodarilo vystaviť automaticky — účtovný systém neodpovedal správne. Aplikácia to skúsi znova; ak sa to nepodarí, dostaneme upozornenie a faktúru vystavíme ručne. Keď bude vystavená, nájdeš ju v aplikácii v časti <strong>Predplatné a fakturácia → História platieb</strong>. Dovtedy ti ako doklad o platbe slúži potvrdenie zo Stripe. Tvoj prístup do aplikácie zostáva neprerušený.</p>
+<p style="margin:0 0 16px 0;">tvoja platba za predplatné POapp pre <strong>{$accEsc}</strong> vo výške <strong>{$amount}&nbsp;{$cur}</strong> (s DPH) bola úspešne prijatá.</p>
+<p style="margin:0 0 16px 0;">Faktúru k platbe sa nám nepodarilo vystaviť automaticky — účtovný systém neodpovedal správne. Aplikácia to skúsi znova; ak sa to nepodarí, dostaneme upozornenie a faktúru vystavíme ručne. Keď bude vystavená, pošleme ti ju e-mailom a nájdeš ju aj v aplikácii v časti <strong>Predplatné a fakturácia → História platieb</strong>. Dovtedy ti ako doklad o platbe slúži potvrdenie zo Stripe. Tvoj prístup do aplikácie zostáva neprerušený.</p>
 HTML
             . $hostedBlock
             . <<<HTML
@@ -43,9 +44,9 @@ HTML
 HTML;
 
         $text = "Platba prijatá — POapp\n\n"
-              . "Tvoja platba pre {$accountName} vo výške {$amount} {$cur} bola úspešne prijatá.\n"
+              . "Tvoja platba pre {$accountName} vo výške {$amount} {$cur} (s DPH) bola úspešne prijatá.\n"
               . "Faktúru sa nepodarilo vystaviť automaticky. Aplikácia to skúsi znova; ak sa to nepodarí, dostaneme upozornenie a vystavíme ju ručne.\n"
-              . "Vystavenú faktúru nájdeš v aplikácii v časti Predplatné a fakturácia → História platieb. Dovtedy ti ako doklad slúži potvrdenie zo Stripe."
+              . "Vystavenú faktúru ti pošleme e-mailom a nájdeš ju aj v aplikácii v časti Predplatné a fakturácia → História platieb. Dovtedy ti ako doklad slúži potvrdenie zo Stripe."
               . $hostedText;
 
         return new Message(

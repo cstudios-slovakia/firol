@@ -85,6 +85,28 @@ final class OperatorAlert
         }
     }
 
+    /**
+     * Forget every alert whose key starts with $prefix except the keys in
+     * $keep (the ConfigCheck errors still present).
+     *
+     * @param list<string> $keep
+     */
+    public static function forgetExcept(string $prefix, array $keep): void
+    {
+        try {
+            $stmt = Db::pdo()->prepare('SELECT alert_key FROM billing_operator_alerts WHERE alert_key LIKE ?');
+            $stmt->execute([addcslashes(self::key($prefix), '%_\\') . '%']);
+            $keep = array_map(static fn (string $k): string => self::key($k), $keep);
+            foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $k) {
+                if (!in_array((string) $k, $keep, true)) {
+                    Db::pdo()->prepare('DELETE FROM billing_operator_alerts WHERE alert_key = ?')->execute([(string) $k]);
+                }
+            }
+        } catch (\Throwable $e) {
+            error_log('[billing.alert] ' . $e->getMessage());
+        }
+    }
+
     private static function key(string $key): string
     {
         return mb_substr($key, 0, 191);

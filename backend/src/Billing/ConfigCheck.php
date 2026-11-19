@@ -8,6 +8,7 @@ use Firol\Auth\Admin;
 use Firol\Controllers\BillingController;
 use Firol\Db;
 use Firol\Idoklad\IDokladClient;
+use Firol\Idoklad\InvoiceIssuer;
 use Firol\Idoklad\IssuePolicy;
 use Firol\Stripe\StripeClient;
 
@@ -45,15 +46,28 @@ final class ConfigCheck
     /** How many accounts / rows a message names before „a ďalšie N". */
     private const NAMED = 5;
 
+    /** Hours after which a missing daily run is alerted from the webhook. */
+    public const DAILY_STALE_HOURS = 36;
+
+    /** OperatorAlert key of the webhook's „daily run missing" alert. */
+    public const DAILY_STALE_ALERT = 'daily_stale';
+
     /**
-     * @return list<array{key: string, level: 'ok'|'warn'|'error', message: string}>
+     * Checks the daily run does not e-mail as ConfigCheck errors: it cannot
+     * report its own absence (the webhook does, alertIfDailyStale()), and a
+     * refused run is alerted on its own.
+     */
+    public const NOT_MAILED = ['daily', 'daily_refused'];
+
+    /**
+     * @return list<array{key: string, level: 'ok'|'warn'|'error', message: string, dismiss?: list<array{id: string, label: string}>}>
      */
     public static function run(): array
     {
         $out = [];
         $prod = strtolower(trim((string) ($_ENV['APP_ENV'] ?? ''))) === 'production';
-        $add = static function (string $key, string $level, string $message) use (&$out): void {
-            $out[] = ['key' => $key, 'level' => $level, 'message' => $message];
+        $add = static function (string $key, string $level, string $message, ?array $dismiss = null) use (&$out): void {
+            $out[] = ['key' => $key, 'level' => $level, 'message' => $message] + ($dismiss !== null ? ['dismiss' => $dismiss] : []);
         };
 
         $key = (string) ($_ENV['STRIPE_SECRET_KEY'] ?? '');
@@ -86,6 +100,19 @@ final class ConfigCheck
             $add(...self::checkExtraProduct($productId));
         } else {
             $add('stripe_product_extra', 'warn', 'Produkt pre extra technika je nastavený, bez kľúča Stripe sa nedá overiť.');
+        }
+
+        // VAT: prices are net, Stripe adds VAT_RATE_PERCENT with the
+        // exclusive tax rate STRIPE_TAX_RATE_ID.
+        if (!Vat::percentIsSet()) {
+            $add('vat_rate', 'warn', 'VAT_RATE_PERCENT nie je nastavený — počíta sa s ' . Vat::label() . '. Nastav ho v .env.');
+        }
+        $taxRateId = Vat::stripeTaxRateId();
+        if ($taxRateId === '') {
+            $add('stripe_tax_rate', 'error', 'STRIPE_TAX_RATE_ID nie je nastavený — Checkout je zablokovaný a predplatné by sa účtovalo bez DPH. '
+                . 'Založ v Stripe daňovú sadzbu (Tax rates: DPH ' . Vat::label() . ', exclusive, SK) a jej ID (txr_…) daj do .env.');
+        } elseif ($key !== '') {
+            $add(...self::checkTaxRate($taxRateId));
         }
 
         $switch = SeatSync::reconcileSwitch();
@@ -146,35 +173,87 @@ final class ConfigCheck
         return $out;
     }
 
-    /** @param callable(string, string, string): void $add */
+    /** @param callable(string, string, string, ?array): void $add */
     private static function databaseChecks(callable $add, bool $prod, bool $liveKey): void
     {
         $pdo = Db::pdo();
+        // A row of a Stripe TEST-mode payment is a warning in production (so
+        // a test payment left on the server does not keep the check red);
+        // anywhere else it counts like a live one.
+        $isTest = static fn (array $r): bool => $r['stripe_livemode'] !== null && (int) $r['stripe_livemode'] === 0;
+        $split = static function (array $rows) use ($prod, $isTest): array {
+            if (!$prod) {
+                return [$rows, []];
+            }
+            return [array_values(array_filter($rows, static fn (array $r): bool => !$isTest($r))),
+                    array_values(array_filter($rows, $isTest))];
+        };
+        $label = static fn (array $r): string => sprintf('%s (#%d) %s%s', (string) $r['invoice_company_name'], (int) $r['account_id'],
+            self::eur((int) ($r['stripe_amount_paid_cents'] ?? $r['amount_cents'])),
+            $r['stripe_livemode'] !== null && (int) $r['stripe_livemode'] === 0 ? ' [test]' : '');
 
         // Paid Stripe invoices without a tax document, waiting for a person.
         $held = $pdo->query(
-            "SELECT i.id, i.account_id, a.invoice_company_name, i.review_reason, i.stripe_amount_paid_cents, i.amount_cents
+            "SELECT i.id, i.account_id, a.invoice_company_name, i.review_reason, i.stripe_amount_paid_cents, i.amount_cents, i.stripe_livemode
              FROM   invoices i JOIN accounts a ON a.id = i.account_id
              WHERE  i.status = 'needs_review'
              ORDER  BY i.id"
         )->fetchAll();
-        if ($held !== []) {
-            $add('invoices_held', 'error', 'Zaplatené faktúry bez daňového dokladu (čakajú na kontrolu): ' . count($held) . ' — '
-                . self::names($held, static fn (array $r): string => sprintf('%s (#%d) %s, %s', (string) $r['invoice_company_name'], (int) $r['account_id'],
-                    self::eur((int) ($r['stripe_amount_paid_cents'] ?? $r['amount_cents'])), self::reasonLabel((string) $r['review_reason'])))
-                . '. Účty → faktúry účtu.');
+        [$heldLive, $heldTest] = $split($held);
+        foreach ([['invoices_held', 'error', $heldLive], ['invoices_held_test', 'warn', $heldTest]] as [$k, $level, $rows]) {
+            if ($rows !== []) {
+                $add($k, $level, ($k === 'invoices_held_test' ? 'Testovacie platby' : 'Zaplatené faktúry') . ' bez daňového dokladu (čakajú na kontrolu): ' . count($rows) . ' — '
+                    . self::names($rows, static fn (array $r): string => $label($r) . ', ' . self::reasonLabel((string) $r['review_reason']))
+                    . '. Účty → faktúry účtu.');
+            }
         }
 
+        // Failed issues: below the cap the daily run tries again (warning);
+        // a live row at the cap is no longer retried and needs a person.
         $failed = $pdo->query(
-            "SELECT i.id, i.account_id, a.invoice_company_name, i.status, i.attempts, i.stripe_amount_paid_cents, i.amount_cents
+            "SELECT i.id, i.account_id, a.invoice_company_name, i.status, i.attempts, i.stripe_amount_paid_cents, i.amount_cents, i.stripe_livemode
              FROM   invoices i JOIN accounts a ON a.id = i.account_id
              WHERE  i.status IN ('error', 'sending') ORDER BY i.id"
         )->fetchAll();
-        if ($failed !== []) {
-            $add('invoices_failed', 'warn', 'Faktúry, ktoré zlyhali alebo sa nedokončili: ' . count($failed) . ' — '
-                . self::names($failed, static fn (array $r): string => sprintf('%s (#%d) %s, %s po %d pokusoch', (string) $r['invoice_company_name'], (int) $r['account_id'],
-                    self::eur((int) ($r['stripe_amount_paid_cents'] ?? $r['amount_cents'])), (string) $r['status'], (int) $r['attempts']))
-                . '. Denná kontrola ich skúsi znova.');
+        $atCap = static fn (array $r): bool => $r['status'] === 'error' && (int) $r['attempts'] >= InvoiceIssuer::MAX_AUTO_ATTEMPTS;
+        $retried = array_values(array_filter($failed, static fn (array $r): bool => !$atCap($r)));
+        $stopped = array_values(array_filter($failed, $atCap));
+        $stoppedLive = array_values(array_filter($stopped, static fn (array $r): bool => (int) $r['stripe_livemode'] === 1));
+        $stoppedOther = array_values(array_filter($stopped, static fn (array $r): bool => (int) $r['stripe_livemode'] !== 1));
+        $failLabel = static fn (array $r): string => $label($r) . sprintf(', %s po %d pokusoch', (string) $r['status'], (int) $r['attempts']);
+        if ($retried !== []) {
+            $add('invoices_failed', 'warn', 'Faktúry, ktoré zlyhali alebo sa nedokončili: ' . count($retried) . ' — '
+                . self::names($retried, $failLabel) . '. Denná kontrola ich skúsi znova.');
+        }
+        if ($stoppedLive !== []) {
+            $add('invoices_failed_stopped', 'error', 'Ostré platby bez faktúry po ' . InvoiceIssuer::MAX_AUTO_ATTEMPTS . ' neúspešných pokusoch — treba zásah: ' . count($stoppedLive) . ' — '
+                . self::names($stoppedLive, $failLabel) . '. Denná kontrola ich už neskúša; po odstránení príčiny „Vystaviť znova" (Účty → faktúry účtu).');
+        }
+        if ($stoppedOther !== []) {
+            $add('invoices_failed_stopped_test', 'warn', 'Testovacie platby bez faktúry po ' . InvoiceIssuer::MAX_AUTO_ATTEMPTS . ' pokusoch (už sa neskúšajú): ' . count($stoppedOther) . ' — '
+                . self::names($stoppedOther, $failLabel) . '.');
+        }
+
+        // Issued invoices whose marking as paid or e-mail to the customer
+        // failed for good, or is uncertain.
+        $follow = $pdo->query(
+            "SELECT i.id, i.account_id, a.invoice_company_name, i.stripe_amount_paid_cents, i.amount_cents, i.stripe_livemode, i.document_number,
+                    i.send_state, i.send_attempts, i.paid_mark_state, i.paid_mark_attempts
+             FROM   invoices i JOIN accounts a ON a.id = i.account_id
+             WHERE  i.status = 'issued'
+               AND  (i.send_state = 'uncertain'
+                     OR (i.send_state = 'error' AND i.send_attempts >= " . InvoiceIssuer::MAX_AUTO_ATTEMPTS . ")
+                     OR (i.paid_mark_state = 'error' AND i.paid_mark_attempts >= " . InvoiceIssuer::MAX_AUTO_ATTEMPTS . '))
+             ORDER  BY i.id'
+        )->fetchAll();
+        if ($follow !== []) {
+            $add('invoices_followup', 'error', 'Vystavené faktúry, ktoré sa zákazníkovi neodoslali alebo sa neoznačili ako uhradené — treba zásah: ' . count($follow) . ' — '
+                . self::names($follow, static fn (array $r): string => $label($r) . ' ' . (string) $r['document_number'] . ': '
+                    . implode(', ', array_filter([
+                        $r['send_state'] === 'uncertain' ? 'odoslanie neisté' : ($r['send_state'] === 'error' ? 'neodoslaná' : ''),
+                        $r['paid_mark_state'] === 'error' ? 'neoznačená ako uhradená' : '',
+                    ])))
+                . '. Účty → faktúry účtu → „Poslať znova".');
         }
 
         // A real payment whose invoice was only prepared, never sent.
@@ -222,10 +301,49 @@ final class ConfigCheck
                 . '. Pozri bin/billing-seat-report.php.');
         }
 
+        // Live subscriptions without the VAT tax rate (as the last read of
+        // the subscription saw them): Stripe charges them without VAT.
+        $taxRateId = Vat::stripeTaxRateId();
+        if ($taxRateId !== '') {
+            $noTax = $pdo->prepare(
+                "SELECT id, invoice_company_name, stripe_subscription_id, stripe_tax_rate_ids FROM accounts
+                 WHERE  stripe_status IN ('active', 'trialing', 'past_due', 'unpaid', 'paused')
+                   AND  stripe_subscription_id IS NOT NULL AND stripe_subscription_id <> ''
+                   AND  (stripe_tax_rate_ids IS NULL OR stripe_tax_rate_ids <> ?)
+                 ORDER  BY id"
+            );
+            $noTax->execute([$taxRateId]);
+            $noTax = $noTax->fetchAll();
+            if ($noTax !== []) {
+                $add('subscriptions_no_vat', 'error', 'Živé predplatné bez daňovej sadzby DPH (STRIPE_TAX_RATE_ID): ' . count($noTax) . ' — '
+                    . self::names($noTax, static fn (array $r): string => sprintf('%s (#%d) %s%s', (string) $r['invoice_company_name'], (int) $r['id'],
+                        (string) $r['stripe_subscription_id'], (string) $r['stripe_tax_rate_ids'] !== '' ? ' (má ' . $r['stripe_tax_rate_ids'] . ')' : ''))
+                    . '. Denná kontrola sadzbu doplní (pri BILLING_RECONCILE=on); dovtedy by sa účtovalo bez DPH.');
+            }
+        }
+
+        // A recorded subscription that is over while the customer has a live
+        // one (stored by a daily run that could not take it over).
+        $ended = $pdo->query(
+            "SELECT id, invoice_company_name, stripe_subscription_id, stripe_status, stripe_other_subscriptions
+             FROM   accounts WHERE stripe_other_subscriptions IS NOT NULL AND stripe_other_subscriptions <> ''
+               AND  stripe_status IN ('canceled', 'incomplete_expired') ORDER BY id"
+        )->fetchAll();
+        if ($ended !== []) {
+            $add('subscription_ended_live', 'error', 'V databáze skončené predplatné, zákazník má v Stripe živé: ' . count($ended) . ' — '
+                . self::names($ended, static function (array $r): string {
+                    $others = json_decode((string) $r['stripe_other_subscriptions'], true) ?: [];
+                    return sprintf('%s (#%d): %s (%s), živé %s', (string) $r['invoice_company_name'], (int) $r['id'], (string) $r['stripe_subscription_id'], (string) $r['stripe_status'],
+                        implode(', ', array_map(static fn (array $o): string => $o['id'] . ' (' . $o['status'] . ')', $others)));
+                })
+                . '. Denná kontrola ho prevezme, keď smie zapisovať; jeho technici sa dovtedy neúčtujú.');
+        }
+
         // Customers with more than one live subscription (the daily run).
         $multi = $pdo->query(
             "SELECT id, invoice_company_name, stripe_subscription_id, stripe_status, stripe_other_subscriptions
-             FROM   accounts WHERE stripe_other_subscriptions IS NOT NULL AND stripe_other_subscriptions <> '' ORDER BY id"
+             FROM   accounts WHERE stripe_other_subscriptions IS NOT NULL AND stripe_other_subscriptions <> ''
+               AND  (stripe_status IS NULL OR stripe_status NOT IN ('canceled', 'incomplete_expired')) ORDER BY id"
         )->fetchAll();
         if ($multi !== []) {
             $add('subscriptions_multiple', 'error', 'Zákazníci s viac ako jedným živým predplatným v Stripe: ' . count($multi) . ' — '
@@ -250,9 +368,23 @@ final class ConfigCheck
             $add('webhook_events', 'warn',
                 "Udalosti zo Stripe, ktoré sa nespracovali: $failedEv zlyhaných, $stuck zaseknutých. Denná kontrola ich spustí znova a upozorní správcu.");
         }
+        // An invoice.* event that is gone may be a payment without a tax
+        // document: an error until an admin dismisses it (after checking
+        // the account). Other gone events are listed for a while.
+        $goneInvoice = $pdo->query(
+            "SELECT event_id, event_type, error_message FROM stripe_webhook_events
+             WHERE  status = 'gone' AND event_type LIKE 'invoice.%' AND dismissed_at IS NULL ORDER BY received_at"
+        )->fetchAll();
+        if ($goneInvoice !== []) {
+            $add('webhook_events_gone_invoice', 'error', 'Udalosti faktúr zo Stripe, ktoré sa už nespracujú: ' . count($goneInvoice) . ' — '
+                . self::names($goneInvoice, static fn (array $r): string => $r['event_id'] . ' (' . $r['event_type'] . ')')
+                . '. Platba mohla ostať bez faktúry: over ju v Stripe a v iDoklade, potom udalosť zruš („Vyriešené").',
+                array_map(static fn (array $r): array => ['id' => (string) $r['event_id'], 'label' => $r['event_id'] . ' (' . $r['event_type'] . ')'], $goneInvoice));
+        }
         $gone = $pdo->query(
             "SELECT event_id, event_type, error_message FROM stripe_webhook_events
-             WHERE  status = 'gone' AND updated_at > NOW() - INTERVAL " . self::GONE_EVENT_LIST_DAYS . ' DAY ORDER BY received_at'
+             WHERE  status = 'gone' AND event_type NOT LIKE 'invoice.%'
+               AND  updated_at > NOW() - INTERVAL " . self::GONE_EVENT_LIST_DAYS . ' DAY ORDER BY received_at'
         )->fetchAll();
         if ($gone !== []) {
             $add('webhook_events_gone', 'warn', 'Udalosti zo Stripe, ktoré sa už nespracujú (Stripe ich nevráti alebo zlyhávajú viac ako '
@@ -271,7 +403,7 @@ final class ConfigCheck
 
         $stmt->execute([self::DAILY_RUN_KEY]);
         $last = $stmt->fetchColumn();
-        if ($last === false || strtotime((string) $last) < time() - 36 * 3600) {
+        if ($last === false || strtotime((string) $last) < time() - self::DAILY_STALE_HOURS * 3600) {
             $add('daily', $prod || $liveKey ? 'error' : 'warn', 'Denná kontrola fakturácie (bin/billing-daily.php) '
                 . ($last === false ? 'ešte celá nebežala.' : 'naposledy celá bežala ' . $last . '.'));
         } else {
@@ -279,17 +411,48 @@ final class ConfigCheck
         }
     }
 
+    /**
+     * The webhook path: tell the operator once when the daily run has not
+     * run for DAILY_STALE_HOURS (a missing cron cannot e-mail itself) — where
+     * the `daily` check is an error (production, or a live Stripe key). The
+     * daily run forgets the alert after each full run. Returns the
+     * OperatorAlert result, or null when nothing was due.
+     */
+    public static function alertIfDailyStale(): ?string
+    {
+        $prod = strtolower(trim((string) ($_ENV['APP_ENV'] ?? ''))) === 'production';
+        $liveKey = StripeClient::isConfigured() && !StripeClient::isTestKey();
+        if (!$prod && !$liveKey) {
+            return null;
+        }
+        $stmt = Db::pdo()->prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?');
+        $stmt->execute([self::DAILY_RUN_KEY]);
+        $last = $stmt->fetchColumn();
+        if ($last !== false && strtotime((string) $last) >= time() - self::DAILY_STALE_HOURS * 3600) {
+            return null;
+        }
+        return OperatorAlert::once(self::DAILY_STALE_ALERT, 'denná kontrola fakturácie nebeží',
+            'Denná kontrola fakturácie (bin/billing-daily.php) ' . ($last === false ? 'ešte celá nebežala' : 'naposledy celá bežala ' . $last)
+            . '. Bez nej sa neopakujú zlyhané faktúry, udalosti zo Stripe ani počty technikov. Skontroluj cron na serveri.',
+            ['Server: ' . (gethostname() ?: '?'), 'Cron: php backend/bin/billing-daily.php (README, Production deploy checklist)']);
+    }
+
     /** Slovak label of an invoices.review_reason. */
     public static function reasonLabel(string $reason): string
     {
         return match ($reason) {
-            'credit'           => 'dobropis / kredit',
-            'mismatch'         => 'nesúhlasia sumy',
-            'uncertain_send'   => 'iDoklad neodpovedal jednoznačne',
-            'missing_snapshot' => 'chýba faktúra zo Stripe',
-            'zero'             => '0 €',
-            'discount'         => 'zľava',
-            default            => $reason !== '' ? $reason : 'na kontrolu',
+            'credit'              => 'dobropis / kredit (pravidlo pred 19. 11. 2026 — denná kontrola ju vystaví)',
+            'mismatch'            => 'nesúhlasia sumy',
+            'vat_mismatch'        => 'nesedí DPH alebo súčet v iDoklade',
+            'no_vat'              => 'Stripe účtoval bez DPH',
+            'uncertain_send'      => 'iDoklad neodpovedal jednoznačne',
+            'missing_snapshot'    => 'chýba faktúra zo Stripe',
+            'snapshot_unreadable' => 'faktúru zo Stripe nemožno načítať',
+            'zero'                => '0 €',
+            'discount'            => 'zľava',
+            'credit_carried'      => 'nič sa neplatilo, kredit prechádza ďalej',
+            'credit_covered'      => 'uhradené z kreditu',
+            default               => $reason !== '' ? $reason : 'na kontrolu',
         };
     }
 
@@ -309,6 +472,36 @@ final class ConfigCheck
     private static function eur(int $cents): string
     {
         return number_format($cents / 100, 2, ',', ' ') . ' €';
+    }
+
+    /**
+     * Reads STRIPE_TAX_RATE_ID from Stripe: it must exist, be active,
+     * exclusive (Stripe adds it to the net price) and have the percentage of
+     * VAT_RATE_PERCENT.
+     *
+     * @return array{0: string, 1: 'ok'|'warn'|'error', 2: string}
+     */
+    private static function checkTaxRate(string $taxRateId): array
+    {
+        try {
+            $rate = StripeClient::get()->taxRates->retrieve($taxRateId);
+        } catch (\Throwable $e) {
+            return ['stripe_tax_rate', 'error', "Daňová sadzba STRIPE_TAX_RATE_ID ($taxRateId) sa v Stripe nenašla: " . $e->getMessage()];
+        }
+        $problems = [];
+        if (!$rate->active) {
+            $problems[] = 'je archivovaná';
+        }
+        if ($rate->inclusive) {
+            $problems[] = 'je „inclusive" (DPH by bola v cene, nie navrch)';
+        }
+        if (abs((float) $rate->percentage - Vat::percent()) > 0.0001) {
+            $problems[] = 'má ' . Vat::label((float) $rate->percentage) . ', VAT_RATE_PERCENT je ' . Vat::label();
+        }
+        if ($problems !== []) {
+            return ['stripe_tax_rate', 'error', "Daňová sadzba STRIPE_TAX_RATE_ID ($taxRateId) " . implode(', ', $problems) . '.'];
+        }
+        return ['stripe_tax_rate', 'ok', 'DPH: daňová sadzba „' . (string) $rate->display_name . '" ' . Vat::label() . ', pripočítava sa k cene.'];
     }
 
     /**
