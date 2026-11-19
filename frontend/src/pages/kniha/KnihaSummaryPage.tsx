@@ -8,7 +8,7 @@ import { Inspections, documentDownloadUrl, type InspectionDetail } from '@/api/i
 import { invoicingOf } from '@/api/invoicing';
 import { Kniha, type KnihaContext } from '@/api/kniha';
 import { ApiError } from '@/lib/api';
-import { DISCARD_BOOK_ENTRY_DIALOG, discardDoneMessage } from '@/lib/discard';
+import { DISCARD_BOOK_ENTRY_DIALOG, discardDoneMessage, discardNeedsRefresh } from '@/lib/discard';
 import { useCertMissingToast } from '@/lib/certMissing';
 import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
@@ -194,6 +194,16 @@ function SummaryForm({
         err instanceof ApiError ? err.message : offlineMessage(err, 'Zahodiť zápis sa dá len s pripojením na internet.'),
       );
       setDiscarding(false);
+      // Issued meanwhile (409, round 6): read it again and show the entry as it
+      // is now, as generate() does, instead of the stale draft.
+      if (discardNeedsRefresh(err)) {
+        try {
+          onDetail(await Inspections.show(id));
+          navigate(knihaPath(id), { replace: true });
+        } catch {
+          // The toast above already said why; the screen stays as it was.
+        }
+      }
       return;
     }
     // The toast follows what the server did, not the cached `discard`.

@@ -15,6 +15,7 @@ use Firol\Support\InspectionCoverage;
 use Firol\Support\InspectionDetails;
 use Firol\Support\PrehliadkaDefects;
 use Firol\Support\PrehliadkaDetails;
+use Firol\Support\PrehliadkaPrevious;
 use PDO;
 
 /**
@@ -382,6 +383,20 @@ final class InspectionItemController
     }
 
     /**
+     * Whether the item stored before carried the same origin (key and source).
+     *
+     * @param array<string, mixed>|null $existingFields
+     * @param array<string, mixed> $origin
+     */
+    private static function sameOrigin(?array $existingFields, array $origin): bool
+    {
+        $stored = $existingFields['persists_from'] ?? null;
+        return is_array($stored)
+            && ($stored['key'] ?? null) === ($origin['key'] ?? null)
+            && (int) ($stored['inspection_id'] ?? 0) === (int) ($origin['inspection_id'] ?? 0);
+    }
+
+    /**
      * Dispatches per inspection type. Adding a new type means registering
      * a validator branch here that returns the canonical fields array.
      *
@@ -431,6 +446,12 @@ final class InspectionItemController
                         }
                         $fields['persists_from'] = null;
                         $fields['status'] = 'zisteny';
+                    } elseif (!PrehliadkaPrevious::namesDefectOf((string) $fields['persists_from']['key'], $srcInspId)
+                        && !self::sameOrigin($existingFields, $fields['persists_from'])) {
+                        // The origin must name a defect of that record (round 6): a
+                        // made-up one would let a new defect be „dôvod zanikol".
+                        // An item saved with this origin before keeps it.
+                        throw new \InvalidArgumentException('Nedostatok z minulej prehliadky má neplatný pôvod.');
                     } elseif ($fields['persists_from']['source_item_id'] !== null) {
                         // The item whose photos get copied must belong to that record.
                         $item = Db::pdo()->prepare('SELECT 1 FROM inspection_items WHERE id = ? AND inspection_id = ?');
@@ -451,6 +472,10 @@ final class InspectionItemController
         // always po and nothing carried over (plan O3).
         if ($type === 'poziarna_kniha' && self::isNewBook($inspection)) {
             $facilityIds = BookEntry::facilityIds((int) $inspection['id']);
+            // Nothing is carried into a book entry: an origin sent anyway is
+            // dropped before validating, so it cannot make a new defect
+            // „dôvod zanikol" (round 6 — answer 6 B held only on screen).
+            unset($body['persists_from']);
             try {
                 $fields = PrehliadkaDefects::validate(
                     $body,
@@ -482,6 +507,9 @@ final class InspectionItemController
         if (\Firol\Support\BozpItems::supports($type)) {
             try {
                 return \Firol\Support\BozpItems::validate($type, $body);
+            } catch (\Firol\Support\FieldRefused $e) {
+                // The field's key, as the fire validators pass it (round 6).
+                self::failValidation($e->getMessage(), $e->field);
             } catch (\InvalidArgumentException $e) {
                 self::failValidation($e->getMessage());
             }

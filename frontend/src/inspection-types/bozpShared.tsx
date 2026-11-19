@@ -218,7 +218,7 @@ export function ItemFormFooter({
 }: {
   editing: boolean;
   submitting: boolean;
-  /** A photo is still being resized: the buttons wait for it (`photos.processing`). */
+  /** A photo is still being resized — the item's or a nedostatok's: the buttons wait for it (`photos.processing || defects.processing`). */
   busy?: boolean;
   apiError: string | null;
   hasErrors: boolean;

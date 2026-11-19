@@ -28,8 +28,9 @@ use Firol\Db;
  * it said when it was issued, so the parts that read live data (the Termíny
  * table, the previous-defect table, the facility's description and main
  * switches, the printed „Vykonané činnosti") are copied into
- * `details.issued_record` at issue time ({@see ISSUED_KEY}). The key is server-owned: the header validator
- * does not keep it, so unlocking and saving drops the copy.
+ * `details.issued_record` at issue time ({@see ISSUED_KEY}). The key is server-owned: a header save keeps
+ * it (InspectionDetails::mergeOver), only re-renders of an issued record read it, and the next issue
+ * after „Upraviť" writes it afresh.
  */
 final class PrehliadkaRecord
 {

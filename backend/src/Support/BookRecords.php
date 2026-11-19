@@ -41,6 +41,10 @@ final class BookRecords
     public static function forCompany(int $accountId, int $companyId): array
     {
         $pdo = Db::pdo();
+        // A record of a bytové družstvo happened „v bytovom dome" (round 6).
+        $kind = $pdo->prepare('SELECT client_type FROM companies WHERE id = ? AND account_id = ?');
+        $kind->execute([$companyId, $accountId]);
+        $bytoveDruzstvo = ClientKind::isBytovyDom((string) $kind->fetchColumn());
         $types = array_values(array_diff(BookMapping::PO_INSPECTION_TYPES, ['poziarna_kniha']));
         $typeIn = implode(',', array_fill(0, count($types), '?'));
 
@@ -149,7 +153,7 @@ final class BookRecords
             $rec['label'] = BookSentences::heading($rec);
             $rec['meta'] = BookSentences::meta($rec);
             $rec['is_latest'] = $newest[self::groupKey($rec) . '|' . $rec['druh']] === $rec['date'];
-            $rec['text_full'] = BookSentences::full($rec, $rec['facility_name']);
+            $rec['text_full'] = BookSentences::full($rec, $rec['facility_name'], $bytoveDruzstvo);
             $rec['text_ref'] = BookSentences::reference($rec);
         }
         unset($rec);

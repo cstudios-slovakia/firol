@@ -755,9 +755,12 @@ export const Inspections = {
     }),
   /**
    * Start this year's inspection from last year's (chapter 12). The devices
-   * come across; their stav, poznámky, photos and nedostatky do not, and
-   * anything disposed of last time is left behind — `disposed_skipped` says
-   * how many, so a shorter list reads as a decision rather than a bug.
+   * come across — for a type in `carriesValues()` with its values, stav and
+   * texts too (fix list of 16. 11. 2026; the BOZP item checks since 18. 11.
+   * 2026), for any other type its identification only. Photos and the
+   * structured nedostatky never do, and anything disposed of last time is left
+   * behind — `disposed_skipped` says how many, so a shorter list reads as a
+   * decision rather than a bug.
    */
   repeat: (inspectionId: number, csrfToken: string | null) =>
     api<InspectionDetail & { source_id: number; disposed_skipped: number }>(

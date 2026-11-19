@@ -34,10 +34,13 @@ final class BookSentences
     /**
      * @param array<string, mixed> $rec   a BookRecords row with its internal `items` / `attendees`
      * @param string|null          $facilityName null for a training of the whole organisation
+     * @param bool                 $bytoveDruzstvo the place reads „v bytovom dome" (round 6, as {@see fixed()})
      */
-    public static function full(array $rec, ?string $facilityName): string
+    public static function full(array $rec, ?string $facilityName, bool $bytoveDruzstvo = false): string
     {
-        $where = $facilityName !== null && trim($facilityName) !== '' ? ' v prevádzke ' . trim($facilityName) : '';
+        $where = $facilityName !== null && trim($facilityName) !== ''
+            ? ($bytoveDruzstvo ? ' v bytovom dome ' : ' v prevádzke ') . trim($facilityName)
+            : '';
         $summary = self::summary($rec);
         return 'Dňa ' . self::dateSk((string) $rec['date']) . ' ' . self::verb($rec) . $where . '.'
             . ($summary !== '' ? ' ' . $summary : '')

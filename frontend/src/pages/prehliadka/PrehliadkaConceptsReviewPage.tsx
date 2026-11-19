@@ -66,7 +66,8 @@ type ChoiceOption = { value: string; label: string };
 type InlineField =
   | { key: string; label: string; kind: 'number'; unit: string; step: string; min: number; max: number }
   // `clearable`: a free text carried from the last protocol gets the „Vymazať text" button.
-  | { key: string; label: string; kind: 'text'; optional?: true; clearable?: true }
+  // `max`: the length the item validator accepts, so the field stops there (round 6).
+  | { key: string; label: string; kind: 'text'; optional?: true; clearable?: true; max?: number }
   | { key: string; label: string; kind: 'choice'; options: ChoiceOption[]; select?: boolean };
 
 const PASS_FAIL: ChoiceOption[] = [
@@ -92,7 +93,7 @@ const FIELDS: Partial<Record<InspectionType, InlineField[]>> = {
     { key: 'hs', label: 'HS', kind: 'number', unit: 'MPa', step: '0.01', min: 0, max: 50 },
     { key: 'hd', label: 'HD', kind: 'number', unit: 'MPa', step: '0.01', min: 0, max: 50 },
     { key: 'q', label: 'Q', kind: 'number', unit: 'l/s', step: '0.01', min: 0, max: 100 },
-    { key: 'defects', label: 'Zistené závady', kind: 'text', optional: true, clearable: true },
+    { key: 'defects', label: 'Zistené závady', kind: 'text', optional: true, clearable: true, max: 500 },
     { key: 'result', label: 'Výsledok kontroly', kind: 'choice', options: PASS_FAIL },
   ],
   pu_akcieschopnost: [
@@ -112,11 +113,11 @@ const FIELDS: Partial<Record<InspectionType, InlineField[]>> = {
   // The závady travel with a rebrík / regál since the customer's answer of
   // 18. 11. 2026, so they are shown — and clearable — like the fire types' notes.
   rebriky: [
-    { key: 'faults', label: 'Zistené závady', kind: 'text', optional: true, clearable: true },
+    { key: 'faults', label: 'Zistené závady', kind: 'text', optional: true, clearable: true, max: 500 },
     { key: 'result', label: 'Výsledok', kind: 'choice', options: [...PASS_FAIL, { value: 'vyradene', label: 'Vyradené' }] },
   ],
   regale: [
-    { key: 'faults', label: 'Zistené závady', kind: 'text', optional: true, clearable: true },
+    { key: 'faults', label: 'Zistené závady', kind: 'text', optional: true, clearable: true, max: 500 },
     { key: 'result', label: 'Výsledok', kind: 'choice', options: [...PASS_FAIL, { value: 'vyradene', label: 'Vyradené' }] },
   ],
   oprava_ts_php: [{ key: 'notes', label: 'Poznámky', kind: 'text', optional: true }],
@@ -730,6 +731,7 @@ function ItemEditor({
             <ReviewTextInput
               disabled={!canEdit}
               clearable={f.clearable === true}
+              maxLength={f.max}
               value={valueOf(item, edits, f.key)}
               onChange={(v) => onEdit(item.id, f.key, v)}
             />
@@ -787,17 +789,20 @@ function ReviewTextInput({
   onChange,
   disabled,
   clearable,
+  maxLength,
 }: {
   value: string;
   onChange: (value: string) => void;
   disabled: boolean;
   clearable: boolean;
+  maxLength?: number;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   return (
     <Input
       ref={ref}
       disabled={disabled}
+      maxLength={maxLength}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className="h-10"

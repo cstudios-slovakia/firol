@@ -9,7 +9,7 @@
     "build:safe": "tsc -b && vite build --config vite.config.ts --outDir dist-next && node scripts/swap-dist.mjs",
     "preview": "vite preview --config vite.config.ts",
     "lint": "eslint . --ext ts,tsx",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b"
   },
   "dependencies": {
     "clsx": "^2.1.1",

@@ -42,6 +42,7 @@ import { InspectionTags } from '@/components/InspectionTags';
 import { HandoverDialog } from '@/components/HandoverDialog';
 import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStatusBadge';
 import { carriedOriginOf, carriesValues, originText } from '@/lib/carryOver';
+import { isBozpItemType } from '@/api/bozpItems';
 import { plural } from '@/lib/text';
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { periodicityLabel, type Periodicity } from '@/lib/periodicity';
@@ -777,6 +778,7 @@ export function InspectionDetailPage() {
           offer={data.carry_over}
           record={module?.singleItem === true}
           withValues={carriesValues(i.type)}
+          bozpType={isBozpItemType(i.type) ? i.type : null}
           busy={carryingOver}
           onCarryOver={handleCarryOver}
         />
@@ -980,6 +982,7 @@ function CarryOverOfferCard({
   offer,
   record = false,
   withValues,
+  bozpType = null,
   busy,
   onCarryOver,
 }: {
@@ -988,6 +991,12 @@ function CarryOverOfferCard({
   record?: boolean;
   /** The items arrive with their values and result (lib/carryOver). */
   withValues: boolean;
+  /**
+   * A BOZP item check: its rows carry result and texts, but not their
+   * nedostatky, nor the úkon's opatrenia / záver — the offer must not promise
+   * „všetky údaje" (round 6; whether those carry too is asked of the customer).
+   */
+  bozpType?: string | null;
   busy: boolean;
   onCarryOver: () => void;
 }) {
@@ -1018,7 +1027,9 @@ function CarryOverOfferCard({
           <p className="mt-1 text-xs text-ink-600">
             Prenesie sa {offer.item_count}{' '}
             {offer.item_count === 1 ? 'položka' : offer.item_count < 5 ? 'položky' : 'položiek'}{' '}
-            {withValues
+            {withValues && bozpType
+              ? `s údajmi z posledného protokolu — aj ${bozpType === 'oopp' || bozpType === 'oznacenie' ? 'so stavom a poznámkou' : 's výsledkom a zistenými závadami'}. Prepíšeš len to, čo sa zmenilo; nedostatky položiek, ${bozpType === 'oopp' ? 'záver' : 'opatrenia'} a fotky sa neprenášajú.`
+              : withValues
               ? 'so všetkými údajmi z posledného protokolu — aj s nameranými hodnotami a výsledkom. Prepíšeš len to, čo sa zmenilo; fotky sa neprenášajú.'
               : 'aj s označením a umiestnením. Stav, poznámky a fotky zadáš nanovo — pri každej položke uvidíš, aký stav mala minule.'}
             {offer.disposed > 0 && ` ${disposedNotice(offer.disposed)}`}

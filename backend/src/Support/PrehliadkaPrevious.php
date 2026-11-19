@@ -183,6 +183,34 @@ final class PrehliadkaPrevious
     }
 
     /**
+     * Whether `$key` names a defect of record `$sourceId` — the keys this class
+     * hands out: `p<record>-<item>` for a defect of a prehliadka or a book
+     * entry (the item must be a defect row of that record), `k<record>-<n>`
+     * (also the older `pk…`) for the n-th defect of an old book record. Round 6:
+     * the walk checks an origin with it, so a new defect cannot borrow a
+     * made-up one to become „dôvod zanikol".
+     */
+    public static function namesDefectOf(string $key, int $sourceId): bool
+    {
+        if (preg_match('/^p(\d+)-(\d+)$/', $key, $m) === 1) {
+            if ((int) $m[1] !== $sourceId) {
+                return false;
+            }
+            $stmt = Db::pdo()->prepare('SELECT fields FROM inspection_items WHERE id = ? AND inspection_id = ?');
+            $stmt->execute([(int) $m[2], $sourceId]);
+            $f = json_decode((string) $stmt->fetchColumn(), true);
+            return is_array($f) && is_string($f['title'] ?? null);
+        }
+        if (preg_match('/^(?:pk|k)(\d+)-(\d+)$/', $key, $m) === 1) {
+            if ((int) $m[1] !== $sourceId || (int) $m[2] < 1) {
+                return false;
+            }
+            return (int) $m[2] <= count(self::fromLegacy(['id' => $sourceId, 'executed_on' => null]));
+        }
+        return false;
+    }
+
+    /**
      * The open defects of a prehliadka — or of a new-format book entry, then
      * only those written for `$facilityId` (the same row shape).
      *

@@ -86,6 +86,8 @@ export function PrehliadkaWalkPage() {
     data?.inspection.status === 'draft' ? id : null,
     (facilityId) => navigate(`/facilities/${facilityId}`, { replace: true }),
     data,
+    // Refused because it was issued meanwhile: show it as it is now.
+    () => void load(),
   );
 
   if (error) {

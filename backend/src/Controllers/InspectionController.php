@@ -958,8 +958,10 @@ final class InspectionController
             PrehliadkaDefects::recomputeDeadlines($id, $executedOn);
         }
 
-        // Header data replaces the whole object — a cleared field has to be
-        // expressible, so there is no field-by-field COALESCE here.
+        // Header data replaces every field the client owns — a cleared field has
+        // to be expressible, so there is no field-by-field COALESCE here. The
+        // keys the server wrote (the origin of carried items, the concept marks,
+        // the frozen issue copies) stay: InspectionDetails::mergeOver().
         if (array_key_exists('details', $body) && !$isNewBook) {
             $details = self::readDetails($req, (string) $row['type']);
             // Switching on PO or BOZP scope asks for that oprávnenie now, as
@@ -985,6 +987,9 @@ final class InspectionController
                     static fn (array $p): bool => isset($allowed[(int) ($p['source_inspection_id'] ?? 0)]),
                 ));
             }
+            $details = $details === null
+                ? InspectionDetails::serverOwned((string) $row['type'], $storedDetails)
+                : InspectionDetails::mergeOver($storedDetails, $details);
             Db::pdo()->prepare(
                 'UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?'
             )->execute([InspectionDetails::encode($details), $id, $scopeAccountId]);
@@ -1712,6 +1717,8 @@ final class InspectionController
             } catch (\InvalidArgumentException $e) {
                 Response::error($e->getMessage(), 422);
             }
+            // The keys the server wrote (issued_contractor, …) stay, as in updateBasic().
+            $details = InspectionDetails::mergeOver($stored, $details);
         } elseif ($rows !== null) {
             // Records of a prevádzka that left the entry are no longer attached.
             $details = $stored;

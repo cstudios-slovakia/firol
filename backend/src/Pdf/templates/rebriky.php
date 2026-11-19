@@ -81,6 +81,13 @@ $total = (int) ($stats['total'] ?? count($items));
 <?= DefectsTable::renderRoutineDefects($items, 'rebriky', [
   'photo_counts' => $photo_counts ?? [],
 ]) ?>
+<?php /* The rows' nedostatky (popis, opatrenie, termín), numbered like the photo
+         appendix — as the other BOZP item protocols print them, under the same band. */ ?>
+<?= DefectsTable::render(Defects::collect($items), [
+  'labels'     => DefectsTable::SHORT_LABELS,
+  'photo_note' => !empty($photos),
+  'band'       => false,
+]) ?>
 
 <?php if ($measures !== ''): ?>
   <?= $doc->band('Opatrenia') ?>

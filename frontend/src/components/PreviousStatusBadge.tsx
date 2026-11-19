@@ -18,8 +18,10 @@ import { cn } from '@/lib/cn';
  * the result was left blank, and the badge is hidden where it would only
  * repeat the item's current value.
  *
- * The badge disappears as soon as the technician records a result, so a row
- * never shows two verdicts at once.
+ * The badge shows only while the item's current value differs from it: a row
+ * whose result is still blank shows what it scored last time, a row the
+ * technician set to the same value shows nothing, and a changed one shows
+ * both — the new verdict and „minule: …".
  */
 export const PREVIOUS_STATUS_KEY = 'previous_status';
 

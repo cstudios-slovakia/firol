@@ -15,6 +15,7 @@ import type { InspectionType } from '@/api/inspections';
 import type { ChecklistOrigin } from '@/api/prehliadka';
 import { formatDateSk } from '@/lib/clientNoticeEmail';
 
+/** The types that carry values and result — the mirror of `CarryOver::FULL`; keep the two in step. */
 const FULL: ReadonlySet<string> = new Set([
   'php',
   'hydranty',

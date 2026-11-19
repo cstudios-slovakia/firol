@@ -29,6 +29,9 @@ namespace Firol\Pdf;
  *   photo_note  true → prints „Fotodokumentácia zistených nedostatkov tvorí
  *               prílohu tohto záznamu." under the table (only say it when the
  *               appendix really is attached)
+ *   band        false → no `<h2>` band; the table continues the section above
+ *               it (rebríky, regály: under the failing rows of „Zistené
+ *               nedostatky")
  *
  * Backend counterpart: Firol\Support\Defects (storage, validation, numbering).
  * ────────────────────────────────────────────────────────────────────────────
@@ -40,7 +43,7 @@ final class DefectsTable
 
     /**
      * @param list<array{number: int, description: string, measure: ?string, deadline: ?string}> $rows
-     * @param array{title?: string, labels?: array{0: string, 1: string, 2: string}, photo_note?: bool} $options
+     * @param array{title?: string, labels?: array{0: string, 1: string, 2: string}, photo_note?: bool, band?: bool} $options
      */
     public static function render(array $rows, array $options = []): string
     {
@@ -50,7 +53,7 @@ final class DefectsTable
         $title  = $options['title'] ?? 'Zistené nedostatky';
         $labels = $options['labels'] ?? self::LONG_LABELS;
 
-        $html = '<h2>' . self::esc($title) . '</h2>'
+        $html = (($options['band'] ?? true) ? '<h2>' . self::esc($title) . '</h2>' : '')
             . '<table class="grid"><thead><tr>'
             . '<th style="width:5%">Č.</th>'
             . '<th style="width:47%">' . self::esc($labels[0]) . '</th>'
@@ -117,8 +120,11 @@ final class DefectsTable
                     break;
                 case 'rebriky':
                 case 'regale':
+                    // A row with a nedostatok is listed too: the nedostatky table
+                    // under this section must not follow „všetky vyhovujú".
                     $r = (string) ($f['result'] ?? '');
-                    $isFailing = $r === 'nevyhovuje' || $r === 'vyradene' || !empty($f['faults']) || $hasPrehliadkaDefects;
+                    $isFailing = $r === 'nevyhovuje' || $r === 'vyradene' || self::scalarText($f['faults'] ?? null) !== ''
+                        || \Firol\Support\Defects::fromFields($f) !== [] || $hasPrehliadkaDefects;
                     break;
                 default: // pu_akcieschopnost, pu_udrzba, nudzove_osvetlenie, ts_hadic
                     $r = (string) ($f['result'] ?? '');
@@ -203,7 +209,7 @@ final class DefectsTable
                 }
             } else {
                 // Standalone routine inspection defect
-                $state = trim((string) ($f['faults'] ?? $f['defects'] ?? $f['notes'] ?? ''));
+                $state = self::routineState($type, $f);
                 if ($state === '') {
                     if ($type === 'php' && isset($f['status'])) {
                         $statusLabels = ['TS' => 'Tlaková skúška', 'O' => 'Vyžaduje opravu', 'V' => 'Vyradený z prevádzky'];
@@ -234,6 +240,39 @@ final class DefectsTable
         }
 
         return $html;
+    }
+
+    /**
+     * „Zistený stav" of a failing row without prehliadka defects: its závady,
+     * else (rebríky, regály) the descriptions of the row's nedostatky, else the
+     * text field of the other types; '' when there is none (the caller prints
+     * the stav label or „Nevyhovuje"). A field holding an array is never cast —
+     * `defects` of a BOZP row is its list of nedostatky (round 6: a rebrík with
+     * empty závady printed „Array").
+     *
+     * @param array<string, mixed> $f
+     */
+    private static function routineState(string $type, array $f): string
+    {
+        $faults = self::scalarText($f['faults'] ?? null);
+        if ($faults !== '') {
+            return $faults;
+        }
+        if ($type === 'rebriky' || $type === 'regale') {
+            $descriptions = array_values(array_filter(array_map(
+                static fn (array $d): string => trim((string) $d['description']),
+                \Firol\Support\Defects::fromFields($f),
+            ), static fn (string $s): bool => $s !== ''));
+            return implode("\n", $descriptions);
+        }
+        $defects = self::scalarText($f['defects'] ?? null);
+        return $defects !== '' ? $defects : self::scalarText($f['notes'] ?? null);
+    }
+
+    /** A text field, '' for anything that is not a string or a number. */
+    private static function scalarText(mixed $v): string
+    {
+        return is_string($v) || is_int($v) || is_float($v) ? trim((string) $v) : '';
     }
 
     /**

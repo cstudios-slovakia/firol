@@ -605,20 +605,23 @@ final class BookEntry
         if ($inspection['executed_on'] === null) {
             return 'Doplň dátum vykonania pred generovaním PDF.';
         }
+        // A bytové družstvo reads „bytový dom" (round 6).
+        $bd = ClientKind::isBytovyDom((string) ($inspection['company_client_type'] ?? ''));
+        $gone = $bd ? 'Bytový dom zápisu je archivovaný alebo sa nenašiel.' : 'Prevádzka zápisu je archivovaná alebo sa nenašla.';
         $rows = self::facilityRows((int) $inspection['id']);
         if ($rows === []) {
-            return 'Prevádzka zápisu je archivovaná alebo sa nenašla.';
+            return $gone;
         }
         foreach ($rows as $r) {
             if ($r['archived'] || $r['company_id'] !== (int) $inspection['company_id']) {
-                return 'Prevádzka zápisu je archivovaná alebo sa nenašla.';
+                return $gone;
             }
         }
         $details = InspectionDetails::decode($inspection['details'] ?? null) ?? [];
         if ((int) ($details['sposob'] ?? 0) === 1) {
             foreach ($rows as $r) {
                 if ($r['periodicity_value'] === null) {
-                    return 'Vyber periodicitu pri každej prevádzke.';
+                    return $bd ? 'Vyber periodicitu pri každom bytovom dome.' : 'Vyber periodicitu pri každej prevádzke.';
                 }
             }
         }

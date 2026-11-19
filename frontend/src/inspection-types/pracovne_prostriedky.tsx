@@ -192,7 +192,7 @@ function PpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
         <DefectsEditor state={defects} initialPhotos={initialItem?.photos} />
 
         <ItemFormFooter
-          busy={photos.processing}
+          busy={photos.processing || defects.processing}
           onNextRecorded={hasNextItem ? (e) => handleSubmit(e, 'save-and-next-recorded') : undefined}
           editing={editing}
           submitting={submitting}

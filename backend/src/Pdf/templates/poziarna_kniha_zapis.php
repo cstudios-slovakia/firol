@@ -124,7 +124,7 @@ $multi = !empty($k['multi']);
       <tr>
         <th style="width:6%">Č.</th>
         <th>Nedostatok</th>
-        <?php if ($multi): ?><th style="width:20%">Prevádzka</th><?php endif ?>
+        <?php if ($multi): ?><th style="width:20%"><?= ClientKind::isBytovyDom((string) ($company['client_type'] ?? '')) ? 'Bytový dom' : 'Prevádzka' ?></th><?php endif ?>
         <th style="width:18%">Termín odstránenia</th>
       </tr>
     </thead>

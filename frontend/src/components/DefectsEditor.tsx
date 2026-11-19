@@ -75,6 +75,12 @@ export type DefectsState = {
   /** Internal — lets each row's photo field register its staging. */
   registerPhotos: (key: string, staging: PhotoStaging) => void;
   /**
+   * A photo of a nedostatok is still being resized — the form's save buttons
+   * wait for it, as for the item's own photos (round 6; collect() refused the
+   * save, so nothing was lost, but the buttons looked ready).
+   */
+  processing: boolean;
+  /**
    * Whether anything differs from what the item opened with — a nedostatok
    * added, removed or edited, or a photo of one added or removed. „Na súhrn"
    * skips the save only while this is false.
@@ -119,6 +125,8 @@ export function useDefects(initialItem: InspectionItem | null): DefectsState {
   const [rows, setRows] = useState<DefectRow[]>(() => rowsFrom(initialItem));
   const [error, setError] = useState<string | null>(null);
   const stagings = useRef<Map<string, PhotoStaging>>(new Map());
+  // Rows whose photo field is resizing a photo; state, so the form re-renders.
+  const [processingKeys, setProcessingKeys] = useState<ReadonlySet<string>>(() => new Set());
   // Keys of the nedostatky that belong to the item being edited (loaded or
   // added since) — only their photos may be discarded as „removed".
   const ownKeys = useRef<Set<string>>(new Set(rows.map((r) => r.key)));
@@ -161,7 +169,15 @@ export function useDefects(initialItem: InspectionItem | null): DefectsState {
   }, []);
   const registerPhotos = useCallback((key: string, staging: PhotoStaging) => {
     stagings.current.set(key, staging);
+    setProcessingKeys((prev) => {
+      if (prev.has(key) === staging.processing) return prev;
+      const next = new Set(prev);
+      if (staging.processing) next.add(key);
+      else next.delete(key);
+      return next;
+    });
   }, []);
+  const processing = rows.some((r) => processingKeys.has(r.key));
 
   const collect = useCallback((opts?: { requireOne?: boolean }): DefectsCollected | null => {
     // A photo of a nedostatok still being resized is not staged yet; saving now
@@ -219,7 +235,7 @@ export function useDefects(initialItem: InspectionItem | null): DefectsState {
     return rows.some((r) => stagings.current.get(r.key)?.dirty === true);
   }, [rows]);
 
-  return { rows, error, add, remove, update, clear, collect, registerPhotos, isDirty };
+  return { rows, error, add, remove, update, clear, collect, registerPhotos, isDirty, processing };
 }
 
 export function DefectsEditor({

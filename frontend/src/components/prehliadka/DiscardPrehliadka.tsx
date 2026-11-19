@@ -23,7 +23,7 @@ import { useMemberRights } from '@/auth/useMemberRights';
 import { Inspections, type InspectionDetail } from '@/api/inspections';
 import { Tasks } from '@/api/tasks';
 import { ApiError } from '@/lib/api';
-import { DISCARD_PREHLIADKA_DIALOG, discardDoneMessage } from '@/lib/discard';
+import { DISCARD_PREHLIADKA_DIALOG, discardDoneMessage, discardNeedsRefresh } from '@/lib/discard';
 import { cn } from '@/lib/cn';
 import { useConfirm } from '@/lib/confirm';
 import { offlineMessage } from '@/lib/offline';
@@ -42,11 +42,15 @@ function neverClosed(detail: InspectionDetail, taskCount: number): boolean {
 /**
  * Whether the draft `inspectionId` may be discarded here, and the action.
  * `detail` saves a request when the screen already loaded the prehliadka.
+ * `onStale` runs after a 409 — the prehliadka was issued or followed up since
+ * the screen loaded it — so the screen reads it again instead of offering
+ * „Generovať" / „Zahodiť" on a draft that is gone (round 6).
  */
 export function useDiscardPrehliadka(
   inspectionId: number | null,
   onDiscarded: (facilityId: number) => void,
   detail?: InspectionDetail | null,
+  onStale?: () => void,
 ) {
   const { csrfToken } = useAuth();
   const isReadOnly = useIsReadOnly();
@@ -114,6 +118,10 @@ export function useDiscardPrehliadka(
         err instanceof ApiError ? err.message : offlineMessage(err, 'Zahodiť prehliadku sa dá len s pripojením na internet.'),
       );
       setDiscarding(false);
+      if (discardNeedsRefresh(err)) {
+        setChecked(null);
+        onStale?.();
+      }
       return;
     }
     setDiscarding(false);

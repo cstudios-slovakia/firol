@@ -17,8 +17,9 @@ namespace Firol\Support;
  * unchecked.
  *
  * Usage: POST /api/inspections and PATCH /api/inspections/{id} accept a
- * `details` object; show() returns it decoded. PATCH replaces the whole object
- * (send every field), so a cleared field is expressible.
+ * `details` object; show() returns it decoded. PATCH replaces every field the
+ * client owns (send every field), so a cleared field is expressible; the keys
+ * the server writes stay ({@see self::mergeOver()}).
  */
 final class InspectionDetails
 {
@@ -60,6 +61,59 @@ final class InspectionDetails
             return BookEntry::validateShape($raw);
         }
         return [];
+    }
+
+    /**
+     * The header after a client's save: the validated fields over what is
+     * stored (round 6 of the fix list of 16. 11. 2026). A validator always
+     * returns its type's whole field set, so a field the client cleared is
+     * still cleared; every other stored key is the server's and stays:
+     *
+     *   carried_from, carried_positions   the origin of carried items (CarryOver,
+     *                                     PrehliadkaChecklist) — the origin line
+     *                                     and the „prevzaté" marks
+     *   concept_from_prehliadka,
+     *   concept_built_at, concept_item_count,
+     *   concept_confirmed_at              a concept from a prehliadka
+     *                                     (PrehliadkaConcepts) — without them an
+     *                                     unconfirmed concept could be issued
+     *   issued_contractor                 the Zhotoviteľ frozen at issue (Contractor)
+     *   issued_record                     the prehliadka's frozen tables
+     *                                     (PrehliadkaRecord); rewritten at the next issue
+     *   issued                            what a book entry printed (BookEntry);
+     *                                     removed by „Upraviť"
+     *
+     * Before this, saving opatrenia / záver of a BOZP item check stored the
+     * validator's output alone and the keys above were lost.
+     *
+     * @param array<string, mixed>|null $stored
+     * @param array<string, mixed> $validated from {@see self::validate()}
+     * @return array<string, mixed>
+     */
+    public static function mergeOver(?array $stored, array $validated): array
+    {
+        return array_replace($stored ?? [], $validated);
+    }
+
+    /**
+     * The stored keys a client never sends — what is left of the header when
+     * the client clears it (`details: null`).
+     *
+     * @param array<string, mixed>|null $stored
+     * @return array<string, mixed>|null
+     */
+    public static function serverOwned(string $type, ?array $stored): ?array
+    {
+        if ($stored === null) {
+            return null;
+        }
+        try {
+            $clientKeys = self::validate($type, []);
+        } catch (\InvalidArgumentException) {
+            $clientKeys = [];
+        }
+        $left = array_diff_key($stored, $clientKeys);
+        return $left === [] ? null : $left;
     }
 
     /**
