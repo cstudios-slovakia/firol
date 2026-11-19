@@ -1666,7 +1666,8 @@ trip) is tracked in the hand-back report to the owner, not here.
   customer's confirmation.
 - ✅ An attached prehliadka with no defects prints „Neboli zistené žiadne nedostatky." — stays
   (answer 4 A, 18. 11. 2026).
-- ⏸ Wording „Nedostatok zo zápisu do požiarnej knihy č. …" (note on a carried-over defect).
+- ✅ Wording „Nedostatok zo zápisu do požiarnej knihy č. …" (note on a carried-over defect) — the
+  defect-screen texts were confirmed with one change (answer 9c, 18. 11. 2026).
 - ✅ The fixed sentence says „v bytovom dome / v bytových domoch" for a bytové družstvo (answer 9b,
   round 5).
 - ✅ R3: a book entry does not close earlier defects; defects written in a book entry feed the next
@@ -1882,8 +1883,9 @@ labels). The four part-1 failures were a stale fixture, fixed in round 2.
   their own texts; the import result uses Slovak plurals („2 chyby", „1 firma").
 - **Smaller**: the old-Opakovať completeness rule only for the fire types
   (`CarryOver::carriesValues`); `optimizeDeps.entries: ['index.html']` — Vite 6.4 crawled
-  `dist-next/` (and would `dist-prev/`). The dev server reads the gitignored `vite.config.js` that
-  `tsc -b` emits, so a config change reaches `npm run dev` only after `npm run build`.
+  `dist-next/` (and would `dist-prev/`). (Found here and fixed in round 5, D3: the dev server read
+  the gitignored `vite.config.js` that `tsc -b` emitted; the scripts now pass
+  `--config vite.config.ts` and `tsc -b` emits into `node_modules/.tmp/`.)
 
 ### Fix list of 16. 11. 2026 — round 5 (the customer's answers of 18. 11. 2026) — ✅ built, checked at 360 px
 
@@ -1966,6 +1968,75 @@ archive without `issued_before` restores every draft as issued — the result sa
 
 **Check script:** `bin/test-prehliadka-followups.php` parts 7 (A, C), 8 (restore) and 9 (numbering,
 incl. two parallel issues in separate processes).
+
+### Fix list of 16. 11. 2026 — round 6 (review and tests of round 5) — ✅ built, checked at 360 px
+
+Prompt: `docs/prompts/fixes-2026-11-16-round-6.md`. Three reviews and two test passes found parts
+A–D of round 5 working; this round fixes what they found.
+
+1. **A header save wiped the server's keys.** `PATCH /api/inspections/{id}` stored the validator's
+   output as the whole `details`, so saving opatrenia / záver of a BOZP item check dropped
+   `carried_from` / `carried_positions` (origin line and „prevzaté" marks gone after a reload) and —
+   older than round 5 — the `concept_*` marks of a concept, after which an **unconfirmed concept
+   could be issued** (reproduced end to end before the fix: REB-2026-003 issued). Now
+   `InspectionDetails::mergeOver()` puts the validated fields over the stored header (a validator
+   always returns its whole field set, so a cleared field stays cleared); every other key stays:
+   `carried_from`, `carried_positions`, `concept_from_prehliadka`, `concept_built_at`,
+   `concept_item_count`, `concept_confirmed_at`, `issued_contractor`, `issued_record` (rewritten at
+   the next issue), `issued` (book entry; removed by „Upraviť"). `details: null` keeps only those.
+   The book entry's header save (`bookUpdate`) merges the same way (it kept `issued` only).
+2. **„Zistený stav: Array"** in the rebríky / regály PDF (a failing row with empty závady: `defects`
+   is the list of nedostatky). The state is the závady, else the descriptions of the row's
+   nedostatky, else „Nevyhovuje"; an array is never cast. The rows' nedostatky (popis, opatrenie,
+   termín) are printed under the same „Zistené nedostatky" band, numbered like the photo appendix;
+   a passing row with a nedostatok is listed too. No other array cast found in `src/Pdf`.
+3. **Book numbers after a merge restore.** `BookNumber::forIssue` skips every sequence whose
+   `PK-<code>-n` exists on an entry or as a document number (read after the firma's lock) — a gap
+   instead of a 500 on every retry. A code counts as taken also when any number of its series exists
+   in the account (proposal, „Zmeniť", restore, migration 081). The restore reports what happened to
+   each entry: the firma's new code, the numbers kept under a code another firma holds (which it
+   skips), and each entry whose number was taken — restored as an unlocked draft
+   (`issued_before = 1`, no document, `details.issued` removed) instead of finalized without number
+   or document; this also covers an entry of a pre-080 archive whose protocol number was taken. The
+   backup now carries `version` (and `form_variant`, which the restore read but no archive held) of
+   each document; restored rows keep it. The 080 backfill and the restore take the newest documents
+   row of an entry. **Lock order:** the restore's first statement locks every firma row of the
+   account (`FOR UPDATE`, before any read — a plain read first would fix a read view and the lock
+   could fail with 1020), so an issue meanwhile waits and then skips the restored numbers instead of
+   deadlocking on the document's unique key (script: an issue started during the lock waited and got
+   the next free number).
+4. **Numbering, smaller.** `POST /api/companies/{id}/book-code` answers 404 for an archived firma, as
+   `update()`. Migration `081_book_code_proposals.php` stores the proposal on every firma without a
+   code once (per account, by id, archived and bytové družstvá included), so two old firms no longer
+   show the same „VER (navrhnutý)". `BookCodeRow` transliterates like `BookNumber::letters`
+   („šta" → STA), drops nothing (no `maxLength`) and shows the server's message. The code messages
+   (shape, lock, taken, missing) and the restore warnings use the client kind (`ClientKind::bookCode*`).
+5. **The rest.** The book branch of the items API drops `persists_from` before validating, and the
+   walk refuses an origin whose key names no defect of its record (`PrehliadkaPrevious::namesDefectOf`;
+   an item saved with that origin before keeps it) — a new defect can no longer be „dôvod zanikol"
+   through the API. After the 409 of a permanent delete the book summary reads the entry again and
+   shows it as issued; the prehliadka walk reloads (`useDiscardPrehliadka` `onStale`). „v bytovom
+   dome" in the attached-record sentence (`BookSentences::full`), „Bytový dom" as the PDF column
+   header, and the bytový dom wording in the book's readiness refusals. BOZP item refusals carry
+   `field` (`FieldRefused`), so the review hint is right for rebríky / regály; „Zistené závady" there
+   has `maxLength` 500. A nedostatok photo still resizing disables the BOZP footer buttons
+   (`useDefects().processing`). Restore warning „…sú označené ako už vystavené". Stale comments
+   (`lib/carryOver.ts`, `api/inspections.ts` repeat, `BozpItems::unassessedCount`,
+   `PreviousStatusBadge`). `npm run typecheck` is `tsc -b` (TS6310 with `--noEmit`).
+6. **Waiting for the customer, only the text changed:** the „Prevziať položky" offer of a BOZP item
+   check no longer says „so všetkými údajmi" — it names what is carried and says that the rows'
+   nedostatky, opatrenia (OOPP: záver) and photos are not. Whether those should carry, and whether a
+   bytové družstvo's code should skip the words „Bytové družstvo", is asked of the customer.
+
+**Answers for the review.** A re-issued book entry keeps its number as the next document version;
+the documents row (and the PDF on disk) of the earlier version is deleted by „Upraviť", and no
+screen shows the version — this is what round 5 built for „opravený zápis si ponechá pôvodné číslo";
+the file of version 2 is `…-v2.pdf`. Not changed. „Fotodokumentácia zo zápisu do požiarnej knihy"
+labels the source record's photos only while a carried defect is being taken over; the first save
+copies them onto the new row, where they are the row's own photos (removable) — as documented on
+`CarriedPhotos` (round 3 of the first series). Not changed.
+
+**Check script:** part 10 of `bin/test-prehliadka-followups.php` (33 checks).
 
 ---
 

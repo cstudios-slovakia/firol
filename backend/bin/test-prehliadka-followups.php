@@ -34,7 +34,15 @@ declare(strict_types=1);
  *   9. round 5: požiarna kniha numbers PK-<KÓD>-NNN — codes, the series across
  *      a year change, „Upraviť" keeping the number, old numbers, a second
  *      account, a firma without a code, other types, two parallel issues.
- *      Writes scratch accounts and removes them at the end.
+ *      Writes scratch accounts and removes them at the end;
+ *  10. round 6: a header save keeps the origin of carried items and the concept
+ *      marks (an unconfirmed concept stays refused), rebríky / regály PDFs with
+ *      a failing row (no „Array", the rows' nedostatky printed), a merge restore
+ *      of a firma whose code the target holds (the next issue skips the restored
+ *      numbers, a lost number makes an unlocked draft, true warnings, document
+ *      versions kept, an issue during a restore), migrations 080 / 081, the
+ *      client-kind code messages and the origin of a carried defect. Writes
+ *      scratch accounts and removes them at the end.
  *
  *     docker compose exec php php bin/test-prehliadka-followups.php
  *
@@ -952,6 +960,280 @@ try {
         $pdo->prepare('DELETE FROM accounts WHERE id = ?')->execute([$acc]);
     }
     foreach ($r5Users as $uid) {
+        $pdo->prepare('DELETE FROM audit_log WHERE actor_user_id = ?')->execute([$uid]);
+        $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$uid]);
+    }
+}
+
+// ── Part 10 — round 6: what the check of round 5 found ──────────────────────
+// Issues and restores (own transactions), so like parts 6 and 9 it writes
+// scratch accounts (users test-followups-r6-…@firol.test) and removes them.
+$r6Users = [];
+$r6Accounts = [];
+try {
+    $r6Account = static function (string $label) use ($pdo, &$r6Users, &$r6Accounts): array {
+        $pdo->prepare('INSERT INTO users (fullname, email, password_hash, is_pending, is_admin) VALUES (?, ?, ?, 0, 0)')
+            ->execute(['Test R6 ' . $label, 'test-followups-r6-' . bin2hex(random_bytes(4)) . '@firol.test', 'x']);
+        $userId = (int) $pdo->lastInsertId();
+        $r6Users[] = $userId;
+        $pdo->prepare(
+            "INSERT INTO accounts (invoice_company_name, invoice_street, invoice_postal_code, invoice_city,
+                                   invoice_ico, main_user_id, subscription_end_date, member_rights)
+             VALUES ('R6 Test s.r.o.', 'Skúšobná 1', '949 01', 'Nitra', '12345678', ?, '2030-12-31', 'plne')"
+        )->execute([$userId]);
+        $accountId = (int) $pdo->lastInsertId();
+        $r6Accounts[] = $accountId;
+        return [$accountId, $userId];
+    };
+    $r6Company = static function (int $accountId, string $name, string $type = 'firma') use ($pdo): array {
+        $pdo->prepare('INSERT INTO companies (account_id, name, client_type, street, postal_code, city, ico) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            ->execute([$accountId, $name, $type, 'Ulica 1', '949 01', 'Nitra', '87654321']);
+        $companyId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO facilities (account_id, company_id, name, street, postal_code, city) VALUES (?, ?, ?, ?, ?, ?)')
+            ->execute([$accountId, $companyId, 'Sklad ' . $name, 'Ulica 2', '949 01', 'Nitra']);
+        return [$companyId, (int) $pdo->lastInsertId()];
+    };
+    $r6Ukon = static function (int $accountId, int $userId, int $companyId, int $facilityId, string $type, string $on, ?array $details, array $rows) use ($pdo): int {
+        $pdo->prepare(
+            'INSERT INTO inspections (account_id, company_id, facility_id, type, executed_on, inspector_user_id, status, created_by_user_id, details, is_preventive_inspection)
+             VALUES (?, ?, ?, ?, ?, ?, "draft", ?, ?, 0)'
+        )->execute([$accountId, $companyId, $facilityId, $type, $on, $userId, $userId, $details === null ? null : json_encode($details, JSON_UNESCAPED_UNICODE)]);
+        $id = (int) $pdo->lastInsertId();
+        foreach ($rows as $i => $fields) {
+            $pdo->prepare('INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)')
+                ->execute([$id, $i + 1, json_encode($fields, JSON_UNESCAPED_UNICODE)]);
+        }
+        if ($type === 'poziarna_kniha') {
+            $pdo->prepare('INSERT INTO inspection_facilities (account_id, inspection_id, facility_id) VALUES (?, ?, ?)')
+                ->execute([$accountId, $id, $facilityId]);
+        }
+        return $id;
+    };
+    $r6Issue = static function (int $accountId, int $userId, int $id): array {
+        $r = \Firol\Controllers\DocumentController::generateForInspectionInternal($accountId, $userId, $id, false);
+        return isset($r['document'])
+            ? ['number' => $r['document']['number'], 'version' => (int) $r['document']['version']]
+            : ['error' => $r['error'] ?? '?', 'status' => $r['status'] ?? null];
+    };
+    $ID = \Firol\Support\InspectionDetails::class;
+    $BN6 = \Firol\Documents\BookNumber::class;
+
+    // Item 1 — a header save keeps the keys the server wrote.
+    $origin = ['carried_from' => ['number' => 'REB-2026-001', 'executed_on' => '2026-10-01'], 'carried_positions' => [1, 3]];
+    $header = [
+        'rebriky'              => ['measures_text' => 'Vymeniť pätku.'],
+        'regale'               => ['measures_text' => 'Vymeniť policu.'],
+        'pracovne_prostriedky' => ['measures' => [['measure' => 'Doplniť kryt', 'deadline' => null, 'immediately' => true]]],
+        'oznacenie'            => ['measures' => [['measure' => 'Vymeniť tabuľku', 'deadline' => '2026-12-31', 'immediately' => false]]],
+        'oopp'                 => ['conclusion' => 'Záver kontroly.'],
+    ];
+    foreach ($header as $type => $sent) {
+        $merged = $ID::mergeOver($origin + ['issued_contractor' => ['name' => 'X']], $ID::validate($type, $sent));
+        $key = (string) array_key_first($sent);
+        $expect("10 $type: saving opatrenia / záver keeps the origin, the marks and the snapshot",
+            [$merged['carried_from'] ?? null, $merged['carried_positions'] ?? null, isset($merged['issued_contractor']), $merged[$key] !== null],
+            [$origin['carried_from'], $origin['carried_positions'], true, true]);
+    }
+    $expect('10 a cleared field is still cleared', $ID::mergeOver(['measures_text' => 'Staré.'] + $origin, $ID::validate('rebriky', []))['measures_text'], null);
+    $expect('10 details: null keeps only the keys the server wrote', $ID::serverOwned('rebriky', ['measures_text' => 'x'] + $origin), $origin);
+
+    [$a10, $u10] = $r6Account('prenos');
+    [$c10, $f10] = $r6Company($a10, 'Prenos Test');
+    $ladder6 = ['inventory_number' => 'R-1', 'type' => 'Dvojitý', 'manufacturer' => null, 'year' => null, 'location' => 'Sklad',
+        'faults' => null, 'result' => 'vyhovuje', 'defects' => []];
+    // A concept of rebríky, never confirmed: saving its opatrenia must not make it issuable.
+    $concept = $r6Ukon($a10, $u10, $c10, $f10, 'rebriky', '2026-11-12', [
+        'concept_from_prehliadka' => 1, 'concept_built_at' => '2026-11-12 10:00:00', 'concept_item_count' => 1,
+        'concept_confirmed_at' => null, 'carried_from' => null, 'carried_positions' => [],
+    ], [$ladder6]);
+    $stored = $ID::decode($pdo->query("SELECT details FROM inspections WHERE id = $concept")->fetchColumn());
+    $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
+        ->execute([$ID::encode($ID::mergeOver($stored, $ID::validate('rebriky', ['measures_text' => 'Opatrenie.']))), $concept]);
+    $expect('10 a concept is still unconfirmed after saving opatrenia, and generate refuses it', $r6Issue($a10, $u10, $concept),
+        ['error' => 'Koncept z prehliadky — potvrď výsledky.', 'status' => 422]);
+
+    // Item 2 — rebríky / regály with a failing row: závady, a nedostatok only, neither.
+    $nedostatok = ['key' => 'k-r6', 'description' => 'Prasknutá priečka', 'measure' => 'Vymeniť priečku', 'deadline' => '2026-12-15'];
+    $shelf6 = ['label' => 'A1', 'type' => 'Policový', 'capacity' => '200 kg', 'location' => 'Sklad', 'capacity_marked' => true];
+    $rows6 = [
+        'rebriky' => [
+            ['faults' => 'Chýba pätka', 'result' => 'nevyhovuje'] + $ladder6,
+            ['faults' => null, 'result' => 'nevyhovuje', 'defects' => [$nedostatok], 'inventory_number' => 'R-2'] + $ladder6,
+            ['faults' => null, 'result' => 'nevyhovuje', 'inventory_number' => 'R-3'] + $ladder6,
+            ['result' => 'vyhovuje', 'defects' => [['key' => 'k-r6b', 'description' => 'Odretý lak'] + $nedostatok], 'inventory_number' => 'R-4'] + $ladder6,
+        ],
+        'regale' => [
+            ['faults' => 'Ohnutá polica', 'result' => 'nevyhovuje', 'defects' => []] + $shelf6,
+            ['faults' => null, 'result' => 'nevyhovuje', 'defects' => [$nedostatok]] + $shelf6,
+            ['faults' => null, 'result' => 'nevyhovuje', 'defects' => []] + $shelf6,
+        ],
+    ];
+    foreach ($rows6 as $type => $rows) {
+        $u = $r6Ukon($a10, $u10, $c10, $f10, $type, '2026-11-15', ['measures_text' => null], $rows);
+        $warnings = [];
+        set_error_handler(static function (int $no, string $msg) use (&$warnings): bool {
+            $warnings[] = $msg;
+            return true;
+        });
+        try {
+            $payload = \Firol\Controllers\DocumentController::buildPayload($a10, $u10,
+                \Firol\Controllers\DocumentController::loadInspectionForGenerate($a10, $u), \Firol\Controllers\DocumentController::loadItems($u));
+            $html = \Firol\Pdf\PdfRenderer::renderHtmlForType($type, $payload);
+        } finally {
+            restore_error_handler();
+        }
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES, 'UTF-8');
+        $expect("10 $type PDF: no „Array\", no PHP warning", [substr_count($html, 'Array'), $warnings], [0, []]);
+        preg_match_all('#Zistený stav</td><td[^>]*>(.*?)</td>#s', $html, $states);
+        $expect("10 $type PDF: zistený stav from the závady, else the nedostatok, else „Nevyhovuje\"",
+            array_map(static fn (string $s): string => html_entity_decode(strip_tags($s), ENT_QUOTES, 'UTF-8'), $states[1]),
+            $type === 'rebriky'
+                ? ['Chýba pätka', 'Prasknutá priečka', 'Nevyhovuje', 'Odretý lak']
+                : ['Ohnutá polica', 'Prasknutá priečka', 'Nevyhovuje']);
+        $expect("10 $type PDF: the row's nedostatok with its opatrenie and termín", [str_contains($text, 'Vymeniť priečku'), str_contains($text, '15. 12. 2026')], [true, true]);
+        $expect("10 $type PDF: one „Zistené nedostatky\" band", substr_count($text, 'Zistené nedostatky'), 1);
+        $expect("10 $type: the protocol is issued", isset($r6Issue($a10, $u10, $u)['number']), true);
+    }
+
+    // Item 3 — a merge restore of a firma whose code the target account holds.
+    $bookDetails = ['format' => 'pk2', 'sposob' => 2, 'sposob_rucne' => false, 'uvod' => null, 'cinnosti' => [], 'vlastne_cinnosti' => [],
+        'doplnujuci_text' => '', 'text_zapisu' => 'Kontrola stavu ochrany pred požiarmi.', 'zaznamy' => [], 'zaver' => '', 'schvalil' => 'Ján Test'];
+    [$aSrc, $uSrc] = $r6Account('zdroj');
+    [$cSrc, $fSrc] = $r6Company($aSrc, 'Stavby Novák s.r.o.');
+    $pdo->exec("UPDATE companies SET ico = '11223344' WHERE id = $cSrc"); // a merge matches firms by IČO
+    $BN6::assignProposal($aSrc, $cSrc, 'Stavby Novák s.r.o.');
+    $src = [];
+    foreach (['2026-09-01', '2026-09-02', '2026-09-03'] as $on) {
+        $src[] = $id = $r6Ukon($aSrc, $uSrc, $cSrc, $fSrc, 'poziarna_kniha', $on, $bookDetails, []);
+        $r6Issue($aSrc, $uSrc, $id);
+    }
+    // The second entry opened with „Upraviť" and issued again: version 2.
+    $pdo->prepare("DELETE FROM documents WHERE account_id = ? AND parent_type = 'inspection' AND parent_id = ?")->execute([$aSrc, $src[1]]);
+    $pdo->prepare("UPDATE inspections SET status = 'draft', issued_before = 1, details = JSON_REMOVE(details, '$.issued') WHERE id = ?")->execute([$src[1]]);
+    $expect('10 source: PK-STA-002 issued again as version 2', $r6Issue($aSrc, $uSrc, $src[1]), ['number' => 'PK-STA-002', 'version' => 2]);
+    $archive6 = \Firol\Backup\Writer::build($aSrc, false, true);
+
+    [$aDst, $uDst] = $r6Account('ciel');
+    [$cDst, $fDst] = $r6Company($aDst, 'Stavebniny Kováč');
+    $BN6::assignProposal($aDst, $cDst, 'Stavebniny Kováč');
+    $dst1 = $r6Ukon($aDst, $uDst, $cDst, $fDst, 'poziarna_kniha', '2026-10-01', $bookDetails, []);
+    $expect('10 target: its own firma holds STA', $r6Issue($aDst, $uDst, $dst1)['number'] ?? null, 'PK-STA-001');
+
+    $result6 = \Firol\Backup\Restorer::run($aDst, $uDst, $archive6['path'], \Firol\Backup\Restorer::MODE_MERGE);
+    @unlink($archive6['path']);
+    $restoredFirma = (int) $pdo->query("SELECT id FROM companies WHERE account_id = $aDst AND name = 'Stavby Novák s.r.o.'")->fetchColumn();
+    $entries = $pdo->query("SELECT i.executed_on, i.status, i.issued_before, i.book_number, i.book_number_version,
+                                   (SELECT GROUP_CONCAT(d.number, ' v', d.version) FROM documents d WHERE d.account_id = i.account_id AND d.parent_type = 'inspection' AND d.parent_id = i.id) AS docs
+                            FROM inspections i WHERE i.account_id = $aDst AND i.company_id = $restoredFirma ORDER BY i.executed_on")->fetchAll(PDO::FETCH_ASSOC);
+    $expect('10 restore: the firma gets another code, its counter at 0', [$code6 = (string) $pdo->query("SELECT book_code FROM companies WHERE id = $restoredFirma")->fetchColumn(),
+        (int) $pdo->query("SELECT book_last_seq FROM companies WHERE id = $restoredFirma")->fetchColumn()], ['STV', 0]);
+    $expect('10 restore: PK-STA-001 is taken here — that entry is an unlocked draft without a number or a document',
+        array_values($entries[0] ?? []), ['2026-09-01', 'draft', 1, null, 0, null]);
+    $expect('10 restore: PK-STA-002 keeps its number and version 2 (entry and document)',
+        array_values($entries[1] ?? []), ['2026-09-02', 'finalized', 1, 'PK-STA-002', 2, 'PK-STA-002 v2']);
+    $expect('10 restore: PK-STA-003 keeps its number', [$entries[2]['book_number'] ?? null, $entries[2]['docs'] ?? null], ['PK-STA-003', 'PK-STA-003 v1']);
+    $w = implode("\n", $result6['warnings']);
+    $expect('10 restore: the warnings say what happened to each entry', [
+        str_contains($w, 'Firma „Stavby Novák s.r.o.": kód „STA" už v tomto účte patrí inému klientovi — dostala kód „STV"'),
+        str_contains($w, 'PK-STA-002, PK-STA-003. Ten klient tieto čísla pri ďalších zápisoch preskočí.'),
+        str_contains($w, 'Zápis do požiarnej knihy č. PK-STA-001: toto číslo už v účte má iný zápis — zápis je obnovený ako rozpracovaný'),
+        !str_contains($w, 'si čísla ponechali'), // the old, untrue „vystavené zápisy si čísla ponechali" is gone
+    ], [true, true, true, true]);
+    $dst2 = $r6Ukon($aDst, $uDst, $cDst, $fDst, 'poziarna_kniha', '2026-11-01', $bookDetails, []);
+    $expect('10 the next issue of the firma holding STA skips the restored numbers (no 500)', $r6Issue($aDst, $uDst, $dst2)['number'] ?? null, 'PK-STA-004');
+    $lostId = (int) $pdo->query("SELECT id FROM inspections WHERE account_id = $aDst AND company_id = $restoredFirma AND executed_on = '2026-09-01'")->fetchColumn();
+    $expect('10 the entry that lost its number is issued under the firma\'s new code', $r6Issue($aDst, $uDst, $lostId)['number'] ?? null, 'PK-STV-001');
+
+    // A code is taken also by numbers of its series alone.
+    $pdo->prepare("INSERT INTO documents (account_id, parent_type, parent_id, type, number, file_path, generated_at) VALUES (?, 'inspection', ?, 'poziarna_kniha', 'PK-QUA-007', 'x.pdf', NOW())")
+        ->execute([$aDst, $dst1]);
+    $expect('10 a code only numbers use is taken (proposal and edit)', [$BN6::isCodeTaken($aDst, 'QUA'), $BN6::propose($aDst, 'Quarta')], [true, 'QUR']);
+
+    // Lock order: the restore's first statement locks the firms; an issue at the
+    // same moment waits, then skips a number the restore wrote.
+    $dst3 = $r6Ukon($aDst, $uDst, $cDst, $fDst, 'poziarna_kniha', '2026-11-02', $bookDetails, []);
+    $pdo->beginTransaction();
+    $pdo->prepare('SELECT id FROM companies WHERE account_id = ? ORDER BY id FOR UPDATE')->execute([$aDst]);
+    $pdo->prepare("INSERT INTO documents (account_id, parent_type, parent_id, type, number, file_path, generated_at) VALUES (?, 'inspection', ?, 'poziarna_kniha', 'PK-STA-005', 'y.pdf', NOW())")
+        ->execute([$aDst, $dst1]);
+    $racePipes = [];
+    $raceProc = proc_open([PHP_BINARY, __FILE__, '--book-race', (string) $aDst, (string) $dst3, '0'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $racePipes);
+    usleep(1_200_000);
+    $raceStatus = proc_get_status($raceProc);
+    $pdo->commit();
+    $raceOut = trim((string) stream_get_contents($racePipes[1]));
+    $raceErr = trim((string) stream_get_contents($racePipes[2]));
+    proc_close($raceProc);
+    $expect('10 an issue during a restore waits for it, then skips its numbers' . ($raceErr !== '' ? " ($raceErr)" : ''),
+        [$raceStatus['running'], $raceOut], [true, 'PK-STA-006']);
+
+    // Migration 080's backfill takes the newest documents row of an entry.
+    $two = $r6Ukon($aDst, $uDst, $cDst, $fDst, 'poziarna_kniha', '2026-08-01', $bookDetails, []);
+    $pdo->exec("UPDATE inspections SET status = 'finalized' WHERE id = $two");
+    $pdo->prepare("INSERT INTO documents (account_id, parent_type, parent_id, type, number, version, file_path, generated_at) VALUES
+                   (?, 'inspection', ?, 'poziarna_kniha', 'PK-2026-881', 1, 'a.pdf', NOW()), (?, 'inspection', ?, 'poziarna_kniha', 'PK-2026-880', 3, 'b.pdf', NOW())")
+        ->execute([$aDst, $two, $aDst, $two]);
+    $sql080 = (string) file_get_contents(__DIR__ . '/../db/migrations/080_book_numbering.sql');
+    $backfill = substr($sql080, (int) strpos($sql080, 'UPDATE inspections i'));
+    $pdo->exec(rtrim(trim($backfill), ';') . " AND i.account_id = $aDst");
+    $expect('10 migration 080: an entry with two documents rows takes the newest version',
+        $pdo->query("SELECT CONCAT(book_number, ' v', book_number_version) FROM inspections WHERE id = $two")->fetchColumn(), 'PK-2026-880 v3');
+
+    // Item 4 — the wording of a bytové družstvo, an archived firma, the stored proposals.
+    $codeMsg = static function (string $raw, string $kind) use ($BN6): string {
+        try {
+            $BN6::normalizeCode($raw, $kind);
+            return '';
+        } catch (\InvalidArgumentException $e) {
+            return $e->getMessage();
+        }
+    };
+    $expect('10 the code messages use the client kind', [$codeMsg('X', 'bytove_druzstvo'), $codeMsg('12', 'firma'),
+        \Firol\Support\ClientKind::bookCodeLocked('bytove_druzstvo'), \Firol\Support\ClientKind::bookCodeTaken('BYT', 'bytove_druzstvo')], [
+        'Kód bytového družstva musí mať 2 až 4 znaky — písmená bez diakritiky alebo číslice.',
+        'Kód firmy musí obsahovať aspoň jedno písmeno.',
+        'Kód sa už nedá zmeniť — bytové družstvo má vystavený zápis do požiarnej knihy.',
+        'Kód „BYT" už má iné bytové družstvo tohto účtu. Zvoľ iný.',
+    ]);
+    [$aMig, ] = $r6Account('migracia');
+    [$cVer1, ] = $r6Company($aMig, 'Verex s.r.o.');
+    [$cVer2, ] = $r6Company($aMig, 'Verona a.s.');
+    [$cQ6, ] = $r6Company($aMig, 'Q 1');
+    $migration081 = require __DIR__ . '/../db/migrations/081_book_code_proposals.php';
+    $migration081($pdo);
+    $expect('10 migration 081: two old firms with the same letters get different stored codes, by id; a name without one keeps none',
+        $pdo->query("SELECT book_code FROM companies WHERE id IN ($cVer1, $cVer2, $cQ6) ORDER BY id")->fetchAll(PDO::FETCH_COLUMN), ['VER', 'VEO', null]);
+
+    // Item 5 — the origin of a carried defect must name a defect of its record.
+    $pp = $prehliadkaId6 = $r6Ukon($a10, $u10, $c10, $f10, 'preventivna_prehliadka', '2026-10-05', null,
+        [['title' => 'Chýba PHP', 'scope' => 'po', 'description' => 'Popis', 'status' => 'zisteny']]);
+    $ppItem = (int) $pdo->query("SELECT id FROM inspection_items WHERE inspection_id = $pp")->fetchColumn();
+    $PP = \Firol\Support\PrehliadkaPrevious::class;
+    $expect('10 an origin names a defect of its record; a made-up one does not',
+        [$PP::namesDefectOf("p$pp-$ppItem", $pp), $PP::namesDefectOf("p$pp-999999999", $pp), $PP::namesDefectOf("p1-$ppItem", $pp), $PP::namesDefectOf('x-1', $pp)],
+        [true, false, false, false]);
+} catch (Throwable $e) {
+    $failures++;
+    echo 'FAIL part 10 stopped: ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ")\n";
+} finally {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    foreach ($r6Accounts as $acc) {
+        $files = $pdo->prepare('SELECT v.file_path FROM document_versions v JOIN documents d ON d.id = v.document_id WHERE d.account_id = ?');
+        $files->execute([$acc]);
+        foreach ($files->fetchAll(PDO::FETCH_COLUMN) as $rel) {
+            @unlink(\Firol\Storage\Storage::documentAbsolute((string) $rel));
+        }
+        foreach (glob(\Firol\Storage\Storage::documentAbsolute("documents/$acc") . '/*/*.pdf') ?: [] as $leftover) {
+            @unlink($leftover);
+        }
+        \Firol\Support\AccountPurge::everything($acc);
+        $pdo->prepare('DELETE FROM inspections WHERE account_id = ?')->execute([$acc]);
+        $pdo->prepare('DELETE FROM document_sequences WHERE account_id = ?')->execute([$acc]);
+        $pdo->prepare('DELETE FROM accounts WHERE id = ?')->execute([$acc]);
+    }
+    foreach ($r6Users as $uid) {
         $pdo->prepare('DELETE FROM audit_log WHERE actor_user_id = ?')->execute([$uid]);
         $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$uid]);
     }
