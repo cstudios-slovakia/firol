@@ -128,11 +128,25 @@ foreach (['IDOKLAD_CLIENT_ID', 'IDOKLAD_CLIENT_SECRET'] as $name) {
 $_ENV['IDOKLAD_ISSUE_MODE'] = 'prepare';
 unset($_ENV['IDOKLAD_ALLOW_TEST_EVENTS'], $_ENV['BILLING_RECONCILE']);
 $_ENV['SMTP_HOST'] = '';
+// One example operator address: no captured alert names a real address.
+$_ENV['ADMIN_EMAIL'] = 'ops-test@example.com';
 IDokladClient::assertStub();
 if (StripeClient::extraTechnicianProductId() === '') {
     fwrite(STDERR, "STRIPE_PRODUCT_EXTRA_TECHNICIAN is not set (a test-mode product id).\n");
     exit(1);
 }
+if (\Firol\Billing\Vat::stripeTaxRateId() === '') {
+    fwrite(STDERR, "STRIPE_TAX_RATE_ID is not set (a test-mode exclusive tax rate, DPH 23 %).\n");
+    exit(1);
+}
+$taxRate = \Firol\Billing\Vat::stripeTaxRateId();
+// Mail of this process and of every child goes to this file (Mailer capture),
+// never to an SMTP server.
+$mailFile = tempnam(sys_get_temp_dir(), 'billing-stripe-mail');
+\Firol\Mail\Mailer::$captureFile = $mailFile;
+$mails = static function () use ($mailFile): array {
+    return array_map(static fn ($l) => json_decode($l, true), file($mailFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []);
+};
 
 // Child mode for scenario D: one roster recompute, as a request would run it.
 foreach ($argv as $arg) {
@@ -313,6 +327,9 @@ $subscribe = static function (array $acc, string $period, ?int $trialEnd = null)
         'customer' => $acc['customer'],
         'items'    => $items,
         'metadata' => ['firol_account_id' => (string) $acc['id'], 'billing_period' => $period],
+        // As Checkout sets it (BillingController::checkout): prices are net,
+        // Stripe adds VAT with STRIPE_TAX_RATE_ID.
+        'default_tax_rates' => [\Firol\Billing\Vat::stripeTaxRateId()],
     ];
     if ($trialEnd !== null) {
         $params['trial_end'] = $trialEnd;
@@ -354,7 +371,7 @@ $invoicesOf = static function (string $customer) use ($stripe): array {
 $lineSummary = static function (array $invoice): string {
     $parts = [];
     foreach ((array) $invoice['lines']['data'] as $l) {
-        $parts[] = sprintf('%s%s %+.2f', StripeShape::lineIsProration($l) ? 'proration ' : '', (string) ($l['description'] ?? ''), $l['amount'] / 100);
+        $parts[] = sprintf('%s%s %+.2f (VAT %+.2f)', StripeShape::lineIsProration($l) ? 'proration ' : '', (string) ($l['description'] ?? ''), $l['amount'] / 100, StripeShape::lineTax($l) / 100);
     }
     return implode(' | ', $parts);
 };
@@ -375,20 +392,30 @@ $issueRecorded = static function (array $acc, array $invoice) use ($pdo): array 
     $rec = new IDokladClient();
     $st  = (new InvoiceIssuer($rec))->issue($rowId);
     $sent = $rec->lastInvoicePost() ?? [];
-    $items = array_map(static fn ($i) => [$i['Name'], $i['Amount'], $i['UnitPrice']], $sent['Items'] ?? []);
-    $sum = (int) round(array_sum(array_map(static fn ($i) => $i['Amount'] * $i['UnitPrice'] * 100, $sent['Items'] ?? [])));
-    return ['status' => $st, 'reason' => null, 'detail' => null, 'items' => $items, 'sum' => $sum, 'row' => $rowId];
+    $items = array_map(static fn ($i) => [$i['Name'], $i['Amount'], $i['UnitPrice'], $i['PriceType']], $sent['Items'] ?? []);
+    // The document's base + VAT as the recorder recounts it (net items get
+    // 23 %, items priced with VAT count as they are).
+    $sum = InvoiceIssuer::documentTotalCents($sent['Items'] ?? []);
+    $s->execute([$invoice['id']]);
+    $after = $s->fetch() ?: [];
+    return ['status' => $st, 'reason' => $after['review_reason'] ?? null, 'detail' => $after['error_message'] ?? null, 'items' => $items, 'sum' => $sum, 'row' => $rowId,
+            'send' => $after['send_state'] ?? null, 'paid' => $after['paid_mark_state'] ?? null];
 };
-$showRecorded = static function (string $label, array $invoice, array $r) use ($note, $eur, $lineSummary): void {
-    $note(sprintf('%s: Stripe total %s, paid %s → %s%s', $label, $eur((int) $invoice['total']), $eur((int) $invoice['amount_paid']),
-        $r['status'], $r['reason'] ? " ({$r['reason']}: {$r['detail']})" : ''));
+// One line of the report table per scenario: Stripe's net, VAT, gross and
+// paid against the recorded payload's base + VAT.
+$table = [];
+$showRecorded = static function (string $label, array $invoice, array $r) use ($note, $eur, $lineSummary, &$table): void {
+    $tax = StripeShape::invoiceTax($invoice);
+    $note(sprintf('%s: Stripe total %s (net %s + VAT %s), paid %s → %s%s', $label, $eur((int) $invoice['total']), $eur((int) $invoice['total'] - $tax), $eur($tax),
+        $eur((int) $invoice['amount_paid']), $r['status'], $r['reason'] ? " ({$r['reason']}: {$r['detail']})" : ''));
     $note('  Stripe lines: ' . $lineSummary($invoice));
-    foreach ($r['items'] as [$name, $amount, $unit]) {
-        $note(sprintf('  iDoklad item: %s — %d × %s €', $name, $amount, number_format($unit, 2, ',', ' ')));
+    foreach ($r['items'] as [$name, $amount, $unit, $priceType]) {
+        $note(sprintf('  iDoklad item: %s — %d × %s € %s', $name, $amount, number_format($unit, 2, ',', ' '), $priceType === 0 ? 's DPH' : '+ DPH'));
     }
     if ($r['sum'] !== null) {
-        $note('  iDoklad items sum ' . $eur($r['sum']));
+        $note('  iDoklad document base + VAT ' . $eur($r['sum']) . (isset($r['send']) ? ", marked paid: {$r['paid']}, e-mailed: {$r['send']}" : ''));
     }
+    $table[] = [$label, (int) $invoice['total'] - $tax, $tax, (int) $invoice['total'], (int) $invoice['amount_paid'], $r['status'] . ($r['reason'] ? '/' . $r['reason'] : ''), $r['sum']];
 };
 $byReason = static function (string $customer, string $reason) use ($invoicesOf): ?array {
     $found = null;
@@ -412,8 +439,13 @@ $throwawayPrice = static function (string $name, int $amount, string $interval =
 // A child process: the iDoklad recorder is prepended (auto_prepend_file — it
 // IS the iDoklad client there too), the iDoklad credentials are blank and
 // the mode is `prepare` (the child reads backend/.env itself; these win).
-$runScript = static function (string $script, array $args, array $env = []): array {
-    $env += ['IDOKLAD_CLIENT_ID' => '', 'IDOKLAD_CLIENT_SECRET' => '', 'IDOKLAD_ISSUE_MODE' => 'prepare', 'IDOKLAD_ALLOW_TEST_EVENTS' => ''];
+$runScript = static function (string $script, array $args, array $env = []) use ($mailFile): array {
+    $env += ['IDOKLAD_CLIENT_ID' => '', 'IDOKLAD_CLIENT_SECRET' => '', 'IDOKLAD_ISSUE_MODE' => 'prepare', 'IDOKLAD_ALLOW_TEST_EVENTS' => '',
+             'ADMIN_EMAIL' => 'ops-test@example.com', 'FIROL_TEST_MAIL_CAPTURE' => $mailFile];
+    // proc_open() drops variables with an empty value: the recorder blanks
+    // the ones listed here before the child's Dotenv runs (and checks it).
+    $env['FIROL_TEST_BLANK'] = implode(',', array_keys(array_filter($env, static fn ($v) => $v === '')));
+    $env = array_filter($env, static fn ($v) => $v !== '');
     $p = proc_open([PHP_BINARY, '-d', 'auto_prepend_file=' . __DIR__ . '/lib/idoklad-recorder.php', __DIR__ . '/' . $script, ...$args],
         [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, array_merge(getenv(), $env));
     $out = (string) stream_get_contents($pipes[1]) . (string) stream_get_contents($pipes[2]);
@@ -824,14 +856,8 @@ if ($run('H')) {
     $inv = $byReason($acc['customer'], 'subscription_cycle');
     $r = $issueRecorded($acc, $inv);
     $showRecorded('H9 renewal after add-and-remove (negative net)', $inv, $r);
-    $expect('H9 negative net held as a credit', [$r['status'], $r['reason']], ['needs_review', 'credit']);
-    $checks = array_column(\Firol\Billing\ConfigCheck::run(), null, 'key');
-    $expect('H9 admin ERROR naming the account and the amount paid', [$checks['invoices_held']['level'] ?? null,
-        str_contains((string) ($checks['invoices_held']['message'] ?? ''), '(#' . $acc['id'] . ') ' . $eur((int) $inv['amount_paid']))], ['error', true]);
-    [, $out1] = $runScript('billing-daily.php', ['--only=invoices', '--account=' . $acc['id']]);
-    [, $out2] = $runScript('billing-daily.php', ['--only=invoices', '--account=' . $acc['id']]);
-    $expect('H9 the daily run alerts it once (the webhook-time alert had no mail here), not again',
-        [str_contains($out1, "row={$r['row']} held (credit) — operator alerted"), str_contains($out2, "row={$r['row']}")], [true, false]);
+    // Decisions part 3: the credit is a negative line of the same invoice.
+    $expect('H9 negative net: issued with a negative line, the document = amount paid', [$r['status'], $r['sum'], ($r['items'][0][2] ?? 0) < 0], ['issued', (int) $inv['amount_paid'], true]);
 
     // H6 a real removal: still a credit, held.
     $clock = $newClock('H6 removal');
@@ -845,8 +871,9 @@ if ($run('H')) {
     $advance($clock, $clockNow($clock) + 22 * 86400);
     $inv = $byReason($acc['customer'], 'subscription_cycle');
     $r = $issueRecorded($acc, $inv);
-    $showRecorded('H6 renewal after a removal', $inv, $r);
-    $expect('H6 removal credit held for review (credit)', [$r['status'], $r['reason']], ['needs_review', 'credit']);
+    $showRecorded('H6 renewal after a removal (monthly)', $inv, $r);
+    $expect('H6 removal: issued with „(−1 technik)" as a negative line, the document = amount paid',
+        [$r['status'], $r['sum'], str_contains($r['items'][0][0] ?? '', 'pomerná časť (−1 technik)'), ($r['items'][0][2] ?? 0) < 0], ['issued', (int) $inv['amount_paid'], true, true]);
     echo "\n";
 }
 
@@ -891,6 +918,7 @@ if ($run('K')) {
             'items'     => BillingController::checkoutLineItems('monthly', SeatSync::wantedExtra($acc['id'], 2)),
             'discounts' => [['coupon' => $couponId]],
             'metadata'  => ['firol_account_id' => (string) $acc['id'], 'billing_period' => 'monthly'],
+            'default_tax_rates' => [$taxRate],
         ]);
         BillingController::handleSubscriptionUpsert($sub);
         $expect("$label account knows the next charge is before the discount", (int) $accountRow($acc['id'])['stripe_has_discount'], 1);
@@ -906,7 +934,12 @@ if ($run('K')) {
         $showRecorded("$label renewal with an extra technician added", $inv, $r);
         $expect("$label renewal issued, items sum to the amount paid", [$r['status'], $r['sum']], ['issued', (int) $inv['amount_paid']]);
         $pro = array_values(array_filter($r['items'], static fn ($i) => str_contains($i[0], 'pomerná časť')));
-        $expect("$label the proration line of the discounted subscription says „po zľave\"", $pro !== [] && str_contains($pro[0][0], 'po zľave'), true);
+        // „po zľave" only where Stripe priced the proration „with … off".
+        $stripeOff = false;
+        foreach ((array) $inv['lines']['data'] as $l) {
+            $stripeOff = $stripeOff || (StripeShape::lineIsProration($l) && preg_match('/\(with [^)]* off\)/i', (string) ($l['description'] ?? '')));
+        }
+        $expect("$label the proration line says „po zľave\" exactly when Stripe's proration line is priced „with … off\"", $pro !== [] && str_contains($pro[0][0], 'po zľave'), $stripeOff);
     }
 
     // K3 a coupon on the customer, not on the subscription.
@@ -1241,6 +1274,311 @@ if ($run('P')) {
     echo "\n";
 }
 
+
+// ── Decisions of 18. 11. 2026 (docs/prompts/billing-decisions-2026-11.md) ──
+// A main user who can log in, and a JSON client over nginx for that session.
+$loginAs = static function (array $acc) use ($pdo): \Closure {
+    $pw = 'Pw-' . bin2hex(random_bytes(4)) . '-123';
+    $mainId = (int) $pdo->query('SELECT main_user_id FROM accounts WHERE id = ' . (int) $acc['id'])->fetchColumn();
+    $pdo->prepare('UPDATE users SET password_hash = ?, vop_version = ?, vop_accepted_at = NOW(), privacy_version = ?, privacy_accepted_at = NOW() WHERE id = ?')
+        ->execute([\Firol\Auth\Password::hash($pw), \Firol\Legal\Terms::VOP_VERSION, \Firol\Legal\Terms::PRIVACY_VERSION, $mainId]);
+    $email = (string) $pdo->query('SELECT email FROM users WHERE id = ' . $mainId)->fetchColumn();
+    $cookie = tempnam(sys_get_temp_dir(), 'billing-http');
+    $csrf = '';
+    $http = static function (string $method, string $path, ?array $body = null) use ($cookie, &$csrf): array {
+        $ch = curl_init('http://nginx' . $path);
+        curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 60,
+            CURLOPT_COOKIEJAR => $cookie, CURLOPT_COOKIEFILE => $cookie,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: application/json', 'X-CSRF-Token: ' . $csrf]]);
+        if ($body !== null) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
+        }
+        $out = (string) curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        return [$code, json_decode($out, true)];
+    };
+    [, $login] = $http('POST', '/api/auth/login', ['email' => $email, 'password' => $pw]);
+    $csrf = (string) ($login['csrfToken'] ?? '');
+    return $http;
+};
+
+// ── V: VAT (decisions part 1) ───────────────────────────────────────────
+if ($run('V')) {
+    echo "V — VAT: Checkout's tax line, the tax rate put on an old subscription, every line taxed\n";
+    // V1 Checkout over HTTP as the main user: the session carries the tax.
+    $clock = $newClock('V1 checkout');
+    $acc = $newAccount($clock, 'V1 checkout');
+    $addTech($acc, false);
+    $addTech($acc, false); // one extra technician
+    // No local trial left: the first invoice is due at once, so the page
+    // shows the amounts (with a trial it shows 0 € due today).
+    $pdo->prepare('UPDATE accounts SET subscription_end_date = ? WHERE id = ?')->execute([date('Y-m-d', time() - 86400), $acc['id']]);
+    $http = $loginAs($acc);
+    [$code, $res] = $http('POST', '/api/billing/checkout', ['billing_period' => 'monthly']);
+    if (isset($res['id'])) {
+        $sessions[] = (string) $res['id'];
+        $sess = $stripe->checkout->sessions->retrieve((string) $res['id'], ['expand' => ['line_items']]);
+        $note(sprintf('V1 Checkout session payload: amount_subtotal %d, total_details.amount_tax %d, amount_total %d; lines: %s',
+            $sess->amount_subtotal, $sess->total_details->amount_tax, $sess->amount_total,
+            implode(', ', array_map(static fn ($li) => "{$li->description} {$li->amount_subtotal} + tax {$li->amount_tax}", $sess->line_items->data))));
+        $expect('V1 Checkout (opened by the app) adds 23 % VAT to the net prices: tax line on the page', [$code, $sess->total_details->amount_tax, $sess->amount_total],
+            [200, \Firol\Billing\Vat::of((int) $sess->amount_subtotal), (int) $sess->amount_subtotal + \Firol\Billing\Vat::of((int) $sess->amount_subtotal)]);
+        $expect('V1 …due now: 19 € plan + 10 € extra technician net', (int) $sess->amount_subtotal, 2900);
+    } else {
+        $expect('V1 Checkout opens', [$code, $res], [200, 'a session']);
+    }
+    $portal = $http('POST', '/api/billing/portal', []);
+    $expect('V1 the customer portal opens (it lists Stripe\'s invoices with their tax lines)', $portal[0], 200);
+
+    // V2 a subscription that has no tax rate (an old one): the daily run puts it on.
+    $clock = $newClock('V2 old subscription');
+    $acc = $newAccount($clock, 'V2 old subscription');
+    $addTech($acc, false);
+    $sub = $stripe->subscriptions->create(['customer' => $acc['customer'], 'items' => BillingController::checkoutLineItems('monthly', 0),
+        'metadata' => ['firol_account_id' => (string) $acc['id'], 'billing_period' => 'monthly']]);
+    $_ENV['BILLING_RECONCILE'] = 'off';
+    BillingController::handleSubscriptionUpsert($sub);
+    $checks = array_column(\Firol\Billing\ConfigCheck::run(), null, 'key');
+    $expect('V2 a live subscription without the tax rate is an admin ERROR naming the account (switch off: nothing pushed)',
+        [$checks['subscriptions_no_vat']['level'] ?? null, str_contains((string) ($checks['subscriptions_no_vat']['message'] ?? ''), '(#' . $acc['id'] . ')'), StripeShape::subscriptionTaxRateIds(StripeShape::arr($stripe->subscriptions->retrieve($sub->id)))],
+        ['error', true, []]);
+    unset($_ENV['BILLING_RECONCILE']);
+    [, $out] = $runScript('billing-daily.php', ['--only=seats', '--account=' . $acc['id']]);
+    $expect('V2 the daily run sets the default tax rate (BILLING_RECONCILE on), no proration from it',
+        [StripeShape::subscriptionTaxRateIds(StripeShape::arr($stripe->subscriptions->retrieve($sub->id))), $pendingItems($acc['customer'])], [[$taxRate], []]);
+    $checks = array_column(\Firol\Billing\ConfigCheck::run(), null, 'key');
+    $expect('V2 …the admin error is gone for it', str_contains((string) ($checks['subscriptions_no_vat']['message'] ?? ''), '(#' . $acc['id'] . ')'), false);
+    // Additions and a removal in the period: every line of the renewal taxed.
+    $advance($clock, $clockNow($clock) + 5 * 86400 + 3600);
+    $tA = $addTech($acc);
+    $tB = $addTech($acc);
+    $advance($clock, $clockNow($clock) + 9 * 86400 + 777);
+    $removeTech($acc, $tA);
+    $advance($clock, $clockNow($clock) + 18 * 86400);
+    $inv = $byReason($acc['customer'], 'subscription_cycle');
+    $untaxed = array_filter((array) $inv['lines']['data'], static fn ($l) => (int) $l['amount'] !== 0 && StripeShape::lineTax($l) === 0);
+    $expect('V2 renewal: VAT on every line (plan, extra, the prorations of the additions and the removal)', count($untaxed), 0);
+    $perLine = 0;
+    foreach ((array) $inv['lines']['data'] as $l) {
+        $perLine += \Firol\Billing\Vat::of((int) $l['amount'] - array_sum(array_map(static fn ($d) => (int) $d['amount'], (array) ($l['discount_amounts'] ?? []))));
+    }
+    $expect('V2 Stripe rounds per line: the invoice VAT is the sum of 23 % of each line, rounded', StripeShape::invoiceTax($inv), $perLine);
+    $r = $issueRecorded($acc, $inv);
+    $showRecorded('V2 renewal of an old subscription after the tax rate was set', $inv, $r);
+    $expect('V2 issued, the document = amount paid, marked paid and e-mailed (recorder)', [$r['status'], $r['sum'], $r['paid'], $r['send']], ['issued', (int) $inv['amount_paid'], 'done', 'sent']);
+    echo "\n";
+}
+
+// ── CR: credits on the same invoice (decisions part 3) ──────────────────
+if ($run('CR')) {
+    echo "CR — credits: yearly removal, a credit larger than the next invoice (two periods)\n";
+    // CR1 yearly: 2 extra technicians, one removed in month 3.
+    $clock = $newClock('CR1 yearly removal');
+    $acc = $newAccount($clock, 'CR1 yearly removal');
+    $addTech($acc, false);
+    $t = $addTech($acc, false);
+    $addTech($acc, false);
+    $subscribe($acc, 'yearly'); // extra qty 2
+    $advance($clock, $clockNow($clock) + 90 * 86400);
+    $removeTech($acc, $t);
+    $advance($clock, $clockNow($clock) + 280 * 86400);
+    $inv = $byReason($acc['customer'], 'subscription_cycle');
+    $r = $issueRecorded($acc, $inv);
+    $showRecorded('CR1 yearly renewal after a removal', $inv, $r);
+    $expect('CR1 issued with „(−1 technik)" as a negative line, the document = amount paid',
+        [$r['status'], $r['sum'], str_contains($r['items'][0][0] ?? '', '(−1 technik)'), ($r['items'][0][2] ?? 0) < 0], ['issued', (int) $inv['amount_paid'], true, true]);
+
+    // CR2 three extra technicians removed a day in: the credit is larger
+    // than the next renewal (no document, carried), the one after is paid
+    // partly from it (a „Kredit z predchádzajúceho obdobia" line).
+    $clock = $newClock('CR2 credit carried');
+    $acc = $newAccount($clock, 'CR2 credit carried');
+    $addTech($acc, false);
+    $ts = [$addTech($acc, false), $addTech($acc, false), $addTech($acc, false)];
+    $subscribe($acc, 'monthly'); // extra qty 3
+    $advance($clock, $clockNow($clock) + 86400);
+    foreach ($ts as $t) {
+        $pdo->prepare('DELETE FROM account_users WHERE account_id = ? AND user_id = ?')->execute([$acc['id'], $t]);
+    }
+    SeatSync::recompute($acc['id']); // one roster change: 3 → 0
+    $advance($clock, $clockNow($clock) + 31 * 86400);
+    $inv1 = $byReason($acc['customer'], 'subscription_cycle');
+    $r1 = $issueRecorded($acc, $inv1);
+    $showRecorded('CR2 first renewal (credit larger than the invoice)', $inv1, $r1);
+    $expect('CR2 first renewal: total below 0, nothing paid → no document, credit carried (Stripe keeps it on the customer)',
+        [$r1['status'], $r1['reason'], (int) $inv1['amount_paid'], (int) ($inv1['ending_balance'] ?? 0) < 0], ['no_document', 'credit_carried', 0, true]);
+    $advance($clock, $clockNow($clock) + 31 * 86400);
+    $inv2 = null;
+    foreach ($invoicesOf($acc['customer']) as $i) {
+        if (($i['billing_reason'] ?? '') === 'subscription_cycle' && $i['id'] !== $inv1['id'] && (int) $i['total'] > 0) {
+            $inv2 = $i;
+        }
+    }
+    $r2 = $issueRecorded($acc, $inv2);
+    $showRecorded('CR2 second renewal (paid partly from the credit)', $inv2, $r2);
+    $last = end($r2['items']) ?: [];
+    if ((int) $inv2['amount_paid'] > 0) {
+        $expect('CR2 second renewal: issued with „Kredit z predchádzajúceho obdobia" for the part the credit paid, the document = amount paid',
+            [$r2['status'], $last[0] ?? null, round(($last[2] ?? 0) * 100), $r2['sum']],
+            ['issued', 'Kredit z predchádzajúceho obdobia', (float) -((int) $inv2['total'] - (int) $inv2['amount_paid']), (int) $inv2['amount_paid']]);
+    } else {
+        $expect('CR2 second renewal covered entirely by the credit → no document (credit covered)', [$r2['status'], $r2['reason']], ['no_document', 'credit_covered']);
+    }
+    echo "\n";
+}
+
+// ── GR: a failed renewal — 14 days, then read-only (decisions part 2) ───
+if ($run('GR')) {
+    echo "GR — failed renewal: e-mail and banner, usable for 14 days, then read-only; payment restores; a second failure counts its own 14 days\n";
+    $clock = $newClock('GR grace');
+    $acc = $newAccount($clock, 'GR grace');
+    $sub = $subscribe($acc, 'monthly');
+    $http = $loginAs($acc);
+    $fail = $stripe->paymentMethods->attach('pm_card_chargeCustomerFail', ['customer' => $acc['customer']]);
+    $stripe->customers->update($acc['customer'], ['invoice_settings' => ['default_payment_method' => $fail->id]]);
+    $advance($clock, $clockNow($clock) + 31 * 86400 + 3 * 3600);
+    $failed = null;
+    foreach ($invoicesOf($acc['customer']) as $i) {
+        if (($i['status'] ?? '') === 'open') {
+            $failed = $i;
+        }
+    }
+    // The webhook: invoice.payment_failed (Stripe's own event of this invoice).
+    $ev = null;
+    foreach ($stripe->events->all(['type' => 'invoice.payment_failed', 'created' => ['gte' => $t0 - 60], 'limit' => 100])->autoPagingIterator() as $e) {
+        if ((string) ($e->data->object->id ?? '') === (string) ($failed['id'] ?? '')) {
+            $ev = $e;
+        }
+    }
+    file_put_contents($mailFile, '');
+    if ($ev !== null) {
+        BillingController::dispatchEvent($ev);
+        BillingController::dispatchEvent($ev); // delivered twice
+    } else {
+        BillingController::handleSubscriptionUpsert($sub);
+    }
+    \Firol\Billing\PaymentGrace::sendPendingEmails($acc['id']);
+    \Firol\Billing\PaymentGrace::sendPendingEmails($acc['id']);
+    $row = $accountRow($acc['id']);
+    $graceEnd = date('Y-m-d', (int) $failed['created'] + 14 * 86400);
+    $toUser = array_values(array_filter($mails(), static fn ($m) => str_contains((string) $m['subject'], 'Platba za predplatné POapp sa nepodarila')));
+    $expect('GR the renewal fails: past_due, the paid-until date capped at the failure + 14 days (not the period end Stripe moved ahead)',
+        [$row['stripe_status'], $row['subscription_end_date'], (string) $row['subscription_end_date'] < date('Y-m-d', StripeShape::subscriptionPeriodEnd(StripeShape::arr($stripe->subscriptions->retrieve($sub->id))))],
+        ['past_due', $graceEnd, true]);
+    $expect('GR one e-mail to the main user (also with the event delivered twice): amount with VAT, the read-only date, the link to pay',
+        [count($toUser), str_contains((string) ($toUser[0]['text'] ?? ''), number_format((int) $failed['amount_due'] / 100, 2, ',', ' ') . ' EUR (s DPH)'),
+         str_contains((string) ($toUser[0]['text'] ?? ''), date('j. n. Y', strtotime($graceEnd . ' 12:00') + 86400)), str_contains((string) ($toUser[0]['text'] ?? ''), '/billing')],
+        [1, true, true, true]);
+    [, $me] = $http('GET', '/api/me');
+    $mine = array_values(array_filter((array) ($me['accounts'] ?? []), static fn ($a) => (int) $a['id'] === (int) $acc['id']))[0] ?? [];
+    $expect('GR the banner data for every member: amount and the first read-only day', $mine['payment_failed'] ?? null,
+        ['amount_cents' => (int) $failed['amount_due'], 'currency' => 'EUR', 'failed_at' => date('Y-m-d', (int) $failed['created']), 'read_only_from' => date('Y-m-d', strtotime($graceEnd . ' 12:00') + 86400)]);
+    // The server's „today" is real time, the clock's is not: the failure is
+    // moved to 13 and 15 real days ago and the subscription read again.
+    $setFailedAgo = static function (int $days) use ($pdo, $failed, $sub): void {
+        $pdo->prepare('UPDATE billing_payment_failures SET failed_at = ? WHERE stripe_invoice_id = ?')->execute([date('Y-m-d H:i:s', time() - $days * 86400), $failed['id']]);
+        BillingController::handleSubscriptionUpsert($sub);
+    };
+    $setFailedAgo(13);
+    [$c13] = $http('POST', '/api/companies', []);
+    $setFailedAgo(15);
+    [$c15, $b15] = $http('POST', '/api/companies', []);
+    $expect('GR day 13: still writable (a write is not refused with 402); day 15: read-only — the server refuses the write with 402',
+        [$c13 !== 402, $c15, $b15['error'] ?? null], [true, 402, 'Predplatné vypršalo. Účet je v režime len na čítanie.']);
+    // Payment: the open invoice paid with a good card.
+    $good = $stripe->paymentMethods->attach('pm_card_visa', ['customer' => $acc['customer']]);
+    $stripe->customers->update($acc['customer'], ['invoice_settings' => ['default_payment_method' => $good->id]]);
+    $stripe->invoices->pay((string) $failed['id'], ['payment_method' => $good->id]);
+    $paidEvent = null;
+    foreach ($stripe->events->all(['type' => 'invoice.paid', 'created' => ['gte' => $t0 - 60], 'limit' => 100])->autoPagingIterator() as $e) {
+        if ((string) ($e->data->object->id ?? '') === (string) $failed['id']) {
+            $paidEvent = $e;
+        }
+    }
+    if ($paidEvent !== null) {
+        BillingController::dispatchEvent($paidEvent);
+    } else {
+        BillingController::handleSubscriptionUpsert($sub);
+    }
+    $row = $accountRow($acc['id']);
+    [$cPaid] = $http('POST', '/api/companies', []);
+    $expect('GR paid: active at once, the real period end back, writable, no banner',
+        [$row['stripe_status'], $row['subscription_end_date'], $cPaid !== 402, \Firol\Billing\PaymentGrace::bannerFor($acc['id'], 'past_due')],
+        ['active', date('Y-m-d', (int) StripeShape::subscriptionPeriodEnd(StripeShape::arr($stripe->subscriptions->retrieve($sub->id)))), true, null]);
+    // A second failure in a later period: its own 14 days.
+    $fail2 = $stripe->paymentMethods->attach('pm_card_chargeCustomerFail', ['customer' => $acc['customer']]);
+    $stripe->customers->update($acc['customer'], ['invoice_settings' => ['default_payment_method' => $fail2->id]]);
+    $advance($clock, (int) StripeShape::subscriptionPeriodEnd(StripeShape::arr($stripe->subscriptions->retrieve($sub->id))) + 2 * 3600);
+    BillingController::handleSubscriptionUpsert($sub);
+    $second = null;
+    foreach ($invoicesOf($acc['customer']) as $i) {
+        if (($i['status'] ?? '') === 'open') {
+            $second = $i;
+        }
+    }
+    $expect('GR a second failure in a later period (seen from the subscription\'s latest invoice — no event needed) counts its own 14 days',
+        [$accountRow($acc['id'])['stripe_status'], $accountRow($acc['id'])['subscription_end_date']], ['past_due', date('Y-m-d', (int) ($second['created'] ?? 0) + 14 * 86400)]);
+    echo "\n";
+}
+
+// ── U: subscriptions of another product (Part 0, items 1 and 2) ─────────
+if ($run('U')) {
+    echo "U — a subscription of another product is never taken over; an account recorded as cancelled takes over a paid POapp one\n";
+    $otherPrice = $throwawayPrice('Other product (test)', 500);
+    // U1 (S2c): the recorded subscription past_due, another product active.
+    $clock = $newClock('U1 other product');
+    $acc = $newAccount($clock, 'U1 other product');
+    $addTech($acc, false);
+    $addTech($acc, false); // 1 extra technician
+    $subA = $subscribe($acc, 'monthly');
+    $fail = $stripe->paymentMethods->attach('pm_card_chargeCustomerFail', ['customer' => $acc['customer']]);
+    $stripe->customers->update($acc['customer'], ['invoice_settings' => ['default_payment_method' => $fail->id]]);
+    $advance($clock, $clockNow($clock) + 33 * 86400);
+    BillingController::handleSubscriptionUpsert($subA);
+    $good = $stripe->paymentMethods->attach('pm_card_visa', ['customer' => $acc['customer']]);
+    $stripe->customers->update($acc['customer'], ['invoice_settings' => ['default_payment_method' => $good->id]]);
+    $subX = $stripe->subscriptions->create(['customer' => $acc['customer'], 'items' => [['price' => $otherPrice->id, 'quantity' => 1]]]);
+    $endBefore = (string) $accountRow($acc['id'])['subscription_end_date'];
+    BillingController::handleSubscriptionUpsert($subX); // its webhook
+    $expect('U1 the webhook of the other product\'s subscription is ignored', [$accountRow($acc['id'])['stripe_subscription_id'], $accountRow($acc['id'])['stripe_status']], [$subA->id, 'past_due']);
+    [, $out] = $runScript('billing-daily.php', ['--only=seats', '--account=' . $acc['id']]);
+    $x = StripeShape::arr($stripe->subscriptions->retrieve($subX->id));
+    $row = $accountRow($acc['id']);
+    $expect('U1 the daily run takes nothing over: no extra item on the other product, its period end not used, not listed as a second subscription',
+        [$row['stripe_subscription_id'], count($x['items']['data']), $row['subscription_end_date'], $row['stripe_other_subscriptions']], [$subA->id, 1, $endBefore, null]);
+    $rSkip[] = $acc['id'];
+
+    // U2 (S2d): recorded as cancelled, another product live — not taken
+    // over; then a paid POapp subscription — taken over, technicians on it.
+    $clock = $newClock('U2 cancelled');
+    $acc = $newAccount($clock, 'U2 cancelled');
+    $addTech($acc, false);
+    $addTech($acc, false);
+    $subA = $subscribe($acc, 'monthly');
+    $stripe->subscriptions->cancel($subA->id);
+    BillingController::handleSubscriptionUpsert($subA);
+    $subX = $stripe->subscriptions->create(['customer' => $acc['customer'], 'items' => [['price' => $otherPrice->id, 'quantity' => 1]]]);
+    [, $out] = $runScript('billing-daily.php', ['--only=seats', '--account=' . $acc['id']]);
+    $expect('U2 recorded cancelled + another product live: the daily run reads the account (item 2) and takes nothing over',
+        [$accountRow($acc['id'])['stripe_subscription_id'], $accountRow($acc['id'])['stripe_status'], count(StripeShape::arr($stripe->subscriptions->retrieve($subX->id))['items']['data'])],
+        [$subA->id, 'canceled', 1]);
+    $subB = $stripe->subscriptions->create(['customer' => $acc['customer'], 'items' => [['price' => StripeClient::priceFor('monthly'), 'quantity' => 1]], 'default_tax_rates' => [$taxRate]]);
+    // A run that may not take it over (Stripe writes refused) names it.
+    BillingController::syncSubscriptionState($acc['id'], true, true);
+    $checks = array_column(\Firol\Billing\ConfigCheck::run(), null, 'key');
+    $expect('U2 …a run that could not take it over: admin ERROR „DB canceled, customer has a live subscription" naming it',
+        [$checks['subscription_ended_live']['level'] ?? null, str_contains((string) ($checks['subscription_ended_live']['message'] ?? ''), $subB->id)], ['error', true]);
+    [, $out] = $runScript('billing-daily.php', ['--only=seats', '--account=' . $acc['id']]);
+    $note('U2 daily: ' . trim(implode(' | ', array_filter(explode("\n", $out), static fn ($l) => str_contains($l, 'account=')))));
+    $row = $accountRow($acc['id']);
+    $expect('U2 a paid POapp subscription after the recorded one was cancelled: taken over by the daily run, its technicians charged on it, alerted once',
+        [$row['stripe_subscription_id'], $row['stripe_status'], $extrasOf($subB->id)['qty'], \Firol\Billing\OperatorAlert::wasSent("takeover:{$acc['id']}:{$subB->id}")],
+        [$subB->id, 'active', 1, true]);
+    $rSkip[] = $acc['id'];
+    echo "\n";
+}
+
 // ── R: webhook replay ───────────────────────────────────────────────────
 if ($run('R') && $accounts !== []) {
     echo "R — replay of the captured events through the real webhook\n";
@@ -1385,12 +1723,15 @@ if ($run('R') && $accounts !== []) {
             $payload = json_decode((string) $r['idoklad_payload_json'], true);
             $wantDesc = \Firol\Idoklad\InvoiceIssuer::deriveDescription($inv);
             if ($r['status'] === 'needs_review') {
-                $expect("R row {$r['id']} held: credit/discount ({$r['review_reason']})", in_array($r['review_reason'], ['credit', 'discount', 'mismatch'], true), true);
+                $expect("R row {$r['id']} held for a reason of the current rules ({$r['review_reason']})", in_array($r['review_reason'], ['no_vat', 'mismatch', 'vat_mismatch'], true), true);
                 $note(sprintf('  needs_review %s: total %s paid %s — %s', $r['stripe_invoice_id'], $eur((int) $r['stripe_total_cents']), $eur((int) $r['stripe_amount_paid_cents']), $r['error_message']));
+            } elseif ($r['status'] === 'no_document') {
+                $expect("R row {$r['id']} no document only when nothing was paid", (int) $r['stripe_amount_paid_cents'], 0);
+                $note(sprintf('  no_document %s (%s): total %s — %s', $r['stripe_invoice_id'], $r['review_reason'], $eur((int) $r['stripe_total_cents']), $r['error_message']));
             } else {
                 $expect("R row {$r['id']} prepared, description from the first non-proration line", [$r['status'], $payload['Description'] ?? null], ['prepared', $wantDesc]);
-                $sum = (int) round(array_sum(array_map(static fn ($i) => $i['Amount'] * $i['UnitPrice'] * 100, $payload['Items'] ?? [])));
-                $expect("R row {$r['id']} payload sums to the amount paid", $sum, (int) $r['stripe_amount_paid_cents']);
+                $sum = InvoiceIssuer::documentTotalCents($payload['Items'] ?? []);
+                $expect("R row {$r['id']} payload base + VAT = the amount paid", $sum, (int) $r['stripe_amount_paid_cents']);
                 $note(sprintf('  prepared %s %s: %s', $r['stripe_invoice_id'], $eur((int) $r['stripe_total_cents']), json_encode(array_map(static fn ($i) => $i['Name'] . ' ' . $i['Amount'] . '×' . $i['UnitPrice'], $payload['Items'] ?? []), JSON_UNESCAPED_UNICODE)));
             }
         }
@@ -1422,5 +1763,15 @@ if ($run('R') && $accounts !== []) {
     echo "\n";
 }
 
+// The report table: Stripe's numbers against the recorded payload.
+if ($table !== []) {
+    echo "Stripe amount_paid against the recorded iDoklad payload (cents):\n";
+    printf("  %-62s %8s %8s %8s %8s  %-26s %8s\n", 'scenario', 'net', 'VAT', 'gross', 'paid', 'outcome', 'payload');
+    foreach ($table as [$label, $net, $vat, $gross, $paid, $outcome, $sum]) {
+        printf("  %-62s %8d %8d %8d %8d  %-26s %8s\n", mb_substr($label, 0, 62), $net, $vat, $gross, $paid, $outcome, $sum === null ? '—' : (string) $sum);
+    }
+    echo "\n";
+}
+@unlink($mailFile);
 echo $failures === 0 ? "All checks passed.\n" : "$failures check(s) FAILED.\n";
 exit($failures === 0 ? 0 : 1);
