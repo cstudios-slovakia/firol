@@ -57,6 +57,20 @@ export type Account = {
   next_charge_before_discount?: boolean;
   /** Extra technicians next_charge_cents includes (Stripe's count while nothing is pushed to Stripe). */
   next_charge_extra_technicians?: number;
+  /** A failed renewal: shown to every member until it is paid; null otherwise. */
+  payment_failed?: PaymentFailed | null;
+};
+
+/**
+ * A renewal whose payment failed (PaymentGrace on the server): the amount
+ * due with VAT, when it failed, and the first day the account is read-only
+ * (PAYMENT_GRACE_DAYS after the failure).
+ */
+export type PaymentFailed = {
+  amount_cents: number;
+  currency: string;
+  failed_at: string;
+  read_only_from: string;
 };
 
 /**

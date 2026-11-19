@@ -20,7 +20,7 @@ import { ApiError } from "@/lib/api";
 import { offlineMessage } from "@/lib/offline";
 import { useToast } from "@/lib/toast";
 import { useCertMissingSyncToast, warmCertProfile } from "@/lib/certMissing";
-import { formatCents, periodPriceLabel, usePricing } from "@/lib/pricing";
+import { chargeLabel, formatCents, periodPriceLabel, usePricing } from "@/lib/pricing";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { OfflineIndicator } from "./OfflineIndicator";
 import { AuroraBackground } from "./AuroraBackground";
@@ -257,6 +257,7 @@ export function AppShell() {
             <AuroraBackground />
             <div ref={topBarRef} className="sticky top-0 z-20">
                 <SubscriptionBanner />
+                <PaymentFailedBanner />
                 <TrialBanner />
                 <header className="border-b border-ink-100/80 bg-white/80 backdrop-blur">
                     <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
@@ -379,13 +380,32 @@ function SubscriptionBanner() {
                     <AlertTriangle className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
-                    <p className="font-semibold">Predplatné vypršalo {human}</p>
-                    <p className="text-xs opacity-80">
-                        Účet je v režime len na čítanie — nové kontroly,
-                        školenia ani úpravy nie sú možné, kým si neobnovíš
-                        predplatné.
-                        {!isMainUser && " Predplatné obnoví hlavný používateľ účtu."}
-                    </p>
+                    {unpaid ? (
+                        <>
+                            <p className="font-semibold">
+                                Platba predplatného nebola uhradená
+                                {account.payment_failed
+                                    ? ` (${formatCents(account.payment_failed.amount_cents)} s DPH)`
+                                    : ""}
+                            </p>
+                            <p className="text-xs opacity-80">
+                                Účet je od {readOnlyHuman(account.payment_failed?.read_only_from) ?? human} len na čítanie —
+                                nové kontroly, školenia ani úpravy nie sú možné. Po zaplatení
+                                sa plný prístup obnoví hneď.
+                                {!isMainUser && " Platbu uhradí hlavný používateľ účtu."}
+                            </p>
+                        </>
+                    ) : (
+                        <>
+                            <p className="font-semibold">Predplatné vypršalo {human}</p>
+                            <p className="text-xs opacity-80">
+                                Účet je v režime len na čítanie — nové kontroly,
+                                školenia ani úpravy nie sú možné, kým si neobnovíš
+                                predplatné.
+                                {!isMainUser && " Predplatné obnoví hlavný používateľ účtu."}
+                            </p>
+                        </>
+                    )}
                 </div>
                 {isMainUser && (
                     <button
@@ -393,6 +413,81 @@ function SubscriptionBanner() {
                         onClick={onPay}
                         disabled={busy}
                         className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-status-bad)] px-3 py-2 text-xs font-semibold text-white shadow transition-opacity hover:opacity-90 disabled:opacity-60"
+                    >
+                        <CreditCard className="size-4" />
+                        {busy ? "Otváram Stripe…" : "Zaplatiť"}
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+}
+
+/** "3. decembra 2026" from a Y-m-d date, or null. */
+function readOnlyHuman(ymd: string | null | undefined): string | null {
+    if (!ymd) return null;
+    const d = new Date(`${ymd}T00:00:00`);
+    return Number.isNaN(d.getTime())
+        ? null
+        : d.toLocaleDateString("sk-SK", { day: "numeric", month: "long", year: "numeric" });
+}
+
+/**
+ * A renewal whose payment failed, while the account is still fully usable
+ * (the grace period, PAYMENT_GRACE_DAYS on the server): every member sees
+ * it with the day the account becomes read-only; the main user gets
+ * „Zaplatiť" (the Stripe portal — card change and paying the open invoice).
+ * After the grace period SubscriptionBanner takes over (read-only).
+ */
+function PaymentFailedBanner() {
+    const { accounts, activeAccountId, csrfToken, isAdmin, user } = useAuth();
+    const toast = useToast();
+    const [busy, setBusy] = useState(false);
+
+    const account = accounts.find((a) => a.id === activeAccountId);
+    if (!account || isAdmin || account.admin_owned) return null;
+    const failed = account.payment_failed;
+    if (!failed) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const readOnly = new Date(`${failed.read_only_from}T00:00:00`);
+    if (Number.isNaN(readOnly.getTime()) || readOnly <= today) return null; // read-only: SubscriptionBanner
+
+    const isMainUser = !!user && user.id === account.main_user_id;
+
+    async function onPay() {
+        setBusy(true);
+        try {
+            const res = await Billing.portal(csrfToken);
+            window.location.assign(res.url);
+        } catch (err) {
+            toast.error(offlineMessage(err, "Platobný portál sa nepodarilo otvoriť."));
+            setBusy(false);
+        }
+    }
+
+    return (
+        <div className="border-b border-amber-300/60 bg-amber-50">
+            <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:gap-3">
+                <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-white/70">
+                    <AlertTriangle className="size-4 text-amber-600" />
+                </span>
+                <div className="min-w-0 flex-1">
+                    <p className="font-semibold">
+                        Platba predplatného ({formatCents(failed.amount_cents)} s DPH) sa nepodarila
+                    </p>
+                    <p className="text-xs opacity-80">
+                        Aplikáciu môžeš plne používať do {readOnlyHuman(failed.read_only_from)}
+                        {" "}— potom bude len na čítanie, kým sa platba neuhradí.
+                        {!isMainUser && " Platbu uhradí hlavný používateľ účtu."}
+                    </p>
+                </div>
+                {isMainUser && (
+                    <button
+                        type="button"
+                        onClick={onPay}
+                        disabled={busy}
+                        className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white shadow transition-all duration-300 hover:bg-amber-700 active:scale-[0.98] disabled:opacity-60"
                     >
                         <CreditCard className="size-4" />
                         {busy ? "Otváram Stripe…" : "Zaplatiť"}
@@ -444,7 +539,7 @@ function TrialBanner() {
     const periodWord = account.billing_period === "yearly" ? "rok" : "mesiac";
     const periodPrice =
         account.next_charge_cents !== null
-            ? `${formatCents(account.next_charge_cents)} / ${periodWord}${account.next_charge_before_discount ? " pred zľavou" : ""}`
+            ? `${chargeLabel(account.next_charge_cents, pricing?.vatPercent ?? 23)} / ${periodWord}${account.next_charge_before_discount ? ", pred zľavou" : ""}`
             : periodPriceLabel(
                   pricing,
                   account.billing_period === "yearly" ? "yearly" : "monthly",

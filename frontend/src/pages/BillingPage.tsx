@@ -16,7 +16,7 @@ import { Skeleton, CardBlockSkeleton } from '@/components/ui/Skeleton';
 import { Badge } from '@/components/ui/Badge';
 import { Dialog } from '@/components/ui/Dialog';
 import { cn } from '@/lib/cn';
-import { formatCents, periodPriceLabel, usePricing, yearlyHint } from '@/lib/pricing';
+import { chargeLabel, formatCents, periodPriceLabel, usePricing, yearlyHint } from '@/lib/pricing';
 
 export function BillingPage() {
   const [account, setAccount] = useState<Account | null>(null);
@@ -87,8 +87,8 @@ function SeatsSection({ account, loading }: { account: Account | null; loading: 
           <SeatStat label="Aktívnych technikov" value={`${active}`} />
           <SeatStat
             label="Extra (nad rámec)"
-            value={extra === 0 ? '0' : `${extra} × ${formatCents(perPeriodCents)}`}
-            hint={extra > 0 ? `+${formatCents(extra * perPeriodCents)} / ${periodWord} (proratované)` : 'Plán nie je preplnený.'}
+            value={extra === 0 ? '0' : `${extra} × ${formatCents(perPeriodCents)} + DPH`}
+            hint={extra > 0 ? `+${formatCents(extra * perPeriodCents)} + DPH / ${periodWord} (proratované)` : 'Plán nie je preplnený.'}
           />
         </div>
 
@@ -108,14 +108,14 @@ function SeatsSection({ account, loading }: { account: Account | null; loading: 
           </div>
         ) : isYearly ? (
           <p className="text-xs text-ink-500">
-            Každý ďalší technik nad zahrnutý počet stojí {formatCents(perYearCents)} / rok.
+            Každý ďalší technik nad zahrnutý počet stojí {formatCents(perYearCents)} + DPH / rok.
             Pri pozvaní sa pomerná časť ceny za zvyšok predplateného roka pripočíta automaticky
             k najbližšej faktúre — pri ročnom predplatnom je to faktúra za jeho obnovu.
           </p>
         ) : (
           <p className="text-xs text-ink-500">
-            Každý ďalší technik nad zahrnutý počet stojí {formatCents(perMonthCents)} / mesiac
-            (pri ročnom predplatnom {formatCents(perYearCents)} / rok). Pri pozvaní sa pomerná časť
+            Každý ďalší technik nad zahrnutý počet stojí {formatCents(perMonthCents)} + DPH / mesiac
+            (pri ročnom predplatnom {formatCents(perYearCents)} + DPH / rok). Pri pozvaní sa pomerná časť
             ceny za zvyšok obdobia pripočíta automaticky k najbližšej faktúre.
           </p>
         )}
@@ -299,9 +299,16 @@ function BillingSection({
   // is the one the charge was built from (Stripe's own while nothing is
   // pushed to Stripe).
   const extra = account.next_charge_extra_technicians ?? account.extra_technicians;
+  // Prices are net; an announced charge says what is paid with VAT.
   const periodPrice = account.next_charge_cents !== null
-    ? `${formatCents(account.next_charge_cents)} / ${isYearly ? 'rok' : 'mesiac'}${extra > 0 ? ` vrátane ${extra} ${extra === 1 ? 'extra technika' : 'extra technikov'}` : ''}${account.next_charge_before_discount ? ' (pred zľavou)' : ''}`
+    ? `${chargeLabel(account.next_charge_cents, account.vat_rate_percent)} / ${isYearly ? 'rok' : 'mesiac'}${extra > 0 ? ` vrátane ${extra} ${extra === 1 ? 'extra technika' : 'extra technikov'}` : ''}${account.next_charge_before_discount ? ', pred zľavou' : ''}`
     : periodPriceLabel(pricing, isYearly ? 'yearly' : 'monthly');
+  // A failed renewal: the day the account becomes read-only.
+  const failed = account.payment_failed;
+  const readOnlyFrom = failed
+    ? new Date(`${failed.read_only_from}T00:00:00`).toLocaleDateString('sk-SK', { day: 'numeric', month: 'long', year: 'numeric' })
+    : null;
+  const failedAmount = failed ? `${formatCents(failed.amount_cents)} s DPH` : null;
 
   const cancelScheduled = account.stripe_cancel_at_period_end && (isActive || isTrialing);
 
@@ -321,10 +328,15 @@ function BillingSection({
                 ? <Badge tone="warn">Zrušené</Badge>
                 : <Badge tone="neutral">Skúšobné obdobie</Badge>;
 
+  const graceText = readOnlyFrom !== null
+    ? (expired
+        ? ` Účet je od ${readOnlyFrom} len na čítanie — po zaplatení sa plný prístup obnoví hneď.`
+        : ` Do ${readOnlyFrom} môžeš aplikáciu plne používať, potom bude len na čítanie, kým platbu nezaplatíš.`)
+    : '';
   const subtitle = isPastDue
-    ? 'Platbu za predplatné sa nepodarilo strhnúť z karty. Stripe ju skúša znova — zaplatiť ju alebo zmeniť kartu môžeš hneď cez „Zaplatiť“.'
+    ? `Platbu za predplatné${failedAmount ? ` (${failedAmount})` : ''} sa nepodarilo strhnúť z karty. Stripe ju skúša znova — zaplatiť ju alebo zmeniť kartu môžeš hneď cez „Zaplatiť“.${graceText}`
     : isUnpaid
-      ? 'Stripe prestal platbu za predplatné skúšať. Zaplať otvorenú faktúru cez „Zaplatiť“ — nové predplatné netreba.'
+      ? `Stripe prestal platbu za predplatné skúšať. Zaplať otvorenú faktúru cez „Zaplatiť“ — nové predplatné netreba.${graceText}`
       : cancelScheduled
         ? `Predplatné bude zrušené ${humanEnd}. Dovtedy máš plný prístup — môžeš ho kedykoľvek obnoviť.`
         : isTrialing

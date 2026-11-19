@@ -1,5 +1,5 @@
 import { api, buildUrl } from '@/lib/api';
-import type { SubscriptionState } from '@/auth/AuthContext';
+import type { PaymentFailed, SubscriptionState } from '@/auth/AuthContext';
 
 export type Account = {
   id: number;
@@ -36,6 +36,10 @@ export type Account = {
   next_charge_before_discount?: boolean;
   /** Extra technicians next_charge_cents includes (Stripe's count while nothing is pushed to Stripe). */
   next_charge_extra_technicians?: number;
+  /** VAT rate in percent (VAT_RATE_PERCENT): every price above is net, the customer pays it plus VAT. */
+  vat_rate_percent: number;
+  /** A failed renewal: amount (with VAT) and the first read-only day; null otherwise. */
+  payment_failed: PaymentFailed | null;
   main_user_id: number | null;
   admin_owned: boolean;
   default_php_user_id: number | null;

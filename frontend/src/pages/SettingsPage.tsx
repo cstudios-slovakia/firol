@@ -1132,7 +1132,7 @@ function TeamSection() {
     // with), else today's price — yearly for a yearly account (not 12 ×
     // monthly), monthly for everyone else.
     const isYearly = seatInfo?.billing_period === "yearly";
-    const perExtraLabel = `${formatCents(seatInfo?.extra_unit_amount_cents ?? 0)} / ${isYearly ? "rok" : "mes"}`;
+    const perExtraLabel = `${formatCents(seatInfo?.extra_unit_amount_cents ?? 0)} + DPH / ${isYearly ? "rok" : "mes"}`;
     const atCap = active >= max;
 
     async function onInvite(e: FormEvent) {

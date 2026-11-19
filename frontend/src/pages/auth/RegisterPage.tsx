@@ -48,10 +48,11 @@ export function RegisterPage() {
       .catch(() => {});
   }, []);
 
+  // List prices are net; the customer pays them plus VAT (VAT_RATE_PERCENT).
   const priceMonthlyWithVat =
-    priceMonthly !== null && vatPercent !== null ? priceMonthly * (1 + vatPercent / 100) : null;
+    priceMonthly !== null && vatPercent !== null ? Math.round(priceMonthly * (100 + vatPercent)) / 100 : null;
   const priceYearlyWithVat =
-    priceYearly !== null && vatPercent !== null ? priceYearly * (1 + vatPercent / 100) : null;
+    priceYearly !== null && vatPercent !== null ? Math.round(priceYearly * (100 + vatPercent)) / 100 : null;
   // Yearly discount against 12 × monthly, in whole percent.
   const yearlyDiscount =
     priceMonthly !== null && priceYearly !== null && priceMonthly > 0
@@ -400,7 +401,7 @@ function PeriodOption({
       <span className="text-base font-semibold text-ink-900">
         {price}
         {priceWithVat && (
-          <span className="ml-1 text-xs font-normal text-ink-400">bez DPH</span>
+          <span className="ml-1 text-xs font-normal text-ink-400">+ DPH</span>
         )}
       </span>
       {priceWithVat && (
