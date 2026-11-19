@@ -2365,12 +2365,280 @@ edited again (not deployed anywhere yet).
   proposal — a one-off, read-only script that lists the paid Stripe invoices (live, since the
   launch) and compares them with the `invoices` table by Stripe invoice id, printing every paid
   invoice without a row or with a row that has no iDoklad number. Not written or run.
-- ⏸ Round 2's three questions stay open: the price when the extra item is created again (terms
-  5.5), `PATCH /api/account` open to every team member, the registration claim of an imported
+- ⏸ Round 2's three questions stay open: ~~the price when the extra item is created again (terms
+  5.5)~~ (closed 18. 11. 2026: the current price applies, the owner notifies price increases),
+  `PATCH /api/account` open to every team member, the registration claim of an imported
   technician.
 - ⏸ Round 1 Part 2 (VAT, charging additions at once, failed-renewal access, credits on tax
   documents, invoice delivery, monthly ↔ yearly) still waits — and now decides the held removal
   credits (H9) and the OVERCHARGED accounts' first renewal after the switch.
+
+### Billing — the owner's decisions of 18. 11. 2026 (19. 11. 2026) 🟨 built on `poapp-oct-2026`, checked in Stripe test mode; first real send to be watched
+
+Source: `docs/prompts/billing-decisions-2026-11.md`. The owner decided four
+points of round 1's Part 2; this builds them, plus the leftovers of the
+round-3 check. Migrations `082` (079 again — see Part 0, item 11) and `083`.
+
+| Point | Decision | Built |
+|---|---|---|
+| VAT | Prices are net; the customer pays price + VAT | Part 1 |
+| Failed payment at renewal | 14 days to pay, then read-only | Part 2 |
+| Credit on the tax document | A negative line on the same invoice | Part 3 |
+| Price when a technician is added again | The current price (as today) | ✅ closed, no change — the owner notifies customers of price increases himself |
+| Invoice delivery | iDoklad e-mails the invoice to the customer | Part 4 |
+| Charging an added technician at once; monthly ↔ yearly switch | Not decided | ⏸ not built |
+
+**Part 0 — leftovers of round 3**
+- ✅ 1. A subscription of another product is never taken over:
+  `SeatSync::isOurSubscription()` — a POapp subscription carries a plan item
+  recognised by a configured base price / base product or the remembered plan
+  item, never through the lone-unrecognised-item fallback. Used by
+  `liveSubscriptions` (daily run, seat report), `paidSibling`, the webhook
+  (an event of another product's subscription is ignored, also when the
+  account has none), checkout-sync / checkout's live check, and the admin
+  account delete (it no longer cancels another product's subscription).
+  Test clock U1 (S2c): recorded past_due + another product active → nothing
+  taken over, no extra item on it, the paid-until date unchanged.
+- ✅ 2. The daily run reads accounts recorded as `canceled` /
+  `incomplete_expired` that have a Stripe customer: a live POapp
+  subscription takes over (its technicians are then charged); otherwise
+  nothing else runs for them. A run that may not write the take-over
+  (Stripe writes refused) stores it, and `ConfigCheck` shows the error
+  „V databáze skončené predplatné, zákazník má v Stripe živé". Test clock
+  U2 (S2d).
+- ✅ 3. The daily run e-mails each `ConfigCheck` ERROR once per check
+  (`OperatorAlert` key `config:<key>:`) and forgets it when the check is OK
+  again (`forgetExcept`); not its own absence nor a refused run. The webhook
+  e-mails once when `billing_daily_last_run` is older than 36 h (production
+  or a live key; forgotten by the next full run).
+- ✅ 4. Alerts: the memory is per row **and state**
+  (`invoices.operator_alerted_state`, migration 083 back-fills it): a row
+  moving to another state needing a person is alerted again; the webhook's
+  deferred alert is notify-once (no double alert with an event re-run in the
+  daily run, whose deferred jobs now run right after the re-run). A row whose
+  Stripe invoice cannot be read is alerted once (`missing_snapshot`) and after
+  3 failed reads or a 404 becomes `snapshot_unreadable` (terminal, no longer
+  fetched). A live row at the attempt cap is the error
+  `invoices_failed_stopped` („treba zásah") and is in the alert loop; below
+  the cap it stays the warning „skúsi znova". Test-mode rows: „[TEST]" in the
+  mail subject, a warning in production (`invoices_held_test`, …). A gone
+  `invoice.*` event is an error until an admin marks it „Vyriešené"
+  (`stripe_webhook_events.dismissed_at`, POST
+  `/api/admin/billing/events/{id}/dismiss`).
+- ✅ 5. `proration_date` = max(period start, min(now, period end − 1)) from
+  the subscription already read (`SeatSync::prorationDate`).
+- ✅ 6. A netted line prints its count only when its sign matches the
+  amount's; „po zľave" only on a line with a discount amount or a proration
+  Stripe priced „(with … off)" (the test clock showed Stripe puts the
+  coupon into the proration's price, not into discount_amounts).
+- ✅ 7. „Vystaviť znova" sends the status / reason the admin saw; a changed
+  row is refused (409), and the claim is only from that status.
+- ✅ 8. A refused daily run (live key outside production) forces
+  `IDOKLAD_ISSUE_MODE=prepare` for its invoice step: it prepares and alerts,
+  never issues (`--allow-live` lifts the refusal).
+- ✅ 9. „Ďalšia fakturácia" shows no figure while the account is `manual` or
+  `error`.
+- ✅ 10. Test children: the recorder blanks every variable the parent lists
+  in `FIROL_TEST_BLANK` (proc_open drops empty ones) and always SMTP, before
+  Dotenv runs, and asserts it at the end („[recorder-env] ok"); mail of test
+  processes goes to a capture file (`Mailer::$captureFile` /
+  `FIROL_TEST_MAIL_CAPTURE`). The invoices script's event checks run only its
+  own events (`billing-daily.php --event=`), and it restores the refusal
+  stamp, the last run and the alert memory it touched.
+- ✅ 11. Migration `082_billing_fixes_again.sql` repeats every statement of the
+  final 079 (rounds 1–3, all `IF NOT EXISTS`), so a database that ran an
+  earlier 079 gets the columns. **Departure:** 079 itself was not edited
+  again (the prompt also says 078–080 count as pushed); the round-3
+  statements are in both files, which is harmless. From now on no pushed
+  migration is edited.
+- ✅ 12. README step 6 says which subscription the daily run charges (the paid
+  POapp one, newest first; a cancelled recorded one is left for a live one);
+  the seat report prints „the daily run charges … — why" by the same rule;
+  step 8 lists the held rows nobody can clear.
+
+**Part 1 — VAT**
+- ✅ `Billing\Vat`: `VAT_RATE_PERCENT` (default 23) — the one setting (the
+  admin form shows it read-only; it was an admin system setting used only for
+  the registration copy). `STRIPE_TAX_RATE_ID` — a manual **exclusive**
+  Stripe tax rate. Checkout sets it as `subscription_data.default_tax_rates`
+  (refused with 503 when it is not set); `SeatSync::reconcile` puts it on
+  every live subscription whose default tax rates are not exactly it, behind
+  `BILLING_RECONCILE` (also on a subscription left for a person — the rate is
+  not about the items), with `proration_behavior=none`.
+- ✅ Test clock first (19. 11. 2026, three customers): the default tax rate
+  taxes every line — the plan, the extra item, prorations of additions and of
+  removals, pending prorations created **before** the rate was set — and, with
+  a coupon, the amount after the discount. Changing the rate created no
+  proration. **Stripe rounds per line** (each line carries its own rounded
+  `tax_amounts`, the invoice tax is their sum). Dahlia payloads carry it as
+  `taxes` / `total_taxes` (`tax` is gone) — `StripeShape::lineTax / invoiceTax`.
+  A manual tax rate was kept: Stripe Tax (automatic) would need the
+  customer's address validated for every customer and adds a per-transaction
+  fee, for a single Slovak rate.
+- ✅ `ConfigCheck`: the rate exists, is active, exclusive and has
+  `VAT_RATE_PERCENT`; a live subscription without it (as last read,
+  `accounts.stripe_tax_rate_ids`) is an error; `VAT_RATE_PERCENT` unset is a
+  warning.
+- ✅ iDoklad payload: each netted line with its **net** unit price,
+  `PriceType` 1 („Cena bez daně") and `VatRateType` 1 („Basic") — the iDoklad
+  reference: „WithVat = 0 / WithoutVat = 1 / OnlyBase = 2" and „Reduced1 = 0 /
+  Basic = 1 / Zero = 2 / Reduced2 = 3"; the template's `VatRateType` 2 that the
+  old code inherited would have been the **zero** rate. A line whose
+  23 % of the net does not give Stripe's VAT of that line to the cent (a
+  netted line whose Stripe lines were rounded one by one) goes with its gross
+  price (`PriceType` 0), so the document stays Stripe's total. Before every
+  POST the app calls `POST IssuedInvoices/Recount` (counts the document,
+  creates nothing) and holds the row as `vat_mismatch` with an alert when its
+  `Prices.TotalWithVat` is not the amount paid — never sent. The reference
+  does not say how iDoklad rounds; the Recount is how the two are made to
+  agree. An invoice Stripe charged without VAT is held (`no_vat`).
+- ✅ Screens and texts — one wording: a price „27 € + DPH / mesiac", an
+  announced charge „33,21 € s DPH (27,00 € + DPH 23 %)". Changed: the
+  registration plan cards („+ DPH", gross chip), Onboarding plan price,
+  Billing page (plan cards, yearly hint, „Ďalšia fakturácia", extra
+  technician prices and hint, the past-due texts with the amount), Settings
+  (extra technician price), the trial banner (the charge with VAT), the new
+  payment-failed banner, the read-only banner of an unpaid account, the
+  failed-payment e-mail (amount „s DPH"), the fallback e-mail („(s DPH)",
+  the invoice comes by e-mail), the admin settings note and read-only VAT
+  field, the admin invoice detail („z toho DPH").
+- ⏸ **Departure:** the VOP (`frontend/public/legal/vseobecne-obchodne-podmienky.html`,
+  5.1) does not say that prices are without VAT. Not edited: changing the VOP
+  needs a version bump (`Legal\Terms::VOP_VERSION`), which makes every user
+  accept it again — the owner's call. Proposed sentence for 5.1: „Ceny
+  v cenníku sú uvedené bez DPH; k cene sa pripočíta DPH v zákonnej výške."
+- ⏸ Foreign customers / reverse charge: out of scope. What it would need:
+  the customer's country and a validated EU VAT number (Stripe's `eu_vat`
+  tax id is registered already when IČ DPH is filled), a second
+  „reverse charge" tax rate of 0 % (or Stripe Tax) chosen per customer at
+  Checkout and in the reconcile, the iDoklad item `VatRateType` 2 (zero) with
+  the reverse-charge note / `VatRegime`, and the accountant's wording.
+
+**Part 2 — failed renewal: 14 days, then read-only**
+- ✅ `Billing\PaymentGrace` + table `billing_payment_failures` (one row per
+  failed invoice): recorded from `invoice.payment_failed` (the event now
+  handled) and from the subscription's expanded `latest_invoice` whenever a
+  past_due / unpaid subscription is read (webhook, checkout-sync, daily run —
+  a lost event is caught). While a failure is open, `subscription_end_date` is
+  capped at the failure + `PAYMENT_GRACE_DAYS` (default 14) — the same
+  mechanism as an ended subscription, so the server's 402 gate, the banners
+  and the read-only UI apply unchanged. A payment resolves it
+  (`invoice.paid` re-reads the subscription; any read of a paid subscription
+  resolves the account's failures) and the real period end comes back at once.
+  A later failure counts its own 14 days. Trials, cancelled subscriptions and
+  accounts without one are not touched.
+- ✅ One e-mail per failed invoice to the main user (amount with VAT, the
+  first read-only day, the billing page's „Zaplatiť" = the Stripe portal, and
+  Stripe's page of the invoice); a failed send is repeated by the daily run.
+  The banner for every member with „Zaplatiť" for the main user
+  (`/api/me` → `payment_failed`); after the grace period the read-only banner
+  says the payment is unpaid.
+- ✅ README: Stripe's retry schedule and final action are dashboard settings —
+  what they must be.
+- **Departure:** the e-mail's pay link is the app's billing page (the portal
+  needs a session created after login) plus Stripe's hosted invoice page,
+  not a direct portal link.
+
+**Part 3 — credit as a negative line** (accounting choices for the
+accountant — see the payloads below)
+- ✅ A removal mid-period is issued as the negative line „POapp — extra
+  technik, pomerná časť (−1 technik) (obdobie)", same VAT rate, the document =
+  amount paid.
+- ✅ Paid partly from the customer's Stripe balance: one negative item
+  „Kredit z predchádzajúceho obdobia" for total − paid, priced **with VAT** at
+  the standard rate (the credit came from VAT-bearing lines of earlier
+  invoices).
+- ✅ Nothing paid (total ≤ 0, or covered entirely by the balance):
+  `no_document` with reason `credit_carried` / `credit_covered` — a visible
+  state in the admin list with the credit carried, not an error, no alert.
+- ✅ Rows held as `credit` before are decided again by the daily run (and the
+  admin has the button); `mismatch` stays held.
+
+**Part 4 — iDoklad sends the invoice** (reference read from
+`https://api.idoklad.cz/Help/v3/{en,cs}/` — its data files, the live API was
+never called)
+- ✅ Send: `POST /v3/Mails/IssuedInvoice/Send` with `DocumentId`,
+  `SendToPartner: true` („Send to the partner (purchaser/supplier) specified
+  on the document"), `SendToSelf` / `SendToAccountant: false`, `Method: 0`
+  (PDF), `ReportLanguage: 2` (Sk); it answers `{Sent: [...], NotSent: [...]}`.
+- ✅ Mark paid: `PUT /v3/IssuedDocumentPayments/FullyPay/{id}?dateOfPayment=`
+  („Metoda provede plnou úhradu faktury"), the Stripe payment date; iDoklad's
+  ErrorCode 110 „Document has already been paid" counts as done.
+- ✅ Recipient: the e-mail of the iDoklad contact the invoice was issued to,
+  set to the main user's e-mail (`users.email` — the account has no separate
+  billing e-mail): at contact creation (`Email`), and with
+  `PATCH /v3/Contacts` (`Id` in the body) when it differs from the one the app
+  stored (`accounts.idoklad_contact_email`). Empty: the send is an error,
+  alerted once, not retried.
+- ✅ Three steps with their own state (`paid_mark_*`, `send_*`, `sent_at`,
+  `sent_to`, the error text); a failure never changes the issued state nor
+  issues again; the daily run retries each up to 3 times, then alerts once;
+  „Poslať znova" in the admin. The send is claimed atomically
+  (pending / error → sending); an uncertain answer is `uncertain`, held for a
+  person. Nothing is sent or marked unless the invoice was issued in `send`
+  mode; a test-mode payment is never e-mailed.
+- ✅ The fallback e-mail stays (only when issuing fails). The normal case sends
+  one e-mail (iDoklad's) — **Stripe's own receipt e-mails must be off**
+  (README).
+- ⏸ Not found in the reference (built defensively, listed): how iDoklad
+  rounds VAT (per item or per document), whether negative `UnitPrice` is
+  accepted, what the send does for a contact without e-mail, and whether a
+  second send call sends a second e-mail (no idempotency is documented — the
+  app never calls it twice for one row).
+- ⚠️ **The first real send must be watched by the owner** (README checklist,
+  step 9).
+
+**Checks, 19. 11. 2026**
+- `bin/test-billing-invoices.php` in full: **162 checks, 0 failures** (VAT
+  payloads, credits, Recount, mark paid / send with every failure path, the
+  grace period, the alert memory per state, the daily run's refusal / config
+  alerts / follow-up retries / `--event`, the recorder-env assertion in the
+  child, HTTP 403s).
+- `bin/test-billing-stripe.php --only=V,CR,GR,U` (the new scenarios, 7 test
+  clocks, all deleted): **all checks passed**. V1 Checkout opened by the app
+  carries the tax line; V2 an old subscription without a tax rate is an admin
+  error, the daily run sets the rate (no proration), the renewal taxes every
+  line (plan, extra, the prorations of two additions and a removal) and its
+  VAT is the sum of each line's rounded 23 %; CR1 yearly removal → issued with
+  „(−1 technik)" −75,34 €; CR2 three technicians removed a day in → first
+  renewal −12,30 € → `no_document` / credit carried, the next 23,37 € renewal
+  paid 11,07 € → issued with „Kredit z predchádzajúceho obdobia" −12,30 €
+  (with VAT); GR the renewal fails → past_due, paid-until date capped at the
+  failure + 14 days, one e-mail (event delivered twice), the banner data on
+  `/api/me`, 13 days → writable, 15 days → the server answers 402, paid →
+  active with the real period end at once, a second failure → its own 14 days;
+  U1 / U2 as in Part 0.
+
+  | Scenario | Stripe net | VAT | gross | paid | outcome | payload base + VAT |
+  |---|---:|---:|---:|---:|---|---:|
+  | V2 renewal of an old subscription after the rate was set | 40,33 | 9,28 | 49,61 | 49,61 | issued | 49,61 |
+  | CR1 yearly renewal after a removal | 223,66 | 51,44 | 275,10 | 275,10 | issued | 275,10 |
+  | CR2 first renewal (credit larger than the invoice) | −10,00 | −2,30 | −12,30 | 0,00 | no_document / credit_carried | — |
+  | CR2 second renewal (paid partly from the credit) | 19,00 | 4,37 | 23,37 | 11,07 | issued (Kredit −12,30 s DPH) | 11,07 |
+
+- The full `bin/test-billing-stripe.php` run (all scenarios, then the replay
+  of every captured event twice and in reverse) was started; the local shell
+  running it was stopped by the machine for low memory after scenarios A–G
+  and H1–H3 (**45 checks logged, 0 failures** — H1 „(+2 technici)" and H2 /
+  H3 renewals issued with base + VAT = amount paid). The process went on in
+  the container without output, and its cleanup deletes the test clocks. The
+  rest of H, K, L, O, S, T, W, P and the replay R were **not observed** this
+  round — to be run again.
+- `php -l` on every changed file, `npm run typecheck`, `npm run build`
+  passed. iDoklad was never called (the recorder in every process).
+
+**Open questions (owner / accountant)**
+- ⏸ The accounting choices of Part 3: the credit line priced with VAT at the
+  standard rate; no tax document for an invoice where nothing was paid (the
+  credit is only on Stripe's balance); the removal as a negative line.
+- ⏸ The VOP sentence about VAT (version bump, re-acceptance).
+- ⏸ A 0 € invoice with no credit (100 % coupon, trial start) still leaves no
+  row; the period end printed is the first day of the next period; payments
+  lost before the deploy (round 3) — unchanged.
+- ⏸ `PATCH /api/account` open to every team member; the registration claim
+  of an imported technician (round 2) — unchanged.
+- ⏸ Charging an added technician at once; the monthly ↔ yearly switch — not
+  decided.
 
 ---
 
