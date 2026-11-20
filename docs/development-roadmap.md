@@ -2038,6 +2038,99 @@ copies them onto the new row, where they are the row's own photos (removable) �
 
 **Check script:** part 10 of `bin/test-prehliadka-followups.php` (33 checks).
 
+Round 7 found two faults in the lock of item 3 (it leaked into other accounts, and the settle step
+still deadlocked with a first issue — „no deadlock" above held only for the simulated first
+statement) and a code cascade; see round 7.
+
+### Fix list of 16. 11. 2026 — round 7 (review and tests of round 6) — ✅ built, checked at 360 px (Chromium, WebKit)
+
+Prompt: `docs/prompts/fixes-2026-11-16-round-7.md`. Items 1, 2, 4 and 5 of round 6 worked; this
+round fixes the lock of item 3 and what the check found besides.
+
+1. **The restore's lock reached other customers' accounts.** At the database's REPEATABLE READ the
+   restore's first statement (`SELECT id FROM companies WHERE account_id = ? … FOR UPDATE`, via
+   `uq_companies_book_code`) took gap locks beyond the account: a new firma or a changed code in the
+   neighbouring account waited for the whole restore and failed with 1205 (reproduced by the new
+   check before the fix). The restore transaction now runs at **READ COMMITTED**
+   (`SET TRANSACTION ISOLATION LEVEL READ COMMITTED` right before it): the locking read locks the
+   matching rows only, every plain read sees what is committed when it runs (so the round-6 1020
+   concern of a read view fixed too early does not arise). Check (two connections, the real
+   `Restorer::run` held in a child at its `settle` stage through `Restorer::$checkpoint`): the
+   previous and the next account with firms insert a firma with and without a code and change a code
+   while the restore holds its locks; a first issue started meanwhile waits and then skips the
+   restored numbers (PK-STA-004 after the restored PK-STA-003).
+2. **A restore deadlocked with a first issue in the same account.** The settle UPDATE (… JOIN
+   documents, a derived table over the account's entries) locked other entries of the account; an
+   issue holds its entry and waits for the firma, which the restore holds → 1213 for the issue
+   („PDF sa nepodarilo vygenerovať.", reproduced before the fix). After its first statement the
+   restore now locks **no row it did not insert**: `settleBookNumbers`, `markIssuedFromDocuments` and
+   the pre-080 reopen read with a plain SELECT and update one row by primary key;
+   `relinkFollowUps` updates only úkony this restore inserted (it could set `source_inspection_id`
+   on an existing one — merge no longer touches it); `relinkPrehliadkaDevices`,
+   `relinkPrehliadkaPrevious` and `relinkBookEntries` already updated only inserted rows by primary
+   key. Check: the real restore next to a first issue (it waits, no deadlock) and next to a re-issue
+   (same number, version 2; it needs no firma lock — whether it ends inside the restore's pause
+   depends on how fast the PDF renders, so the script prints it). Foreign-key checks still take a
+   shared lock on an existing úkon that a restored deadline notice, plan or task points to; a first
+   issue's draft has none, and a re-issue does not wait for the restore, so no cycle.
+   **Restore next to an Excel import:** it can deadlock — the import inserts a firma (uncommitted)
+   and then a prevádzka or úkon under an existing firma (foreign-key check = shared lock on that
+   firma), while the restore's first statement has locked the existing firma and waits for the new
+   one. Observed once in three runs of a two-connection experiment; InnoDB chose the restore
+   (1213, rolled back; a merge restore can be repeated). Not changed (the prompt asked only for the
+   answer).
+3. **Codes after a restore.** Two passes in `Restorer::restoreBookCodes`: every archive firma whose
+   code is free here keeps it (with its counter); then the others get a proposal with every code of
+   the archive counted as taken (its firms' codes and the codes of its entries' numbers) — Stavby
+   Novák STA gets STB, Stv Trade keeps STV. The warnings name the next number the next issue really
+   takes (`BookNumber::nextNumber`), word a code held only by numbers („… ktorý v tomto účte nemá
+   žiadny klient, len čísla iných zápisov … Kód „QUA" preto nedostane žiadny klient tohto účtu.")
+   and name the client that skips the numbers; a firma merged into an existing firma with another
+   code says which numbers its entries brought and what the next entry will be. The pre-080 reopen
+   clears `protocol_deferred_at` (an entry restored as a draft never had it — the archive does not
+   carry it). A firma's code is locked also when an entry of it holds a book number
+   (`BookNumber::isCodeLocked`, used by `CompanyController::shape` and `POST …/book-code`).
+4. **Rebríky / regály PDF.** The nedostatky table has a caption row „Nedostatky" inside its `<thead>`
+   (mPDF repeats it on the next page and never leaves it alone at a page bottom) and a column
+   „Rebrík č." / „Regál č." with the row's „Č." from the list. A row without závady points to its
+   nedostatky by number („Pozri nedostatky č. 3, 4 v tabuľke Nedostatky.") instead of repeating the
+   texts; with neither, „Nevyhovuje". `$cell` uses `DefectsTable::scalarText`. PDFs looked at with
+   the nine row cases (závady only, nedostatok only, both, neither, two nedostatky, a passing row
+   with a nedostatok, a passing row, a disposed one, a table over three pages).
+5. **Smaller.** Bytové družstvo wording: the book entry's prevádzky refusals (`readFacilities`,
+   „Bytový dom zápisu musí byť medzi vybranými.", „Bytový dom návštevy musí zostať vybraný.",
+   „Z bytového domu … sú zapísané nedostatky …"), Opakovať of an entry whose houses are archived,
+   „Prevziať položky" with nothing to take, the house of a book defect, the prehliadka PDF header
+   („Bytový dom: …"), `CompanyController::findOrFail` („Bytové družstvo sa nenašlo." for an archived
+   one, „Klient sa nenašiel." for an id that names nothing). The walk refuses a carried defect of a
+   book entry's other house (`namesDefectOf` with the walk's facility) and a second item with the
+   same `persists_from.key` (422). After the 409 of the permanent delete the walk hides „Prerušiť"
+   and its hint for a closed prehliadka; the prevádzka detail and the prehliadka setup read the list
+   / context again (`onStale`). `updateBasic` reads `details … FOR UPDATE` in a transaction around
+   the merge and the write. `details: null` on a prehliadka keeps only the keys the client never
+   sends (its client keys are read from the smallest valid header); `mergeOver` docblock corrected
+   for legacy keys. `CarryOver::checksCompleteness` docblock aligned with the code (round 5 meant
+   old protocols without a recorded origin; a carried draft stays checked after issue and
+   „Upraviť"). `BookCodeRow` selects synchronously (`flushSync`). `concept_confirmed_at` comes from
+   the database clock like `concept_built_at` (`PrehliadkaConcepts::now()`; only `isTouched()`
+   compares a mark with a time — `concept_built_at` against the items' timestamps — so the build
+   time must stay on the database clock; the confirmation is read as set / not set).
+   `BookNumber::takenCodes` joins documents by account and runs once per call site. Check script:
+   part 10 runs migration 081 on temporary copies of the scratch account's tables; every part
+   removes its scratch accounts through one function, also from a shutdown function; the six users
+   `test-followups-r6-…` of 18. 11. 2026 (accounts 680–682, 691–693) are removed.
+
+**Left as they are (bytové družstvo wording).** „Firma sa nenašla." / „Prevádzka sa nenašla." in the
+other controllers answer an id that names no record of the account — there is no client kind to
+word it by. „Firma alebo prevádzka úlohy je archivovaná" (task reopen), „pri tejto firme" (potvrdenie
+o vykonaní práce, výdajka) and „Prevádzka nepatrí k vybranej firme" (training API mismatch) are generic
+or API-only; the code-taken message on a duplicate key (a race) says „iná firma"; the Excel import's
+readFacilities refusal keeps „prevádzku" (the import has its own sheet wording). `confirmConcept`
+writes `details` from its own earlier read too (a header save between its read and write would be
+lost) — not in this round's scope.
+
+**Check script:** part 11 of `bin/test-prehliadka-followups.php` (the whole script: 222 checks).
+
 ---
 
 ## Billing fixes (17. 11. 2026) 🟨 built on `poapp-oct-2026`, checked in Stripe test mode; owner decisions pending
