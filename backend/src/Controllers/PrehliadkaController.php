@@ -177,7 +177,7 @@ final class PrehliadkaController
             }
         }
 
-        $details[PrehliadkaConcepts::CONFIRMED_KEY] = $confirmed ? date('Y-m-d H:i:s') : null;
+        $details[PrehliadkaConcepts::CONFIRMED_KEY] = $confirmed ? PrehliadkaConcepts::now() : null;
         Db::pdo()->prepare('UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?')
             ->execute([InspectionDetails::encode($details), $id, $accountId]);
         AuditLog::record(

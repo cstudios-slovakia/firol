@@ -16,6 +16,7 @@ use Firol\Storage\Storage;
 use Firol\Support\BookEntry;
 use Firol\Support\CarryOver;
 use Firol\Support\CertGuard;
+use Firol\Support\ClientKind;
 use Firol\Support\InspectionCoverage;
 use Firol\Support\InspectionDetails;
 use Firol\Support\Periodicity;
@@ -987,12 +988,27 @@ final class InspectionController
                     static fn (array $p): bool => isset($allowed[(int) ($p['source_inspection_id'] ?? 0)]),
                 ));
             }
-            $details = $details === null
-                ? InspectionDetails::serverOwned((string) $row['type'], $storedDetails)
-                : InspectionDetails::mergeOver($storedDetails, $details);
-            Db::pdo()->prepare(
-                'UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?'
-            )->execute([InspectionDetails::encode($details), $id, $scopeAccountId]);
+            // The stored header is read again under the row's lock and written in
+            // the same transaction (round 7): a confirm-concept or another
+            // server write that landed since the request read the row is kept,
+            // not overwritten by the copy read at the start.
+            $pdo = Db::pdo();
+            $pdo->beginTransaction();
+            try {
+                $lock = $pdo->prepare('SELECT details FROM inspections WHERE id = ? AND account_id = ? FOR UPDATE');
+                $lock->execute([$id, $scopeAccountId]);
+                $current = InspectionDetails::decode($lock->fetchColumn() ?: null);
+                $details = $details === null
+                    ? InspectionDetails::serverOwned((string) $row['type'], $current)
+                    : InspectionDetails::mergeOver($current, $details);
+                $pdo->prepare(
+                    'UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?'
+                )->execute([InspectionDetails::encode($details), $id, $scopeAccountId]);
+                $pdo->commit();
+            } catch (\Throwable $e) {
+                $pdo->rollBack();
+                throw $e;
+            }
         }
 
         $fresh = self::loadOrFail($scopeAccountId, $id);
@@ -1392,12 +1408,18 @@ final class InspectionController
 
         $sourceId = $req->jsonInt('source_id')
             ?? self::lastFinalizedId($accountId, (int) $row['facility_id'], $type, $id);
+        // A bytové družstvo reads „bytový dom" (round 7).
+        $bdCarry = ClientKind::isBytovyDom((string) ($row['company_client_type'] ?? ''));
         if ($sourceId === null) {
-            Response::error('Pre túto prevádzku a typ kontroly zatiaľ nie je z čoho prevziať položky.', 404);
+            Response::error($bdCarry
+                ? 'Pre tento bytový dom a typ kontroly zatiaľ nie je z čoho prevziať položky.'
+                : 'Pre túto prevádzku a typ kontroly zatiaľ nie je z čoho prevziať položky.', 404);
         }
         $source = self::loadOrFail($accountId, $sourceId);
         if ((string) $source['type'] !== $type || (int) $source['facility_id'] !== (int) $row['facility_id']) {
-            Response::error('Prevziať položky možno len z kontroly rovnakého typu na tej istej prevádzke.', 422);
+            Response::error($bdCarry
+                ? 'Prevziať položky možno len z kontroly rovnakého typu v tom istom bytovom dome.'
+                : 'Prevziať položky možno len z kontroly rovnakého typu na tej istej prevádzke.', 422);
         }
         // Values and results travel with the item (CarryOver::FULL): only an
         // issued protocol is a source, never another draft.
@@ -1620,20 +1642,22 @@ final class InspectionController
     {
         $body = $req->json();
         try {
-            $rows = BookEntry::readFacilities($body['facilities'] ?? null);
+            $rows = BookEntry::readFacilities($body['facilities'] ?? null, (string) self::clientType($companyId));
         } catch (\InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422);
         }
         $ids = array_map(static fn (array $r): int => $r['facility_id'], $rows);
+        // A bytové družstvo reads „bytový dom" (round 7).
+        $bd = ClientKind::isBytovyDom((string) self::clientType($companyId));
         if (!in_array($facilityId, $ids, true)) {
             if (!$inVisit) {
-                Response::error('Prevádzka zápisu musí byť medzi vybranými.', 422);
+                Response::error($bd ? 'Bytový dom zápisu musí byť medzi vybranými.' : 'Prevádzka zápisu musí byť medzi vybranými.', 422);
             }
             $rows[] = ['facility_id' => $facilityId, 'periodicity_value' => null, 'periodicity_unit' => null];
             $ids[] = $facilityId;
         }
         if (BookEntry::facilityNames($accountId, $companyId, $ids) === null) {
-            Response::error('Firma alebo prevádzka sa nenašla.', 404);
+            Response::error($bd ? 'Bytové družstvo alebo bytový dom sa nenašli.' : 'Firma alebo prevádzka sa nenašla.', 404);
         }
         try {
             $details = BookEntry::applyContext($details, [
@@ -1668,22 +1692,24 @@ final class InspectionController
 
         $rows = null;
         $ids = $currentIds;
+        // A bytové družstvo reads „bytový dom" (round 7).
+        $bd = ClientKind::isBytovyDom((string) ($row['company_client_type'] ?? ''));
         if (array_key_exists('facilities', $body)) {
             try {
-                $rows = BookEntry::readFacilities($body['facilities']);
+                $rows = BookEntry::readFacilities($body['facilities'], (string) ($row['company_client_type'] ?? ''));
             } catch (\InvalidArgumentException $e) {
                 Response::error($e->getMessage(), 422);
             }
             $ids = array_map(static fn (array $r): int => $r['facility_id'], $rows);
             if (BookEntry::facilityNames($accountId, $companyId, $ids) === null) {
-                Response::error('Firma alebo prevádzka sa nenašla.', 404);
+                Response::error($bd ? 'Bytové družstvo alebo bytový dom sa nenašli.' : 'Firma alebo prevádzka sa nenašla.', 404);
             }
             if ($row['visit_id'] !== null) {
                 $visit = Db::pdo()->prepare('SELECT facility_id FROM visits WHERE id = ? AND account_id = ?');
                 $visit->execute([(int) $row['visit_id'], $accountId]);
                 $visitFacility = $visit->fetchColumn();
                 if ($visitFacility !== false && !in_array((int) $visitFacility, $ids, true)) {
-                    Response::error('Prevádzka návštevy musí zostať vybraná.', 422);
+                    Response::error($bd ? 'Bytový dom návštevy musí zostať vybraný.' : 'Prevádzka návštevy musí zostať vybraná.', 422);
                 }
             }
             // A defect belongs to one prevádzka; that prevádzka cannot leave the
@@ -1697,7 +1723,7 @@ final class InspectionController
                 }
                 $withDefects->execute([$id, $r['facility_id']]);
                 if ($withDefects->fetchColumn() !== false) {
-                    Response::error('Z prevádzky ' . $r['name'] . ' sú zapísané nedostatky — najprv ich zmaž.', 409);
+                    Response::error(($bd ? 'Z bytového domu ' : 'Z prevádzky ') . $r['name'] . ' sú zapísané nedostatky — najprv ich zmaž.', 409);
                 }
             }
         }

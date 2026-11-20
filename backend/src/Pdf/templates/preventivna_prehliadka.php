@@ -94,7 +94,8 @@ $facilityDesc = trim((string) ($p['description'] ?? ($facility['description'] ??
 $note = trim((string) ($p['note'] ?? ($p['poznamka'] ?? ($rawDetails['note'] ?? ($rawDetails['poznamka'] ?? ($inspection['notes'] ?? ''))))));
 ?>
 <?= $doc->styles() ?>
-<?= $doc->header($title, $subtitle) ?>
+<?php /* The facility line names a bytový dom for a bytový dom (round 7). */ ?>
+<?= $doc->header($title, $subtitle, $isDom ? 'Bytový dom' : 'Prevádzka') ?>
 
 <?= $doc->band('Základné údaje') ?>
 <table class="grid" style="margin-top:0;">

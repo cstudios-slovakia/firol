@@ -19,7 +19,8 @@ use Firol\Support\Defects;
 
 $doc = new ProtocolLayout(get_defined_vars());
 $e = [ProtocolLayout::class, 'esc'];
-$cell = static fn(mixed $v): string => ($v === null || trim((string) $v) === '') ? '—' : nl2br($e((string) $v));
+// Never casts an array (round 7) — DefectsTable::scalarText reads text and numbers only.
+$cell = static fn(mixed $v): string => DefectsTable::scalarText($v) === '' ? '—' : nl2br($e(DefectsTable::scalarText($v)));
 $details = (array) ($inspection['details'] ?? []);
 $measures = trim((string) ($details['measures_text'] ?? ''));
 
@@ -82,11 +83,19 @@ $total = (int) ($stats['total'] ?? count($items));
   'photo_counts' => $photo_counts ?? [],
 ]) ?>
 <?php /* The rows' nedostatky (popis, opatrenie, termín), numbered like the photo
-         appendix — as the other BOZP item protocols print them, under the same band. */ ?>
+         appendix, under the same band — captioned „Nedostatky" inside the table
+         (it stays with the table on a new page) and each naming its rebrík by the
+         „Č." of the list above (round 7). */
+$rowNumbers = [];
+foreach ($items as $i => $item) {
+  $rowNumbers[(int) ($item['id'] ?? 0)] = $i + 1;
+} ?>
 <?= DefectsTable::render(Defects::collect($items), [
-  'labels'     => DefectsTable::SHORT_LABELS,
-  'photo_note' => !empty($photos),
-  'band'       => false,
+  'labels'      => DefectsTable::SHORT_LABELS,
+  'photo_note'  => !empty($photos),
+  'band'        => false,
+  'caption'     => 'Nedostatky',
+  'item_column' => ['label' => 'Rebrík č.', 'numbers' => $rowNumbers],
 ]) ?>
 
 <?php if ($measures !== ''): ?>

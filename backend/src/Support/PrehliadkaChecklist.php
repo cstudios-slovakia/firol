@@ -404,7 +404,7 @@ final class PrehliadkaChecklist
             }
             if ($confirm) {
                 $confirmed = $details;
-                $confirmed[PrehliadkaConcepts::CONFIRMED_KEY] = date('Y-m-d H:i:s');
+                $confirmed[PrehliadkaConcepts::CONFIRMED_KEY] = PrehliadkaConcepts::now();
                 $setDetails->execute([InspectionDetails::encode($confirmed), $id, $accountId]);
                 $confirmSet = true;
             }

@@ -421,14 +421,16 @@ final class CompanyController
             $sql .= ' AND account_id = ?';
             $params[] = $accountId;
         }
-        if (!$includeArchived) {
-            $sql .= ' AND archived_at IS NULL';
-        }
         $stmt = Db::pdo()->prepare($sql);
         $stmt->execute($params);
         $row = $stmt->fetch();
+        // In the client's words (round 7): an archived one is found and has a
+        // kind; an id that names nothing has none, so it is „klient".
         if (!$row) {
-            Response::error('Firma sa nenašla.', 404);
+            Response::error('Klient sa nenašiel.', 404);
+        }
+        if (!$includeArchived && $row['archived_at'] !== null) {
+            Response::error(ClientKind::isBytovyDom((string) $row['client_type']) ? 'Bytové družstvo sa nenašlo.' : 'Firma sa nenašla.', 404);
         }
         return $row;
     }
@@ -455,11 +457,14 @@ final class CompanyController
         }
         $row['id'] = (int) $row['id'];
         // Customer's answer 3 of 18. 11. 2026 — the code of the firma's
-        // požiarna kniha numbers: locked once an entry took a number; a firma
-        // without one shows what the first issue would propose.
+        // požiarna kniha numbers: locked once an entry took a number (also an
+        // entry a merge restore brought back with its number — round 7); a
+        // firma without one shows what the first issue would propose.
         if (array_key_exists('book_last_seq', $row)) {
             $row['book_last_seq'] = (int) $row['book_last_seq'];
-            $row['book_code_locked'] = $row['book_last_seq'] > 0;
+            $row['book_code_locked'] = isset($row['account_id'])
+                ? BookNumber::isCodeLocked(Db::pdo(), (int) $row['account_id'], $row['id'], $row['book_last_seq'])
+                : $row['book_last_seq'] > 0;
             $row['book_code_suggested'] = ($row['book_code'] ?? null) === null && isset($row['account_id'])
                 ? BookNumber::propose((int) $row['account_id'], (string) $row['name'], $row['id'])
                 : null;
@@ -500,7 +505,7 @@ final class CompanyController
             $lock = $pdo->prepare('SELECT book_code, book_last_seq FROM companies WHERE id = ? AND account_id = ? FOR UPDATE');
             $lock->execute([$id, $scopeAccountId]);
             $row = $lock->fetch(PDO::FETCH_ASSOC);
-            if ((int) ($row['book_last_seq'] ?? 0) > 0 && $row['book_code'] !== $code) {
+            if ($row['book_code'] !== $code && BookNumber::isCodeLocked($pdo, $scopeAccountId, $id, (int) ($row['book_last_seq'] ?? 0))) {
                 $pdo->rollBack();
                 Response::error(ClientKind::bookCodeLocked($clientType), 409);
             }

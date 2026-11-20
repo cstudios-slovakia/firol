@@ -509,7 +509,9 @@ final class PrehliadkaDefects
                 $facilityId = (int) $facilityId;
             }
             if (!is_int($facilityId) || !in_array($facilityId, $facilityIds, true)) {
-                throw new \InvalidArgumentException('Vyber, ktorej prevádzky sa nedostatok týka.');
+                throw new \InvalidArgumentException($isBytovyDom
+                    ? 'Vyber, ktorého bytového domu sa nedostatok týka.'
+                    : 'Vyber, ktorej prevádzky sa nedostatok týka.');
             }
             $out['facility_id'] = $facilityId;
         }

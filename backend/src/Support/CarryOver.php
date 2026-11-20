@@ -179,8 +179,11 @@ final class CarryOver
      *    and was never issued.
      *
      * A draft typed through the forms, an Excel import (a draft, `''` for an
-     * empty cell) and an issued protocol opened again with „Upraviť" (it keeps
-     * its `carried_over_from_id`) generate as they always did.
+     * empty cell) and an old protocol opened again with „Upraviť" — one with
+     * `carried_over_from_id` but no recorded origin (rounds 2 and 3) — generate
+     * as they always did. A draft with a recorded origin stays checked after it
+     * was issued and opened again: `carried_from` is not removed at issue or by
+     * „Upraviť" (round 7: this docblock said otherwise; the rule is unchanged).
      *
      * @param array<string, mixed> $row the úkon: `details` (raw JSON or decoded),
      *        `carried_over_from_id` and `issued_before` when known

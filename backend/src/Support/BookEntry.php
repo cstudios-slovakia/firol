@@ -315,27 +315,29 @@ final class BookEntry
     // ── Prevádzky ────────────────────────────────────────────────────────────
 
     /**
-     * The `facilities` list off the wire, deduplicated (the first wins).
+     * The `facilities` list off the wire, deduplicated (the first wins). The
+     * refusal names a bytový dom for a bytové družstvo (round 7).
      *
      * @return list<array{facility_id: int, periodicity_value: ?int, periodicity_unit: ?string}>
      * @throws \InvalidArgumentException with a Slovak message
      */
-    public static function readFacilities(mixed $raw): array
+    public static function readFacilities(mixed $raw, string $clientType = ''): array
     {
+        $none = ClientKind::isBytovyDom($clientType) ? 'Vyber aspoň jeden bytový dom.' : 'Vyber aspoň jednu prevádzku.';
         if (!is_array($raw) || $raw === []) {
-            throw new \InvalidArgumentException('Vyber aspoň jednu prevádzku.');
+            throw new \InvalidArgumentException($none);
         }
         $out = [];
         foreach ($raw as $row) {
             if (!is_array($row)) {
-                throw new \InvalidArgumentException('Vyber aspoň jednu prevádzku.');
+                throw new \InvalidArgumentException($none);
             }
             $id = $row['facility_id'] ?? null;
             if (is_string($id) && ctype_digit($id)) {
                 $id = (int) $id;
             }
             if (!is_int($id) || $id <= 0) {
-                throw new \InvalidArgumentException('Vyber aspoň jednu prevádzku.');
+                throw new \InvalidArgumentException($none);
             }
             if (isset($out[$id])) {
                 continue;
@@ -867,7 +869,10 @@ final class BookEntry
         }
         $names = self::facilityNames($accountId, $companyId, array_values($ids));
         if ($names === null) {
-            throw new \InvalidArgumentException('Prevádzka zápisu je archivovaná alebo sa nenašla.');
+            // A bytové družstvo reads „bytový dom" (round 7), as readyError() does.
+            throw new \InvalidArgumentException(ClientKind::isBytovyDom((string) self::clientTypeOf($accountId, $source))
+                ? 'Bytový dom zápisu je archivovaný alebo sa nenašiel.'
+                : 'Prevádzka zápisu je archivovaná alebo sa nenašla.');
         }
         asort($names);
         $primary = isset($names[(int) $source['facility_id']]) ? (int) $source['facility_id'] : (int) array_key_first($names);

@@ -275,7 +275,7 @@ final class InspectionItemController
 
         $existingFields = self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
-        $fields = self::validateFields($inspection['type'], $req->json(), $inspection, $existingFields);
+        $fields = self::validateFields($inspection['type'], $req->json(), $inspection, $existingFields, $itemId);
 
         Db::pdo()->prepare(
             'UPDATE inspection_items SET fields = ? WHERE id = ? AND inspection_id = ?'
@@ -383,6 +383,24 @@ final class InspectionItemController
     }
 
     /**
+     * Whether another item of the record already carries the defect `$key`
+     * (round 7). `$itemId` is the item being saved, null for a new one.
+     */
+    private static function originTaken(int $inspectionId, string $key, ?int $itemId): bool
+    {
+        $stmt = Db::pdo()->prepare(
+            "SELECT id FROM inspection_items WHERE inspection_id = ? AND JSON_VALUE(fields, '$.persists_from.key') = ?"
+        );
+        $stmt->execute([$inspectionId, $key]);
+        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $id) {
+            if ((int) $id !== $itemId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Whether the item stored before carried the same origin (key and source).
      *
      * @param array<string, mixed>|null $existingFields
@@ -405,7 +423,7 @@ final class InspectionItemController
      *                                         types whose fields depend on it
      * @return array<string, mixed>
      */
-    private static function validateFields(string $type, array $body, array $inspection = [], ?array $existingFields = null): array
+    private static function validateFields(string $type, array $body, array $inspection = [], ?array $existingFields = null, ?int $itemId = null): array
     {
         // A defect stored as „dôvod zanikol" before the customer's answer 6 B
         // (18. 11. 2026) keeps that state on a later save of the same item.
@@ -446,12 +464,16 @@ final class InspectionItemController
                         }
                         $fields['persists_from'] = null;
                         $fields['status'] = 'zisteny';
-                    } elseif (!PrehliadkaPrevious::namesDefectOf((string) $fields['persists_from']['key'], $srcInspId)
+                    } elseif (!PrehliadkaPrevious::namesDefectOf((string) $fields['persists_from']['key'], $srcInspId, (int) $inspection['facility_id'])
                         && !self::sameOrigin($existingFields, $fields['persists_from'])) {
-                        // The origin must name a defect of that record (round 6): a
-                        // made-up one would let a new defect be „dôvod zanikol".
-                        // An item saved with this origin before keeps it.
+                        // The origin must name a defect of that record (round 6) —
+                        // of this prevádzka when the record is a book entry of
+                        // several (round 7): a made-up one would let a new defect be
+                        // „dôvod zanikol". An item saved with this origin before keeps it.
                         throw new \InvalidArgumentException('Nedostatok z minulej prehliadky má neplatný pôvod.');
+                    } elseif (self::originTaken((int) $inspection['id'], (string) $fields['persists_from']['key'], $itemId)) {
+                        // One item per carried defect (round 7: a second one was accepted).
+                        throw new \InvalidArgumentException('Tento nedostatok z minulej prehliadky už je v zázname zapísaný.');
                     } elseif ($fields['persists_from']['source_item_id'] !== null) {
                         // The item whose photos get copied must belong to that record.
                         $item = Db::pdo()->prepare('SELECT 1 FROM inspection_items WHERE id = ? AND inspection_id = ?');

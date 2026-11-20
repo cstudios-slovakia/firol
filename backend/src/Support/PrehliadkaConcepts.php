@@ -66,6 +66,19 @@ final class PrehliadkaConcepts
     /** The kinds of požiarny uzáver, found in a hand-written description. */
     private const PU_KIND_WORDS = ['dver' => 'dvere', 'okn' => 'okno', 'klap' => 'klapka'];
 
+    /**
+     * The time a concept mark is written with — the database clock, for
+     * `concept_built_at` and `concept_confirmed_at` alike (round 7: the
+     * confirmation came from PHP's Europe/Bratislava clock, the build from the
+     * database's UTC). isTouched() compares the build time with the items'
+     * `updated_at` / `created_at`, which the database writes, so it must stay
+     * on that clock; the confirmation is only read as set / not set.
+     */
+    public static function now(): string
+    {
+        return (string) Db::pdo()->query('SELECT NOW()')->fetchColumn();
+    }
+
     /** @param array<string, mixed>|null $details */
     public static function isConcept(?array $details): bool
     {
@@ -239,7 +252,7 @@ final class PrehliadkaConcepts
         }
 
         // Stamped last, so no item or photo written above counts as the technician's edit.
-        $now = (string) $pdo->query('SELECT NOW()')->fetchColumn();
+        $now = self::now();
         $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?')->execute([
             InspectionDetails::encode([
                 self::KEY           => $prehliadkaId,

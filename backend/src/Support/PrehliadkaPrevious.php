@@ -188,9 +188,11 @@ final class PrehliadkaPrevious
      * entry (the item must be a defect row of that record), `k<record>-<n>`
      * (also the older `pk…`) for the n-th defect of an old book record. Round 6:
      * the walk checks an origin with it, so a new defect cannot borrow a
-     * made-up one to become „dôvod zanikol".
+     * made-up one to become „dôvod zanikol". Round 7: with `$facilityId`, a
+     * defect of a book entry written for several prevádzky must be one of that
+     * prevádzka — the walk of one house cannot carry another house's defect.
      */
-    public static function namesDefectOf(string $key, int $sourceId): bool
+    public static function namesDefectOf(string $key, int $sourceId, ?int $facilityId = null): bool
     {
         if (preg_match('/^p(\d+)-(\d+)$/', $key, $m) === 1) {
             if ((int) $m[1] !== $sourceId) {
@@ -199,7 +201,11 @@ final class PrehliadkaPrevious
             $stmt = Db::pdo()->prepare('SELECT fields FROM inspection_items WHERE id = ? AND inspection_id = ?');
             $stmt->execute([(int) $m[2], $sourceId]);
             $f = json_decode((string) $stmt->fetchColumn(), true);
-            return is_array($f) && is_string($f['title'] ?? null);
+            if (!is_array($f) || !is_string($f['title'] ?? null)) {
+                return false;
+            }
+            // A book entry's defect names its prevádzka; a prehliadka's has none.
+            return $facilityId === null || !isset($f['facility_id']) || (int) $f['facility_id'] === $facilityId;
         }
         if (preg_match('/^(?:pk|k)(\d+)-(\d+)$/', $key, $m) === 1) {
             if ((int) $m[1] !== $sourceId || (int) $m[2] < 1) {

@@ -32,6 +32,13 @@ namespace Firol\Pdf;
  *   band        false → no `<h2>` band; the table continues the section above
  *               it (rebríky, regály: under the failing rows of „Zistené
  *               nedostatky")
+ *   caption     a heading row inside the table's `<thead>`, so mPDF prints it
+ *               with the table — also when the table starts a new page or
+ *               breaks across pages (rebríky, regály: „Nedostatky", round 7)
+ *   item_column ['label' => 'Rebrík č.', 'numbers' => [item id => its row
+ *               number]] → a column naming the row each nedostatok belongs to
+ *
+ * Photo captions „Nedostatok č. N" refer to the „Č." column of this table.
  *
  * Backend counterpart: Firol\Support\Defects (storage, validation, numbering).
  * ────────────────────────────────────────────────────────────────────────────
@@ -42,8 +49,9 @@ final class DefectsTable
     public const SHORT_LABELS = ['Popis', 'Opatrenie', 'Termín'];
 
     /**
-     * @param list<array{number: int, description: string, measure: ?string, deadline: ?string}> $rows
-     * @param array{title?: string, labels?: array{0: string, 1: string, 2: string}, photo_note?: bool, band?: bool} $options
+     * @param list<array{number: int, item_id?: ?int, description: string, measure: ?string, deadline: ?string}> $rows
+     * @param array{title?: string, labels?: array{0: string, 1: string, 2: string}, photo_note?: bool, band?: bool,
+     *              caption?: string, item_column?: array{label: string, numbers: array<int, int>}} $options
      */
     public static function render(array $rows, array $options = []): string
     {
@@ -52,18 +60,28 @@ final class DefectsTable
         }
         $title  = $options['title'] ?? 'Zistené nedostatky';
         $labels = $options['labels'] ?? self::LONG_LABELS;
+        $itemColumn = $options['item_column'] ?? null;
+        $columns = $itemColumn !== null ? 5 : 4;
 
         $html = (($options['band'] ?? true) ? '<h2>' . self::esc($title) . '</h2>' : '')
-            . '<table class="grid"><thead><tr>'
+            . '<table class="grid"><thead>'
+            . (isset($options['caption'])
+                ? '<tr><th colspan="' . $columns . '" style="background:#dfe7f1; font-size:8pt; letter-spacing:.4pt;">'
+                    . self::esc($options['caption']) . '</th></tr>'
+                : '')
+            . '<tr>'
             . '<th style="width:5%">Č.</th>'
-            . '<th style="width:47%">' . self::esc($labels[0]) . '</th>'
-            . '<th style="width:28%">' . self::esc($labels[1]) . '</th>'
+            . ($itemColumn !== null ? '<th style="width:9%">' . self::esc($itemColumn['label']) . '</th>' : '')
+            . '<th style="width:' . ($itemColumn !== null ? 40 : 47) . '%">' . self::esc($labels[0]) . '</th>'
+            . '<th style="width:' . ($itemColumn !== null ? 27 : 28) . '%">' . self::esc($labels[1]) . '</th>'
             . '<th>' . self::esc($labels[2]) . '</th>'
             . '</tr></thead><tbody>';
 
         foreach ($rows as $row) {
+            $owner = $itemColumn !== null ? ($itemColumn['numbers'][(int) ($row['item_id'] ?? 0)] ?? null) : null;
             $html .= '<tr>'
                 . '<td>' . (int) $row['number'] . '</td>'
+                . ($itemColumn !== null ? '<td>' . ($owner !== null ? (int) $owner : '—') . '</td>' : '')
                 . '<td>' . nl2br(self::esc($row['description'])) . '</td>'
                 . '<td>' . ($row['measure'] !== null ? nl2br(self::esc($row['measure'])) : '—') . '</td>'
                 . '<td>' . ($row['deadline'] !== null ? self::esc(self::date($row['deadline'])) : '—') . '</td>'
@@ -103,8 +121,15 @@ final class DefectsTable
         $title = (string) ($options['title'] ?? 'Zistené nedostatky');
 
         $failing = [];
+        // The numbers of each row's nedostatky in the table under this section
+        // (Defects::collect counts them 1…n across the rows in this order).
+        $defectNumber = 0;
         foreach ($items as $idx => $it) {
             $f = (array) ($it['fields'] ?? []);
+            $ownNumbers = [];
+            foreach (\Firol\Support\Defects::fromFields($f) as $_) {
+                $ownNumbers[] = ++$defectNumber;
+            }
             $itemId = (int) ($it['id'] ?? 0);
             $hasPrehliadkaDefects = !empty($f['prehliadka_defects']) && is_array($f['prehliadka_defects']);
 
@@ -137,6 +162,7 @@ final class DefectsTable
                     'index'   => $idx + 1,
                     'item_id' => $itemId,
                     'fields'  => $f,
+                    'defect_numbers' => $ownNumbers,
                 ];
             }
         }
@@ -209,7 +235,7 @@ final class DefectsTable
                 }
             } else {
                 // Standalone routine inspection defect
-                $state = self::routineState($type, $f);
+                $state = self::routineState($type, $f, $fail['defect_numbers']);
                 if ($state === '') {
                     if ($type === 'php' && isset($f['status'])) {
                         $statusLabels = ['TS' => 'Tlaková skúška', 'O' => 'Vyžaduje opravu', 'V' => 'Vyradený z prevádzky'];
@@ -244,33 +270,36 @@ final class DefectsTable
 
     /**
      * „Zistený stav" of a failing row without prehliadka defects: its závady,
-     * else (rebríky, regály) the descriptions of the row's nedostatky, else the
-     * text field of the other types; '' when there is none (the caller prints
-     * the stav label or „Nevyhovuje"). A field holding an array is never cast —
+     * else (rebríky, regály) a pointer to the row's nedostatky in the table
+     * below — their numbers, not their texts again (round 7) — else the text
+     * field of the other types; '' when there is none (the caller prints the
+     * stav label or „Nevyhovuje"). A field holding an array is never cast —
      * `defects` of a BOZP row is its list of nedostatky (round 6: a rebrík with
      * empty závady printed „Array").
      *
      * @param array<string, mixed> $f
+     * @param list<int> $defectNumbers the numbers of the row's nedostatky in the table
      */
-    private static function routineState(string $type, array $f): string
+    private static function routineState(string $type, array $f, array $defectNumbers = []): string
     {
         $faults = self::scalarText($f['faults'] ?? null);
         if ($faults !== '') {
             return $faults;
         }
         if ($type === 'rebriky' || $type === 'regale') {
-            $descriptions = array_values(array_filter(array_map(
-                static fn (array $d): string => trim((string) $d['description']),
-                \Firol\Support\Defects::fromFields($f),
-            ), static fn (string $s): bool => $s !== ''));
-            return implode("\n", $descriptions);
+            if ($defectNumbers === []) {
+                return '';
+            }
+            return count($defectNumbers) === 1
+                ? 'Pozri nedostatok č. ' . $defectNumbers[0] . ' v tabuľke Nedostatky.'
+                : 'Pozri nedostatky č. ' . implode(', ', $defectNumbers) . ' v tabuľke Nedostatky.';
         }
         $defects = self::scalarText($f['defects'] ?? null);
         return $defects !== '' ? $defects : self::scalarText($f['notes'] ?? null);
     }
 
     /** A text field, '' for anything that is not a string or a number. */
-    private static function scalarText(mixed $v): string
+    public static function scalarText(mixed $v): string
     {
         return is_string($v) || is_int($v) || is_float($v) ? trim((string) $v) : '';
     }

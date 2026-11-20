@@ -151,14 +151,18 @@ final class BookNumber
 
     /**
      * Writes the proposal onto a firma that has no code yet — when it is
-     * created (the app, the Excel import). Best effort: a name without a
-     * proposal leaves the code empty for the user, and the first issue
-     * proposes again.
+     * created (the app, the Excel import, a restore). Best effort: a name
+     * without a proposal leaves the code empty for the user, and the first
+     * issue proposes again. `$alsoTaken` are codes counted as taken besides
+     * the account's (a restore: every code of the archive — round 7).
+     *
+     * @param array<string, true> $alsoTaken
      */
-    public static function assignProposal(int $accountId, int $companyId, string $name): ?string
+    public static function assignProposal(int $accountId, int $companyId, string $name, array $alsoTaken = []): ?string
     {
+        $taken = self::takenCodes($accountId, $companyId) + $alsoTaken;
         foreach (self::candidates($name) as $code) {
-            if (isset(self::takenCodes($accountId, $companyId)[$code])) {
+            if (isset($taken[$code])) {
                 continue;
             }
             try {
@@ -285,11 +289,55 @@ final class BookNumber
         return ctype_digit($rest) ? (int) $rest : null;
     }
 
+    /**
+     * The number the firma's next first issue would take now — its counter + 1,
+     * past every sequence of its code already used in the account, as
+     * {@see self::forIssue()} counts it; null without a code. A plain read: what
+     * a message may promise (round 7 — the restore warning named PK-STV-001
+     * while the next issue was PK-STV-002).
+     */
+    public static function nextNumber(PDO $pdo, int $accountId, int $companyId): ?string
+    {
+        $stmt = $pdo->prepare('SELECT book_code, book_last_seq FROM companies WHERE id = ? AND account_id = ?');
+        $stmt->execute([$companyId, $accountId]);
+        $company = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$company || !is_string($company['book_code']) || $company['book_code'] === '') {
+            return null;
+        }
+        $code = $company['book_code'];
+        $next = (int) $company['book_last_seq'] + 1;
+        $used = self::usedSequences($pdo, $accountId, $code, $next);
+        while (isset($used[$next])) {
+            $next++;
+        }
+        return self::format($code, $next);
+    }
+
+    /**
+     * Whether the firma's code is locked: an entry of it took a number — its
+     * counter moved, or an entry of the firma holds a book number (round 7: a
+     * firma whose code a merge restore changed has counter 0, its restored
+     * entries keep the numbers of the old code). „Upraviť" keeps the number,
+     * so an entry opened again still locks it.
+     */
+    public static function isCodeLocked(PDO $pdo, int $accountId, int $companyId, int $lastSeq): bool
+    {
+        if ($lastSeq > 0) {
+            return true;
+        }
+        $stmt = $pdo->prepare(
+            'SELECT 1 FROM inspections WHERE account_id = ? AND company_id = ? AND book_number IS NOT NULL LIMIT 1'
+        );
+        $stmt->execute([$accountId, $companyId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     /** The code under the firma's row lock: the first free proposal, written at once. */
     private static function claimCode(PDO $pdo, int $accountId, int $companyId, string $name, string $clientType): string
     {
+        $taken = self::takenCodes($accountId, $companyId);
         foreach (self::candidates($name) as $code) {
-            if (isset(self::takenCodes($accountId, $companyId)[$code])) {
+            if (isset($taken[$code])) {
                 continue;
             }
             try {
@@ -368,7 +416,7 @@ final class BookNumber
              WHERE  i.account_id = ? AND i.book_number LIKE 'PK-%' AND (? IS NULL OR i.company_id <> ?)
              UNION
              SELECT d.number FROM documents d
-             LEFT   JOIN inspections i ON d.parent_type = 'inspection' AND i.id = d.parent_id
+             LEFT   JOIN inspections i ON d.parent_type = 'inspection' AND i.id = d.parent_id AND i.account_id = d.account_id
              WHERE  d.account_id = ? AND d.number LIKE 'PK-%' AND (? IS NULL OR i.company_id IS NULL OR i.company_id <> ?)"
         );
         $numbers->execute([$accountId, $exceptCompanyId, $exceptCompanyId, $accountId, $exceptCompanyId, $exceptCompanyId]);

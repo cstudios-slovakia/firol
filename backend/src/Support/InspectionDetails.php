@@ -67,7 +67,10 @@ final class InspectionDetails
      * The header after a client's save: the validated fields over what is
      * stored (round 6 of the fix list of 16. 11. 2026). A validator always
      * returns its type's whole field set, so a field the client cleared is
-     * still cleared; every other stored key is the server's and stays:
+     * still cleared; every other stored key stays — the keys the server writes,
+     * listed below, and keys an older version stored that no validator returns
+     * any more (e.g. `book_entry`; round 7 — they are not the server's, they are
+     * simply left as they were):
      *
      *   carried_from, carried_positions   the origin of carried items (CarryOver,
      *                                     PrehliadkaChecklist) — the origin line
@@ -107,13 +110,26 @@ final class InspectionDetails
         if ($stored === null) {
             return null;
         }
-        try {
-            $clientKeys = self::validate($type, []);
-        } catch (\InvalidArgumentException) {
-            $clientKeys = [];
-        }
-        $left = array_diff_key($stored, $clientKeys);
+        $left = array_diff_key($stored, self::clientKeys($type));
         return $left === [] ? null : $left;
+    }
+
+    /**
+     * The keys a client owns: the field set its type's validator returns. The
+     * validator of a preventívna prehliadka refuses an empty header (a scope
+     * is required), so its set is read from the smallest valid one — round 7:
+     * an empty set had made `details: null` keep every stored key.
+     *
+     * @return array<string, mixed>
+     */
+    private static function clientKeys(string $type): array
+    {
+        $sample = PrehliadkaDetails::supports($type) ? ['scope' => ['po' => true]] : [];
+        try {
+            return self::validate($type, $sample);
+        } catch (\InvalidArgumentException) {
+            return [];
+        }
     }
 
     /**

@@ -46,6 +46,16 @@ final class Restorer
     public const MODE_MERGE   = 'merge';
     public const MODE_REPLACE = 'replace';
 
+    /**
+     * Check scripts only (bin/test-prehliadka-followups.php, round 7): called
+     * with the stage name — `locked` after the firms are locked, `settle`
+     * before the book numbers are settled — inside the restore's transaction,
+     * so a second connection can act while its locks are held. Null in the app.
+     *
+     * @var null|\Closure(string): void
+     */
+    public static ?\Closure $checkpoint = null;
+
     /** @var list<string> absolute paths written during this run */
     private array $written = [];
 
@@ -124,8 +134,19 @@ final class Restorer
     private array $bookCodeChanged = [];
     /** @var list<string> book numbers of the archive an entry lost because the account uses them (round 6) */
     private array $bookNumbersLost = [];
-    /** @var list<string> book numbers an entry brought back under a code another firma holds now (round 6) */
+    /**
+     * @var array<string, list<string>> archive code → book numbers entries brought
+     *      back under it after their firma got another code (round 6; per code, round 7)
+     */
     private array $bookNumbersForeign = [];
+    /**
+     * @var array<int, array{name: string, client_type: string, old: string, own: ?string, numbers: list<string>}>
+     *      existing firma id → the other code its merged archive firma had, and the
+     *      numbers of that code its entries brought back (round 7)
+     */
+    private array $bookCodeMerged = [];
+    /** @var list<string> every book code of the archive — its firms' and its entries' numbers' (round 7) */
+    private array $archiveBookCodes = [];
     /** @var array<int, true> new ids of entries restored as drafts because their number was taken (round 6) */
     private array $bookLostInspectionIds = [];
     /** @var array<int, string> new entry id → number of its book document the account already used (round 6) */
@@ -159,6 +180,14 @@ final class Restorer
             return $restorer->restore($manifest, $mode);
         } finally {
             $zip?->close();
+        }
+    }
+
+    /** {@see self::$checkpoint} */
+    private static function reach(string $stage): void
+    {
+        if (self::$checkpoint !== null) {
+            (self::$checkpoint)($stage);
         }
     }
 
@@ -219,6 +248,7 @@ final class Restorer
     private function restore(array $manifest, string $mode): array
     {
         $this->userMap = $this->loadUserMap();
+        $this->archiveBookCodes = self::bookCodesOf($manifest);
 
         // Purging runs before the transaction: it deletes files off disk, which
         // no rollback can undo, so there is nothing to gain from holding it
@@ -235,18 +265,29 @@ final class Restorer
             }
         }
 
+        // READ COMMITTED (round 7): at the database's REPEATABLE READ the lock
+        // below also took gap locks on uq_companies_book_code beyond this
+        // account, so another customer's new firma or changed code waited for
+        // the whole restore (files written to disk included) and answered 500.
+        // At READ COMMITTED a locking read locks the matching rows only, and
+        // every plain read sees what is committed when it runs. Applies to the
+        // next transaction only — issued right before it.
+        $this->pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
         $this->pdo->beginTransaction();
         try {
             // Lock order with an issue (round 6): an issue locks its entry, then
             // its firma, then writes the document. The restore takes every firma
-            // row of the account first, before any read or write, so a book entry
-            // being issued meanwhile waits here and then reads the numbers this
-            // restore brought back (BookNumber::forIssue skips them) instead of
-            // deadlocking on the document's unique key. First statement on
-            // purpose: a plain read before it would fix a read view, and a firma
-            // changed after that would fail the lock with error 1020.
+            // row of the account first, so a book entry being issued meanwhile
+            // waits here and then reads the numbers this restore brought back
+            // (BookNumber::forIssue skips them) instead of deadlocking on the
+            // document's unique key. After it the restore never locks a row it
+            // did not insert (round 7): an issue holding its entry and waiting
+            // for its firma would otherwise deadlock with it — every later
+            // UPDATE goes by the primary key of a row this restore inserted, its
+            // values read first with a plain SELECT.
             $this->pdo->prepare('SELECT id FROM companies WHERE account_id = ? ORDER BY id FOR UPDATE')
                 ->execute([$this->accountId]);
+            self::reach('locked');
             $this->restoreCompanies($this->list($manifest, 'companies'));
             // Before the inspections: a defect's fields.catalog_id is remapped onto it.
             $this->restoreDefectCatalog($this->list($manifest, 'defect_catalog'));
@@ -262,6 +303,7 @@ final class Restorer
             // After the documents: an old archive's draft that owns one was issued.
             $this->markIssuedFromDocuments();
             // After the documents: book numbers onto the entries, counters up.
+            self::reach('settle');
             $this->settleBookNumbers();
             // Phase 6 — termíny cudzích revízií, onto the restored firms and prevádzky.
             $this->restoreExternalTerms($this->list($manifest, 'external_terms'));
@@ -326,6 +368,8 @@ final class Restorer
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
 
+        /** @var list<array{id: int, name: string, company: array<string, mixed>}> $insertedFirms */
+        $insertedFirms = [];
         foreach ($companies as $company) {
             $oldId = (int) ($company['id'] ?? 0);
             $name  = $this->str($company, 'name');
@@ -341,6 +385,7 @@ final class Restorer
             if (isset($existingCompanies[$key])) {
                 $newId = $existingCompanies[$key];
                 $this->skipped['companies']++;
+                $this->noteMergedBookCode($newId, $name, $company);
             } else {
                 $clientType = $this->str($company, 'client_type');
                 if ($clientType !== 'firma' && $clientType !== 'bytove_druzstvo') {
@@ -363,7 +408,7 @@ final class Restorer
                 $existingCompanies[$key] = $newId;
                 $this->restored['companies']++;
                 $this->restoreCompanyBillingMode($newId, $company);
-                $this->restoreCompanyBookCode($newId, $name, $company);
+                $insertedFirms[] = ['id' => $newId, 'name' => $name, 'company' => $company];
             }
             $this->companyMap[$oldId] = $newId;
 
@@ -408,60 +453,186 @@ final class Restorer
                 $this->restored['facilities']++;
             }
         }
+
+        $this->restoreBookCodes($insertedFirms);
     }
 
     /**
-     * The code and counter of the firma's požiarna kniha numbers (customer's
-     * answer 3 of 18. 11. 2026). A code that is taken here — another firma of
-     * this account holds it, or numbers of its series exist (round 6) — is not
-     * taken over: the firma gets a fresh proposal with its counter at 0, and
-     * what happened to each of its entries is reported after the entries
-     * ({@see self::bookWarnings()}). An archive from before the code existed
-     * gets a proposal as a firma created in the app does.
+     * Every book code the archive uses: its firms' codes and the code of each
+     * PK-<KÓD>-n number of its entries (a code always has a letter, so the old
+     * PK-RRRR-NNN numbers name none).
      *
-     * @param array<string, mixed> $company
+     * @param array<string, mixed> $manifest
+     * @return list<string>
      */
-    private function restoreCompanyBookCode(int $companyId, string $name, array $company): void
+    private static function bookCodesOf(array $manifest): array
     {
-        $code = null;
+        $codes = [];
+        foreach ((array) ($manifest['companies'] ?? []) as $company) {
+            if (is_array($company) && ($code = self::archiveCode($company)) !== null) {
+                $codes[$code] = true;
+            }
+        }
+        foreach ((array) ($manifest['inspections'] ?? []) as $inspection) {
+            $number = is_array($inspection) ? ($inspection['book_number'] ?? null) : null;
+            if (is_string($number) && preg_match('/^' . BookNumber::PREFIX . '-([A-Z0-9]{2,4})-\d+$/', $number, $m) === 1
+                && preg_match('/[A-Z]/', $m[1]) === 1) {
+                $codes[$m[1]] = true;
+            }
+        }
+        return array_map('strval', array_keys($codes));
+    }
+
+    /** The firma's code as the archive has it, or null (none, or not a valid code). */
+    private static function archiveCode(array $company): ?string
+    {
         try {
-            $code = isset($company['book_code']) && $company['book_code'] !== null
+            return isset($company['book_code']) && $company['book_code'] !== null
                 ? BookNumber::normalizeCode($company['book_code'])
                 : null;
         } catch (\InvalidArgumentException) {
-            $code = null;
+            return null;
         }
-        $seq = max(0, (int) ($company['book_last_seq'] ?? 0));
-        if ($code !== null && BookNumber::isCodeTaken($this->accountId, $code, $companyId)) {
-            $clientType = (string) ($company['client_type'] ?? 'firma');
-            $new = BookNumber::assignProposal($this->accountId, $companyId, $name);
-            $this->bookCodeChanged[$companyId] = ['name' => $name, 'client_type' => $clientType, 'old' => $code, 'new' => $new];
+    }
+
+    /**
+     * The codes and counters of the firms this restore inserted (customer's
+     * answer 3 of 18. 11. 2026), in two passes (round 7). First every firma
+     * whose code is free here keeps it with its counter. Then the others — a
+     * code another firma of this account holds, or numbers of its series exist
+     * here (round 6), or no code at all (an archive from before the code) — get
+     * a proposal with their counter at 0, every code of the archive counted as
+     * taken: a firma whose code was taken no longer takes the free code of
+     * another firma of the archive (Stavby Novák STA used to get STV, so
+     * „Stv Trade" lost STV and its book had two series). What happened to
+     * each entry is reported after the entries ({@see self::bookWarnings()}).
+     *
+     * @param list<array{id: int, name: string, company: array<string, mixed>}> $firms
+     */
+    private function restoreBookCodes(array $firms): void
+    {
+        $archiveCodes = [];
+        foreach ($this->archiveBookCodes as $code) {
+            $archiveCodes[$code] = true;
+        }
+
+        $setCode = $this->pdo->prepare('UPDATE companies SET book_code = ?, book_last_seq = ? WHERE id = ? AND account_id = ?');
+        $rest = [];
+        foreach ($firms as $firm) {
+            $code = self::archiveCode($firm['company']);
+            if ($code !== null && !BookNumber::isCodeTaken($this->accountId, $code, $firm['id'])) {
+                $setCode->execute([$code, max(0, (int) ($firm['company']['book_last_seq'] ?? 0)), $firm['id'], $this->accountId]);
+                continue;
+            }
+            $rest[] = $firm + ['code' => $code];
+        }
+        foreach ($rest as $firm) {
+            $new = BookNumber::assignProposal($this->accountId, $firm['id'], $firm['name'], $archiveCodes);
+            if ($firm['code'] !== null) {
+                $this->bookCodeChanged[$firm['id']] = [
+                    'name'        => $firm['name'],
+                    'client_type' => (string) ($firm['company']['client_type'] ?? ClientKind::FIRMA),
+                    'old'         => $firm['code'],
+                    'new'         => $new,
+                ];
+            }
+        }
+    }
+
+    /**
+     * A firma of the archive the merge matched to an existing one keeps the
+     * existing firma's code; when the archive's code differs, its entries come
+     * back with numbers of the archive's code, and the warning says so (round 7).
+     *
+     * @param array<string, mixed> $company
+     */
+    private function noteMergedBookCode(int $companyId, string $name, array $company): void
+    {
+        $code = self::archiveCode($company);
+        if ($code === null) {
             return;
         }
-        if ($code !== null) {
-            $this->pdo->prepare('UPDATE companies SET book_code = ?, book_last_seq = ? WHERE id = ? AND account_id = ?')
-                ->execute([$code, $seq, $companyId, $this->accountId]);
+        $stmt = $this->pdo->prepare('SELECT book_code, client_type FROM companies WHERE id = ? AND account_id = ?');
+        $stmt->execute([$companyId, $this->accountId]);
+        $own = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$own || $own['book_code'] === $code) {
             return;
         }
-        BookNumber::assignProposal($this->accountId, $companyId, $name);
+        $this->bookCodeMerged[$companyId] = [
+            'name'        => $name,
+            'client_type' => (string) $own['client_type'],
+            'old'         => $code,
+            'own'         => $own['book_code'] !== null ? (string) $own['book_code'] : null,
+            'numbers'     => [],
+        ];
+    }
+
+    /** The client of this account holding the code: its name and kind, or null when only numbers hold it. */
+    private function bookCodeHolder(string $code): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT name, client_type FROM companies WHERE account_id = ? AND book_code = ?');
+        $stmt->execute([$this->accountId, $code]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ? ['name' => (string) $row['name'], 'client_type' => (string) $row['client_type']] : null;
+    }
+
+    /**
+     * The end of the sentence about numbers kept under `$code`: who skips them —
+     * the client holding the code, or, when only numbers hold it, nobody may
+     * take the code (BookNumber::isCodeTaken).
+     *
+     * @param list<string> $numbers
+     */
+    private function holderSentence(string $code, array $numbers): string
+    {
+        $holder = $this->bookCodeHolder($code);
+        $list = implode(', ', $numbers);
+        return $holder !== null
+            ? "ktorý teraz patrí klientovi „{$holder['name']}\": $list. Tento klient tieto čísla pri ďalších zápisoch preskočí."
+            : "ktorý v tomto účte nemá žiadny klient, len čísla iných zápisov: $list. Kód „{$code}\" preto nedostane žiadny klient tohto účtu.";
     }
 
     /**
      * What the restore did to book codes and numbers, entry by entry (round 6;
      * the warning used to say the numbers were kept even when one was lost).
+     * Round 7: the next number is the one the next issue really takes, or none
+     * is named; a code held by numbers only is worded as such; a firma merged
+     * into one with another code says what its numbers are.
      */
     private function bookWarnings(): void
     {
-        foreach ($this->bookCodeChanged as $c) {
+        foreach ($this->bookCodeChanged as $companyId => $c) {
             $bd = ClientKind::isBytovyDom($c['client_type']);
-            $this->warnings[] = ($bd ? 'Bytové družstvo' : 'Firma') . " „{$c['name']}\": kód „{$c['old']}\" už v tomto účte patrí inému klientovi — "
-                . ($c['new'] !== null
-                    ? ($bd ? 'dostalo' : 'dostala') . " kód „{$c['new']}\", ďalšie zápisy budú PK-{$c['new']}-001, …"
-                    : 'kód treba doplniť na ' . ($bd ? 'jeho' : 'jej') . ' detaile pred ďalším zápisom.');
+            $why = $this->bookCodeHolder($c['old']) !== null
+                ? 'už v tomto účte patrí inému klientovi'
+                : 'už v tomto účte používajú čísla iných zápisov';
+            if ($c['new'] !== null) {
+                $next = BookNumber::nextNumber($this->pdo, $this->accountId, $companyId);
+                $tail = ($bd ? 'dostalo' : 'dostala') . " kód „{$c['new']}\""
+                    . ($next !== null ? ", ďalší zápis bude $next." : '.');
+            } else {
+                $tail = 'kód treba doplniť na ' . ($bd ? 'jeho' : 'jej') . ' detaile pred ďalším zápisom.';
+            }
+            $this->warnings[] = ($bd ? 'Bytové družstvo' : 'Firma') . " „{$c['name']}\": kód „{$c['old']}\" $why — $tail";
         }
-        if ($this->bookNumbersForeign !== []) {
-            $this->warnings[] = 'Zápisy do požiarnej knihy si ponechali svoje čísla aj pod kódom, ktorý teraz patrí inému klientovi: '
-                . implode(', ', $this->bookNumbersForeign) . '. Ten klient tieto čísla pri ďalších zápisoch preskočí.';
+        foreach ($this->bookNumbersForeign as $code => $numbers) {
+            $this->warnings[] = "Zápisy do požiarnej knihy si ponechali svoje čísla aj pod kódom „{$code}\"" . ', ' . $this->holderSentence($code, $numbers);
+        }
+        foreach ($this->bookCodeMerged as $companyId => $m) {
+            if ($m['numbers'] === []) {
+                continue;
+            }
+            $bd = ClientKind::isBytovyDom($m['client_type']);
+            $next = $m['own'] !== null ? BookNumber::nextNumber($this->pdo, $this->accountId, $companyId) : null;
+            $this->warnings[] = ($bd ? "Bytové družstvo „{$m['name']}\" zo zálohy sa spojilo s rovnakým bytovým družstvom tohto účtu, ktoré "
+                    : "Firma „{$m['name']}\" zo zálohy sa spojila s rovnakou firmou tohto účtu, ktorá ")
+                . ($m['own'] !== null ? "má kód „{$m['own']}\"" : 'ešte nemá kód')
+                . " — zápisy zo zálohy si ponechali čísla s kódom „{$m['old']}\": " . implode(', ', $m['numbers']) . '.'
+                . ($next !== null ? " Ďalší zápis bude $next." : '');
+            $holder = $this->bookCodeHolder($m['old']);
+            if ($holder !== null) {
+                $this->warnings[] = "Kód „{$m['old']}\" v tomto účte patrí klientovi „{$holder['name']}\" — tento klient tieto čísla pri ďalších zápisoch preskočí.";
+            }
         }
         foreach ($this->bookNumbersLost as $number) {
             $this->warnings[] = "Zápis do požiarnej knihy č. $number: toto číslo už v účte má iný zápis — zápis je obnovený "
@@ -477,42 +648,64 @@ final class Restorer
      */
     private function settleBookNumbers(): void
     {
+        // Plain reads, then one UPDATE per entry by its primary key — only the
+        // entries this restore inserted are locked (round 7: the UPDATE … JOIN
+        // with its subqueries locked other entries of the account and deadlocked
+        // with an issue holding one of them).
+        $inUse = $this->pdo->prepare('SELECT 1 FROM inspections WHERE account_id = ? AND book_number = ? LIMIT 1');
+        $setNumber = $this->pdo->prepare(
+            'UPDATE inspections SET book_number = ?, book_number_version = ? WHERE id = ? AND account_id = ? AND book_number IS NULL'
+        );
         foreach (array_chunk($this->insertedInspectionIds, 500) as $chunk) {
             $in = implode(',', array_fill(0, count($chunk), '?'));
             // The newest documents row when an entry has more than one (round 6).
-            $this->pdo->prepare(
-                "UPDATE inspections i
+            $stmt = $this->pdo->prepare(
+                "SELECT i.id, d.number, d.version
+                 FROM   inspections i
                  JOIN   documents d ON d.id = (SELECT d2.id FROM documents d2
                                                WHERE  d2.account_id = i.account_id AND d2.parent_type = 'inspection' AND d2.parent_id = i.id
                                                ORDER  BY d2.version DESC, d2.id DESC LIMIT 1)
-                 SET    i.book_number = d.number, i.book_number_version = d.version
-                 WHERE  i.account_id = ? AND i.id IN ($in) AND i.type = 'poziarna_kniha' AND i.book_number IS NULL
-                   AND  NOT EXISTS (SELECT 1 FROM (SELECT book_number FROM inspections WHERE account_id = ? AND book_number IS NOT NULL) x
-                                    WHERE x.book_number = d.number)"
-            )->execute([$this->accountId, ...$chunk, $this->accountId]);
+                 WHERE  i.account_id = ? AND i.id IN ($in) AND i.type = 'poziarna_kniha' AND i.book_number IS NULL"
+            );
+            $stmt->execute([$this->accountId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $inUse->execute([$this->accountId, (string) $r['number']]);
+                if ($inUse->fetchColumn() !== false) {
+                    continue;
+                }
+                $setNumber->execute([(string) $r['number'], (int) $r['version'], (int) $r['id'], $this->accountId]);
+            }
         }
 
         // An entry of an archive from before migration 080 whose protocol number
         // this account already used: no number and no document came back. It
-        // returns as „Upraviť" leaves it, like an entry of a newer archive whose
-        // number was taken (round 6).
+        // returns as „Upraviť" leaves it (round 7: protocol_deferred_at cleared
+        // too), like an entry of a newer archive whose number was taken (round 6).
+        $state = $this->pdo->prepare(
+            "SELECT i.status, i.book_number,
+                    EXISTS (SELECT 1 FROM documents d WHERE d.account_id = i.account_id
+                            AND d.parent_type = 'inspection' AND d.parent_id = i.id) AS has_document
+             FROM   inspections i WHERE i.id = ? AND i.account_id = ?"
+        );
         $reopen = $this->pdo->prepare(
             "UPDATE inspections
-             SET    status = 'draft', issued_before = 1, effective_inspector_user_id = NULL, effective_cert_number = NULL,
+             SET    status = 'draft', issued_before = 1, protocol_deferred_at = NULL,
+                    effective_inspector_user_id = NULL, effective_cert_number = NULL,
                     effective_cert_valid_from = NULL, effective_cert_valid_to = NULL,
                     details = IF(JSON_EXISTS(details, '$.issued'), JSON_REMOVE(details, '$.issued'), details)
-             WHERE  id = ? AND account_id = ? AND status = 'finalized' AND book_number IS NULL
-               AND  NOT EXISTS (SELECT 1 FROM documents d WHERE d.account_id = inspections.account_id
-                                AND d.parent_type = 'inspection' AND d.parent_id = inspections.id)"
+             WHERE  id = ? AND account_id = ?"
         );
         foreach ($this->bookDocumentSkipped as $inspectionId => $number) {
             if (!in_array($inspectionId, $this->insertedInspectionIds, true)) {
                 continue;
             }
-            $reopen->execute([$inspectionId, $this->accountId]);
-            if ($reopen->rowCount() > 0) {
-                $this->bookNumbersLost[] = $number;
+            $state->execute([$inspectionId, $this->accountId]);
+            $s = $state->fetch(PDO::FETCH_ASSOC);
+            if (!$s || $s['status'] !== 'finalized' || $s['book_number'] !== null || (int) $s['has_document'] === 1) {
+                continue;
             }
+            $reopen->execute([$inspectionId, $this->accountId]);
+            $this->bookNumbersLost[] = $number;
         }
 
         $companyIds = array_values(array_unique($this->companyMap));
@@ -677,7 +870,10 @@ final class Restorer
                     }
                 } elseif ($bookNumber !== null && isset($this->bookCodeChanged[$companyId])
                     && BookNumber::sequenceOf($bookNumber, $this->bookCodeChanged[$companyId]['old']) !== null) {
-                    $this->bookNumbersForeign[] = $bookNumber;
+                    $this->bookNumbersForeign[$this->bookCodeChanged[$companyId]['old']][] = $bookNumber;
+                } elseif ($bookNumber !== null && isset($this->bookCodeMerged[$companyId])
+                    && BookNumber::sequenceOf($bookNumber, $this->bookCodeMerged[$companyId]['old']) !== null) {
+                    $this->bookCodeMerged[$companyId]['numbers'][] = $bookNumber;
                 }
             }
 
@@ -1035,7 +1231,9 @@ final class Restorer
             }
             $newId     = $this->inspectionMap[(int) ($inspection['id'] ?? 0)] ?? null;
             $newSource = $this->inspectionMap[(int) $sourceOld] ?? null;
-            if ($newId === null || $newSource === null) {
+            // Only an úkon this restore inserted: one the merge matched to an
+            // existing record is left as it is — and unlocked (round 7).
+            if ($newId === null || $newSource === null || !in_array($newId, $this->insertedInspectionIds, true)) {
                 continue;
             }
             $update->execute([$newSource, $newId, $this->accountId]);
@@ -2175,24 +2373,25 @@ final class Restorer
             array_keys($this->documentedInspectionIds),
             fn (int $id): bool => in_array($id, $this->insertedInspectionIds, true),
         ));
-        foreach (array_chunk($named, 500) as $chunk) {
-            $in = implode(',', array_fill(0, count($chunk), '?'));
-            $this->pdo->prepare(
-                "UPDATE inspections SET issued_before = 1
-                 WHERE  account_id = ? AND id IN ($in) AND status = 'draft'"
-            )->execute([$this->accountId, ...$chunk]);
+        // One UPDATE per entry by its primary key, so no row of the account
+        // other than the ones this restore inserted is locked (round 7).
+        $mark = $this->pdo->prepare(
+            "UPDATE inspections SET issued_before = 1 WHERE id = ? AND account_id = ? AND status = 'draft'"
+        );
+        foreach ($named as $id) {
+            $mark->execute([$id, $this->accountId]);
         }
         foreach (array_chunk($this->issuedUnknownIds, 500) as $chunk) {
             $in = implode(',', array_fill(0, count($chunk), '?'));
-            $this->pdo->prepare(
-                "UPDATE inspections i
-                 SET    i.issued_before = 1
-                 WHERE  i.account_id = ? AND i.id IN ($in)
-                   AND  EXISTS (SELECT 1 FROM documents d
-                                WHERE  d.account_id = i.account_id
-                                  AND  d.parent_type = 'inspection'
-                                  AND  d.parent_id = i.id)"
-            )->execute([$this->accountId, ...$chunk]);
+            $documented = $this->pdo->prepare(
+                "SELECT DISTINCT parent_id FROM documents
+                 WHERE  account_id = ? AND parent_type = 'inspection' AND parent_id IN ($in)"
+            );
+            $documented->execute([$this->accountId, ...$chunk]);
+            $set = $this->pdo->prepare('UPDATE inspections SET issued_before = 1 WHERE id = ? AND account_id = ?');
+            foreach ($documented->fetchAll(PDO::FETCH_COLUMN) as $id) {
+                $set->execute([(int) $id, $this->accountId]);
+            }
         }
     }
 
