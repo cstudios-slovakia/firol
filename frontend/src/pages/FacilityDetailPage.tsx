@@ -279,10 +279,24 @@ export function FacilityDetailPage() {
     const ppDraftId =
         (inspections ?? []).find((i) => i.type === PREHLIADKA_TYPE && i.status === "draft")?.id ?? ppContextDraft;
     // Spec 11.1 — a draft prehliadka that was never closed can be discarded from its banner.
-    const ppDiscard = useDiscardPrehliadka(ppDraftId, () => {
-        setInspections((prev) => prev?.filter((i) => i.id !== ppDraftId) ?? null);
-        setPpContextDraft(null);
-    });
+    const ppDiscard = useDiscardPrehliadka(
+        ppDraftId,
+        () => {
+            setInspections((prev) => prev?.filter((i) => i.id !== ppDraftId) ?? null);
+            setPpContextDraft(null);
+        },
+        undefined,
+        // Refused because it was issued meanwhile (409): read the list and the
+        // context again, so the draft card goes without a reload (round 7).
+        () => {
+            Inspections.list({ facility_id: id })
+                .then((res) => setInspections(res.items))
+                .catch(() => undefined);
+            Prehliadka.context(id)
+                .then((c) => setPpContextDraft(c.draft_id))
+                .catch(() => undefined);
+        },
+    );
 
     if (error) {
         return (

@@ -258,23 +258,27 @@ export function PrehliadkaWalkPage() {
         </Card>
       )}
 
-      <div className="flex gap-2">
-        <Button type="button" id="pp-interrupt" variant="secondary" className="flex-1" onClick={() => navigate(facilityHref)}>
-          Prerušiť
-        </Button>
-        {draft && (
-          <Button
-            type="button"
-            id="pp-continue"
-            className="flex-1"
-            rightIcon={<ChevronRight className="size-4" />}
-            onClick={() => navigate(prehliadkaTermsPath(id))}
-          >
-            Pokračovať
-          </Button>
-        )}
-      </div>
-      <p className="-mt-2 text-center text-xs text-ink-400">Prerušenú prehliadku nájdeš na {nouns.cases.loc}.</p>
+      {/* Only a draft can be interrupted (round 7: after the 409 of a permanent
+          delete the closed prehliadka still offered „Prerušiť" and its hint). */}
+      {draft && (
+        <>
+          <div className="flex gap-2">
+            <Button type="button" id="pp-interrupt" variant="secondary" className="flex-1" onClick={() => navigate(facilityHref)}>
+              Prerušiť
+            </Button>
+            <Button
+              type="button"
+              id="pp-continue"
+              className="flex-1"
+              rightIcon={<ChevronRight className="size-4" />}
+              onClick={() => navigate(prehliadkaTermsPath(id))}
+            >
+              Pokračovať
+            </Button>
+          </div>
+          <p className="-mt-2 text-center text-xs text-ink-400">Prerušenú prehliadku nájdeš na {nouns.cases.loc}.</p>
+        </>
+      )}
       <DiscardPrehliadkaButton action={discard} className="self-center" size="sm" />
     </div>
   );

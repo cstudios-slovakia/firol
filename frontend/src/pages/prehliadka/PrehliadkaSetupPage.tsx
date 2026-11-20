@@ -301,8 +301,17 @@ function SetupForm({
 
   // A prehliadka already in progress at this prevádzka (only when starting a new one).
   const inProgress = editing === null ? (loaded?.context?.draft_id ?? null) : null;
-  const discardInProgress = useDiscardPrehliadka(inProgress, () =>
-    setLoaded((cur) => (cur && cur.context ? { ...cur, context: { ...cur.context, draft_id: null } } : cur)),
+  const discardInProgress = useDiscardPrehliadka(
+    inProgress,
+    () => setLoaded((cur) => (cur && cur.context ? { ...cur, context: { ...cur.context, draft_id: null } } : cur)),
+    undefined,
+    // Refused because it was issued meanwhile (409): read the context again,
+    // so the card of the draft goes without a reload (round 7).
+    () => {
+      Prehliadka.context(facilityId)
+        .then((context) => setLoaded((cur) => (cur ? { ...cur, context } : cur)))
+        .catch(() => undefined);
+    },
   );
 
   const backTo = editing

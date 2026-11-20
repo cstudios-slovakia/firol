@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { BookMarked, Check, Lock, Pencil, X } from 'lucide-react';
 import { Companies, type Company } from '@/api/companies';
 import { ApiError } from '@/lib/api';
@@ -62,10 +63,16 @@ export function BookCodeRow({
   const shown = stored ?? suggested;
 
   function startEdit() {
-    setValue(shown ?? '');
-    setError(null);
-    setEditing(true);
-    requestAnimationFrame(() => inputRef.current?.select());
+    // The input is rendered and selected before this handler returns (round 7):
+    // a select() delayed to the next frame swallowed the first keys typed
+    // right after „Zmeniť".
+    flushSync(() => {
+      setValue(shown ?? '');
+      setError(null);
+      setEditing(true);
+    });
+    inputRef.current?.focus();
+    inputRef.current?.select();
   }
 
   async function save() {
