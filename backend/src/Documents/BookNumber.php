@@ -319,6 +319,12 @@ final class BookNumber
      * firma whose code a merge restore changed has counter 0, its restored
      * entries keep the numbers of the old code). „Upraviť" keeps the number,
      * so an entry opened again still locks it.
+     *
+     * Only numbers of the per-firma format count. An old `PK-RRRR-NNN` number
+     * (backfilled by migration 080 from entries issued before the change)
+     * carries no code, so it does not lock it: the customer's rule is that the
+     * code stays editable until the firma's first entry in the new format is
+     * issued. A code always has a letter, so it can never read as a year.
      */
     public static function isCodeLocked(PDO $pdo, int $accountId, int $companyId, int $lastSeq): bool
     {
@@ -326,7 +332,8 @@ final class BookNumber
             return true;
         }
         $stmt = $pdo->prepare(
-            'SELECT 1 FROM inspections WHERE account_id = ? AND company_id = ? AND book_number IS NOT NULL LIMIT 1'
+            "SELECT 1 FROM inspections WHERE account_id = ? AND company_id = ? AND book_number IS NOT NULL
+               AND book_number NOT REGEXP '^PK-[0-9]{4}-[0-9]+$' LIMIT 1"
         );
         $stmt->execute([$accountId, $companyId]);
         return $stmt->fetchColumn() !== false;

@@ -2088,8 +2088,12 @@ round fixes the lock of item 3 and what the check found besides.
    and name the client that skips the numbers; a firma merged into an existing firma with another
    code says which numbers its entries brought and what the next entry will be. The pre-080 reopen
    clears `protocol_deferred_at` (an entry restored as a draft never had it — the archive does not
-   carry it). A firma's code is locked also when an entry of it holds a book number
-   (`BookNumber::isCodeLocked`, used by `CompanyController::shape` and `POST …/book-code`).
+   carry it). A firma's code is locked also when an entry of it holds a book number of the
+   per-firma format (`BookNumber::isCodeLocked`, used by `CompanyController::shape` and
+   `POST …/book-code`). An old `PK-RRRR-NNN` number backfilled by 080 does not lock it — it carries
+   no code, and the code stays editable until the firma's first entry in the new format is issued
+   (answer 3; without this every firma with entries issued before the change showed its proposed
+   code locked).
 4. **Rebríky / regály PDF.** The nedostatky table has a caption row „Nedostatky" inside its `<thead>`
    (mPDF repeats it on the next page and never leaves it alone at a page bottom) and a column
    „Rebrík č." / „Regál č." with the row's „Č." from the list. A row without závady points to its
