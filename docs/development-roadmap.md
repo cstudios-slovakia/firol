@@ -373,8 +373,12 @@ Split into 4a (foundation), 4b (trainees + canvas signatures),
   `invoice.payment_succeeded` webhook, idempotent on stripe_invoice_id.
   First payment per account auto-creates an iDoklad Contact from the
   `accounts.invoice_*` fields and persists `idoklad_contact_id`.
-  `IDOKLAD_DRAFT_MODE` env (default true) keeps faktúry as Draft until
-  production. Frontend shows „História faktúr" in BillingSection.
+  ~~`IDOKLAD_DRAFT_MODE` env (default true) keeps faktúry as Draft until
+  production.~~ **Corrected 17. 11. 2026:** that flag never created drafts —
+  it posted a normal, numbered invoice and only labelled the local row
+  „draft". It is no longer read; `IDOKLAD_ISSUE_MODE` / IssuePolicy now
+  decide whether anything is sent (see „Billing fixes (17. 11. 2026)").
+  Frontend shows „História faktúr" in BillingSection.
   Migration 006 adds `accounts.idoklad_contact_id` and the `invoices`
   mirror table.
 - ✅ **Phase 6d — Billing screen + invoice details + admin knobs**:
@@ -1297,6 +1301,1441 @@ Protokoly, in its own section **above** Odoslané protokoly. Signing still
 re-renders the same number (`potvrdenie_prace` handover). It stays out of the
 bulk „Odoslať protokoly" list (decision 7. 10. 2026) — that mail is the
 client's protocols; this e-mail is the confirmation on its own.
+
+---
+
+## POapp zadanie 26. 10. 2026 — preventívna prehliadka, kniha, školenia ✅ built and checked (2. 11. 2026); owner acceptance and FIROL's answers pending
+
+Package: `POapp_zadanie_26_10_2026/` (binding spec `5_Zadanie_pre_AI.md`). Full plan,
+owner decisions D1–D8 and the open questions for FIROL:
+`docs/implementation-plan-2026-10-preventivna-prehliadka.md`.
+
+Points 11, 12 and 13 of the 2. 10. report (cancelled then for budget) are back in scope.
+
+| Phase | Content | Status |
+|---|---|---|
+| 0 | Branch (`poapp-oct-2026`), roadmap; questions to FIROL still to send | 🟨 |
+| 1 | Small fixes (rename, Paušál, IČO, after-create, address button, hints, O follow-up) | ✅ |
+| 2 | Client type (firma / bytové družstvo), prevádzka data, e-mail precedence, device list | ✅ built; firma form checked at 360 px, BD save not re-checked |
+| 3 | Školenia (osobné číslo, bulk, edit, take-over, hliadky, platnosť override) | ✅ |
+| 4 | Defect catalogue (27 items + own items) | ✅ |
+| 5 | Požiarna kniha and kniha BOZP as ledgers; old book úkony retired | 🟨 built, API + 360 px iframe checked; not accepted |
+| 6 | Termíny split by book, cudzie revízie | 🟨 built; HTTP routes, 360 px, PDF, backup/restore, migration 071 verified; not accepted |
+| 7a | Preventívna prehliadka: step 1, walk-through, defect entry | 🟨 built, API + 360 px iframe checked; not accepted |
+| 7b | Preventívna prehliadka: previous defects, step 3, uzavretie | 🟨 built, API + 360 px iframe checked; not accepted |
+| 8a | Closing: PP record, BOZP zápis, book entries | 🟨 built, API + PDF + 360 px verified; not accepted |
+| 8b | Concept checks, visits, Dnes, backup | 🟨 built, API + backup round trip + 360 px checked; not accepted |
+| 9 | Acceptance pass, manual | ✅ all 19 criteria checked; two bugs fixed; manual updated; see "Phase 9" below |
+
+**Superseded (13. 11. 2026):** the ledger of phase 5 (both books, the offers, signature states,
+the whole-book print, the scope switch) and the book parts of phases 6 and 8a („Do knihy" from an
+external term, „Termíny ďalších kontrol", book entries written on closing) were withdrawn by
+FIROL's zadanie of 7. 11. 2026 and removed. See "Požiarna kniha rework" below. Everything else in
+this section stands.
+
+**Phases 1, 3 and 4 accepted (30. 10. 2026).** Checked in the browser at 360 px and on the
+API: 7-digit IČO at the field, new firm opens Pridať prevádzku, seat-address button (hidden with
+no address), Paušál, the documentation rename, training hint, approver hint, bulk paste of 20
+(semicolon and tab, 11 with a number), attendee edit, hliadka labels, platnosť override on the
+calendar and časová os, status `O` offering Oprava/plnenie/TS, take-over (copy then skip),
+training and BOZP PDFs (osobné číslo column only when someone has a number; hliadka line and
+Platnosť do when overridden), `/api/defect-catalog` (27 items). A future override is not on Dnes:
+that screen lists a term only when it is planned for today or already overdue. Backup merge and
+replace round-trip (own číselník, `personal_number`, `patrol_scope`, `valid_until_override`,
+`fields.catalog_id` remap) and the usage SQL against a fake `preventivna_prehliadka` item both
+passed; the throwaway account was removed. Migration 060 is applied on the local DB.
+
+**Built so far:**
+- **Phase 2** — migration 060. `companies.client_type` (`firma` / `bytove_druzstvo`) with a selector
+  on the company form. Nouns (Prevádzka / Bytový dom) on the company list, company detail, the
+  prevádzka form and the „Pridať …" buttons (`lib/clientKind.ts`, `Support/ClientKind.php`).
+  Prevádzka: e-mail, hlavné vypínače a uzávery, popis objektu, and for a bytový dom the floor
+  counts (no vchody field). `entrances` and `places` are stored for the walk-through and are not
+  on the form. E-mail precedence (prevádzka → kontaktný e-mail firmy → adresa v Kontakte) is
+  `ClientEmail` / `clientRecipientEmail`, used by single send, bulk send, termín notices and the
+  prevádzka detail. Zodpovedná osoba resolver (`ResponsiblePerson`, `lib/responsiblePerson.ts`)
+  is ready for Phase 5 and not wired into documents yet. Tab Objekt and a read-only Zariadenia
+  screen from the latest finalized úkon per type (`FacilityDevices`, disposed items left behind).
+  `FacilityEditPage` now uses `FacilityForm`. Phase 5's reserved migrations therefore start at 061.
+- **Phase 1** — migration 056 (Paušál column default), 8-digit IČO at the field + 422 `field: ico`,
+  new company → add-prevádzka dialog, "Rovnaká adresa ako sídlo firmy" button, training and approver
+  hints, rename to "ochrany pred požiarmi", status `O` follow-up (`OPRAVA_FOLLOW_UP_STATUSES` /
+  `PHP_OPRAVA_FOLLOW_UP_STATUSES`, one line each to drop O). Company detail "Pridať prevádzku" now opens
+  `NewFacilityDialog`; `FacilityEditPage` is left for Phase 2 to drop or share the form.
+- **Phase 3** — migration 057; osobné číslo (PDF column only when someone has one), JSON PATCH to edit
+  an attendee, bulk add (`;`/TAB, online-only), take-over from the last training (online-only),
+  hliadka `patrol_scope`, `valid_until_override` honoured by `Deadlines` / `ClientTerms`, import column,
+  backup fields. Added (not in spec): a "Platnosť do" row on the training PDF when overridden.
+- **Phase 4** — migrations 058 (table) + 059 (PHP seed, ids 1–27 = JSON ids), `DefectCatalogController`,
+  usage endpoint, backup/restore with `catalog_id` remap, `DefectPicker` component (not mounted anywhere
+  until Phase 7a). Own items: delete rights follow `MemberRights` unless the user created the item;
+  empty popis / opatrenie saved as "Doplní technik." (prototype).
+- **Phase 5** (built in parallel with 7a, 1. 11. 2026) — migrations 061–063 (`companies.book_scope`,
+  `book_entries`, `book_entry_additions`; 064–065 are gaps). `BookController` (7 routes, writes online-only),
+  `BookMapping` / `lib/bookMapping.ts`, offers ("Appka ponúka pridať", same type + date on several
+  prevádzky = one offer), manual entries, legal-sentence toggle, dopísanie, "bez nedostatkov" flag
+  (PO book only), signatures and on-the-fly print (`renderBook`, no `documents` row), scope switch,
+  route `/companies/:id/kniha`, company card + prevádzka tile + picker entry. `poziarna_kniha` is gone from
+  the picker, visit planner and Opakovať (frontend only; the API still accepts it). Backup/restore of
+  entries. Not done (Phase 6): termín / revízia offers. Decisions to confirm with FIROL: the BOZP
+  "Podľa čísla" kinds (the "oboznámenie zamestnancov v oblasti BOZP" kind is an extrapolation, not in the
+  spec); Q8 built as dopísanie only. Offline cache of the book screen not tested.
+- **Phase 7a** — no migration (`066`–`070` unused). Type `preventivna_prehliadka`, setup in
+  `inspections.details`, `PrehliadkaDefects` validator, `GET /api/facilities/{id}/prehliadka-context`,
+  entrance/place memory saved with the defect, deadlines computed server-side and recomputed on date change.
+  Screens: Krok 1 (with "Ako naposledy"), Krok 2 obchôdzka, defect form with `DefectPicker`, floor tiles,
+  device search over 8, "Uložiť a ďalšie zariadenie" (shared `group_key`). Entry points: prevádzka detail,
+  picker, visit planner; "Kniha kontrol BOZP" starts the BOZP preset (also from the visit planner). Offline: all
+  writes queue (simulated offline with 2 photos synced; real airplane mode and a physical camera not
+  tested). Cannot be closed or generated yet (Phase 8a).
+- **Phase 6** (1. 11. 2026) — migration `071` (`company_external_terms`; `072`–`075` unused). Per firma with an
+  optional `facility_id` (Q7); the book is an explicit field of the term, never derived from the name.
+  `ExternalTermController` (4 routes, writes online-only, delete = archive), `Support/ExternalTerms`.
+  `ClientTerms::forProtocol(…, book)`: only the record's own book (trainings are PO), external terms merged in,
+  everything sorted by validity (no date last), external rows print the full date and "nedoložené" without a
+  valid-until, own úkony month/year. `kniha_bozp` passes `bozp`; already issued records keep their frozen
+  snapshot. `BookOffers` adds the PO-only "Termíny ďalších kontrol" offer (`source = termin`, own úkony only,
+  due date = last úkon + its real periodicity, not offered again while an entry has the same sentence).
+  "Do knihy" from a term writes `source = revizia` with an editable "Klient bol upozornený na termín: …"
+  (the prototype's trailing sentence was left out). Backup: `Writer` / `Restorer` carry `external_terms`
+  (merge key firma + prevádzka + book + name + dates); `AccountPurge` cascades by FK. External terms do not
+  appear in the calendar, Dnes or client notices (spec silent). Verified across Steps 1–6: all 4 external-term
+  endpoints over HTTP and book entries (`source=revizia`, `source=termin`), validation errors (empty name,
+  invalid book, invalid date -> 422, foreign `facility_id` -> 404), tenant isolation (other tenant company -> 404),
+  archived company mutations (409), DELETE archiving the term; 360 px mobile layout (no overflow, state badges,
+  add/edit/delete flows, preselection from `REVIZIE` suggestions, editable proposal sentence on "Do knihy" without
+  "bez nedostatkov" checkbox, PO-only "Termíny ďalších kontrol" offer adding once and not reappearing while sentence
+  is unchanged); rendered `kniha_bozp` PDF (only BOZP terms/úkony print, sorted by validity, full date on external
+  rows, month/year on own úkony, "nedoložené" on missing valid_until, frozen `_client_terms` snapshot preserved on
+  re-render); backup → restore round trip and `AccountPurge` FK cascade; migration `071` verified on a scratch DB copy
+  (alongside 061–063, 066); code review verified including the `earliestDue` rule for `upcoming()` showing the
+  earliest due date per type across prevádzky. Migrations 061–063 had not been applied to the dev DB before this
+  session (the earlier agent used a scratch DB); `migrate.php` applied 061–063 + 071.
+- **Phase 7b** (1. 11. 2026) — migration `066` (`company_activities`: the firm's own „vykonané činnosti", per firma and
+  set `po` / `bozp`, removal = archive). `details` gains `activities_po`, `activities_bozp`, `previous`, `term_overrides`,
+  `present`, `handed_over` (validated in `PrehliadkaDetails`; a PATCH still replaces the whole object, so every writer
+  sends all keys — `useDetailsSaver` coalesces the writes). `persists_from` on a defect is now
+  `{key, inspection_id, executed_on}`. New `PrehliadkaController`: `GET /api/facilities/{id}/prehliadka-previous`
+  (defects of the last finalized prehliadka, else of the last old `poziarna_kniha` record — text and deadline only),
+  `GET …/prehliadka-terms` (trainings + last periodicity per riadna kontrola), `GET/POST/DELETE /api/companies/{id}/activities`
+  (writes online-only). Screens: Krok 2 shows „Nedostatky z minulej prehliadky" with the three states; **Trvá**
+  copies the defect into this prehliadka (own deadline chosen from today's date, `persists_from` set) and is only
+  real while that defect exists, **Dôvod zanikol** is refused without its sentence (client and server);
+  Krok 3 `/prehliadky/:id/terminy` (Vykonané činnosti per chosen record — asked twice for „obidve"; „Doplnené samy" with
+  „Prepísať"; the firm's external terms with the Phase 6 form; „Doplniť školenie" when no PO training exists);
+  `/prehliadky/:id/uzavretie` (summary, Prítomní, Prevzal za organizáciu prefilled by the Phase 2 resolver; both
+  required). The close button is disabled — closing is Phase 8a. Backup/restore of `company_activities` checked
+  (merge skips, replace restores). Decisions taken: a previous defect is offered only when the record it belongs to is
+  done today (`ob` fits either; a BOZP-only defect is not shown in a PO-only prehliadka); BOZP „Preventívna prehliadka BOZP"
+  gets its own automatic-term row next to the PO one; the oboznámenie BOZP is the only BOZP training listed.
+  **Notes fixed in 8a:** Foreign inspection IDs in `details.previous` and `persists_from` scoped to active account and facility; `Restorer` now remaps both `inspection_items.fields.persists_from` and `inspections.details.previous` on backup restore; "Nové nedostatky" count on `PrehliadkaClosePage` excludes carried-over defects; offline "Trvá" maintains optimistic state so defects do not revert to waiting; `useDetailsSaver` flushes writes and syncs cache before step navigation.
+- **Phase 8a** (1.–2. 11. 2026) — transactional close, PDF rendering, book entries, and result screen (`PrehliadkaCloser`, `PrehliadkaRecord`, `PrehliadkaDefectsBlock`, `preventivna_prehliadka.php`).
+  - **Closing & Numbers**: Allocates prefix `PPP-RRRR-NNN` for PO (`NumberAllocator::PREVENTIVNA_PREHLIADKA`), child `kniha_bozp` `BOZP-RRRR-NNN` for BOZP. Transactional commit; failure unlinks any generated PDF files from storage. Missing present (422), missing handed over (422), missing certificate (PO requires `cert_general`, BOZP requires `cert_bt` -> 422), archived company (409), double close (409).
+  - **Book entries**: BOZP writes entry automatically. PO writes entry when `book_entry = true`. When 0 PO defects, writes zero-defect statement (`no_defects_statement = 1`) and prints `ZISTENIA` on book sheet. When `book_entry = false`, offers "Pridať do požiarnej knihy" on the result screen. `PrehliadkaRecord::bookLines()` formats numbered defect lines for PO book entries.
+  - **BOZP-only close**: Issues no PP document, issues child `BOZP-RRRR-NNN` document and entry, finalizes parent prehliadka with `is_preventive_inspection = 0` (does not advance PO calendar).
+  - **PDF layout (AC 19 & 2_Vzor_hotoveho_zaznamu.pdf)**: Layout order: title (`bytového domu` suffix for BD), Správca (with seat address) vs Právnická osoba (with IČO), Adresa, Dátum PPP, Zhotoviteľ, Popis objektu (`SCOPE_DOM` vs `SCOPE_FIRMA`), Hlavné vypínače a uzávery (only filled rows), Vykonané činnosti (custom tagged `(vlastná činnosť)`, trailing `CHECKED` + `CHECKED_DOM` sentence), Zistené nedostatky (grouped by `group_key`, places merged as `"Vchod 2 · 4. NP, 3. NP a 2. NP · chodba"`, `NEDOSTATOK PRETRVÁVA` tag, `N fotografie v prílohe`), Nedostatky z predchádzajúcej prehliadky (`odstránené`, `trvá — prechádza do bodu N`, `dôvod zanikol — ...`), Termíny (PO book terms + automatic terms + `term_overrides` marked `"prepísané rukou"` with full date), Záver box (prekonzultované s prítomnými, zodpovedá správca/prevádzkovateľ, book seq sentence when written), Signatures (`Za vlastníka / správcu prevzal` vs `Za právnickú osobu prevzal`), Photo appendix captions matching point numbers.
+  - **Re-opening & Re-closing**: `InspectionController::unlock` unlocks both parent PPP and child BOZP, unlinking both PDFs; standalone unlock of child kniha_bozp throws 422. Re-closing while book entry is unsigned updates entry in place with new protocol number. Re-closing after entry is signed by manager preserves signed text, appends new protocol number to `protocol_numbers`, and inserts reissue entry into `book_entry_additions`.
+  - **Handover signature**: `HandoverDialog` re-renders document into version 2 while preserving frozen snapshot data.
+  - **Frontend**: `PrehliadkaClosePage.tsx`, `PrehliadkaResultPage.tsx`, `api/prehliadka.ts`, `lib/prehliadka.ts`, responsive at 360 px width.
+  - **Verification**: 22 automated end-to-end backend tests covering guards, BD close, Firma close, BOZP-only close, zero-defect book entries, unlock and re-closing, and handover signatures passed cleanly. Clean build (`npm run build` and `php -l`).
+- **Phase 8b** (2. 11. 2026) — no migration (`072`–`075` unused). `Support/PrehliadkaConcepts`: on closing, one **draft úkon per
+  ticked riadna kontrola**, inside the close transaction. Devices = the latest finalized úkon of that type via `CarryOver` (disposed stay
+  behind, `previous_status` kept) + `details.new_devices`; a device named in a defect gets the failing result (`php` → status **O**, D3;
+  others `nevyhovuje`) with the defect text in `notes` / `defects` / `faults` and the defects' **photos copied** (own files); every other
+  device passes (`A` / `vyhovuje`). Draft date = prehliadka date, periodicity = last used, `visit_id` and `source_inspection_id` = the
+  prehliadka. Marked in `details`: `concept_from_prehliadka`, `concept_built_at`, `concept_item_count`, `concept_confirmed_at`.
+  **A concept cannot generate its PDF until confirmed** (`POST /api/inspections/{id}/confirm-concept`, online-only, `confirmed:false`
+  takes it back); `generateForInspectionInternal` refuses with „Koncept z prehliadky — potvrď výsledky", so a visit's „generovať všetky"
+  reports it as skipped. Idempotent per prehliadka + type: re-closing refreshes a concept nobody touched since it was built (items, edits,
+  photos compared with `concept_built_at`), keeps a confirmed / edited / issued one, archives an untouched one whose type was unticked.
+  Dnes „Otvorené nedostatky" now lists the defects of the latest finalized prehliadka per prevádzka that carry a deadline, minus those
+  an open prehliadka set to odstránené / dôvod zanikol (`openPrehliadkaDefects`); the BOZP child's copy is excluded so nothing counts
+  twice. Lists: scope chip (PO / BOZP / PO + BOZP) in OPP lists, prevádzka history, company Protokoly and bulk send; concept tag on drafts;
+  visit screen shows concepts and a closed prehliadka as done; result screen has „Koncepty kontrol"; Objekt tab tile „Posledná
+  preventívna prehliadka" (date, N nedostatkov). Backup: concept `details` link remapped on restore (`Restorer`); photos are ordinary rows.
+  **Follow-ups (2. 11. 2026, both built):** (1) „Overiť odstránenie" is offered from the **closed** prehliadka's result screen only
+  (`offerPrehliadkaDefectTasks`; key `p<item id>` = `source_defect_key`, `source_inspection_id` = the prehliadka, the same key Dnes already
+  uses). Skips bezodkladne, defects a later open prehliadka set to odstránené / dôvod zanikol, and defects that already have a task.
+  A done task with nothing still open drops the defect from „Otvorené nedostatky" (`Defects::verifiedKeys`, filtered by `account_id`).
+  (2) `confirmConcept` returns 422 naming the device and the missing fields when any item fails the type's existing validator
+  (`InspectionItemController::missingFields` / `BozpItems::missingFields` — no second copy of the rules). Owner decision: hydrant HS/HD/Q
+  and núdzové osvetlenie trvanie block confirmation too, including devices carried over. PDF generation of a concept repeats the same
+  check, so a concept confirmed before this check still cannot be issued incomplete. Un-confirm stays unrestricted. Editing an item
+  after confirmation does **not** clear `concept_confirmed_at` (unchanged). Check: `backend/bin/test-prehliadka-followups.php`.
+  Verified (throwaway account, removed): close → 2 concepts with items/status/notes/photos, gate 422, confirm + generate over HTTP,
+  re-close refresh / keep, visit skip + generate after confirm, Today dedupe, follow-up Oprava from the O concept, list/context/sendable
+  fields, backup merge + replace round trip, UI banner / result page / no overflow at 360 px. Terms-of-use dialog of the test user was
+  dismissed, not accepted.
+- **Phase 9** (2. 11. 2026) — acceptance pass, no migration. Throwaway account from `backend/bin/seed-acceptance.php`
+  (`--remove` deletes it): a firma with 50 PHP + 6 hydrants + 3 emergency lights, a second firma, a bytové družstvo
+  with 3 houses (8 nadzemných + 1 podzemné). Checked in a 360 px iframe on the dev server, the generated PDFs read with
+  `pdftotext` and rendered to PNG, and the API over HTTP.
+  **Criteria (spec 11):** 1 selector + Paušál + add-prevádzka dialog after create ✅ · 2 BD form asks floors, no entrances;
+  8 nadzemných offers exactly 1.–8. NP + 1. PP + strecha ✅ · 3 prevádzka e-mail wins (detail, single send prefilled,
+  other house keeps the firm's) ✅ · 4 own catalogue item shared across the account, edit/delete reflected, shipped items
+  read-only (API) ✅ · 5 activities printed as a list; "obidve" asks twice and each set lands in its own record; custom
+  activity not offered at another firma ✅ · 6 BD with 3 entrances = one `PPP-` document, entrance printed as place ✅ ·
+  7 PHP concept: 50 devices, the 2 named in defects status **O** with the defect text, 48 **A**; protocol refused before
+  confirm, issued after ✅ · 8 book offers every finished úkon, not again after adding ✅ · 9 entry by protocol number
+  (`KOLEGA-2026-77`) ✅ · 10 legal-sentence toggle off by default ✅ · 11 same úkon + day on 3 prevádzky = one offer
+  with 3 numbers ✅ · 12 two signature states, "Vytlačiť nepodpísané" = one sheet with one signature block, "Označiť ako
+  podpísané"; no signing round or reminder in code ✅ · 13 20 people pasted at once (`;` and TAB, preview "20 ľudí · 11
+  s osobným číslom"), osobné číslo column in the PDF, training term in the prehliadka terms, defaults 24 / 36 ✅ ·
+  14 serial search finds one of 50 ✅ · 15 defect without a routine control, device written by hand, printed ✅ ·
+  16 overridden term printed with "prepísané rukou" under the right row ✅ · 17 27 items, all "do 30 dní" ✅ ·
+  18 filled switches print, the empty one does not ✅ · 19 BD and firma records compared with the sample: section order and
+  fixed sentences match ✅ (visual differences below).
+  **Bugs found and fixed in this pass:** (a) `PreviousDefectsSection` called `useState` after its early return →
+  "Rendered more hooks than during the previous render" and a blank walk-through whenever a previous prehliadka existed
+  (a scan of the whole frontend for the same pattern found only the older `InspectionStep1Page`, which depends on a
+  route param and was left alone); (b) a PHP named in a defect printed twice ("LP1-0002, v. č. LP1-0002") on the PP record
+  and in the device list — now "v. č. A, B". Also: the closing screen's "Funkcia" placeholder no longer says "predseda družstva"
+  on a firma. **Gates:** `npm run build` passes, `php -l` clean on the whole backend, migrations `001`–`071` apply on a fresh DB
+  (64) and on a DB built at `055` with a company + prevádzka (the 10 new ones; the old company keeps `na_fakturu`, gets
+  `firma` / `firma`; schema identical to the fresh one). Whole-account backup → restore (replace) round trip: every count
+  identical, concept and previous-defect links point at the right (remapped) prehliadky, external term and custom activity
+  restored.
+  **Deviations from the plan / spec, all deliberate or unavoidable:**
+  1. PHP status **O** for a device named in a defect (D3), not the word "nevyhovuje" of criterion 7 — confirm with FIROL.
+  2. Printed "Vykonané činnosti" uses ✓ marks (same look as the kniha BOZP record); the sample uses plain bullets. PREDPIS is not
+     colour-accented as in the sample. Layout and sentences are otherwise the sample's.
+  3. Number prefix `PPP` (not the sample's `PP-`), decided 1. 11.
+  4. "Overiť odstránenie" for prehliadka defects — **resolved 2. 11. 2026** (see Phase 8b follow-ups): offered after closing, key `p<item id>`.
+  5. Book: Q8 built as dopísanie only; the BOZP "Podľa čísla" kind "oboznámenie zamestnancov v oblasti BOZP" is an extrapolation;
+     `bozp_ob` dropped.
+  6. Q5 (overriding an automatic term): printed and in the record; the calendar still follows the periodicity. The book's
+     "Termíny ďalších kontrol" offer first used the calendar term (seen: record prints 15. 4. 2027, offer says 2. 11. 2027) —
+     **resolved 2. 11. 2026, see "Phase 9 follow-ups" below: the offer now follows the override.**
+  7. "Doplniť školenie" from step 3 opens the external-term form (book PO), as planned; it does not create a training.
+  8. Not tested: real airplane mode and a physical camera (only simulated offline in 7a), the offline cache of the book screen,
+     BD save after a client-type change (Phase 2), the visit planner's pre-tick for the new type in this pass, e-mail delivery
+     (mailpit not opened). The offline cache can show a stale read after a change made outside the SPA (seen once on the
+     book screen; the SPA's own writes invalidate it).
+  **Still ⏸ (not implemented, needs FIROL):** Q2 (Stripe seats mid-year, block 5 parked), Q3 (§ 29 ods. 3 main book vs per-prevádzka
+  books). Built on the plan's proposed default, answer still wanted: Q1 offline, Q4/Q9/Q10/Q11, Q5–Q8 as above.
+  **Manual:** `docs/manual/Firol-manual.md` updated (client type, prevádzka data, e-mail precedence, preventívna prehliadka,
+  číselník, books, external terms, trainings, backup, prefixes; the stale "date never prefilled" note removed). The folder is
+  git-ignored (`docs/*`) and the PDF and screenshots were not regenerated.
+- **Phase 9 follow-ups** (2. 11. 2026, `docs/handoff-2026-11-02-phase9-followups.md`):
+  - **Overridden terms in the book offer — built** (owner decision: the offer follows the override, for that one offer only).
+    `ClientTerms::upcoming()` now reads `details.term_overrides` of the closed PO prehliadky (`prehliadkaOverrides()`, new
+    `$followOverrides` flag of `ownRaw()`; no migration, nothing is written). The override is used for `prehliadka_po` and for
+    each riadna kontrola the prehliadka ticked (`routine:<type>`), per prevádzka, and only while it is the last word: a newer
+    úkon of the same kind brings its own date + periodicity back, and a newer prehliadka that ticks the control without an override
+    clears it. A BOZP-only prehliadka governs nothing of the požiarna kniha; a malformed date is ignored. The úkon's periodicity,
+    the calendar, the printed "Termíny" tables and the frozen record snapshots are untouched, so later inspections start from
+    the plain interval. Check: `backend/bin/test-term-override-offer.php` (run in the php container; one rolled-back
+    transaction; fails 3 checks on the old code, passes on the new one).
+  - **Stale reads on open screens — built.** Cause: screens fetch once on mount and the IndexedDB cache is network-first (read
+    only when `fetch` rejects), so an open screen never saw changes made by another technician, device, cron or directly in the DB.
+    New `lib/useRevalidateOnReturn.ts`: runs a silent reload when the page returns to the foreground (throttled to 30 s) and on
+    `online` (not throttled), never while hidden or offline. Wired into Dnes (`TodayPage`, replaces its own `online` listener),
+    the book (`BookPage`, ignores failures and a late answer for a book the user switched away from) and the visit screen
+    (`VisitDetailPage`, paused while "generovať všetky" runs). Other screens are unchanged; add the hook where needed.
+    `npm run build` passes; not clicked through in a browser.
+  - **D3 (PHP status `O`):** kept. `O` creates the Oprava/plnenie/TS follow-up like `TS` (`mapPhpToOprava`). Still wants FIROL's
+    confirmation; PHP has no "nevyhovuje" status, adding one would touch validation, form, PDF, import, backup, carry-over and
+    the concept mapping.
+- **Decided 1. 11. 2026:** the prehliadka record's number prefix is `PPP` (`PP` belongs to
+  `pracovne_prostriedky`; `documents` has `UNIQUE (account_id, number)`). Register it in `NumberAllocator` in
+  Phase 8a. The BOZP "Podľa čísla" kind `bozp_ob` was dropped (not in the prototype's `KN_RUCNE`).
+  "Ako naposledy" keeps reading finalized prehliadky only. (Migrations on a copy of the DB at `055` and on a fresh DB: run in phase 9.)
+
+## Missing číslo oprávnenia — guided refusal, early and offline (10. 11. 2026) ✅ built; checked in the app
+
+A refused úkon answers `422 { code: 'cert_missing', cert }`, and the UI shows a toast with „Doplniť v profile"
+that opens the field, highlighted (`lib/certMissing.ts`, `components/CertFocus.tsx`).
+
+- **One source of the rules:** `Support/CertGuard.php` (`missingForType`, `missingForPrehliadka`, `verdicts`),
+  used by create, repeat, follow-up, the prehliadka scope edit (PATCH) and `PrehliadkaCloser`.
+- **Decided 10. 11. 2026 (owner):** the check applies to **everyone**, sys-admins included. It is about the
+  signing technician (`inspector_user_id`) in the úkon's account. Consequence: an admin acting in a foreign
+  account needs a profile with the number in that account.
+- **Early:** follow-up drafts (`oprava_ts_php`, `vyradenie`, `ts_hadic`) are checked on creation. A prehliadka
+  edit is checked when it switches PO / BOZP scope **on** (scope already on is left alone).
+- **Offline (approved 10. 11. 2026):** `/api/me/inspector-profile` returns `can_create` (the server verdict per
+  type, prehliadka as `.po` / `.bozp`). The app warms it in `AppShell` and on the create screens. Offline,
+  `InspectionStep1Page` / `PrehliadkaSetupPage` refuse up front from the cache. With nothing cached the draft
+  starts and the sync decides.
+- **Outbox:** a replay refused with `cert_missing` stays `failed` with `lastCode` / `lastCert`. It is retried on
+  every drain and raises `firol:sync-cert-missing` for the guided toast. Mutations that reference the temp id of
+  any failed create are held `pending` instead of replaying into 404s. Saving the Profil technika starts a drain.
+
+---
+
+## Požiarna kniha rework (zadanie 7. 11. 2026) 🟨 built on `poapp-oct-2026` (13.–14. 11. 2026); owner acceptance and FIROL's answers pending
+
+Package: `POapp_poziarna_kniha/` (binding spec `POapp_kniha_zadanie_pre_AI.md`, untracked like the
+earlier packages). Plan, decisions K1–K7 and open points O1–O5:
+`docs/implementation-plan-2026-11-07-kniha.md`. Commits `4db77bf`..`16dc401`. Not on `main`;
+deployed nowhere yet. Verification (build, migrations, spec 15 criteria at 360 px, backup round
+trip) is tracked in the hand-back report to the owner, not here.
+
+**Removed** (`4db77bf`):
+- ✅ The požiarna kniha ledger: `BookPage`, „Nový zápis", the company book card, book offers,
+  signature states („Vytlačiť nepodpísané" / „Označiť ako podpísané"), the whole-book print, the
+  „Rozsah knihy" switch and the book API routes. The kniha BOZP ledger went with it (the BOZP
+  record of a prehliadka stays). Migration `076_drop_book_ledger.sql` drops `book_entries`,
+  `book_entry_additions` and `companies.book_scope`; test-server rows are discarded, nothing is
+  carried over.
+- ✅ In-app signing and handover for the book: no handover step, no „čaká na podpis";
+  `POST /api/documents/{id}/handover` answers 422 for any `poziarna_kniha` document. The entry is
+  signed by hand on the printed document. Signing in every other úkon is unchanged.
+- ✅ The closing checkbox „Zapísať aj do požiarnej knihy" and the book offer on the prehliadka
+  result screen (K7). „Do knihy" from an external term and „Termíny ďalších kontrol" are gone.
+- ✅ The book úkon `poziarna_kniha` is back in the type picker, the visit planner and Opakovať.
+
+**Built — the book as an ordinary úkon** (`ff11628` backend, `16dc401` screens):
+- ✅ One entry for one or more prevádzky: migration `077_kniha_facilities.php` adds
+  `inspection_facilities` (one row per prevádzka with its own periodicity) and `facility_id` on
+  `calendar_plans` / `deadline_notices` (unique per entry + prevádzka). New-format entries carry
+  `details.format = "pk2"`. One entry = one document and one number.
+- ✅ Step 1 (`/kniha/new`, `/kniha/:id/krok-1`): prevádzky („Označiť všetky"; each row shows the
+  records to attach and until when its prehliadka is valid), spôsob, date. Default spôsob by
+  count (one → 1, several → 2); a manual choice sticks until „Vrátiť na predvolené".
+- ✅ **Spôsob 1** „Zápis je zároveň preventívkou": the entry is the preventívna prehliadka of each
+  selected prevádzka (K1). Each has its own periodicity 12 / 6 / 3, prefilled from its last
+  prehliadka or empty, with „Po vykonaní platí…". Only generating the PDF moves the deadlines;
+  unselected prevádzky, drafts and spôsob 2 move nothing. Every reader of the term chain
+  (Deadlines, calendar, Dnes, notices, facility history, prehliadka context, company periodicities,
+  work confirmation) sees the entry per prevádzka.
+- ✅ **Spôsob 2** „Preventívky sú priložené": prehliadky are attached, the deadline does not change,
+  no periodicity is shown anywhere. Switching spôsob deletes nothing.
+- ✅ Step 2 (`/kniha/:id`): spôsob 1 Úvod (prefilled once with the legal sentence) → Vykonané
+  činnosti (firma: the nine points of § 14 ods. 2; bytový dom: the 13 items; nothing pre-ticked;
+  own activities) → Priložiť záznamy → Nedostatky → Doplňujúci text → Na záver. Spôsob 2: Text
+  zápisu → Priložiť záznamy → Nedostatky → Na záver. „Na záver" has two insert buttons that never
+  insert a sentence twice.
+- ✅ Records to attach (`GET /api/companies/{id}/kniha`, `BookRecords`): only records of the selected
+  prevádzky, grouped by prevádzka when several, company-wide trainings in one group
+  „Celá organizácia"; newest of each kind, „Zobraziť aj staršie" for the rest; per record
+  „Celým textom" / „Len odkaz" with the composed paragraph right below (`BookSentences`).
+- ✅ Defects on the shared defect screen (`DefectForm`): prevádzka chooser when several, deadline
+  optional, no device card, photos as before; „Overiť odstránenie" offered after saving a defect
+  with a date (online).
+- ✅ Step 3 (`/kniha/:id/suhrn`): deadlines per prevádzka, counts, the composed text, „Schválil za
+  klienta" (prefilled, editable), photos, fakturácia, „Generovať PDF protokol", „Zahodiť zápis".
+- ✅ The new entry document `poziarna_kniha_zapis.php` (Zápis, Priložené záznamy, Doplňujúci text,
+  Zistené nedostatky only when there are any, Na záver, Podpisy with printed names and blank
+  lines). The issued text and paragraphs are frozen in `details.issued`.
+- ✅ Old-format entries (one prevádzka, old items) stay listed, readable and downloadable through
+  the old template; Opakovať on any book entry makes a new-format draft on step 1.
+- ✅ Offline: the kniha context is warmed on the facility, company and visit pages; a draft can be
+  started and edited offline; generating needs the connection.
+
+**Built — prehliadka** (`689e4c5`, `864709f`, `b38a4b3`, `e2f9969`, lock in `ff11628`):
+- ✅ One defect screen for new and carried-over defects with „Stav nedostatku" (zistený ·
+  odstránený · trvá · dôvod zanikol), a note on top naming the case, past photos copied onto the
+  new record, the past record never changed. Undecided carried-over defects block closing; only
+  open defects are offered next time. No migration (state in `inspection_items.fields`).
+- ✅ The nine points of § 14 ods. 2 as the PO activity list for a firma (bytový dom keeps its 11);
+  records issued earlier keep the text they were issued with.
+- ✅ The area follows the entry button: „Preventívna prehliadka" presets PO, „Preventívna
+  prehliadka BOZP" presets BOZP; memory no longer presets the area.
+- ✅ A draft prehliadka that was never closed can be discarded („Zahodiť prehliadku") from the
+  walk, the setup's in-progress card and the prevádzka banner (online only).
+- ✅ Concepts after a prehliadka in one checklist („Vytvoriť a rovno uzavrieť") with a review screen
+  (`/prehliadky/:id/koncepty`) to see and edit the values, then generate together; tlaková skúška
+  hadíc takes its values and result from the last protocol.
+- ✅ Row lock on protocol generation: two requests for the same úkon cannot both issue a protocol.
+
+**Findings (spec 11):**
+- ✅ 11.2 „Iná revízia" removed from the external-term suggestions; existing terms keep the name as
+  a custom one. No migration was needed.
+- ✅ 11.3 Signature pad: one smooth line, denser sampling, cropped output.
+- ⬜ 11.5 Not reproducible: the text in the code is correct („podľa objektu a prostredia"). Needs a
+  screenshot from FIROL showing where the truncated form appears.
+- ✅ 11.6 Misdiagnosed: all 27 items exist; the counter shows the items of the chosen area. The
+  customer accepted leaving it as it is.
+- ✅ 11.4 went with `BookPage`.
+
+**Customer decisions (13. 11. 2026):**
+- The concepts checklist lists the routine concepts plus the follow-ups.
+- Oprava / vyradenie devices come from today's PHP check.
+- ~~A result is carried from the last protocol only for TS hadíc.~~ Reversed by the fix list of
+  16. 11. 2026: every fire-protection type carries its values and result (see below); the BOZP
+  item checks too since the customer's answer 1 of 18. 11. 2026 (round 5).
+- Protocols carry the prehliadka date, editable.
+- The catalogue counter stays as it is.
+- Company-wide trainings in Priložiť záznamy form one group headed „Celá organizácia" (not „Celá
+  firma" — more general; the client may be an obec or a school).
+
+**Open points for FIROL / the owner:**
+- ✅ **O1 numbering** — answered 18. 11. 2026 (answer 3 B): `PK-<KÓD>-NNN` per firma, never reset,
+  the number kept by „Upraviť". Built in round 5 (below); the code-uniqueness rule awaits the
+  customer's confirmation.
+- ✅ An attached prehliadka with no defects prints „Neboli zistené žiadne nedostatky." — stays
+  (answer 4 A, 18. 11. 2026).
+- ✅ Wording „Nedostatok zo zápisu do požiarnej knihy č. …" (note on a carried-over defect) — the
+  defect-screen texts were confirmed with one change (answer 9c, 18. 11. 2026).
+- ✅ The fixed sentence says „v bytovom dome / v bytových domoch" for a bytové družstvo (answer 9b,
+  round 5).
+- ✅ R3: a book entry does not close earlier defects; defects written in a book entry feed the next
+  prehliadka at that prevádzka (both spôsoby) — confirmed (answer 7 A).
+- ✅ Opakovať lands on the default spôsob for the number of prevádzky — confirmed (answer 8 A).
+- ✅ Excel import of book rows creates new-format entries (round 2 of the fix list of 16. 11.).
+- ✅ A new defect is no longer offered „dôvod zanikol" (answer 6 B, round 5); one saved with it
+  before keeps printing as it did.
+- ✅ A firma prehliadka record prints the lead line „Obsahom prehliadky bola kontrola:" and
+  „Ďalej vykonané" above custom activities — the customer leaves it, without a heading (answer 9a).
+- ⏸ Date arithmetic differs between client and server elsewhere in the app (the client clamps to
+  the month's end, PHP rolls over); the book screens use the server rule.
+- ✅ Discarding a draft book entry or prehliadka that was never issued deletes it for good, items
+  and photos included (owner decision of 17. 11. 2026, replaces the soft archive — see round 3).
+
+### Fix list of 16. 11. 2026 (`POapp_opravy_2026-11-16.pdf`) — ✅ built
+
+Five points, tested by FIROL on the staging server. Issued documents are untouched; everything
+applies to new drafts and newly generated PDFs.
+
+**1. Values and result travel with the items** (fire-protection types only: PHP, hydranty,
+tlaková skúška hadíc, požiarne uzávery — akcieschopnosť and údržba, núdzové osvetlenie).
+- The rule „stav a výsledok sa neprenáša" (BOZP block spec ch. 12) **no longer applies to the fire
+  types**; it still holds for the person lists. ~~It still holds for the BOZP item types~~ —
+  reversed by the customer's answer 1 of 18. 11. 2026 (round 5). Spec 12.2 of the požiarna kniha zadanie is the source:
+  „preberú sa tie isté údaje, čo tam boli predtým, vrátane výsledku".
+- `CarryOver::FULL`: Opakovať, „Prevziať položky", the concepts of a closed prehliadka and the
+  ts_hadic follow-ups take every item field of the last finalized protocol of the same kind at the
+  prevádzka — identification, measured values, result / stav, defects / notes / vykonané práce.
+  No `previous_status` badge for these types (it would only repeat the carried value).
+- Concepts: a device named in an open defect of today's prehliadka still gets nevyhovuje (PHP `O`)
+  and the defect text; a carried device without a defect keeps what it carried — an empty result
+  stays empty and is marked „Chýba" (round 2); a new device gets the passing result as before.
+- ts_hadic: Opakovať, the checklist and the follow-up button on the hydranty úkon all take values
+  and result from the last ts_hadic protocol (`PrehliadkaChecklist::tsHadicRows()`); a hose with
+  no match, or no earlier protocol, stays blank and its result is not presumed.
+- Origin: Opakovať and „Prevziať položky" record `carried_from` / `carried_positions` like the
+  concepts; the úkon's summary shows „Položky prevzaté z protokolu č. … zo dňa …". The summary
+  rows show every value (núdzové osvetlenie now shows the trvanie, údržba the výrobca).
+- Completeness at generate (the concepts' `missingFields` rule) for the drafts whose items were
+  inserted without the item validator — a concept, or a fire draft with a recorded origin
+  (`carried_from`); the summary marks the items („Chýba: …") and „Generovať" is blocked until they
+  are filled. Round 2 narrowed it from „every fire draft": imports and „Upraviť" create drafts too
+  (`CarryOver::checksCompleteness()`).
+- An item form opened on an item with no result / stav shows nothing picked and asks for one
+  instead of presuming „vyhovuje" / „A".
+
+**2. „Uložiť a ďalší v poradí"** — a fourth button on every item form (the eight own footers and
+the shared BOZP `ItemFormFooter`), shown while editing an item that has a next one; it saves and
+opens the next recorded item. Works when the save is queued offline. The three old buttons are
+unchanged.
+
+**3. Closing screen** — „Podpis na displeji" and the sentence under it removed from „Uzavretie
+prehliadky". Signing elsewhere is unchanged. The signature line is now a centripetal Catmull–Rom
+spline through every sample with chords of at most 2 px and `pointerrawupdate` where available
+(`lib/strokeSpline.ts`); verified with synthetic samples 14–43 px apart, **not on a real phone**.
+
+**4. Núdzové osvetlenie in the prehliadka** — cause: a svietidlo without an evidenčné číslo (optional,
+empty after an Excel import) was dropped from the device list, so step 1 saw no devices. The
+device list never drops a device now (label falls back to the typ svietidla, the umiestnenie, then
+„Svietidlo"). Step 3 lists every automatic term the record prints — also those of úkony not ticked
+today (`PrehliadkaTerms` `recorded`) — and an override of any of them reaches the printed record
+(`ClientTerms::forPrehliadka()` `$overrides`).
+
+**5. Typos and the footer** — „tej istej prevádzky a typu" (lost space), „1 podzemné" (sk3 forms),
+„Periodický záznam o stave ochrany pred požiarmi", and the software credit printed once per page:
+the page footer of `PdfRenderer` stays, the copies in the body of `ProtocolLayout::footer()` and the
+six fire templates are gone.
+
+**Check script:** `bin/test-prehliadka-followups.php` gained part 3 (carry-over and the device
+labels). The four part-1 failures were a stale fixture, fixed in round 2.
+
+
+### Fix list of 16. 11. 2026 — round 2 (review of round 1 + owner's decisions) — ✅ built
+
+**Review findings fixed**
+- **Completeness check** runs only where items skipped the item validator: concepts, and fire drafts
+  with `carried_from` (Opakovať, „Prevziať položky", the ts_hadic follow-ups). Typed, imported and
+  unlocked drafts generate as before round 1; `show()` and the carry-over endpoint return
+  `incomplete_items` by the same rule, so „Chýba" and the disabled button follow it at once.
+- **Hydranty form**: an empty HS / HD / Q / počet hadíc is an error, never 0; an existing item
+  without a hose count opens empty („1" only for a new item). The other five forms already refused
+  empty values.
+- **Concepts**: a carried device with no defect and an empty result keeps its texts and stays
+  without a result („Chýba"), as a hose with no match does.
+- **„Prevzaté" on a new item**: deleting an item takes its position off `carried_positions`, and a
+  new item's position is never on it (`PrehliadkaChecklist::dropCarriedPosition()`).
+- Smaller: „Prevziať položky" refuses a source that is not finalized; Slovak labels for `notes`,
+  `defects`, `manufacturer`, `evid_number`, `floor` and a Slovak „Pole … je príliš dlhé"; the
+  concept banner and the origin line worded by whether there is an origin / whether the type
+  carries values; the device fallback label is capped at 80 characters, not repeated as the place,
+  and used on „Skontroluj hodnoty" and in „Chýba" messages too; the signature spline sizes its steps
+  by the curve's length (≤ 2 px chords, no 48-step cap) and the pad takes `pointermove` until the
+  first `pointerrawupdate` of a stroke arrives; step 3 drops a routine override when the type's
+  tick changes in step 1 and asks again for facts cached without `recorded`; plurals („2 hadice",
+  „2 nevyhovujú", „ďalšia podľa potreby"); a phone page has room below its last button for the
+  „Spätná väzba" tab; Opakovať prefills today's date (it left the date empty).
+- Check script: part 1's failures were a fixture without the `key` every `previous` row has — not
+  a defect and not date-dependent. Part 4 covers `withResult`, the ts_hadic rows of the checklist
+  and the follow-up button, the recorded origin, the completeness rule and the carried positions.
+- Reported only: the núdzové osvetlenie protocol does not print the doba svietenia; the protocol
+  mockup in `docs/handoff/handoff/PDF_protokoly/03_…` has no such column either, while the base
+  document lists the field on the item.
+
+**New work**
+- **Clear button** („X", `aria-label="Vymazať text"`, `ClearTextButton`) on the carried free texts
+  of the fire types — `notes`, hydranty `defects`, údržba `maintenance_work` — in the item forms
+  (shared `ui/Textarea`) and on „Skontroluj hodnoty"; shown only while there is text, focus stays.
+- **Dnes**: rows name the prevádzka („prevádzka · mesto", `facilityPlace()`), the whole-client
+  label for a training of the whole firma (plan rows carry `company_client_type`); the same on the
+  timeline and in the calendar list by firma.
+- **Excel import of the book (B3)**: sheets `Kniha_zapisy`, `Kniha_prevadzky`, `Kniha_nedostatky`
+  create new-format (`pk2`) drafts through the app's own validation (`BookEntry`,
+  `PrehliadkaDefects::validate` with the book's options); a failing row is reported with its sheet
+  and row. The template drops `Polozky_poziarna_kniha`, which still imports as before. The
+  companies sheet has an optional last column `Druh klienta`.
+- **Extra technician on a yearly plan (B4)**: `SeatSync::EXTRA_YEARLY_MONTHS = 10` (13,50 € → 135 €
+  a year). `/api/account` and `/api/public/settings` expose `price_per_extra_technician_yearly_cents`;
+  the billing, settings and admin screens show it and say that a yearly account's next invoice is
+  the renewal. Existing Stripe items keep their price (SeatSync changes only the quantity):
+  `bin/reprice-yearly-extra-seats.php` (dry run by default, `--offline`, `--apply`, `--account=ID`)
+  moves yearly extra-seat items to the new price with `proration_behavior none` — **not run; the
+  owner runs it**.
+- **VOP 4.1**: the trial is 30 dní. `VOP_VERSION` not bumped.
+
+**Open for the owner**
+- ⏸ Run `bin/reprice-yearly-extra-seats.php` (dry run first) against Stripe.
+- ⏸ `SeatSync::applyToStripe` creates a subscription item with `price_data.product_data`; Stripe's
+  subscription-item `price_data` takes a `product` id — check the first extra seat on a live
+  subscription.
+- ⏸ Doba svietenia on the núdzové osvetlenie protocol — print it or not (mockup has no column).
+- ⏸ The núdzové osvetlenie item form requires the evidenčné číslo while the server and the import
+  treat it as optional; an imported svietidlo cannot be saved from its form without one.
+
+### Fix list of 16. 11. 2026 — round 3 (review of round 2, permanent delete, staging build) — ✅ built
+
+**Review findings fixed**
+- **Completeness check** (`CarryOver::checksCompleteness(row)`): every draft with `carried_from`,
+  whatever its type (an oprava / vyradenie follow-up included), and an Opakovať draft from before
+  round 1 (`carried_over_from_id`, never issued). Unlocked old protocols, typed and imported drafts
+  generate as before. The follow-up button now records the origin for oprava / vyradenie too, as
+  the checklist does, and prefills today's date.
+- **„Issued before" for good**: migration 078 adds `inspections.issued_before`, set on every issue
+  (`Contractor::freezeInspection`), by „Upraviť" and by „Doplniť výsledky", and backfilled from
+  status, the contractor snapshot, documents rows and the audit log.
+- Item refusals in Slovak („Pole „Vykonané práce" je povinné.", „Pole „HS" musí byť číslo od 0 do
+  50.", the year range too); the old-format book has refusal labels without joining the
+  completeness check.
+- **Excel import**: an impossible date is a row error on every sheet (`checkdate()`); IČO columns
+  are text and a short all-digit IČO is padded to 8 digits; the spôsob-1 periodicity check uses the
+  deduplicated prevádzky; a repeated entry number is reported after a failed row; a „Druh klienta"
+  that differs from the stored firma is a row error (the stored type is never changed);
+  `companyClientType` filters by account; an entry stores only the fields of its spôsob, as the UI
+  does (spôsob 1: úvod, činnosti, vlastné činnosti, doplňujúci text; spôsob 2: text zápisu; both:
+  na záver, schválil) and the headers, Pokyny and manual say so.
+- Smaller: `facilityPlace()` matches the city as a whole word; the calendar list by firma prints
+  „Celá firma" / „Celé bytové družstvo" for a whole-client training; the six fire item forms save an
+  edited existing item on „na súhrn" when its values changed (`sameFormValues`); „2 kontrolované
+  hydranty"; the timezone is set to Europe/Bratislava in `src/bootstrap.php` (Composer
+  `autoload.files`), so a server on UTC no longer writes yesterday's date after midnight.
+
+**Discarding an úkon (owner decision of 17. 11. 2026, `UkonDiscard`)**
+- A draft that was **never issued** (no `issued_before`, no contractor snapshot, no documents row,
+  no unlock / fill-results in the audit log) and that **nothing was made from** (tasks, úkony with
+  `source_inspection_id`, material issues, a potvrdenie listing it) is **deleted for good**: the row
+  in one transaction (items, photo rows, `inspection_facilities`, calendar plans and deadline
+  notices by CASCADE), then its photo folder; audit row `inspection.delete`.
+- Refused with 409 and no button: a draft issued before, a draft something was made from, a
+  prehliadka closed before, the kniha BOZP record of a prehliadka on its own.
+- An **issued** úkon is archived as before; its dialog says „Kontrola sa archivuje a zmizne zo
+  zoznamov. Vystavený protokol sa nezmaže." The system's own archiving (stale concepts, the BOZP
+  record of a prehliadka closed again) is unchanged.
+- List rows and `show()` carry `discard` (`delete` / `archive` / null). Every permanent delete asks
+  first („Natrvalo zmazať", „Túto akciu nemožno vrátiť späť.") and is online only — it never waits
+  in the offline queue; a queued archive says so instead of reporting a failure. A queued change
+  that meets a deleted úkon (404) explains it in the pending-changes panel.
+
+**Staging build**
+- Source maps are opt-in (`VITE_BUILD_SOURCEMAP=1`, hidden maps); the default build has none.
+- `npm run build:safe` builds into `dist-next/` and swaps it in only after a successful build
+  (`scripts/swap-dist.mjs`, keeps `dist-prev/`); the deploy workflow still runs `npm run build`.
+
+**Open for the owner**
+- ⏸ Imported úkony (book entries included) get no `billing_mode` and no `created_by_user_id`, so a
+  draft finished later never shows in „Nevyfakturované". Unchanged; decide whether the import should
+  set them.
+- ⏸ Not approved, not built: a list of archived úkony on the prevádzka with „Obnoviť"; a one-off
+  hard delete of the archived never-issued drafts already in the database; the same delete rule for
+  školenia (today `TrainingController::archive` hard-deletes a training of any status and leaves
+  its documents rows and PDFs behind).
+- ⏸ Switch the deploy workflow to `npm run build:safe` on servers where the build may be killed.
+
+### Fix list of 16. 11. 2026 — round 4 (review and tests of round 3) — ✅ built, checked at 360 px
+
+- **Photos on „na súhrn"**: `usePhotoStaging` exposes `dirty` (a staged photo or an existing one
+  marked for removal); `isPristine()` is false while it is set in the six fire item forms, in
+  oprava / vyradenie and in the five BOZP forms, so a photo-only change is saved.
+- **Old iPhones**: `facilityPlace()` matches the city without a lookbehind (Safari / iOS before 16.4
+  threw on `(?<!…)` while Dnes, the timeline and the calendar rendered); no lookbehind in the bundle.
+- **Permanent delete**: the row lock and the DELETE skip archived rows (a concept the system has
+  just archived is kept); a refusal under the lock throws `UkonDiscardRefused` with the reason
+  decided there (409), a database error answers 500; the kniha BOZP record of a prehliadka gets its
+  own reason before the „issued" one. `DELETE /api/inspections/{id}` answers `{"mode": "delete" |
+  "archive"}` and the toast follows it, never the cached `discard`.
+- **Backup / restore** export and restore `issued_before`; a backup from before migration 078 sets it
+  on restore for a finalized row, one with the contractor snapshot or one with a restored documents
+  row. Migration 078 uses `ADD COLUMN IF NOT EXISTS`.
+- **Texts**: the remaining item refusals in Slovak („Vyber „Výsledok kontroly"."), labels for
+  `vyradenie.location` and `oprava_ts_php.notes`; an item refusal carries `field`, so „Skontroluj
+  hodnoty" says „Doplň ho vo formulári položky." for an empty field and „Oprav ho tu alebo vo
+  formulári položky." for a wrong value; the pending-changes 404 hint only for úkon and item paths
+  („…zmazal alebo archivoval…"); the list discard dialogs of a prehliadka and of a book entry use
+  their own texts; the import result uses Slovak plurals („2 chyby", „1 firma").
+- **Smaller**: the old-Opakovať completeness rule only for the fire types
+  (`CarryOver::carriesValues`); `optimizeDeps.entries: ['index.html']` — Vite 6.4 crawled
+  `dist-next/` (and would `dist-prev/`). (Found here and fixed in round 5, D3: the dev server read
+  the gitignored `vite.config.js` that `tsc -b` emitted; the scripts now pass
+  `--config vite.config.ts` and `tsc -b` emits into `node_modules/.tmp/`.)
+
+### Fix list of 16. 11. 2026 — round 5 (the customer's answers of 18. 11. 2026) — ✅ built, checked at 360 px
+
+**The answers**
+
+| # | Answer | Effect |
+|---|---|---|
+| 1 | „B — bolo by to dobré" | BOZP item checks carry their result too → A |
+| 2 | „asi A" | Concepts keep the result of the last protocol (rebríky / regály included now) |
+| 3 | „B — vlastný rad za každú firmu, bez nulovania … PK-<kód firmy>-NNN …" | New numbering of book entries → B |
+| 4 | A | „Neboli zistené žiadne nedostatky." stays |
+| 5 | A | „+ Bez nedostatkov" stays |
+| 6 | B | A new defect is not offered „dôvod zanikol" → C1 |
+| 7 | A | Defects of both spôsoby feed the next prehliadka |
+| 8 | A | Opakovať picks the spôsob by the number of prevádzky |
+| 9a | „nechať tak, bez nadpisu" | No change |
+| 9b | „písať „v bytovom dome / v bytových domoch"" | → C2 |
+| 9c | „Fotodokumentácia zo zápisu do požiarnej knihy" | → C3 |
+| 10b | stav O stays for a PHP with a defect from the prehliadka | No change; see the future idea below |
+| 11–14 | billing stays as today | Not this round |
+
+**A — the BOZP item checks carry the result (answer 1).** The BOZP spec rule „žiadna prenesená
+položka nemá predvyplnený stav" (block 2, ch. 12) is **reversed** by the customer for rebríky,
+regály, pracovné prostriedky, označenie and OOPP: they are `CarryOver::FULL` types now. Opakovať,
+„Prevziať položky" and the concepts of a prehliadka (rebríky / regály) carry every field of the last
+protocol — result / stav, závady, označenie nosnosti, poskytnuté / používané, poznámka — record
+`carried_from` / `carried_positions`, show the same origin line and „prevzaté" marks, and the
+completeness rule holds a carried draft with an empty required value back (unlocked and imported
+drafts are not held back). The structured **nedostatky** of a row (`defects`, with photos, termín
+and „Overiť odstránenie" tasks) are **not** carried: they belong to the protocol they were found in,
+and a copy would be listed twice as open on Dnes (Defects: „never carry over"). The úkon-level
+opatrenia / záver are not carried either (not named in the answer). The carried texts got the clear
+button (závady of rebrík / regál / pracovný prostriedok, poznámka of označenie / OOPP; závady also on
+„Skontroluj hodnoty"). The server no longer writes `previous_status` for these types, so „minule: …"
+shows only on drafts carried before (their result is blank). Unchanged: kniha BOZP, pracovisko,
+osamelé pracovisko, fajčenie (records) and the person lists.
+
+**B — numbers of požiarna kniha entries (answer 3).** Both formats; every other document keeps
+`PREFIX-RRRR-NNN`. Migration `080_book_numbering.sql`: `companies.book_code` (unique per account) and
+`book_last_seq`, `inspections.book_number` and `book_number_version`, backfilled from the documents of
+issued entries. `Documents/BookNumber`: the code is the first three letters of the name (letters only,
+no diacritics, upper case), proposed at creation (app, Excel import, restore) or at the first issue;
+when taken, the next free variant (first two letters + each following letter, then + a digit, then
+first three + a digit); editable on the firma's detail (2–4 letters or digits, at least one letter so
+it can never read as a year of the old series) until the first entry is issued, then locked; a renamed
+firma keeps it. The number is taken at the first issue inside the issue transaction under the firma's
+row lock (locking reads only until then — MariaDB's snapshot isolation otherwise fails the lock with
+error 1020, which the two-process test caught) and stored on the entry: „Upraviť" + issue gives the
+same number as the next version (`…-v2.pdf`). Drafts hold no number; archived entries keep theirs.
+Entries issued as `PK-RRRR-NNN` keep that number, also after a later „Upraviť". The year folder on
+disk stays the year of the entry's date. A firma whose name has fewer than two letters is refused at
+issue with the reason until the user types a code. Backup / restore carry the code, the counter and
+the entry numbers (a code another firma of the target account holds is not taken over; a warning says
+so). **For the customer's confirmation:** the uniqueness of the code within the account (not in the
+answer — it follows from two firms with the same first letters) and that entries unlocked before the
+change take a new-format number at their next issue.
+
+**C — small changes.** C1: the defect screen offers „dôvod zanikol" only for a defect carried from an
+earlier record (or one already stored with it); the server refuses it for a new defect; the Excel
+import of historical book defects (`Kniha_nedostatky`, stav `zanik`) is history and stays accepted.
+C2: „v bytovom dome / v bytových domoch" on the summary and in the PDF (`BookSentences::fixed`,
+`lib/kniha.ts fixedSentence`); the „+ Bez nedostatkov" sentence names no prevádzka and needed no
+change. C3: „Fotodokumentácia zo zápisu do požiarnej knihy" on the defect screen — no PDF carried the
+old text.
+
+**D — leftovers of round 4.** D1: a photo still being resized counts as a change and the save buttons
+of every item form (and the defect screen) wait for it; `saveItemWithPhotos` refuses a save while one
+is processing (Enter key), the BOZP nedostatok photos too. D2: a permanent delete sends
+`?expect=delete`; when the server would archive instead (issued meanwhile) it answers 409 „Protokol bol
+medzitým vystavený, zahodiť ho nemožno." and the list is read again. D3: `tsconfig.node.json` emits
+into `node_modules/.tmp/` (`"noEmit": true` fails here with TS6310 — a referenced project may not
+disable emit) and the scripts pass `--config vite.config.ts`; README: delete the stale files on the
+server once. D4: restore marks every draft a manifest documents row names, restored or not, and an
+archive without `issued_before` restores every draft as issued — the result says how many
+(`issued_assumed` + a warning). D5: the three hints of „Skontroluj hodnoty". D6: „1 fotku / 2 fotky /
+5 fotiek sa nepodarilo uložiť", „Uloží sa, keď budeš online" everywhere. D7: compare-to-initial on
+„na súhrn" in the five BOZP forms, oprava and vyradenie (nedostatky changes count too).
+
+**Future idea (not planned):** a protocol for a PHP in stav O after a prehliadka (answer 10b).
+
+**Check script:** `bin/test-prehliadka-followups.php` parts 7 (A, C), 8 (restore) and 9 (numbering,
+incl. two parallel issues in separate processes).
+
+### Fix list of 16. 11. 2026 — round 6 (review and tests of round 5) — ✅ built, checked at 360 px
+
+Prompt: `docs/prompts/fixes-2026-11-16-round-6.md`. Three reviews and two test passes found parts
+A–D of round 5 working; this round fixes what they found.
+
+1. **A header save wiped the server's keys.** `PATCH /api/inspections/{id}` stored the validator's
+   output as the whole `details`, so saving opatrenia / záver of a BOZP item check dropped
+   `carried_from` / `carried_positions` (origin line and „prevzaté" marks gone after a reload) and —
+   older than round 5 — the `concept_*` marks of a concept, after which an **unconfirmed concept
+   could be issued** (reproduced end to end before the fix: REB-2026-003 issued). Now
+   `InspectionDetails::mergeOver()` puts the validated fields over the stored header (a validator
+   always returns its whole field set, so a cleared field stays cleared); every other key stays:
+   `carried_from`, `carried_positions`, `concept_from_prehliadka`, `concept_built_at`,
+   `concept_item_count`, `concept_confirmed_at`, `issued_contractor`, `issued_record` (rewritten at
+   the next issue), `issued` (book entry; removed by „Upraviť"). `details: null` keeps only those.
+   The book entry's header save (`bookUpdate`) merges the same way (it kept `issued` only).
+2. **„Zistený stav: Array"** in the rebríky / regály PDF (a failing row with empty závady: `defects`
+   is the list of nedostatky). The state is the závady, else the descriptions of the row's
+   nedostatky, else „Nevyhovuje"; an array is never cast. The rows' nedostatky (popis, opatrenie,
+   termín) are printed under the same „Zistené nedostatky" band, numbered like the photo appendix;
+   a passing row with a nedostatok is listed too. No other array cast found in `src/Pdf`.
+3. **Book numbers after a merge restore.** `BookNumber::forIssue` skips every sequence whose
+   `PK-<code>-n` exists on an entry or as a document number (read after the firma's lock) — a gap
+   instead of a 500 on every retry. A code counts as taken also when any number of its series exists
+   in the account (proposal, „Zmeniť", restore, migration 081). The restore reports what happened to
+   each entry: the firma's new code, the numbers kept under a code another firma holds (which it
+   skips), and each entry whose number was taken — restored as an unlocked draft
+   (`issued_before = 1`, no document, `details.issued` removed) instead of finalized without number
+   or document; this also covers an entry of a pre-080 archive whose protocol number was taken. The
+   backup now carries `version` (and `form_variant`, which the restore read but no archive held) of
+   each document; restored rows keep it. The 080 backfill and the restore take the newest documents
+   row of an entry. **Lock order:** the restore's first statement locks every firma row of the
+   account (`FOR UPDATE`, before any read — a plain read first would fix a read view and the lock
+   could fail with 1020), so an issue meanwhile waits and then skips the restored numbers instead of
+   deadlocking on the document's unique key (script: an issue started during the lock waited and got
+   the next free number).
+4. **Numbering, smaller.** `POST /api/companies/{id}/book-code` answers 404 for an archived firma, as
+   `update()`. Migration `081_book_code_proposals.php` stores the proposal on every firma without a
+   code once (per account, by id, archived and bytové družstvá included), so two old firms no longer
+   show the same „VER (navrhnutý)". `BookCodeRow` transliterates like `BookNumber::letters`
+   („šta" → STA), drops nothing (no `maxLength`) and shows the server's message. The code messages
+   (shape, lock, taken, missing) and the restore warnings use the client kind (`ClientKind::bookCode*`).
+5. **The rest.** The book branch of the items API drops `persists_from` before validating, and the
+   walk refuses an origin whose key names no defect of its record (`PrehliadkaPrevious::namesDefectOf`;
+   an item saved with that origin before keeps it) — a new defect can no longer be „dôvod zanikol"
+   through the API. After the 409 of a permanent delete the book summary reads the entry again and
+   shows it as issued; the prehliadka walk reloads (`useDiscardPrehliadka` `onStale`). „v bytovom
+   dome" in the attached-record sentence (`BookSentences::full`), „Bytový dom" as the PDF column
+   header, and the bytový dom wording in the book's readiness refusals. BOZP item refusals carry
+   `field` (`FieldRefused`), so the review hint is right for rebríky / regály; „Zistené závady" there
+   has `maxLength` 500. A nedostatok photo still resizing disables the BOZP footer buttons
+   (`useDefects().processing`). Restore warning „…sú označené ako už vystavené". Stale comments
+   (`lib/carryOver.ts`, `api/inspections.ts` repeat, `BozpItems::unassessedCount`,
+   `PreviousStatusBadge`). `npm run typecheck` is `tsc -b` (TS6310 with `--noEmit`).
+6. **Waiting for the customer, only the text changed:** the „Prevziať položky" offer of a BOZP item
+   check no longer says „so všetkými údajmi" — it names what is carried and says that the rows'
+   nedostatky, opatrenia (OOPP: záver) and photos are not. Whether those should carry, and whether a
+   bytové družstvo's code should skip the words „Bytové družstvo", is asked of the customer.
+
+**Answers for the review.** A re-issued book entry keeps its number as the next document version;
+the documents row (and the PDF on disk) of the earlier version is deleted by „Upraviť", and no
+screen shows the version — this is what round 5 built for „opravený zápis si ponechá pôvodné číslo";
+the file of version 2 is `…-v2.pdf`. Not changed. „Fotodokumentácia zo zápisu do požiarnej knihy"
+labels the source record's photos only while a carried defect is being taken over; the first save
+copies them onto the new row, where they are the row's own photos (removable) — as documented on
+`CarriedPhotos` (round 3 of the first series). Not changed.
+
+**Check script:** part 10 of `bin/test-prehliadka-followups.php` (33 checks).
+
+Round 7 found two faults in the lock of item 3 (it leaked into other accounts, and the settle step
+still deadlocked with a first issue — „no deadlock" above held only for the simulated first
+statement) and a code cascade; see round 7.
+
+### Fix list of 16. 11. 2026 — round 7 (review and tests of round 6) — ✅ built, checked at 360 px (Chromium, WebKit)
+
+Prompt: `docs/prompts/fixes-2026-11-16-round-7.md`. Items 1, 2, 4 and 5 of round 6 worked; this
+round fixes the lock of item 3 and what the check found besides.
+
+1. **The restore's lock reached other customers' accounts.** At the database's REPEATABLE READ the
+   restore's first statement (`SELECT id FROM companies WHERE account_id = ? … FOR UPDATE`, via
+   `uq_companies_book_code`) took gap locks beyond the account: a new firma or a changed code in the
+   neighbouring account waited for the whole restore and failed with 1205 (reproduced by the new
+   check before the fix). The restore transaction now runs at **READ COMMITTED**
+   (`SET TRANSACTION ISOLATION LEVEL READ COMMITTED` right before it): the locking read locks the
+   matching rows only, every plain read sees what is committed when it runs (so the round-6 1020
+   concern of a read view fixed too early does not arise). Check (two connections, the real
+   `Restorer::run` held in a child at its `settle` stage through `Restorer::$checkpoint`): the
+   previous and the next account with firms insert a firma with and without a code and change a code
+   while the restore holds its locks; a first issue started meanwhile waits and then skips the
+   restored numbers (PK-STA-004 after the restored PK-STA-003).
+2. **A restore deadlocked with a first issue in the same account.** The settle UPDATE (… JOIN
+   documents, a derived table over the account's entries) locked other entries of the account; an
+   issue holds its entry and waits for the firma, which the restore holds → 1213 for the issue
+   („PDF sa nepodarilo vygenerovať.", reproduced before the fix). After its first statement the
+   restore now locks **no row it did not insert**: `settleBookNumbers`, `markIssuedFromDocuments` and
+   the pre-080 reopen read with a plain SELECT and update one row by primary key;
+   `relinkFollowUps` updates only úkony this restore inserted (it could set `source_inspection_id`
+   on an existing one — merge no longer touches it); `relinkPrehliadkaDevices`,
+   `relinkPrehliadkaPrevious` and `relinkBookEntries` already updated only inserted rows by primary
+   key. Check: the real restore next to a first issue (it waits, no deadlock) and next to a re-issue
+   (same number, version 2; it needs no firma lock — whether it ends inside the restore's pause
+   depends on how fast the PDF renders, so the script prints it). Foreign-key checks still take a
+   shared lock on an existing úkon that a restored deadline notice, plan or task points to; a first
+   issue's draft has none, and a re-issue does not wait for the restore, so no cycle.
+   **Restore next to an Excel import:** it can deadlock — the import inserts a firma (uncommitted)
+   and then a prevádzka or úkon under an existing firma (foreign-key check = shared lock on that
+   firma), while the restore's first statement has locked the existing firma and waits for the new
+   one. Observed once in three runs of a two-connection experiment; InnoDB chose the restore
+   (1213, rolled back; a merge restore can be repeated). Not changed (the prompt asked only for the
+   answer).
+3. **Codes after a restore.** Two passes in `Restorer::restoreBookCodes`: every archive firma whose
+   code is free here keeps it (with its counter); then the others get a proposal with every code of
+   the archive counted as taken (its firms' codes and the codes of its entries' numbers) — Stavby
+   Novák STA gets STB, Stv Trade keeps STV. The warnings name the next number the next issue really
+   takes (`BookNumber::nextNumber`), word a code held only by numbers („… ktorý v tomto účte nemá
+   žiadny klient, len čísla iných zápisov … Kód „QUA" preto nedostane žiadny klient tohto účtu.")
+   and name the client that skips the numbers; a firma merged into an existing firma with another
+   code says which numbers its entries brought and what the next entry will be. The pre-080 reopen
+   clears `protocol_deferred_at` (an entry restored as a draft never had it — the archive does not
+   carry it). A firma's code is locked also when an entry of it holds a book number of the
+   per-firma format (`BookNumber::isCodeLocked`, used by `CompanyController::shape` and
+   `POST …/book-code`). An old `PK-RRRR-NNN` number backfilled by 080 does not lock it — it carries
+   no code, and the code stays editable until the firma's first entry in the new format is issued
+   (answer 3; without this every firma with entries issued before the change showed its proposed
+   code locked).
+4. **Rebríky / regály PDF.** The nedostatky table has a caption row „Nedostatky" inside its `<thead>`
+   (mPDF repeats it on the next page and never leaves it alone at a page bottom) and a column
+   „Rebrík č." / „Regál č." with the row's „Č." from the list. A row without závady points to its
+   nedostatky by number („Pozri nedostatky č. 3, 4 v tabuľke Nedostatky.") instead of repeating the
+   texts; with neither, „Nevyhovuje". `$cell` uses `DefectsTable::scalarText`. PDFs looked at with
+   the nine row cases (závady only, nedostatok only, both, neither, two nedostatky, a passing row
+   with a nedostatok, a passing row, a disposed one, a table over three pages).
+5. **Smaller.** Bytové družstvo wording: the book entry's prevádzky refusals (`readFacilities`,
+   „Bytový dom zápisu musí byť medzi vybranými.", „Bytový dom návštevy musí zostať vybraný.",
+   „Z bytového domu … sú zapísané nedostatky …"), Opakovať of an entry whose houses are archived,
+   „Prevziať položky" with nothing to take, the house of a book defect, the prehliadka PDF header
+   („Bytový dom: …"), `CompanyController::findOrFail` („Bytové družstvo sa nenašlo." for an archived
+   one, „Klient sa nenašiel." for an id that names nothing). The walk refuses a carried defect of a
+   book entry's other house (`namesDefectOf` with the walk's facility) and a second item with the
+   same `persists_from.key` (422). After the 409 of the permanent delete the walk hides „Prerušiť"
+   and its hint for a closed prehliadka; the prevádzka detail and the prehliadka setup read the list
+   / context again (`onStale`). `updateBasic` reads `details … FOR UPDATE` in a transaction around
+   the merge and the write. `details: null` on a prehliadka keeps only the keys the client never
+   sends (its client keys are read from the smallest valid header); `mergeOver` docblock corrected
+   for legacy keys. `CarryOver::checksCompleteness` docblock aligned with the code (round 5 meant
+   old protocols without a recorded origin; a carried draft stays checked after issue and
+   „Upraviť"). `BookCodeRow` selects synchronously (`flushSync`). `concept_confirmed_at` comes from
+   the database clock like `concept_built_at` (`PrehliadkaConcepts::now()`; only `isTouched()`
+   compares a mark with a time — `concept_built_at` against the items' timestamps — so the build
+   time must stay on the database clock; the confirmation is read as set / not set).
+   `BookNumber::takenCodes` joins documents by account and runs once per call site. Check script:
+   part 10 runs migration 081 on temporary copies of the scratch account's tables; every part
+   removes its scratch accounts through one function, also from a shutdown function; the six users
+   `test-followups-r6-…` of 18. 11. 2026 (accounts 680–682, 691–693) are removed.
+
+**Left as they are (bytové družstvo wording).** „Firma sa nenašla." / „Prevádzka sa nenašla." in the
+other controllers answer an id that names no record of the account — there is no client kind to
+word it by. „Firma alebo prevádzka úlohy je archivovaná" (task reopen), „pri tejto firme" (potvrdenie
+o vykonaní práce, výdajka) and „Prevádzka nepatrí k vybranej firme" (training API mismatch) are generic
+or API-only; the code-taken message on a duplicate key (a race) says „iná firma"; the Excel import's
+readFacilities refusal keeps „prevádzku" (the import has its own sheet wording). `confirmConcept`
+writes `details` from its own earlier read too (a header save between its read and write would be
+lost) — not in this round's scope.
+
+**Check script:** part 11 of `bin/test-prehliadka-followups.php` (the whole script: 222 checks).
+
+---
+
+## Billing fixes (17. 11. 2026) 🟨 built on `poapp-oct-2026`, checked in Stripe test mode; owner decisions pending
+
+Source: `docs/prompts/billing-fixes-2026-11.md` (a Stripe test-clock experiment, a replay of the
+captured events and three code audits). Migration 079.
+
+**What was wrong**
+- The first extra technician on a live subscription was never billed: subscription items do not
+  accept `price_data.product_data` (Stripe 400), the error was only logged and the next
+  `customer.subscription.updated` reset `extra_technicians` to 0. The extra item was also found as
+  „any price that is not the base price", so a changed `STRIPE_PRICE_*` made the base item the
+  „extra" one.
+- Nothing repaired a failed seat sync; two roster changes in the same second could create two
+  extra items; deleting a user in the admin panel did not re-sync seats.
+- iDoklad: one line with `amount_paid` and the period of `lines[0]` — 0 € invoices issued,
+  prorations and credits merged, wrong periods, credit-paid invoices invoiced at the card amount.
+  `IDOKLAD_DRAFT_MODE` never created drafts (normal numbered invoices, local label „draft").
+  A failed issue was never retried; the fallback e-mail promised an admin action that did not exist.
+- Webhook: the event id was stored before handling (a failure was skipped on retry); payloads were
+  trusted as they came (order, API version, a foreign/old subscription overwriting the current one);
+  up to five slow iDoklad calls before answering Stripe.
+- A `past_due` account could start a second subscription; any team member could cancel; admin
+  account deletion left Stripe charging; admin date edits were overwritten by the next webhook;
+  the screens showed today's extra price and the base price only.
+
+**What changed**
+- ✅ Extra item under the fixed product `STRIPE_PRODUCT_EXTRA_TECHNICIAN` (new env; Checkout uses it
+  too). Items are recognised by that product, by `metadata.firol_line_kind`, by the legacy inline
+  product name „POapp — extra technik", and only last by the recorded id — never the base item.
+- ✅ `SeatSync::reconcile` reads the subscription from Stripe and pushes the wanted quantity
+  (`extra_technicians` is the wanted count, never copied back from Stripe), merges duplicate items,
+  under a per-account `GET_LOCK` held across the Stripe calls. It runs after every roster change,
+  every `customer.subscription.*` / `checkout.session.completed` event, checkout-sync and daily
+  (`bin/billing-daily.php`, cron line in the README). Paths that change active technicians and call
+  it: invite accept, team activate/deactivate/remove, admin activate/deactivate, admin user delete
+  (new), admin included-count change, registration claiming a pending user. Excel import adds
+  members inactive (no seat).
+- ✅ Report only: `bin/billing-seat-report.php` („NOT CHARGED", overcharged, duplicates, legacy items,
+  more than one live subscription).
+- ✅ iDoklad: `IssuePolicy` — `IDOKLAD_ISSUE_MODE` (default `send` only in production, else
+  `prepare`: payload stored on the row, nothing sent) and test-mode Stripe invoices never sent
+  unless `IDOKLAD_ALLOW_TEST_EVENTS`. One item per Stripe line, period from the first non-proration
+  subscription line, all lines loaded (`has_more`), taxing date = payment date. 0 € invoices are not
+  recorded; a credit (negative total or line, part paid from balance), a discount or mismatched
+  totals → `needs_review` with the Stripe numbers in the admin panel, never issued automatically.
+- ✅ Issuing runs after the webhook answered (`fastcgi_finish_request`); `pending`/`error` rows are
+  retried daily (3 automatic attempts), then the operator (`ADMIN_EMAIL`) is e-mailed; an iDoklad
+  POST without a definite answer (timeout, 5xx, crash in `sending`) → `needs_review/uncertain_send`,
+  never re-sent blindly. Admin „Vystaviť znova". Fallback e-mail text corrected.
+- ✅ Webhook events have a status (`processing`/`done`/`failed`); a failed one is handled again on
+  retry. Subscription events re-read the subscription from Stripe; events of a subscription that is
+  not the account's current one are ignored (a new one is taken over only after the old one ended);
+  fields read for both the pinned version and `2026-04-22.dahlia` (`StripeShape`, captured fixtures).
+- ✅ Checkout refused for `past_due`/`unpaid` (Billing page shows the state and „Zaplatiť" via the
+  portal), checks Stripe for a live subscription, expires the customer's open sessions, one at a time
+  per account; `billing_period` is stored from the subscription, not at checkout.
+- ✅ Checkout, cancel, resume, portal and checkout-sync need the main user (403 otherwise); the UI
+  hides the actions for other members.
+- ✅ Admin: deleting an account with a live subscription asks to cancel it in Stripe first; the end
+  date of a live subscription cannot be edited (Stripe controls it); „Kontrola fakturácie" block.
+- ✅ Screens show the extra price on the customer's Stripe item and the next charge with extras.
+  `reprice-yearly-extra-seats.php`: strict options, no increase without `--allow-increase`, skips
+  cancelled / ending subscriptions, lists „NOT CHARGED".
+- ✅ Checks: `bin/test-billing-invoices.php` (policy, dahlia payloads, recorded iDoklad payload,
+  retries, 403, failed-event retry) and `bin/test-billing-stripe.php` (test clocks: scenarios A–G,
+  webhook replay R, failed renewal P).
+
+**Waits for owner decisions (not built)**
+- ⏸ VAT in Stripe (tax rate / Stripe Tax, reverse charge) and what the iDoklad line carries.
+- ⏸ When an added technician is charged (`always_invoice` vs at renewal as today).
+- ⏸ Failed renewal: `subscription_end_date` still follows `current_period_end` while `past_due`;
+  grace period, notice e-mail and banner to be decided. Test clock (default retry settings of the
+  test account): the renewal fails → `past_due` at once, `current_period_end` moves a full period
+  ahead anyway, Stripe retries (9 attempts) and cancels the subscription about 3 weeks after the
+  renewal; the app kept access until the new period end — a free period.
+- ⏸ Credits on tax documents (negative line or dobropis) — those invoices wait in `needs_review`;
+  unused credit at cancellation (kept on the Stripe customer today).
+- ⏸ iDoklad invoice e-mailed to the customer and marked paid.
+- ⏸ Monthly ↔ yearly switch with extra technicians.
+- ⏸ Registration claiming a pending imported technician (security question, unchanged).
+- ⏸ Before deploying: follow the README „Production deploy checklist" (round 2: deploy with
+  `BILLING_RECONCILE=off`, run `bin/billing-seat-report.php`, owner decides, switch on; the cron is
+  installed by the workflow).
+
+### Billing fixes, round 2 (18. 11. 2026) 🟨 built on `poapp-oct-2026`, checked in Stripe test mode; owner decisions pending
+
+Source: `docs/prompts/billing-fixes-2026-11-round-2.md` (three reviews of round 1 and a re-run on
+11 test clocks with 141 events replayed). Round 1 charged the right money in every scenario; this
+round fixes what the reviews found. Migration `079` edited (not deployed anywhere yet).
+
+**What was wrong**
+- A paid renewal after a quantity change got no invoice: Stripe writes a quantity change as two
+  proration lines (−„Unused time on N ×", +„Remaining time on N+1 ×") and every negative line
+  held the invoice as a credit. Every account with a second or later extra technician paid and
+  got no tax document; „Vystaviť znova" refused it.
+- Promotion codes: line amounts are before the discount, so every discounted invoice was held.
+- The base plan item could still be taken for the extra item: the Firol-era inline product name
+  („Firol — extra technik", 17. 5.–28. 7. 2026) was not recognised, an item matched only by the
+  recorded id was changed or deleted, and a `STRIPE_PRODUCT_EXTRA_TECHNICIAN` set to the plan's
+  own product made the base item the extra one.
+- Production could silently stop issuing invoices (`APP_ENV` other than `production` → every
+  live payment `prepared`, shown as OK); the daily cron was not installed; failed webhook events
+  were never looked at; a 2xx from iDoklad without an Id counted as issued; rows of the old code
+  kept a button that could not work; the daily run with a live key pushed a local roster to live
+  customers.
+- A newer paid subscription next to an older unpaid one was ignored; checkout trusted a stale DB
+  status; an older event could write a stale state back (cancel flag left on a cancelled
+  account); admin delete cancelled only the recorded subscription.
+- A missing product variable made Checkout answer 500; migration 079 could not be re-run; the
+  seat report could only run after the first charge.
+
+**What changed**
+- ✅ `InvoiceIssuer::invoiceLines()`: proration lines of one change (same subscription, kind,
+  proration period) are netted into one line „POapp — extra technik, pomerná časť (+1 technik)
+  (01.12.–17.12.2026)"; a duplicate merge nets to 0 → no line. Amounts are net of the line's
+  `discount_amounts` („…, po zľave"), an unplaced invoice discount becomes one „Zľava" line.
+  Held only for a negative netted line or total, a total paid partly from the balance, or lines
+  that do not add up (tax). Departure: the prompt said „per subscription item"; per item a merge
+  leaves a negative group for the deleted item, so the group is per kind (extra / plan).
+- ✅ `SeatSync::classifyItems()`: legacy names `LEGACY_PRODUCT_NAMES` (POapp and Firol, also for
+  invoice lines); an item under a base price or the product of one is never an extra item
+  (products cached in `system_settings`); an item only the recorded id points to is UNVERIFIED —
+  never touched, the reconcile leaves the subscription to a person (`action: manual`), the seat
+  report lists it; the last item of a subscription is never removed or changed; the reconcile
+  refuses when the extra product is the plan's product. `ConfigCheck` reads the extra product
+  from Stripe (exists, active, not the plan's).
+- ✅ Item 3: `ConfigCheck` errors for a live key without `IDOKLAD_ISSUE_MODE=send` and for a
+  `prepared` row of a live invoice; the daily run issues such rows once sending is allowed, else
+  alerts; the admin list shows „Ostrá platba bez faktúry" with „Vystaviť". A live key still does
+  not imply `send`.
+- ✅ Item 5: `deploy.yml` installs `billing-daily.php` (05:30) like the other crons; the daily run
+  re-runs `failed` / stuck `processing` webhook events from Stripe by id and e-mails the operator
+  once per event (`stripe_webhook_events.operator_alerted_at`), `ConfigCheck` warns about them;
+  a 2xx without Id → `needs_review / uncertain_send` + alert; rows without a snapshot (old code)
+  are rebuilt from Stripe and held „najprv skontroluj v iDoklade, či faktúra už neexistuje",
+  without a button until rebuilt; the daily run refuses a live key unless `APP_ENV=production`
+  or `--allow-live`.
+- ✅ Item 6: an active / trialing subscription takes over from a past_due / unpaid / paused one
+  (logged); checkout re-reads a live DB status from Stripe; the daily run writes status, period
+  end and cancel flag from Stripe; subscription refetch + write under a per-account lock
+  (`firol_subscription_<id>`), a cancelled subscription never keeps the cancel flag; admin delete
+  lists all of the customer's subscriptions and cancels every live one.
+- ✅ Item 7: Checkout falls back to an inline product (current POapp name + `firol_line_kind`)
+  when the variable is missing or is the plan's product; migration 079 `IF NOT EXISTS`
+  throughout (re-run twice locally); `BILLING_RECONCILE=off` — webhooks record, nothing is pushed,
+  the daily run reports; the seat report flags legacy-named and UNVERIFIED items and says which
+  subscription it checked. README: the full production deploy checklist.
+- ✅ Next charge with a promotion code on the subscription shows „pred zľavou"
+  (`accounts.stripe_has_discount`).
+- ✅ Tests: the iDoklad recorder (`bin/lib/idoklad-recorder.php`) IS `Firol\Idoklad\IDokladClient`
+  in the test processes (loaded before the autoloader, checked). `test-billing-invoices.php`: the
+  policy matrix, netting, discounts, 2xx without Id, legacy rows, the daily live-key guard.
+  `test-billing-stripe.php`: scenarios F (both legacy names, down to 0), H, K, L, S, W, O and the
+  replay again + reversed.
+
+**Stripe test mode, 18. 11. 2026** — scenarios A–G, F1/F2, H, O and K passed (69 checks, 0
+  failures); L, S and W passed in a separate run. The full run's output was lost after K (the
+  local shell was stopped for low memory; the process finished in the container and its cleanup
+  deleted every test clock and coupon), so P and the replay R (again + reversed) were not
+  observed this round. Recorded iDoklad payloads: H1 monthly renewal 53,66 € (two „+1 technik"
+  lines 5,66 + 9,00, plan 19,00, 2 × 10,00), H2 yearly 557,91 €, H3 Firol-named legacy item 45,00 €,
+  H4 first extra only 34,33 €, H5 after a merge 39,00 € with no proration line — all issued,
+  items = amount paid; H6 removal held (credit −6,66 €). K1 20 %: 23,20 € and 36,27 €; K2 3 €:
+  26,00 € and 42,34 € — issued, items = amount paid. iDoklad never called (recorder).
+
+**Owner questions (report only, not built)**
+- ⏸ When the extra quantity reaches 0 the item is deleted; the next technician creates a new item
+  at today's admin price — a price rise without the 30 days' notice of terms 5.5. Options: keep
+  the item at quantity 0, or create the new item at the stored unit amount
+  (`accounts.stripe_extra_unit_amount_cents`).
+- ⏸ `PATCH /api/account` (company name, IČO, address on invoices) is open to every team member.
+- ⏸ Registration claiming an import-created pending technician (round 1, item 11), unchanged.
+- ⏸ Round 1 Part 2 (VAT, charging additions at once, failed-renewal access, credits on tax
+  documents, invoice delivery, monthly ↔ yearly) still waits.
+
+### Billing fixes, round 3 (18. 11. 2026) 🟨 built on `poapp-oct-2026`, checked in Stripe test mode; owner decisions pending
+
+Source: `docs/prompts/billing-fixes-2026-11-round-3.md` (three reviews of round 2 and two re-runs on
+test clocks: 26 invoices of 10 customers, 334 events replayed twice and in reverse). Every invoice
+round 2 issued added up to the amount Stripe charged and none was recorded twice; this round fixes
+paid renewals that ended without a tax document and without anyone being told. Migration `079`
+edited again (not deployed anywhere yet).
+
+**What was wrong**
+- A paid renewal after a duplicate merge was held: the reconcile deleted the duplicate and updated
+  the kept item in two calls without `proration_date`, so in real time the two halves got different
+  period starts and `invoiceLines()` (grouped per period start) produced −7,00 / +7,00 → a 39,00 €
+  renewal without a tax document. Same for a merge an hour after the duplicate appeared.
+- Held paid invoices were silent: only an `error_log` line, a yellow count in „Kontrola
+  fakturácie" without account names, the customer seeing „Spracováva sa" forever. A live row
+  `skipped` for missing iDoklad credentials was the same.
+- A wrong `APP_ENV` with a live key hid everything: rows were prepared without an alert, the
+  daily run's live-key guard exited before the invoice alerts every night, `ConfigCheck` showed
+  warnings only; partial runs stamped the last run.
+- Accounts with two subscriptions: the take-over ran only on an event of the paid one; the daily
+  run and every roster change pushed extra technicians onto the recorded unpaid one.
+- Silent states: accounts left for a person only in the log; `BILLING_RECONCILE=disabled` meant
+  ON; the daily run tried a prepared row twice in one run (two attempts, two alerts) and could post
+  a row an admin had just moved to `uncertain_send`; an event Stripe no longer returns failed every
+  night; a failing `crontab -l` could install an empty crontab; a refused extra product made every
+  Checkout with extra technicians answer 502; the alert for a prepared row offered a button that
+  could not work.
+- Smaller: the replay check of L4 failed (no plan item → no period); test child processes did not
+  load the recorder; the reprice script trusted the recorded item id; `classifyItems` took an
+  unrelated item listed first as the plan after a base price change; a plan line could be named as
+  an extra technician; Checkout wrote a subscription read before the lock; a coupon on the
+  customer was not seen; English reasons in the admin and alerts.
+
+**What changed**
+- ✅ Item 1: `SeatSync::reconcile()` passes one `proration_date` (now, or the test clock's frozen
+  time) to every create / update / delete of a run. `InvoiceIssuer::invoiceLines()` nets ALL
+  proration lines of one subscription and kind (extra / plan) over the whole invoice into one line —
+  „POapp — extra technik, pomerná časť (+2 technici) (21.11.–18.12.2026)", the period from the
+  earliest start to the latest end; a positive net with no change in the count is worded without a
+  count. Held only for a negative net, a negative total, `amount_paid` ≠ `total`, or lines that do
+  not add up. **Consequence (as decided in the prompt):** an addition later undone in the same
+  period with a positive net is issued (test clock H8: 21,33 €, extras +2,33 €; the captured
+  renewal of round 1: add + change + remove = +1 technik, 40,66 €, now issued); a removal with a
+  negative net stays held (H9: 21,33 € paid, extras −7,67 € → held). Several changes in one period
+  are one line (H1: „(+2 technici)" instead of two „(+1 technik)" lines).
+- ✅ Item 2: every held paid row alerts the operator once (`InvoiceAlert`, `operator_alerted_at`,
+  sent after the webhook answered); the daily run re-alerts every `needs_review` row whose alert
+  did not go out and logs what really happened (alerted / NOT alerted). `ConfigCheck`: held rows
+  are an **error** naming account, amount and reason; live rows `skipped` without iDoklad
+  credentials are an error, alerted, and issued by the daily run once iDoklad is configured;
+  „iDoklad nie je nastavený" is an error in production (or with a live key). No „issue anyway" for
+  credits (Part 2).
+- ✅ Item 3: `issue()` alerts once when the policy prepares a live row. The daily run's live-key
+  guard stops only the Stripe writes (event re-runs, seat pushes — seats are reported); the checks
+  and the invoice step run; the refusal is stamped (`system_settings.billing_daily_refused`), one
+  alert, exit 2. `ConfigCheck`: a live key with `APP_ENV` ≠ `production`, a stamped refusal, and
+  a stale daily run with a live key are errors. `--dry-run`, `--only`, `--account` and refused runs
+  do not stamp `billing_daily_last_run`.
+- ✅ Item 4: the daily run lists the customer's subscriptions and applies the webhook's take-over
+  rule on Stripe's statuses (paid first; `incomplete` added to what a paid subscription takes over
+  from); `reconcile` pushes nothing to a recorded subscription that is not active / trialing while
+  a paid sibling exists (`manual`). No subscription is ever cancelled or changed automatically; one
+  alert per take-over and per customer with two or more live subscriptions, stored on the account
+  (`stripe_other_subscriptions`) and shown in `ConfigCheck` as an error naming the account and
+  whether the old subscription still carries an extra item. Reachability of an `incomplete`
+  subscription moving `subscription_end_date`: yes, by the code path (not reproduced with the old code) — `customer.subscription.created` of an
+  incomplete subscription (a subscription created in the dashboard / API with
+  `default_incomplete`, or a payment that needs confirmation) on an account with no live
+  subscription stored its period end, a free period; fixed: `incomplete` / `incomplete_expired`
+  never move the paid-until date (test clock T2).
+- ✅ Item 5: the last reconcile result per account (`seat_sync_state`, note, time) — manual and
+  error accounts are an error in `ConfigCheck` with names, alerted once per account and state.
+  `BILLING_RECONCILE` accepts only `on` / `off` (unset = on); anything else is off plus an error;
+  off for more than 3 days is an error (`billing_reconcile_off_since`). While nothing is pushed
+  (switch off, account manual) „Ďalšia fakturácia" uses Stripe's quantity
+  (`stripe_extra_quantity`, `next_charge_extra_technicians`). A prepare / skip claim is not an
+  attempt; a row the daily run handled is skipped by its retry loop; the daily run claims live rows
+  only from `prepared` / `skipped`. An event Stripe answers 404 for, or one failing for 30 days,
+  becomes `gone` (failure recorded on the row, not re-run, listed in `ConfigCheck`, alerted once).
+  `deploy.yml`: the crontab is read once into a variable; a failed read other than „no crontab"
+  leaves it alone (diff below). Checkout retries once with the inline product when Stripe refuses
+  the extra product (`BillingController::createCheckoutSession`). The alert for a prepared row says
+  „Najprv nastav IDOKLAD_ISSUE_MODE=send"; each alert names only what can work in the row's state.
+- ✅ Item 6: test L4's replay expects no period (no plan item); the test child processes run with
+  the recorder as `auto_prepend_file`, blank iDoklad credentials and `IDOKLAD_ISSUE_MODE=prepare`;
+  `test-billing-invoices.php` refuses a key that is not `sk_test_`. The reprice script classifies
+  the subscription's items and reprices only `extras` (L6, dry run). `classifyItems`: the plan item
+  is remembered (`stripe_base_subscription_item_id`) and preferred; more than one unrecognised item,
+  or an unmarked item next to the plan, is `unknown` → `manual`, no next charge without a plan item.
+  `isExtraLine`: a base price / base product line is never an extra line. Checkout stores the
+  subscription read again under the lock, a busy lock answers 502; lock names carry the database
+  name (`BillingLock`). A coupon on the customer counts as a discount (K3). Reasons in the admin and
+  alerts are Slovak; a proration of a discounted subscription is „po zľave"; a discounted line not
+  divisible by its quantity is printed as „POapp — 3 × extra technik, po zľave".
+- ✅ Docs: README (billing notes, webhook events, PHP 8.5 CLI for cron, `ADMIN_EMAIL` = platform
+  admin, OVERCHARGED after the switch, the „Technici zahrnutí v predplatnom" lever, the dry run of
+  the invoice step before the first nightly run, two-subscription flags resolved before the switch),
+  `.env.example`, the manual on disk.
+
+`deploy.yml` (crontab), for the owner's review:
+
+```diff
+-            ( crontab -l 2>/dev/null | grep -qF "$ROOT/scripts/backup-db.sh" ) \
+-              || ( crontab -l 2>/dev/null; echo "$CRON_CMD" ) | crontab -
++            if CRONTAB_NOW=$(crontab -l 2>&1); then CRONTAB_OK=1
++            elif printf '%s' "$CRONTAB_NOW" | grep -q "no crontab"; then CRONTAB_NOW=""; CRONTAB_OK=1
++            else echo "crontab -l failed, cron lines not installed: $CRONTAB_NOW"; CRONTAB_OK=0
++            fi
++            add_cron() {
++              [ "$CRONTAB_OK" = 1 ] || return 0
++              printf '%s\n' "$CRONTAB_NOW" | grep -qF "$1" && return 0
++              if [ -n "$CRONTAB_NOW" ]; then CRONTAB_NOW=$(printf '%s\n%s' "$CRONTAB_NOW" "$2"); else CRONTAB_NOW="$2"; fi
++              printf '%s\n' "$CRONTAB_NOW" | crontab -
++            }
++            add_cron "$ROOT/scripts/backup-db.sh" "$CRON_CMD"
+   (the same one-line `add_cron` for the prune, deadline-notice and billing lines)
+```
+
+**Stripe test mode, 18. 11. 2026** — `bin/test-billing-invoices.php` 116 checks, 0
+  failures; `bin/test-billing-stripe.php` in full 290 checks, 0 failures (31 test clocks, all
+  deleted; 730 events replayed through the real webhook, then again and in reverse: same end state,
+  no invoice row twice, nothing sent; 43 rows prepared, 2 held — the removal credits H6 and H9).
+  Recorded iDoklad payloads, all summing to the amount paid: H1 monthly 53,66 € („pomerná časť
+  (+2 technici)" 14,66 + 19,00 + 2 × 10,00), H2 yearly 557,91 €, H3 Firol-named legacy item
+  45,00 €, H4 34,33 €, H5 merge with the delete and the update 5 s apart 39,00 € — one proration
+  date, no proration line, H7 merge an hour after the duplicate 29,01 € (count-less line 0,01 €),
+  H8 add-then-remove 21,33 € (count-less line 2,33 €); held: H6 removal −6,66 €, H9
+  add-and-remove net −7,67 € (21,33 € paid), each an admin error naming the account and the
+  amount and alerted once by the daily run. K1 20 % 23,20 € / 36,27 €, K2 3 € 26,00 € / 42,34 €
+  — the proration lines „po zľave"; K3 a customer coupon → „pred zľavou". L5 a refused extra
+  product → Checkout retried inline and opened; L6 the reprice dry run skipped the recorded plan
+  item. T: the roster change pushed nothing to the past_due A, the daily run took over B, put 2
+  extra technicians on it, left A's extra item, one take-over and one two-subscription alert (the
+  next run: „already"), admin error naming A's extra item; T2 incomplete → paid-until date
+  unchanged. The `APP_ENV` matrix with a fake live key (offline script): a live key with any
+  `APP_ENV` but `production` is an admin error; without `send` nothing is sent and the prepared
+  row alerts once; the daily run refuses only the Stripe writes, runs the invoice step, stamps and
+  alerts the refusal once (exit 2), a run that is not refused clears it; partial runs never stamp
+  the last run. iDoklad never called (the recorder in every process, PHP-FPM only prepared).
+  `php -l` on every changed file, `npm run build` passed.
+
+**Owner questions (report only, not built)**
+- ⏸ Seat changes made while `BILLING_RECONCILE=off` are prorated from the moment the switch goes
+  on (the next reconcile), not from the change.
+- ⏸ A 0 € invoice (100 % coupon) leaves no `invoices` row at all — nothing in the billing history.
+- ⏸ The period end on invoice lines is Stripe's period end, which is the first day of the next
+  period („18.12.2026 – 18.01.2027"); iDoklad users may expect the last day („17.01.2027").
+- ⏸ Payments the old code lost before the deploy (events marked done, old `skipped` rows):
+  proposal — a one-off, read-only script that lists the paid Stripe invoices (live, since the
+  launch) and compares them with the `invoices` table by Stripe invoice id, printing every paid
+  invoice without a row or with a row that has no iDoklad number. Not written or run.
+- ⏸ Round 2's three questions stay open: ~~the price when the extra item is created again (terms
+  5.5)~~ (closed 18. 11. 2026: the current price applies, the owner notifies price increases),
+  `PATCH /api/account` open to every team member, the registration claim of an imported
+  technician.
+- ⏸ Round 1 Part 2 (VAT, charging additions at once, failed-renewal access, credits on tax
+  documents, invoice delivery, monthly ↔ yearly) still waits — and now decides the held removal
+  credits (H9) and the OVERCHARGED accounts' first renewal after the switch.
+
+### Billing — the owner's decisions of 18. 11. 2026 (19. 11. 2026) 🟨 built on `poapp-oct-2026`, checked in Stripe test mode; first real send to be watched
+
+Source: `docs/prompts/billing-decisions-2026-11.md`. The owner decided four
+points of round 1's Part 2; this builds them, plus the leftovers of the
+round-3 check. Migrations `082` (079 again — see Part 0, item 11) and `083`.
+
+| Point | Decision | Built |
+|---|---|---|
+| VAT | Prices are net; the customer pays price + VAT | Part 1 |
+| Failed payment at renewal | 14 days to pay, then read-only | Part 2 |
+| Credit on the tax document | A negative line on the same invoice | Part 3 |
+| Price when a technician is added again | The current price (as today) | ✅ closed, no change — the owner notifies customers of price increases himself |
+| Invoice delivery | iDoklad e-mails the invoice to the customer | Part 4 |
+| Charging an added technician at once; monthly ↔ yearly switch | Not decided | ⏸ not built |
+
+**Part 0 — leftovers of round 3**
+- ✅ 1. A subscription of another product is never taken over:
+  `SeatSync::isOurSubscription()` — a POapp subscription carries a plan item
+  recognised by a configured base price / base product or the remembered plan
+  item, never through the lone-unrecognised-item fallback. Used by
+  `liveSubscriptions` (daily run, seat report), `paidSibling`, the webhook
+  (an event of another product's subscription is ignored, also when the
+  account has none), checkout-sync / checkout's live check, and the admin
+  account delete (it no longer cancels another product's subscription).
+  Test clock U1 (S2c): recorded past_due + another product active → nothing
+  taken over, no extra item on it, the paid-until date unchanged.
+- ✅ 2. The daily run reads accounts recorded as `canceled` /
+  `incomplete_expired` that have a Stripe customer: a live POapp
+  subscription takes over (its technicians are then charged); otherwise
+  nothing else runs for them. A run that may not write the take-over
+  (Stripe writes refused) stores it, and `ConfigCheck` shows the error
+  „V databáze skončené predplatné, zákazník má v Stripe živé". Test clock
+  U2 (S2d).
+- ✅ 3. The daily run e-mails each `ConfigCheck` ERROR once per check
+  (`OperatorAlert` key `config:<key>:`) and forgets it when the check is OK
+  again (`forgetExcept`); not its own absence nor a refused run. The webhook
+  e-mails once when `billing_daily_last_run` is older than 36 h (production
+  or a live key; forgotten by the next full run).
+- ✅ 4. Alerts: the memory is per row **and state**
+  (`invoices.operator_alerted_state`, migration 083 back-fills it): a row
+  moving to another state needing a person is alerted again; the webhook's
+  deferred alert is notify-once (no double alert with an event re-run in the
+  daily run, whose deferred jobs now run right after the re-run). A row whose
+  Stripe invoice cannot be read is alerted once (`missing_snapshot`) and after
+  3 failed reads or a 404 becomes `snapshot_unreadable` (terminal, no longer
+  fetched). A live row at the attempt cap is the error
+  `invoices_failed_stopped` („treba zásah") and is in the alert loop; below
+  the cap it stays the warning „skúsi znova". Test-mode rows: „[TEST]" in the
+  mail subject, a warning in production (`invoices_held_test`, …). A gone
+  `invoice.*` event is an error until an admin marks it „Vyriešené"
+  (`stripe_webhook_events.dismissed_at`, POST
+  `/api/admin/billing/events/{id}/dismiss`).
+- ✅ 5. `proration_date` = max(period start, min(now, period end − 1)) from
+  the subscription already read (`SeatSync::prorationDate`).
+- ✅ 6. A netted line prints its count only when its sign matches the
+  amount's; „po zľave" only on a line with a discount amount or a proration
+  Stripe priced „(with … off)" (the test clock showed Stripe puts the
+  coupon into the proration's price, not into discount_amounts).
+- ✅ 7. „Vystaviť znova" sends the status / reason the admin saw; a changed
+  row is refused (409), and the claim is only from that status.
+- ✅ 8. A refused daily run (live key outside production) forces
+  `IDOKLAD_ISSUE_MODE=prepare` for its invoice step: it prepares and alerts,
+  never issues (`--allow-live` lifts the refusal).
+- ✅ 9. „Ďalšia fakturácia" shows no figure while the account is `manual` or
+  `error`.
+- ✅ 10. Test children: the recorder blanks every variable the parent lists
+  in `FIROL_TEST_BLANK` (proc_open drops empty ones) and always SMTP, before
+  Dotenv runs, and asserts it at the end („[recorder-env] ok"); mail of test
+  processes goes to a capture file (`Mailer::$captureFile` /
+  `FIROL_TEST_MAIL_CAPTURE`). The invoices script's event checks run only its
+  own events (`billing-daily.php --event=`), and it restores the refusal
+  stamp, the last run and the alert memory it touched.
+- ✅ 11. Migration `082_billing_fixes_again.sql` repeats every statement of the
+  final 079 (rounds 1–3, all `IF NOT EXISTS`), so a database that ran an
+  earlier 079 gets the columns. **Departure:** 079 itself was not edited
+  again (the prompt also says 078–080 count as pushed); the round-3
+  statements are in both files, which is harmless. From now on no pushed
+  migration is edited.
+- ✅ 12. README step 6 says which subscription the daily run charges (the paid
+  POapp one, newest first; a cancelled recorded one is left for a live one);
+  the seat report prints „the daily run charges … — why" by the same rule;
+  step 8 lists the held rows nobody can clear.
+
+**Part 1 — VAT**
+- ✅ `Billing\Vat`: `VAT_RATE_PERCENT` (default 23) — the one setting (the
+  admin form shows it read-only; it was an admin system setting used only for
+  the registration copy). `STRIPE_TAX_RATE_ID` — a manual **exclusive**
+  Stripe tax rate. Checkout sets it as `subscription_data.default_tax_rates`
+  (refused with 503 when it is not set); `SeatSync::reconcile` puts it on
+  every live subscription whose default tax rates are not exactly it, behind
+  `BILLING_RECONCILE` (also on a subscription left for a person — the rate is
+  not about the items), with `proration_behavior=none`.
+- ✅ Test clock first (19. 11. 2026, three customers): the default tax rate
+  taxes every line — the plan, the extra item, prorations of additions and of
+  removals, pending prorations created **before** the rate was set — and, with
+  a coupon, the amount after the discount. Changing the rate created no
+  proration. **Stripe rounds per line** (each line carries its own rounded
+  `tax_amounts`, the invoice tax is their sum). Dahlia payloads carry it as
+  `taxes` / `total_taxes` (`tax` is gone) — `StripeShape::lineTax / invoiceTax`.
+  A manual tax rate was kept: Stripe Tax (automatic) would need the
+  customer's address validated for every customer and adds a per-transaction
+  fee, for a single Slovak rate.
+- ✅ `ConfigCheck`: the rate exists, is active, exclusive and has
+  `VAT_RATE_PERCENT`; a live subscription without it (as last read,
+  `accounts.stripe_tax_rate_ids`) is an error; `VAT_RATE_PERCENT` unset is a
+  warning.
+- ✅ iDoklad payload: each netted line with its **net** unit price,
+  `PriceType` 1 („Cena bez daně") and `VatRateType` 1 („Basic") — the iDoklad
+  reference: „WithVat = 0 / WithoutVat = 1 / OnlyBase = 2" and „Reduced1 = 0 /
+  Basic = 1 / Zero = 2 / Reduced2 = 3"; the template's `VatRateType` 2 that the
+  old code inherited would have been the **zero** rate. A line whose
+  23 % of the net does not give Stripe's VAT of that line to the cent (a
+  netted line whose Stripe lines were rounded one by one) goes with its gross
+  price (`PriceType` 0), so the document stays Stripe's total. Before every
+  POST the app calls `POST IssuedInvoices/Recount` (counts the document,
+  creates nothing) and holds the row as `vat_mismatch` with an alert when its
+  `Prices.TotalWithVat` is not the amount paid — never sent. The reference
+  does not say how iDoklad rounds; the Recount is how the two are made to
+  agree. An invoice Stripe charged without VAT is held (`no_vat`).
+- ✅ Screens and texts — one wording: a price „27 € + DPH / mesiac", an
+  announced charge „33,21 € s DPH (27,00 € + DPH 23 %)". Changed: the
+  registration plan cards („+ DPH", gross chip), Onboarding plan price,
+  Billing page (plan cards, yearly hint, „Ďalšia fakturácia", extra
+  technician prices and hint, the past-due texts with the amount), Settings
+  (extra technician price), the trial banner (the charge with VAT), the new
+  payment-failed banner, the read-only banner of an unpaid account, the
+  failed-payment e-mail (amount „s DPH"), the fallback e-mail („(s DPH)",
+  the invoice comes by e-mail), the admin settings note and read-only VAT
+  field, the admin invoice detail („z toho DPH").
+- ⏸ **Departure:** the VOP (`frontend/public/legal/vseobecne-obchodne-podmienky.html`,
+  5.1) does not say that prices are without VAT. Not edited: changing the VOP
+  needs a version bump (`Legal\Terms::VOP_VERSION`), which makes every user
+  accept it again — the owner's call. Proposed sentence for 5.1: „Ceny
+  v cenníku sú uvedené bez DPH; k cene sa pripočíta DPH v zákonnej výške."
+- ⏸ Foreign customers / reverse charge: out of scope. What it would need:
+  the customer's country and a validated EU VAT number (Stripe's `eu_vat`
+  tax id is registered already when IČ DPH is filled), a second
+  „reverse charge" tax rate of 0 % (or Stripe Tax) chosen per customer at
+  Checkout and in the reconcile, the iDoklad item `VatRateType` 2 (zero) with
+  the reverse-charge note / `VatRegime`, and the accountant's wording.
+
+**Part 2 — failed renewal: 14 days, then read-only**
+- ✅ `Billing\PaymentGrace` + table `billing_payment_failures` (one row per
+  failed invoice): recorded from `invoice.payment_failed` (the event now
+  handled) and from the subscription's expanded `latest_invoice` whenever a
+  past_due / unpaid subscription is read (webhook, checkout-sync, daily run —
+  a lost event is caught). While a failure is open, `subscription_end_date` is
+  capped at the failure + `PAYMENT_GRACE_DAYS` (default 14) — the same
+  mechanism as an ended subscription, so the server's 402 gate, the banners
+  and the read-only UI apply unchanged. A payment resolves it
+  (`invoice.paid` re-reads the subscription; any read of a paid subscription
+  resolves the account's failures) and the real period end comes back at once.
+  A later failure counts its own 14 days. Trials, cancelled subscriptions and
+  accounts without one are not touched.
+- ✅ One e-mail per failed invoice to the main user (amount with VAT, the
+  first read-only day, the billing page's „Zaplatiť" = the Stripe portal, and
+  Stripe's page of the invoice); a failed send is repeated by the daily run.
+  The banner for every member with „Zaplatiť" for the main user
+  (`/api/me` → `payment_failed`); after the grace period the read-only banner
+  says the payment is unpaid.
+- ✅ README: Stripe's retry schedule and final action are dashboard settings —
+  what they must be.
+- **Departure:** the e-mail's pay link is the app's billing page (the portal
+  needs a session created after login) plus Stripe's hosted invoice page,
+  not a direct portal link.
+
+**Part 3 — credit as a negative line** (accounting choices for the
+accountant — see the payloads below)
+- ✅ A removal mid-period is issued as the negative line „POapp — extra
+  technik, pomerná časť (−1 technik) (obdobie)", same VAT rate, the document =
+  amount paid.
+- ✅ Paid partly from the customer's Stripe balance: one negative item
+  „Kredit z predchádzajúceho obdobia" for total − paid, priced **with VAT** at
+  the standard rate (the credit came from VAT-bearing lines of earlier
+  invoices).
+- ✅ Nothing paid (total ≤ 0, or covered entirely by the balance):
+  `no_document` with reason `credit_carried` / `credit_covered` — a visible
+  state in the admin list with the credit carried, not an error, no alert.
+- ✅ Rows held as `credit` before are decided again by the daily run (and the
+  admin has the button); `mismatch` stays held.
+
+**Part 4 — iDoklad sends the invoice** (reference read from
+`https://api.idoklad.cz/Help/v3/{en,cs}/` — its data files, the live API was
+never called)
+- ✅ Send: `POST /v3/Mails/IssuedInvoice/Send` with `DocumentId`,
+  `SendToPartner: true` („Send to the partner (purchaser/supplier) specified
+  on the document"), `SendToSelf` / `SendToAccountant: false`, `Method: 0`
+  (PDF), `ReportLanguage: 2` (Sk); it answers `{Sent: [...], NotSent: [...]}`.
+- ✅ Mark paid: `PUT /v3/IssuedDocumentPayments/FullyPay/{id}?dateOfPayment=`
+  („Metoda provede plnou úhradu faktury"), the Stripe payment date; iDoklad's
+  ErrorCode 110 „Document has already been paid" counts as done.
+- ✅ Recipient: the e-mail of the iDoklad contact the invoice was issued to,
+  set to the main user's e-mail (`users.email` — the account has no separate
+  billing e-mail): at contact creation (`Email`), and with
+  `PATCH /v3/Contacts` (`Id` in the body) when it differs from the one the app
+  stored (`accounts.idoklad_contact_email`). Empty: the send is an error,
+  alerted once, not retried.
+- ✅ Three steps with their own state (`paid_mark_*`, `send_*`, `sent_at`,
+  `sent_to`, the error text); a failure never changes the issued state nor
+  issues again; the daily run retries each up to 3 times, then alerts once;
+  „Poslať znova" in the admin. The send is claimed atomically
+  (pending / error → sending); an uncertain answer is `uncertain`, held for a
+  person. Nothing is sent or marked unless the invoice was issued in `send`
+  mode; a test-mode payment is never e-mailed.
+- ✅ The fallback e-mail stays (only when issuing fails). The normal case sends
+  one e-mail (iDoklad's) — **Stripe's own receipt e-mails must be off**
+  (README).
+- ⏸ Not found in the reference (built defensively, listed): how iDoklad
+  rounds VAT (per item or per document), whether negative `UnitPrice` is
+  accepted, what the send does for a contact without e-mail, and whether a
+  second send call sends a second e-mail (no idempotency is documented — the
+  app never calls it twice for one row).
+- ⚠️ **The first real send must be watched by the owner** (README checklist,
+  step 9).
+
+**Checks, 19. 11. 2026**
+- `bin/test-billing-invoices.php` in full: **162 checks, 0 failures** (VAT
+  payloads, credits, Recount, mark paid / send with every failure path, the
+  grace period, the alert memory per state, the daily run's refusal / config
+  alerts / follow-up retries / `--event`, the recorder-env assertion in the
+  child, HTTP 403s).
+- `bin/test-billing-stripe.php --only=V,CR,GR,U` (the new scenarios, 7 test
+  clocks, all deleted): **all checks passed**. V1 Checkout opened by the app
+  carries the tax line; V2 an old subscription without a tax rate is an admin
+  error, the daily run sets the rate (no proration), the renewal taxes every
+  line (plan, extra, the prorations of two additions and a removal) and its
+  VAT is the sum of each line's rounded 23 %; CR1 yearly removal → issued with
+  „(−1 technik)" −75,34 €; CR2 three technicians removed a day in → first
+  renewal −12,30 € → `no_document` / credit carried, the next 23,37 € renewal
+  paid 11,07 € → issued with „Kredit z predchádzajúceho obdobia" −12,30 €
+  (with VAT); GR the renewal fails → past_due, paid-until date capped at the
+  failure + 14 days, one e-mail (event delivered twice), the banner data on
+  `/api/me`, 13 days → writable, 15 days → the server answers 402, paid →
+  active with the real period end at once, a second failure → its own 14 days;
+  U1 / U2 as in Part 0.
+
+  | Scenario | Stripe net | VAT | gross | paid | outcome | payload base + VAT |
+  |---|---:|---:|---:|---:|---|---:|
+  | V2 renewal of an old subscription after the rate was set | 40,33 | 9,28 | 49,61 | 49,61 | issued | 49,61 |
+  | CR1 yearly renewal after a removal | 223,66 | 51,44 | 275,10 | 275,10 | issued | 275,10 |
+  | CR2 first renewal (credit larger than the invoice) | −10,00 | −2,30 | −12,30 | 0,00 | no_document / credit_carried | — |
+  | CR2 second renewal (paid partly from the credit) | 19,00 | 4,37 | 23,37 | 11,07 | issued (Kredit −12,30 s DPH) | 11,07 |
+
+- The full `bin/test-billing-stripe.php` run (all scenarios, then the replay
+  of every captured event twice and in reverse) was started; the local shell
+  running it was stopped by the machine for low memory after scenarios A–G
+  and H1–H3 (**45 checks logged, 0 failures** — H1 „(+2 technici)" and H2 /
+  H3 renewals issued with base + VAT = amount paid). The process went on in
+  the container without output, and its cleanup deletes the test clocks. The
+  rest of H, K, L, O, S, T, W, P and the replay R were **not observed** this
+  round — to be run again.
+- `php -l` on every changed file, `npm run typecheck`, `npm run build`
+  passed. iDoklad was never called (the recorder in every process).
+
+**Open questions (owner / accountant)**
+- ⏸ The accounting choices of Part 3: the credit line priced with VAT at the
+  standard rate; no tax document for an invoice where nothing was paid (the
+  credit is only on Stripe's balance); the removal as a negative line.
+- ⏸ The VOP sentence about VAT (version bump, re-acceptance).
+- ⏸ A 0 € invoice with no credit (100 % coupon, trial start) still leaves no
+  row; the period end printed is the first day of the next period; payments
+  lost before the deploy (round 3) — unchanged.
+- ⏸ `PATCH /api/account` open to every team member; the registration claim
+  of an imported technician (round 2) — unchanged.
+- ⏸ Charging an added technician at once; the monthly ↔ yearly switch — not
+  decided.
 
 ---
 

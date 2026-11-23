@@ -84,6 +84,8 @@ export type PersonFields = {
   result?: PersonResult | null;
   /** Oboznámenie only — YYYY-MM-DD, the úkon's date when empty. */
   date?: string | null;
+  /** Oboznámenie only (spec 8.3) — optional; the protocol prints the column only if somebody has one. */
+  personal_number?: string | null;
   /** Signed on the display (PNG data URI), or null for a pen signature. */
   signature?: string | null;
   /** The shared „Zistené nedostatky" block (components/DefectsEditor). */
@@ -118,6 +120,7 @@ export function personFields(item: InspectionItem): PersonFields {
     value: s('value'),
     result: r === 'negativny' || r === 'pozitivny' || r === 'odmietol' ? r : null,
     date: s('date'),
+    personal_number: s('personal_number'),
     signature: s('signature'),
     defects: Array.isArray(f.defects) ? (f.defects as unknown[]) : [],
   };
@@ -173,6 +176,21 @@ export const PersonList = {
     api<{ added: number; skipped: number }>(`/api/inspections/${inspectionId}/persons/take-over`, {
       method: 'POST',
       body: { source_kind: source.kind, source_id: source.id },
+      csrfToken,
+      requireOnline: true,
+    }),
+  /**
+   * „Viacerí naraz" for an oboznámenie (spec 8.3): every pasted row in one
+   * transactional request. Online only, like the take-over above.
+   */
+  addBulk: (
+    inspectionId: number,
+    rows: { name: string; position: string | null; personal_number: string | null }[],
+    csrfToken: string | null,
+  ) =>
+    api<{ added: number }>(`/api/inspections/${inspectionId}/persons/bulk`, {
+      method: 'POST',
+      body: { rows },
       csrfToken,
       requireOnline: true,
     }),

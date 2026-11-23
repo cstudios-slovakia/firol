@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
-    Building2,
+    Building,
     CalendarDays,
     ClipboardList,
     Edit2,
@@ -29,9 +29,11 @@ import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { daysUntilNext, getInspectionStatus } from "@/lib/inspectionStatus";
 import { InspectionStatusBadge } from "@/components/InspectionStatusBadge";
+import { InspectionTags } from "@/components/InspectionTags";
 import { useAuth } from "@/auth/AuthContext";
 import { useIsReadOnly } from "@/auth/useIsReadOnly";
 import { useToast } from "@/lib/toast";
+import { useCertMissingToast } from "@/lib/certMissing";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -40,6 +42,15 @@ import { Pagination } from "@/components/ui/Pagination";
 import { SkeletonList } from "@/components/ui/Skeleton";
 import { Spinner } from "@/components/ui/Spinner";
 import { InvoiceTickButton } from "@/components/InvoicingBlock";
+import {
+    discardDialog,
+    discardDoneMessage,
+    discardErrorMessage,
+    discardModeOf,
+    discardUkon,
+    discardNeedsRefresh,
+    type DiscardMode,
+} from "@/lib/discard";
 import { useMemberRights } from "@/auth/useMemberRights";
 import {
     UNINVOICED_LABEL,
@@ -47,6 +58,12 @@ import {
     isUninvoiced,
     type InvoicingFields,
 } from "@/api/invoicing";
+import { repeatPath } from "@/lib/kniha";
+
+/** The prevádzka of a row — every prevádzka of a požiarna kniha entry written for several. */
+function facilityLabel(it: InspectionListItem): string {
+    return it.facilities && it.facilities.length > 0 ? it.facilities.map((f) => f.name).join(", ") : it.facility_name;
+}
 
 const PAGE_SIZE = 10;
 
@@ -81,13 +98,14 @@ const TYPE_CHIPS: [InspectionType, string][] = [
     ["php", "PHP"],
     ["hydranty", "Hydranty"],
     ["oprava_ts_php", "Oprava & TS"],
+    ["preventivna_prehliadka", "Prehliadka"],
     ["poziarna_kniha", "Pož. kniha"],
     ["pu_akcieschopnost", "PU – akciesch."],
     ["pu_udrzba", "PU – údržba"],
     ["nudzove_osvetlenie", "Nú. osvetlenie"],
     ["ts_hadic", "TS hadíc"],
     ["vyradenie", "Vyradenie PHP"],
-    ["kniha_bozp", "Kniha BOZP"],
+    ["kniha_bozp", "Prehliadka BOZP"],
     ["pracovisko", "Pracovisko"],
     ["osamele_pracovisko", "Osamelé prac."],
     ["fajcenie", "Zákaz fajčenia"],
@@ -118,6 +136,7 @@ export function InspectionsListPage({
     const { csrfToken } = useAuth();
     const isReadOnly = useIsReadOnly();
     const toast = useToast();
+    const certMissing = useCertMissingToast();
     const navigate = useNavigate();
 
     const [allItems, setAllItems] = useState<InspectionListItem[] | null>(null);
@@ -125,7 +144,7 @@ export function InspectionsListPage({
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState<InspectionType | "">("");
     const [statusFilter, setStatusFilter] = useState<GroupKey | "">("");
-    const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+    const [pendingDelete, setPendingDelete] = useState<{ id: number; mode: DiscardMode; type: string } | null>(null);
     const [deleting, setDeleting] = useState(false);
     const [repeatingId, setRepeatingId] = useState<number | null>(null);
     const [page, setPage] = useState(1);
@@ -224,7 +243,7 @@ export function InspectionsListPage({
             if (!q) return true;
             return (
                 it.company_name.toLowerCase().includes(q) ||
-                it.facility_name.toLowerCase().includes(q) ||
+                facilityLabel(it).toLowerCase().includes(q) ||
                 it.inspector_name.toLowerCase().includes(q) ||
                 (it.effective_inspector_name?.toLowerCase().includes(q) ?? false) ||
                 INSPECTION_TYPE_LABELS[it.type].toLowerCase().includes(q)
@@ -314,21 +333,21 @@ export function InspectionsListPage({
     }, [grouped, pageIds]);
 
     async function handleDelete() {
-        if (pendingDeleteId === null) return;
+        if (pendingDelete === null) return;
+        const { id, mode } = pendingDelete;
         setDeleting(true);
         try {
-            await Inspections.archive(pendingDeleteId, csrfToken);
-            setAllItems(
-                (prev) => prev?.filter((i) => i.id !== pendingDeleteId) ?? null,
-            );
-            setPendingDeleteId(null);
-            toast.success("Kontrola odstránená");
+            const outcome = await discardUkon(id, mode, csrfToken);
+            setAllItems((prev) => prev?.filter((i) => i.id !== id) ?? null);
+            setPendingDelete(null);
+            toast.success(discardDoneMessage(outcome));
         } catch (err) {
-            toast.error(
-                err instanceof ApiError
-                    ? err.message
-                    : "Nepodarilo sa odstrániť kontrolu.",
-            );
+            toast.error(discardErrorMessage(err, mode));
+            if (discardNeedsRefresh(err)) {
+                // The row changed meanwhile (issued, …): show what it is now.
+                setPendingDelete(null);
+                Inspections.list().then((res) => setAllItems(res.items)).catch(() => undefined);
+            }
         } finally {
             setDeleting(false);
         }
@@ -338,8 +357,9 @@ export function InspectionsListPage({
         setRepeatingId(insId);
         try {
             const res = await Inspections.repeat(insId, csrfToken);
-            navigate(`/inspections/${res.inspection.id}`);
+            navigate(repeatPath(res.inspection.type, res.inspection.id));
         } catch (err) {
+            if (certMissing(err, { returnLabel: "Späť na zoznam kontrol" })) return;
             toast.error(
                 err instanceof ApiError ? err.message : "Opakovať sa nepodarilo.",
             );
@@ -382,7 +402,7 @@ export function InspectionsListPage({
                         <Search className="size-4 shrink-0 text-ink-400" />
                         <input
                             type="search"
-                            placeholder="Hľadať firmu, prevádzku, technika…"
+                            placeholder="Hľadať klienta, objekt, technika…"
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                             className="min-w-0 flex-1 bg-transparent text-sm text-ink-900 placeholder:text-ink-400 outline-none"
@@ -518,7 +538,7 @@ export function InspectionsListPage({
                         Zatiaľ žiadne kontroly
                     </h2>
                     <p className="max-w-xs text-sm text-ink-500">
-                        Začni výberom firmy a typu kontroly. Koncepty zostávajú
+                        Začni výberom klienta a typu kontroly. Koncepty zostávajú
                         uložené, kým nevygeneruješ PDF protokol.
                     </p>
                     <Link
@@ -563,7 +583,7 @@ export function InspectionsListPage({
                                     <ul className="flex flex-col gap-2">
                                         {pagedGroups[key].map((it) => (
                                             <li key={it.id}>
-                                                <InspectionRow it={it} onDelete={setPendingDeleteId} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} onInvoiced={uninvoicedOnly ? handleInvoiced : undefined} />
+                                                <InspectionRow it={it} onDelete={(id, mode) => setPendingDelete({ id, mode, type: it.type })} onRepeat={handleRepeat} repeatingId={repeatingId} isReadOnly={isReadOnly} onInvoiced={uninvoicedOnly ? handleInvoiced : undefined} />
                                             </li>
                                         ))}
                                     </ul>
@@ -582,19 +602,19 @@ export function InspectionsListPage({
             )}
 
             <Dialog
-                open={pendingDeleteId !== null}
+                open={pendingDelete !== null}
                 onClose={() => {
-                    if (!deleting) setPendingDeleteId(null);
+                    if (!deleting) setPendingDelete(null);
                 }}
-                title="Odstrániť kontrolu?"
-                description="Táto akcia je nevratná. Kontrola bude trvalo odstránená spolu so všetkými položkami."
+                title={pendingDelete ? discardDialog(pendingDelete.mode, pendingDelete.type).title : ""}
+                description={pendingDelete ? discardDialog(pendingDelete.mode, pendingDelete.type).description : ""}
                 dismissible={!deleting}
             >
                 <div className="flex justify-end gap-2">
                     <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setPendingDeleteId(null)}
+                        onClick={() => setPendingDelete(null)}
                         disabled={deleting}
                     >
                         Zrušiť
@@ -605,7 +625,7 @@ export function InspectionsListPage({
                         loading={deleting}
                         onClick={handleDelete}
                     >
-                        Odstrániť
+                        {pendingDelete ? discardDialog(pendingDelete.mode, pendingDelete.type).confirmLabel : ""}
                     </Button>
                 </div>
             </Dialog>
@@ -622,7 +642,7 @@ function InspectionRow({
     onInvoiced,
 }: {
     it: InspectionListItem;
-    onDelete: (id: number) => void;
+    onDelete: (id: number, mode: DiscardMode) => void;
     onRepeat: (id: number) => void;
     repeatingId: number | null;
     isReadOnly: boolean;
@@ -631,6 +651,7 @@ function InspectionRow({
 }) {
     const isRepeating = repeatingId === it.id;
     const { canDeleteUkon } = useMemberRights();
+    const discardMode = discardModeOf(it);
 
     const actions = isReadOnly ? null : (
         <>
@@ -659,11 +680,11 @@ function InspectionRow({
             >
                 <Edit2 className="size-4" />
             </Link>
-            {canDeleteUkon(it, it.inspector_user_id) && (
+            {discardMode !== null && canDeleteUkon(it, it.inspector_user_id) && (
                 <button
                     type="button"
-                    title="Odstrániť"
-                    onClick={() => onDelete(it.id)}
+                    title={discardMode === "delete" ? "Natrvalo zmazať" : "Archivovať"}
+                    onClick={() => onDelete(it.id, discardMode)}
                     className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
                 >
                     <Trash2 className="size-4" />
@@ -697,13 +718,18 @@ function InspectionRow({
                         ) : (
                             <InspectionStatusBadge inspection={it} className="shrink-0" />
                         )}
+                        <InspectionTags
+                            scope={it.prehliadka_scope}
+                            concept={it.status === "draft" ? it.concept_state : null}
+                            className="shrink-0"
+                        />
                     </div>
                     <p className="mt-0.5 truncate text-xs text-ink-500">
-                        <Building2 className="-mt-0.5 mr-1 inline size-3" />
+                        <Building className="-mt-0.5 mr-1 inline size-3" />
                         {it.company_name}
                         <span className="mx-1.5 text-ink-300">·</span>
                         <Warehouse className="-mt-0.5 mr-1 inline size-3" />
-                        {it.facility_name}
+                        {facilityLabel(it)}
                     </p>
                     <p className="mt-0.5 text-[11px] text-ink-400">
                         <CalendarDays className="-mt-0.5 mr-1 inline size-3" />

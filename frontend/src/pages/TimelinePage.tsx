@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
     AlertTriangle,
-    Building2,
+    Building,
     CalendarCheck,
     CalendarDays,
     ChartNoAxesGantt,
@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
 import { Calendar, type CalendarData, type CalendarDeadline } from "@/api/calendar";
-import { deadlineFacilityName, deadlineLabel } from "@/lib/deadlines";
+import { deadlineFacilityName, deadlineLabel, facilityPlace } from "@/lib/deadlines";
 import { daysUntil } from "@/lib/calendarGrouping";
 import { formatDateSk } from "@/lib/clientNoticeEmail";
 import { cn } from "@/lib/cn";
@@ -140,7 +140,7 @@ export function TimelinePage() {
                     options={[
                         { value: "mesiac", label: "Mesiac" },
                         { value: "mesto", label: "Mesto" },
-                        { value: "firma", label: "Firma" },
+                        { value: "firma", label: "Klient" },
                     ]}
                 />
             </Card>
@@ -188,7 +188,7 @@ function TimelineGroupCard({
         : groupBy === "mesto"
           ? MapPin
           : groupBy === "firma"
-            ? Building2
+            ? Building
             : CalendarDays;
 
     return (
@@ -258,7 +258,7 @@ function TimelineRow({
     const overdue = d.state === "po_termine";
     const days = daysUntil(d.due_date);
     const soon = !overdue && days <= 30;
-    const where = [d.facility_city, deadlineFacilityName(d)].filter(Boolean).join(" · ");
+    const where = facilityPlace(deadlineFacilityName(d), d.facility_city) ?? "";
 
     return (
         <div

@@ -18,26 +18,45 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { AutocompleteInput, PHP_COMMON_TYPES } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
+import { Textarea } from '@/components/ui/Textarea';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
+import { facilityNouns } from '@/lib/clientKind';
 import { clearDuplicateSeed, peekDuplicateSeed, setDuplicateSeed } from './duplicateSeed';
 import type {
   InspectionTypeModule,
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
+import { NextRecordedButton } from './NextRecordedButton';
 
 function isPhpStatus(s: unknown): s is PhpStatus {
   return s === 'A' || s === 'TS' || s === 'O' || s === 'V';
 }
 
+/** What the form opens with for a stored item. */
+function phpValues(f: Partial<PhpItemFields>) {
+  return {
+    manufacturer: typeof f.manufacturer === 'string' ? f.manufacturer : '',
+    extType: typeof f.type === 'string' ? f.type : '',
+    serial: typeof f.serial === 'string' ? f.serial : '',
+    year: typeof f.year === 'number' ? String(f.year) : '',
+    location: typeof f.location === 'string' ? f.location : '',
+    // A stav the item arrived without stays unpicked — never presumed „A".
+    status: (isPhpStatus(f.status) ? f.status : '') as PhpStatus | '',
+    notes: typeof f.notes === 'string' ? f.notes : '',
+  };
+}
+
 /** Fields carried into the next item by "Ďalší rovnaký" — never serial/location. */
 type PhpSeed = { manufacturer: string; type: string; year: string; status: PhpStatus };
 
-function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function RphpStep2Form({ inspectionId, facilityId, clientType, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -46,7 +65,7 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
   const [serial, setSerial] = useState('');
   const [year, setYear] = useState<string>('');
   const [location, setLocation] = useState('');
-  const [status, setStatus] = useState<PhpStatus>('A');
+  const [status, setStatus] = useState<PhpStatus | ''>('A');
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
@@ -57,14 +76,14 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<PhpItemFields>;
-      setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
-      setExtType(typeof f.type === 'string' ? f.type : '');
-      setSerial(typeof f.serial === 'string' ? f.serial : '');
-      setYear(typeof f.year === 'number' ? String(f.year) : '');
-      setLocation(typeof f.location === 'string' ? f.location : '');
-      setStatus(isPhpStatus(f.status) ? f.status : 'A');
-      setNotes(typeof f.notes === 'string' ? f.notes : '');
+      const v = phpValues(initialItem.fields as Partial<PhpItemFields>);
+      setManufacturer(v.manufacturer);
+      setExtType(v.extType);
+      setSerial(v.serial);
+      setYear(v.year);
+      setLocation(v.location);
+      setStatus(v.status);
+      setNotes(v.notes);
     } else {
       // Carry over identification from the previous item when the technician
       // used "Ďalší rovnaký" — serial and location always start blank (2.4.2).
@@ -80,6 +99,15 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
   }, [initialItem, inspectionId]);
 
   function isPristine() {
+    // A staged or removed photo is a change too; only saveItemWithPhotos()
+    // commits it, so the shortcut must not skip the save.
+    if (photos.dirty) return false;
+    // An existing item: nothing to save only while nothing was changed.
+    if (initialItem) {
+      return sameFormValues(phpValues(initialItem.fields as Partial<PhpItemFields>), {
+        manufacturer, extType, serial, year, location, status, notes,
+      });
+    }
     return (
       !manufacturer && !extType && !serial && !year && !location && !notes &&
       status === 'A'
@@ -94,7 +122,7 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
 
   async function handleSubmit(
     e: FormEvent,
-    action: 'save-and-next' | 'save-and-summary',
+    action: SubmitAction,
     duplicate = false,
   ) {
     e.preventDefault();
@@ -105,6 +133,7 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
     if (!location.trim()) errs.location = 'Doplň umiestnenie.';
     const yn = Number(year);
     if (!Number.isInteger(yn) || yn < 1900 || yn > 2200) errs.year = 'Rok výroby musí byť v rozsahu 1900–2200.';
+    if (!status) errs.status = 'Vyber stav prístroja.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
     setApiError(null);
@@ -116,7 +145,7 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
         serial: serial.trim(),
         year: Number(year),
         location: location.trim(),
-        status,
+        status: status as PhpStatus,
         notes: notes.trim() || null,
       };
       const saved = await saveItemWithPhotos({
@@ -131,7 +160,7 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
           manufacturer: manufacturer.trim(),
           type: extType.trim(),
           year: year.trim(),
-          status,
+          status: status as PhpStatus,
         };
         setDuplicateSeed(inspectionId, seed);
       } else {
@@ -184,7 +213,7 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
           </Field>
         </div>
 
-        <Field label="Umiestnenie" required hint={fieldErrors.location ? undefined : 'Kde sa prístroj nachádza v prevádzke.'} error={fieldErrors.location}>
+        <Field label="Umiestnenie" required hint={fieldErrors.location ? undefined : `Kde sa prístroj nachádza v ${facilityNouns(clientType).cases.loc}.`} error={fieldErrors.location}>
           {(p) => (
             <AutocompleteInput {...p} required field="location" facilityId={facilityId} leftIcon={<MapPin className="size-4" />}
               value={location} onChange={(v) => { setLocation(v); if (fieldErrors.location) setFieldErrors((prev) => { const n = { ...prev }; delete n.location; return n; }); }}
@@ -192,11 +221,11 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
           )}
         </Field>
 
-        <Field label="Stav" required>
+        <Field label="Stav" required error={fieldErrors.status}>
           {() => (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Stav prístroja">
               {(Object.keys(PHP_STATUS_LABELS) as PhpStatus[]).map((s) => (
-                <PhpStatusButton key={s} value={s} active={status === s} onClick={() => setStatus(s)} />
+                <PhpStatusButton key={s} value={s} active={status === s} onClick={() => { setStatus(s); setFieldErrors((prev) => { const n = { ...prev }; delete n.status; return n; }); }} />
               ))}
             </div>
           )}
@@ -204,14 +233,10 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
 
         <Field label="Poznámky / závady" hint="Voliteľné — uvádzaj len skutočné nálezy.">
           {(p) => (
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
-                <NotebookPen className="size-4" />
-              </span>
-              <textarea id={p.id} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
-                placeholder="Popis závady, čas zistenia, navrhované opatrenie."
-                className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
-            </div>
+            <Textarea id={p.id} rows={3} clearable
+              leftIcon={<NotebookPen className="size-4" />}
+              value={notes} onValueChange={setNotes}
+              placeholder="Popis závady, čas zistenia, navrhované opatrenie." />
           )}
         </Field>
 
@@ -228,17 +253,21 @@ function RphpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
           </p>
         )}
 
-        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
-            loading={submitting} leftIcon={<ListChecks className="size-4" />}>
+            loading={submitting} disabled={photos.processing} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
           <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
-            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            loading={submitting} disabled={photos.processing} leftIcon={<CopyPlus className="size-4" />}
             title="Uloží a predvyplní ďalšiu položku rovnakými údajmi (okrem výr. čísla a umiestnenia).">
             Ďalší rovnaký
           </Button>
-          <Button type="submit" loading={submitting}
+          {editing && hasNextItem && (
+            <NextRecordedButton loading={submitting} disabled={photos.processing}
+              onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next-recorded')} />
+          )}
+          <Button type="submit" loading={submitting} disabled={photos.processing}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}
           </Button>

@@ -9,6 +9,7 @@ use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Billing\SeatSync;
+use Firol\Billing\SubscriptionStatus;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
@@ -167,6 +168,9 @@ final class AdminPanelController
                 'subscription_end_date' => $a['subscription_end_date'],
                 'main_user_id'          => $mainId,
                 'stripe_status'         => $a['stripe_status'],
+                // Stripe controls subscription_end_date while this is true
+                // (the admin edit is refused then).
+                'has_live_subscription' => SubscriptionStatus::isLive($a['stripe_status'] ?? null),
                 'billing_period'        => $a['billing_period'],
                 'created_at'            => $a['created_at'],
                 'included_technicians'  => (int) ($a['included_technicians'] ?? $defaultIncluded),
@@ -223,7 +227,11 @@ final class AdminPanelController
         $stmt = $pdo->prepare(
             'SELECT id, stripe_invoice_id, idoklad_invoice_id, document_number,
                     idoklad_public_url, stripe_invoice_pdf_url,
-                    amount_cents, currency, status, issued_at
+                    amount_cents, stripe_total_cents, stripe_amount_paid_cents, stripe_tax_cents, stripe_livemode,
+                    currency, status, review_reason, error_message, attempts, last_attempt_at,
+                    paid_mark_state, paid_mark_attempts, paid_marked_at, paid_mark_error,
+                    send_state, send_attempts, sent_at, sent_to, send_error,
+                    stripe_invoice_json, issued_at
              FROM   invoices
              WHERE  account_id = ? AND YEAR(issued_at) = ?
              ORDER  BY issued_at DESC, id DESC'
@@ -233,6 +241,8 @@ final class AdminPanelController
         $items = array_map(static function (array $r): array {
             // Prefer the legal iDoklad invoice; fall back to the Stripe PDF.
             $pdfUrl = $r['idoklad_public_url'] ?: ($r['stripe_invoice_pdf_url'] ?: null);
+            $status = (string) $r['status'];
+            $reason = $r['review_reason'] !== null ? (string) $r['review_reason'] : null;
             return [
                 'id'                 => (int) $r['id'],
                 'stripe_invoice_id'  => (string) $r['stripe_invoice_id'],
@@ -240,9 +250,33 @@ final class AdminPanelController
                 'document_number'    => $r['document_number'] ?: null,
                 'amount_cents'       => (int) $r['amount_cents'],
                 'currency'           => (string) $r['currency'],
-                'status'             => (string) $r['status'],
+                'status'             => $status,
                 'issued_at'          => $r['issued_at'],
                 'pdf_url'            => $pdfUrl,
+                // The Stripe numbers and what went wrong, for a row held for
+                // review or one that failed.
+                'stripe_total_cents'       => $r['stripe_total_cents'] !== null ? (int) $r['stripe_total_cents'] : null,
+                'stripe_amount_paid_cents' => $r['stripe_amount_paid_cents'] !== null ? (int) $r['stripe_amount_paid_cents'] : null,
+                'stripe_livemode'          => $r['stripe_livemode'] !== null ? (int) $r['stripe_livemode'] === 1 : null,
+                'stripe_balance'           => self::stripeBalanceNumbers((string) ($r['stripe_invoice_json'] ?? '')),
+                'review_reason'            => $reason,
+                'error_message'            => $r['error_message'],
+                'attempts'                 => (int) $r['attempts'],
+                'last_attempt_at'          => $r['last_attempt_at'],
+                'can_reissue'              => \Firol\Idoklad\InvoiceIssuer::manualIssueAllowed($r),
+                'stripe_tax_cents'         => $r['stripe_tax_cents'] !== null ? (int) $r['stripe_tax_cents'] : null,
+                // The two steps after issuing: marking paid in iDoklad and
+                // iDoklad's e-mail to the customer.
+                'paid_mark_state'          => $r['paid_mark_state'],
+                'paid_mark_attempts'       => (int) $r['paid_mark_attempts'],
+                'paid_marked_at'           => $r['paid_marked_at'],
+                'paid_mark_error'          => $r['paid_mark_error'],
+                'send_state'               => $r['send_state'],
+                'send_attempts'            => (int) $r['send_attempts'],
+                'sent_at'                  => $r['sent_at'],
+                'sent_to'                  => $r['sent_to'],
+                'send_error'               => $r['send_error'],
+                'can_resend'               => \Firol\Idoklad\InvoiceIssuer::manualFollowUpAllowed($r),
             ];
         }, $stmt->fetchAll());
 
@@ -252,6 +286,194 @@ final class AdminPanelController
             'year'       => $year,
             'account_id' => $accountId,
         ]);
+    }
+
+    /**
+     * Balance figures of a stored Stripe invoice (subtotal, amount due, the
+     * customer balance before and after), so the admin sees how a credit
+     * was used. Null when no snapshot is stored.
+     *
+     * @return array<string, int>|null
+     */
+    private static function stripeBalanceNumbers(string $json): ?array
+    {
+        if ($json === '') {
+            return null;
+        }
+        $inv = json_decode($json, true);
+        if (!is_array($inv)) {
+            return null;
+        }
+        $out = [];
+        foreach (['subtotal', 'amount_due', 'starting_balance', 'ending_balance'] as $k) {
+            if (isset($inv[$k]) && is_int($inv[$k])) {
+                $out[$k] = $inv[$k];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * POST /api/admin/invoices/{id}/reissue — „Vystaviť znova".
+     *
+     * Runs InvoiceIssuer for one row on demand: a failed one (also past the
+     * automatic retry cap), a prepared or skipped one, or one held because
+     * iDoklad gave no definite answer (after the admin checked in iDoklad
+     * that no invoice exists). Whether it is really sent still follows
+     * IssuePolicy. A row held for a credit is not offered.
+     *
+     * @param array<string, string> $params
+     */
+    public static function reissueInvoice(Request $req, array $params): void
+    {
+        Admin::require();
+        Csrf::require($req);
+
+        $id = (int) ($params['id'] ?? 0);
+        if ($id <= 0) Response::error('Neplatné ID faktúry.', 422);
+
+        $stmt = Db::pdo()->prepare('SELECT id, status, review_reason, stripe_invoice_json FROM invoices WHERE id = ?');
+        $stmt->execute([$id]);
+        $row = $stmt->fetch();
+        if (!$row) Response::error('Faktúra sa nenašla.', 404);
+
+        // The state the admin saw: a row that moved on meanwhile (e.g. to
+        // uncertain_send after a timeout) is never posted on a stale screen.
+        $seenStatus = $req->jsonString('expected_status');
+        $seenReason = $req->jsonString('expected_reason') ?? '';
+        $before = (string) $row['status'];
+        if ($seenStatus === null) {
+            Response::error('Chýba stav faktúry, ktorý si videl — obnov stránku.', 422);
+        }
+        if ($seenStatus !== $before || $seenReason !== (string) ($row['review_reason'] ?? '')) {
+            Response::error('Stav faktúry sa medzitým zmenil — obnov zoznam a skontroluj ju znova.', 409, ['status' => $before]);
+        }
+        if (!\Firol\Idoklad\InvoiceIssuer::manualIssueAllowed($row)) {
+            Response::error('Túto faktúru nie je možné vystaviť znova.', 409, ['status' => $before]);
+        }
+
+        $after = (new \Firol\Idoklad\InvoiceIssuer())->issue($id, true, [$before]);
+        AuditLog::record('invoice.reissue', 'invoices', $id, ['status' => $before], ['status' => $after]);
+
+        $msgStmt = Db::pdo()->prepare('SELECT error_message FROM invoices WHERE id = ?');
+        $msgStmt->execute([$id]);
+        Response::json([
+            'ok'      => $after === 'issued',
+            'status'  => $after,
+            'message' => $after === 'issued' ? null : ($msgStmt->fetchColumn() ?: null),
+        ]);
+    }
+
+    /**
+     * POST /api/admin/invoices/{id}/resend — „Poslať znova".
+     *
+     * Repeats the follow-up steps of an issued invoice whose marking as paid
+     * or whose e-mail to the customer failed (also past the automatic cap) or
+     * is uncertain (after the admin checked in iDoklad that no e-mail went
+     * out). Body: the send / paid states the admin saw; a row that moved on
+     * meanwhile is refused (409). Never issues the invoice again.
+     *
+     * @param array<string, string> $params
+     */
+    public static function resendInvoice(Request $req, array $params): void
+    {
+        Admin::require();
+        Csrf::require($req);
+
+        $id = (int) ($params['id'] ?? 0);
+        if ($id <= 0) Response::error('Neplatné ID faktúry.', 422);
+        $stmt = Db::pdo()->prepare('SELECT id, status, send_state, paid_mark_state FROM invoices WHERE id = ?');
+        $stmt->execute([$id]);
+        $row = $stmt->fetch();
+        if (!$row) Response::error('Faktúra sa nenašla.', 404);
+
+        if (($req->jsonString('expected_send_state') ?? '') !== (string) ($row['send_state'] ?? '')
+            || ($req->jsonString('expected_paid_state') ?? '') !== (string) ($row['paid_mark_state'] ?? '')) {
+            Response::error('Stav faktúry sa medzitým zmenil — obnov zoznam a skontroluj ju znova.', 409);
+        }
+        if (!\Firol\Idoklad\InvoiceIssuer::manualFollowUpAllowed($row)) {
+            Response::error('Túto faktúru nie je možné poslať znova.', 409);
+        }
+        $r = (new \Firol\Idoklad\InvoiceIssuer())->followUps($id, true);
+        AuditLog::record('invoice.resend', 'invoices', $id,
+            ['send' => $row['send_state'], 'paid' => $row['paid_mark_state']], ['send' => $r['send'], 'paid' => $r['paid']]);
+
+        $msg = Db::pdo()->prepare('SELECT send_error, paid_mark_error FROM invoices WHERE id = ?');
+        $msg->execute([$id]);
+        $m = $msg->fetch() ?: [];
+        $ok = in_array($r['send'], ['sent', null], true) && in_array($r['paid'], ['done', null], true);
+        Response::json([
+            'ok'         => $ok,
+            'send_state' => $r['send'],
+            'paid_state' => $r['paid'],
+            'message'    => $ok ? null : (trim(implode(' ', array_filter([(string) ($m['send_error'] ?? ''), (string) ($m['paid_mark_error'] ?? '')]))) ?: null),
+        ]);
+    }
+
+    /**
+     * POST /api/admin/billing/events/{id}/dismiss — „Vyriešené" for a Stripe
+     * event the daily run gave up on (`gone`): an admin checked the account
+     * by hand. A gone invoice.* event is an error in the billing check until
+     * then.
+     *
+     * @param array<string, string> $params
+     */
+    public static function dismissEvent(Request $req, array $params): void
+    {
+        Admin::require();
+        Csrf::require($req);
+        $eventId = (string) ($params['id'] ?? '');
+        if (!preg_match('/^evt_[A-Za-z0-9_]+$/', $eventId)) Response::error('Neplatné ID udalosti.', 422);
+        $stmt = Db::pdo()->prepare("UPDATE stripe_webhook_events SET dismissed_at = NOW() WHERE event_id = ? AND status = 'gone' AND dismissed_at IS NULL");
+        $stmt->execute([$eventId]);
+        if ($stmt->rowCount() !== 1) Response::error('Udalosť sa nenašla alebo už bola vyriešená.', 404);
+        AuditLog::record('billing.event_dismiss', 'stripe_webhook_events', 0, null, ['event_id' => $eventId]);
+        Response::json(['ok' => true]);
+    }
+
+    /**
+     * The account's live Stripe subscriptions (statuses read from Stripe):
+     * every POapp subscription of its Stripe customer that still bills
+     * (SeatSync::isOurSubscription — not one of another product), plus the
+     * recorded one. Refuses with 502 when Stripe cannot be asked — an admin
+     * action that depends on it must not guess.
+     *
+     * @return list<array{id: string, status: string}>
+     */
+    private static function liveSubscriptions(int $accountId): array
+    {
+        $stmt = Db::pdo()->prepare('SELECT stripe_customer_id, stripe_subscription_id FROM accounts WHERE id = ?');
+        $stmt->execute([$accountId]);
+        $row = $stmt->fetch();
+        $customerId = (string) ($row['stripe_customer_id'] ?? '');
+        $subId      = (string) ($row['stripe_subscription_id'] ?? '');
+        if (($customerId === '' && $subId === '') || !\Firol\Stripe\StripeClient::isConfigured()) {
+            return [];
+        }
+        $live = [];
+        try {
+            $stripe = \Firol\Stripe\StripeClient::get();
+            if ($customerId !== '') {
+                foreach ($stripe->subscriptions->all(['customer' => $customerId, 'status' => 'all', 'limit' => 100])->autoPagingIterator() as $sub) {
+                    // A subscription of another product on the same customer
+                    // is not the app's to cancel.
+                    if (SubscriptionStatus::isLive((string) $sub->status)
+                        && \Firol\Billing\SeatSync::isOurSubscription(\Firol\Stripe\StripeShape::arr($sub))) {
+                        $live[(string) $sub->id] = ['id' => (string) $sub->id, 'status' => (string) $sub->status];
+                    }
+                }
+            }
+            if ($subId !== '' && !isset($live[$subId])) {
+                $sub = $stripe->subscriptions->retrieve($subId);
+                if (SubscriptionStatus::isLive((string) $sub->status)) {
+                    $live[$subId] = ['id' => $subId, 'status' => (string) $sub->status];
+                }
+            }
+        } catch (\Throwable $e) {
+            error_log('[admin.liveSubscriptions] ' . $e->getMessage());
+            Response::error('Stav predplatného v Stripe sa nepodarilo overiť. Skús to znova.', 502);
+        }
+        return array_values($live);
     }
 
     public static function updateAccount(Request $req, array $params): void
@@ -277,6 +499,18 @@ final class AdminPanelController
         if ($end !== null) {
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $end)) {
                 Response::error('Neplatný dátum konca predplatného (očakáva sa formát YYYY-MM-DD).', 422);
+            }
+            // With a live Stripe subscription the date is Stripe's period end
+            // and the next webhook would overwrite a local edit — refuse
+            // instead of pretending. (Changing it would mean changing the
+            // subscription in Stripe, which also changes what is charged.)
+            $live = self::liveSubscriptions($id)[0] ?? null;
+            if ($live !== null) {
+                Response::error(
+                    "Účet má živé predplatné v Stripe (stav {$live['status']}) — dátum určuje Stripe (koniec zaplateného obdobia) a tu sa meniť nedá.",
+                    409,
+                    ['code' => 'live_subscription'],
+                );
             }
             $sets[] = 'subscription_end_date = ?';
             $bind[] = $end;
@@ -349,6 +583,39 @@ final class AdminPanelController
         // session would point at nothing.
         if ($id === Tenant::currentAccountId()) {
             Response::error('Nemôžeš zmazať aktívny účet, prepni sa na iný a skús znova.', 409);
+        }
+
+        // A deleted account with a live Stripe subscription would keep being
+        // charged, and its payments would find no account to invoice. Refuse
+        // unless the admin confirms that the subscription is cancelled in
+        // Stripe right away (no refund of the paid period — that is the
+        // admin's call, made in the confirmation dialog).
+        $live = self::liveSubscriptions($id);
+        if ($live !== []) {
+            if (($_GET['cancel_subscription'] ?? '') !== '1') {
+                $list = implode(', ', array_map(static fn (array $s): string => "{$s['id']} ({$s['status']})", $live));
+                Response::error(
+                    count($live) === 1
+                        ? "Účet má živé predplatné v Stripe (stav {$live[0]['status']}). Pred zmazaním ho treba zrušiť."
+                        : 'Zákazník má v Stripe ' . count($live) . " živé predplatné: $list. Pred zmazaním treba zrušiť všetky.",
+                    409,
+                    ['code' => 'live_subscription', 'stripe_status' => $live[0]['status'], 'subscriptions' => count($live)],
+                );
+            }
+            // Every live subscription of the customer is cancelled — one left
+            // running would keep charging an account that no longer exists.
+            foreach ($live as $sub) {
+                try {
+                    \Firol\Stripe\StripeClient::get()->subscriptions->cancel($sub['id'], [
+                        'invoice_now' => false,
+                        'prorate'     => false,
+                    ]);
+                } catch (\Throwable $e) {
+                    error_log('[admin.deleteAccount] cancel ' . $sub['id'] . ': ' . $e->getMessage());
+                    Response::error("Predplatné {$sub['id']} v Stripe sa nepodarilo zrušiť — účet sa nezmazal.", 502);
+                }
+                AuditLog::record('account.subscription_cancel', 'accounts', $id, $sub, ['status' => 'canceled']);
+            }
         }
 
         $pdo = Db::pdo();
@@ -499,6 +766,13 @@ final class AdminPanelController
         $snap->execute([$id]);
         $snapRow = $snap->fetch() ?: null;
 
+        // The accounts this user is an active technician of: deleting the
+        // user removes the membership (FK cascade), so their seat counts
+        // must be re-synced afterwards.
+        $memberOf = Db::pdo()->prepare('SELECT account_id FROM account_users WHERE user_id = ? AND is_active = 1');
+        $memberOf->execute([$id]);
+        $seatAccounts = array_map('intval', $memberOf->fetchAll(\PDO::FETCH_COLUMN));
+
         // A technician whose identity is printed on already-generated
         // protocols cannot be hard-deleted: inspections.inspector_user_id and
         // the immutable effective_inspector_user_id snapshot both reference
@@ -517,6 +791,10 @@ final class AdminPanelController
             throw $e;
         }
         AuditLog::record('user.delete', 'users', $id, $snapRow ?: null, null);
+
+        foreach ($seatAccounts as $seatAccountId) {
+            SeatSync::recompute($seatAccountId);
+        }
 
         Response::noContent();
     }

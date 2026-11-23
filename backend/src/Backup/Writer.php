@@ -48,9 +48,19 @@ final class Writer
             // výdajky and the movements journal.
             'stock'       => self::stock($accountId, $pdo),
             'tasks'       => self::tasks($accountId, $pdo),
+            // Phase 4 — the account's own číselník nedostatkov items. Shipped
+            // ones (account_id NULL) are the same everywhere and not backed up.
+            'defect_catalog' => self::defectCatalog($accountId, $pdo),
+            // Phase 6 — termíny cudzích revízií of each firm.
+            'external_terms' => self::externalTerms($accountId, $pdo),
+            // Phase 7b — the firms' own „vykonané činnosti" of the preventívna prehliadka.
+            'company_activities' => self::companyActivities($accountId, $pdo),
             // Chapter 11.3 — which deadlines already had their automatic
             // client notice, so a restore does not send it a second time.
             'deadline_notices' => self::deadlineNotices($accountId, $pdo),
+            // The planned visit dates of the deadlines (calendar) — per
+            // (úkon, prevádzka), since a book entry covers several prevádzky.
+            'calendar_plans' => self::calendarPlans($accountId, $pdo),
         ];
 
         $manifest['counts'] = [
@@ -60,6 +70,9 @@ final class Writer
             'trainings'   => count($manifest['trainings']),
             'documents'   => count($manifest['documents']),
             'tasks'       => count($manifest['tasks']),
+            'defect_catalog' => count($manifest['defect_catalog']),
+            'external_terms' => count($manifest['external_terms']),
+            'company_activities' => count($manifest['company_activities']),
             'photos'      => count(array_filter(array_keys($files), static fn (string $e): bool => str_starts_with($e, 'photos/') && !str_ends_with($e, '_t.jpg'))),
         ];
 
@@ -119,26 +132,35 @@ final class Writer
     private static function companies(int $accountId, PDO $pdo): array
     {
         $stmt = $pdo->prepare(
-            'SELECT id, name, ico, street, postal_code, city, contact, contact_email, approver, billing_mode, created_at
+            'SELECT id, name, client_type, ico, street, postal_code, city, contact, contact_email, approver, billing_mode,
+                    book_code, book_last_seq, created_at
              FROM   companies WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
         );
         $stmt->execute([$accountId]);
         $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $facStmt = $pdo->prepare(
-            'SELECT id, company_id, name, street, postal_code, city, contact_person, notes, created_at
+            'SELECT id, company_id, name, street, postal_code, city, email, contact_person, notes,
+                    main_power_location, main_gas_location, main_water_location, description,
+                    floors_above, floors_below, entrances, places, vchody, created_at
              FROM   facilities WHERE account_id = ? AND archived_at IS NULL ORDER BY name'
         );
         $facStmt->execute([$accountId]);
         $byCompany = [];
         foreach ($facStmt->fetchAll(PDO::FETCH_ASSOC) as $facility) {
             $facility['id'] = (int) $facility['id'];
+            $facility['floors_above'] = $facility['floors_above'] !== null ? (int) $facility['floors_above'] : null;
+            $facility['floors_below'] = $facility['floors_below'] !== null ? (int) $facility['floors_below'] : null;
+            $facility['entrances'] = self::jsonList($facility['entrances'] ?? null);
+            $facility['places'] = self::jsonList($facility['places'] ?? null);
+            $facility['vchody'] = $facility['vchody'] !== null ? (string) $facility['vchody'] : null;
             $byCompany[(int) $facility['company_id']][] = self::withReadableAddress($facility);
         }
 
         $out = [];
         foreach ($companies as $company) {
             $company['id']         = (int) $company['id'];
+            $company['book_last_seq'] = (int) $company['book_last_seq'];
             $company              = self::withReadableAddress($company);
             $company['facilities'] = $byCompany[$company['id']] ?? [];
             $out[] = $company;
@@ -156,7 +178,8 @@ final class Writer
             'SELECT i.id, i.company_id, i.facility_id, i.source_inspection_id, i.type,
                     i.periodicity_value, i.periodicity_unit, i.periodicity_is_custom,
                     i.is_preventive_inspection, i.executed_on,
-                    i.status, i.notes, i.details, i.created_at,
+                    i.status, i.issued_before, i.book_number, i.book_number_version,
+                    i.notes, i.details, i.created_at,
                     i.effective_cert_number,
                     i.effective_cert_valid_from, i.effective_cert_valid_to,
                     i.billing_mode, i.invoiced, i.invoiced_at, i.billing_note,
@@ -184,6 +207,21 @@ final class Writer
             "SELECT id, inspection_id, position, fields, created_at FROM inspection_items
              WHERE  inspection_id IN ($ids) ORDER BY inspection_id, position"
         );
+        // POapp 7. 11. 2026 — the prevádzky of a new-format požiarna kniha entry,
+        // each with its periodicity. Other úkony have none and get no key.
+        $facilitiesByInspection = [];
+        $facStmt = $pdo->query(
+            "SELECT inspection_id, facility_id, periodicity_value, periodicity_unit FROM inspection_facilities
+             WHERE  inspection_id IN ($ids) ORDER BY inspection_id, id"
+        );
+        foreach ($facStmt->fetchAll(PDO::FETCH_ASSOC) as $f) {
+            $facilitiesByInspection[(int) $f['inspection_id']][] = [
+                'facility_id'       => (int) $f['facility_id'],
+                'periodicity_value' => $f['periodicity_value'] !== null ? (int) $f['periodicity_value'] : null,
+                'periodicity_unit'  => $f['periodicity_unit'],
+            ];
+        }
+
         $itemsByInspection = [];
         foreach ($itemStmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
             $item['id']       = (int) $item['id'];
@@ -209,6 +247,9 @@ final class Writer
             // Chapter 22 — fakturácia úkonu (migration 046).
             $inspection['invoiced'] = (int) $inspection['invoiced'];
             $inspection['items'] = $itemsByInspection[$inspection['id']] ?? [];
+            if (isset($facilitiesByInspection[$inspection['id']])) {
+                $inspection['facilities'] = $facilitiesByInspection[$inspection['id']];
+            }
             $out[] = $inspection;
         }
         return $out;
@@ -261,6 +302,7 @@ final class Writer
         $stmt = $pdo->prepare(
             'SELECT t.id, t.company_id, t.facility_id, t.type, t.date,
                     t.periodicity_value, t.periodicity_unit, t.periodicity_is_custom,
+                    t.valid_until_override, t.patrol_scope,
                     t.topics, t.duration_min, t.fields, t.status, t.created_at,
                     t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
                     u.email AS trainer_email
@@ -277,7 +319,7 @@ final class Writer
 
         $ids = implode(',', array_map(static fn (array $t): int => (int) $t['id'], $trainings));
         $traineeStmt = $pdo->query(
-            "SELECT id, training_id, fullname, position, signature_path, signed_at, created_at
+            "SELECT id, training_id, fullname, position, personal_number, signature_path, signed_at, created_at
              FROM   trainees WHERE training_id IN ($ids) ORDER BY training_id, id"
         );
 
@@ -296,6 +338,7 @@ final class Writer
                 'id'        => $traineeId,
                 'fullname'  => $trainee['fullname'],
                 'position'  => $trainee['position'],
+                'personal_number' => $trainee['personal_number'],
                 'signed_at' => $trainee['signed_at'],
                 'created_at' => $trainee['created_at'],
                 'signature' => $entry,
@@ -339,7 +382,7 @@ final class Writer
         // in the archive that can never come back out — and would make the
         // "27 protocols in, 25 restored" arithmetic look like data loss.
         $stmt = $pdo->prepare(
-            "SELECT d.id, d.parent_type, d.parent_id, d.type, d.number, d.form_variant, d.file_path,
+            "SELECT d.id, d.parent_type, d.parent_id, d.type, d.number, d.version, d.form_variant, d.file_path,
                     d.generated_at, d.signed, d.signed_at
              FROM   documents d
              LEFT   JOIN inspections i ON d.parent_type = 'inspection' AND i.id = d.parent_id
@@ -366,6 +409,10 @@ final class Writer
                 'parent_id'    => (int) $doc['parent_id'],
                 'type'         => $doc['type'],
                 'number'       => $doc['number'],
+                // Round 6 — the version the restore keeps, and the printout of a
+                // test (chapter 8.1), which the restore read but no archive carried.
+                'version'      => (int) $doc['version'],
+                'form_variant' => $doc['form_variant'],
                 'generated_at' => $doc['generated_at'],
                 'signed'       => (int) $doc['signed'],
                 'signed_at'    => $doc['signed_at'],
@@ -409,6 +456,82 @@ final class Writer
     }
 
     /**
+     * The account's own číselník nedostatkov items, archived ones included: a
+     * defect's `fields.catalog_id` may still name one. The author goes by
+     * e-mail, like the inspector of an úkon.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function defectCatalog(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT d.id, d.title, d.scope, d.area, d.default_deadline, d.description,
+                    d.regulation, d.justification, d.measure, d.archived_at, d.created_at,
+                    u.email AS created_by_email
+             FROM   defect_catalog d
+             LEFT   JOIN users u ON u.id = d.created_by_user_id
+             WHERE  d.account_id = ?
+             ORDER  BY d.id'
+        );
+        $stmt->execute([$accountId]);
+
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row['id'] = (int) $row['id'];
+            $out[] = $row;
+        }
+        return $out;
+    }
+
+    /**
+     * Termíny cudzích revízií (phase 6) of the active firms. Archived terms are
+     * left out, so a restore never brings a removed term back.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function externalTerms(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT t.company_id, t.facility_id, t.book, t.name, t.performed_by,
+                    t.done_on, t.valid_until, t.note, t.created_at, u.email AS created_by_email
+             FROM   company_external_terms t
+             JOIN   companies c ON c.id = t.company_id AND c.archived_at IS NULL
+             LEFT   JOIN users u ON u.id = t.created_by_user_id
+             WHERE  t.account_id = ? AND t.archived_at IS NULL
+             ORDER  BY t.company_id, t.id'
+        );
+        $stmt->execute([$accountId]);
+        return array_map(static function (array $r): array {
+            $r['company_id']  = (int) $r['company_id'];
+            $r['facility_id'] = $r['facility_id'] !== null ? (int) $r['facility_id'] : null;
+            return $r;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * The firms' own „vykonané činnosti" (phase 7b) of the active firms.
+     * Removed ones are left out, so a restore never brings them back.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function companyActivities(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT a.company_id, a.kind, a.label, a.created_at, u.email AS created_by_email
+             FROM   company_activities a
+             JOIN   companies c ON c.id = a.company_id AND c.archived_at IS NULL
+             LEFT   JOIN users u ON u.id = a.created_by_user_id
+             WHERE  a.account_id = ? AND a.archived_at IS NULL
+             ORDER  BY a.company_id, a.id'
+        );
+        $stmt->execute([$accountId]);
+        return array_map(static function (array $r): array {
+            $r['company_id'] = (int) $r['company_id'];
+            return $r;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
      * Automatic client notices already sent (chapter 11.3), keyed by the
      * úkon whose deadline they announced — an inspection or, since
      * change request 6, a training (exactly one of the two ids is set).
@@ -418,7 +541,7 @@ final class Writer
     private static function deadlineNotices(int $accountId, PDO $pdo): array
     {
         $stmt = $pdo->prepare(
-            'SELECT n.inspection_id, n.training_id, n.notice_date, n.recipient, n.sent_at
+            'SELECT n.inspection_id, n.facility_id, n.training_id, n.notice_date, n.recipient, n.sent_at
              FROM   deadline_notices n
              LEFT   JOIN inspections i ON i.id = n.inspection_id AND i.archived_at IS NULL
              LEFT   JOIN trainings   t ON t.id = n.training_id   AND t.archived_at IS NULL
@@ -429,10 +552,37 @@ final class Writer
         $stmt->execute([$accountId]);
         return array_map(static fn (array $r): array => [
             'inspection_id' => $r['inspection_id'] !== null ? (int) $r['inspection_id'] : null,
+            'facility_id'   => $r['facility_id'] !== null ? (int) $r['facility_id'] : null,
             'training_id'   => $r['training_id'] !== null ? (int) $r['training_id'] : null,
             'notice_date'   => (string) $r['notice_date'],
             'recipient'     => (string) $r['recipient'],
             'sent_at'       => (string) $r['sent_at'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Planned visit dates (`calendar_plans`): one per inspection and
+     * prevádzka, or per training (exactly one of the two ids is set).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function calendarPlans(int $accountId, PDO $pdo): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT p.inspection_id, p.facility_id, p.training_id, p.planned_date
+             FROM   calendar_plans p
+             LEFT   JOIN inspections i ON i.id = p.inspection_id AND i.archived_at IS NULL
+             LEFT   JOIN trainings   t ON t.id = p.training_id   AND t.archived_at IS NULL
+             WHERE  p.account_id = ?
+               AND  (i.id IS NOT NULL OR t.id IS NOT NULL)
+             ORDER  BY p.id'
+        );
+        $stmt->execute([$accountId]);
+        return array_map(static fn (array $r): array => [
+            'inspection_id' => $r['inspection_id'] !== null ? (int) $r['inspection_id'] : null,
+            'facility_id'   => $r['facility_id'] !== null ? (int) $r['facility_id'] : null,
+            'training_id'   => $r['training_id'] !== null ? (int) $r['training_id'] : null,
+            'planned_date'  => (string) $r['planned_date'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
@@ -533,5 +683,18 @@ final class Writer
             isset($row['city']) ? (string) $row['city'] : null,
         );
         return $row;
+    }
+
+    /** @return list<mixed> */
+    private static function jsonList(mixed $raw): array
+    {
+        if (is_array($raw)) {
+            return array_values($raw);
+        }
+        if (!is_string($raw) || $raw === '') {
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? array_values($decoded) : [];
     }
 }

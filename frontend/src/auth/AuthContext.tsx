@@ -18,6 +18,7 @@ export type User = {
  * - `trial_paid`       — trialing with a subscription on file (will auto-charge)
  * - `active`           — paid subscription, fully active
  * - `past_due`         — payment failed, Stripe is retrying
+ * - `unpaid`           — Stripe stopped retrying; the invoice stays open
  * - `canceled`         — subscription canceled (may still have access until period end)
  * - `incomplete`       — payment never completed or expired
  * - `has_subscription` — any other Stripe state with a subscription attached
@@ -27,6 +28,7 @@ export type SubscriptionState =
   | 'trial_paid'
   | 'active'
   | 'past_due'
+  | 'unpaid'
   | 'canceled'
   | 'incomplete'
   | 'has_subscription';
@@ -47,6 +49,28 @@ export type Account = {
   has_billing_details: boolean;
   subscription_state: SubscriptionState;
   admin_owned: boolean;
+  included_technicians: number;
+  extra_technicians: number;
+  /** Next regular charge (base + extra technicians at their Stripe prices, without prorations); null without a subscription. */
+  next_charge_cents: number | null;
+  /** A promotion code is on the subscription: next_charge_cents is before the discount. */
+  next_charge_before_discount?: boolean;
+  /** Extra technicians next_charge_cents includes (Stripe's count while nothing is pushed to Stripe). */
+  next_charge_extra_technicians?: number;
+  /** A failed renewal: shown to every member until it is paid; null otherwise. */
+  payment_failed?: PaymentFailed | null;
+};
+
+/**
+ * A renewal whose payment failed (PaymentGrace on the server): the amount
+ * due with VAT, when it failed, and the first day the account is read-only
+ * (PAYMENT_GRACE_DAYS after the failure).
+ */
+export type PaymentFailed = {
+  amount_cents: number;
+  currency: string;
+  failed_at: string;
+  read_only_from: string;
 };
 
 /**

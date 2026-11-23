@@ -16,7 +16,7 @@ import { Skeleton, CardBlockSkeleton } from '@/components/ui/Skeleton';
 import { Badge } from '@/components/ui/Badge';
 import { Dialog } from '@/components/ui/Dialog';
 import { cn } from '@/lib/cn';
-import { periodPriceLabel, usePricing, yearlyHint } from '@/lib/pricing';
+import { chargeLabel, formatCents, periodPriceLabel, usePricing, yearlyHint } from '@/lib/pricing';
 
 export function BillingPage() {
   const [account, setAccount] = useState<Account | null>(null);
@@ -55,10 +55,15 @@ function SeatsSection({ account, loading }: { account: Account | null; loading: 
   const included   = account.included_technicians;
   const extra      = Math.max(0, active - included);
   const max        = account.max_self_service_technicians;
-  const perExtra   = account.price_per_extra_technician_cents / 100;
-  const isYearly   = account.billing_period === 'yearly';
-  const perPeriod  = isYearly ? perExtra * 12 : perExtra;
-  const periodWord = isYearly ? 'rok' : 'mesiac';
+  // All amounts come from the backend. The account's own figure is the unit
+  // amount on its Stripe item when it has one — an item keeps the price it
+  // was created with — else today's price for its billing period (the
+  // yearly one is what Stripe charges a yearly subscription, not 12 × monthly).
+  const isYearly       = account.billing_period === 'yearly';
+  const perPeriodCents = account.extra_unit_amount_cents;
+  const perMonthCents  = isYearly ? account.price_per_extra_technician_cents : perPeriodCents;
+  const perYearCents   = isYearly ? perPeriodCents : account.price_per_extra_technician_yearly_cents;
+  const periodWord     = isYearly ? 'rok' : 'mesiac';
   const overMax    = active > max;
 
   return (
@@ -82,8 +87,8 @@ function SeatsSection({ account, loading }: { account: Account | null; loading: 
           <SeatStat label="Aktívnych technikov" value={`${active}`} />
           <SeatStat
             label="Extra (nad rámec)"
-            value={extra === 0 ? '0' : `${extra} × ${perExtra.toFixed(2)} €`}
-            hint={extra > 0 ? `+${(extra * perPeriod).toFixed(2)} € / ${periodWord} (proratované)` : 'Plán nie je preplnený.'}
+            value={extra === 0 ? '0' : `${extra} × ${formatCents(perPeriodCents)} + DPH`}
+            hint={extra > 0 ? `+${formatCents(extra * perPeriodCents)} + DPH / ${periodWord} (proratované)` : 'Plán nie je preplnený.'}
           />
         </div>
 
@@ -101,10 +106,17 @@ function SeatsSection({ account, loading }: { account: Account | null; loading: 
           <div className="rounded-2xl border border-ink-100 bg-ink-50/40 px-4 py-3 text-xs text-ink-600">
             Si na hranici self-service plánu ({max} {pluralTech(max)}). Pre väčší tím nás kontaktuj — pripravíme individuálnu ponuku.
           </div>
+        ) : isYearly ? (
+          <p className="text-xs text-ink-500">
+            Každý ďalší technik nad zahrnutý počet stojí {formatCents(perYearCents)} + DPH / rok.
+            Pri pozvaní sa pomerná časť ceny za zvyšok predplateného roka pripočíta automaticky
+            k najbližšej faktúre — pri ročnom predplatnom je to faktúra za jeho obnovu.
+          </p>
         ) : (
           <p className="text-xs text-ink-500">
-            Každý ďalší technik nad zahrnutý počet stojí {perExtra.toFixed(2)} € / mesiac
-            (ročne {(perExtra * 12).toFixed(2)} €). Pri pozvaní sa cena pripočíta automaticky a proratovane.
+            Každý ďalší technik nad zahrnutý počet stojí {formatCents(perMonthCents)} + DPH / mesiac
+            (pri ročnom predplatnom {formatCents(perYearCents)} + DPH / rok). Pri pozvaní sa pomerná časť
+            ceny za zvyšok obdobia pripočíta automaticky k najbližšej faktúre.
           </p>
         )}
       </div>
@@ -146,9 +158,12 @@ function BillingSection({
   loading: boolean;
   onAccountChange: (a: Account) => void;
 }) {
-  const { csrfToken, refresh } = useAuth();
+  const { csrfToken, refresh, user, isAdmin } = useAuth();
   const toast = useToast();
   const pricing = usePricing();
+  // Checkout, cancel, resume and the portal are the main user's (the
+  // backend refuses everyone else with 403); app admins may act too.
+  const canManage = isAdmin || (!!user && !!account && user.id === account.main_user_id);
   const [period, setPeriod] = useState<BillingPeriod>('monthly');
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -273,37 +288,67 @@ function BillingSection({
   const expired = end !== null && end < today;
   const isTrialing = account.stripe_status === 'trialing';
   const isActive = account.stripe_status === 'active';
+  const isPastDue = account.stripe_status === 'past_due';
+  const isUnpaid = account.stripe_status === 'unpaid';
   const hasSub = isActive || isTrialing;
   const humanEnd = end ? end.toLocaleDateString('sk-SK', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
 
-  const periodPrice = periodPriceLabel(pricing, account.billing_period === 'yearly' ? 'yearly' : 'monthly');
+  const isYearly = account.billing_period === 'yearly';
+  // The next regular charge: base + extra technicians at the prices on the
+  // customer's Stripe items (prorations for changes come on top). The count
+  // is the one the charge was built from (Stripe's own while nothing is
+  // pushed to Stripe).
+  const extra = account.next_charge_extra_technicians ?? account.extra_technicians;
+  // Prices are net; an announced charge says what is paid with VAT.
+  const periodPrice = account.next_charge_cents !== null
+    ? `${chargeLabel(account.next_charge_cents, account.vat_rate_percent)} / ${isYearly ? 'rok' : 'mesiac'}${extra > 0 ? ` vrátane ${extra} ${extra === 1 ? 'extra technika' : 'extra technikov'}` : ''}${account.next_charge_before_discount ? ', pred zľavou' : ''}`
+    : periodPriceLabel(pricing, isYearly ? 'yearly' : 'monthly');
+  // A failed renewal: the day the account becomes read-only.
+  const failed = account.payment_failed;
+  const readOnlyFrom = failed
+    ? new Date(`${failed.read_only_from}T00:00:00`).toLocaleDateString('sk-SK', { day: 'numeric', month: 'long', year: 'numeric' })
+    : null;
+  const failedAmount = failed ? `${formatCents(failed.amount_cents)} s DPH` : null;
 
   const cancelScheduled = account.stripe_cancel_at_period_end && (isActive || isTrialing);
 
-  const statusBadge = expired
-    ? <Badge tone="warn">Vypršalo</Badge>
-    : cancelScheduled
-      ? <Badge tone="warn">Zrušené ku {humanEnd}</Badge>
-      : isActive
-        ? <Badge tone="ok">Aktívne</Badge>
-        : isTrialing
-          ? <Badge tone="ok">Skúška + predplatené</Badge>
-          : account.stripe_status === 'canceled'
-            ? <Badge tone="warn">Zrušené</Badge>
-            : <Badge tone="neutral">Skúšobné obdobie</Badge>;
+  const statusBadge = isPastDue
+    ? <Badge tone="warn">Platba zlyhala</Badge>
+    : isUnpaid
+      ? <Badge tone="warn">Nezaplatené</Badge>
+      : expired
+        ? <Badge tone="warn">Vypršalo</Badge>
+        : cancelScheduled
+          ? <Badge tone="warn">Zrušené ku {humanEnd}</Badge>
+          : isActive
+            ? <Badge tone="ok">Aktívne</Badge>
+            : isTrialing
+              ? <Badge tone="ok">Skúška + predplatené</Badge>
+              : account.stripe_status === 'canceled'
+                ? <Badge tone="warn">Zrušené</Badge>
+                : <Badge tone="neutral">Skúšobné obdobie</Badge>;
 
-  const subtitle = cancelScheduled
-    ? `Predplatné bude zrušené ${humanEnd}. Dovtedy máš plný prístup — môžeš ho kedykoľvek obnoviť.`
-    : isTrialing
-      ? `Skúšobné obdobie do ${humanEnd}. Potom sa predplatné (${periodPrice}) automaticky aktivuje — kartu sme uložili na Stripe.`
-      : isActive
-        ? `Predplatné je aktívne. Ďalšia fakturácia ${humanEnd} (${periodPrice}).`
-        : account.stripe_status === 'canceled'
-          ? `Predplatné zrušené, prístup máš ešte do ${humanEnd}.`
-          : `Účet má prístup do ${humanEnd}. Potom sa prepne do režimu len na čítanie, kým si nezakúpiš predplatné.`;
+  const graceText = readOnlyFrom !== null
+    ? (expired
+        ? ` Účet je od ${readOnlyFrom} len na čítanie — po zaplatení sa plný prístup obnoví hneď.`
+        : ` Do ${readOnlyFrom} môžeš aplikáciu plne používať, potom bude len na čítanie, kým platbu nezaplatíš.`)
+    : '';
+  const subtitle = isPastDue
+    ? `Platbu za predplatné${failedAmount ? ` (${failedAmount})` : ''} sa nepodarilo strhnúť z karty. Stripe ju skúša znova — zaplatiť ju alebo zmeniť kartu môžeš hneď cez „Zaplatiť“.${graceText}`
+    : isUnpaid
+      ? `Stripe prestal platbu za predplatné skúšať. Zaplať otvorenú faktúru cez „Zaplatiť“ — nové predplatné netreba.${graceText}`
+      : cancelScheduled
+        ? `Predplatné bude zrušené ${humanEnd}. Dovtedy máš plný prístup — môžeš ho kedykoľvek obnoviť.`
+        : isTrialing
+          ? `Skúšobné obdobie do ${humanEnd}. Potom sa predplatné (${periodPrice}) automaticky aktivuje — kartu sme uložili na Stripe.`
+          : isActive
+            ? `Predplatné je aktívne. Ďalšia fakturácia ${humanEnd} (${periodPrice}, k tomu pomerné doplatky za zmeny počtu technikov, ak nejaké boli).`
+            : account.stripe_status === 'canceled'
+              ? `Predplatné zrušené, prístup máš ešte do ${humanEnd}.`
+              : `Účet má prístup do ${humanEnd}. Potom sa prepne do režimu len na čítanie, kým si nezakúpiš predplatné.`;
 
   const billingReady = hasBillingDetails(account);
-  const locked = !billingReady && !hasSub;
+  const locked = !billingReady && !hasSub && !isPastDue && !isUnpaid;
 
   return (
     <Card id="billing-section" className="overflow-hidden">
@@ -321,7 +366,7 @@ function BillingSection({
       </div>
 
       <div className="flex flex-col gap-4 px-5 py-5">
-        {locked && (
+        {locked && canManage && (
           <div className="pointer-events-auto flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-start">
             <div className="flex items-start gap-3">
               <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" />
@@ -341,7 +386,26 @@ function BillingSection({
             </button>
           </div>
         )}
-        {hasSub ? (
+        {!canManage ? (
+          <p className="text-sm text-ink-600">
+            Predplatné a platby spravuje hlavný používateľ účtu.
+          </p>
+        ) : isPastDue || isUnpaid ? (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-ink-700">
+              Otvorenú faktúru zaplatíš v zabezpečenom portáli Stripe, kde môžeš aj zmeniť kartu.
+            </p>
+            <Button
+              type="button"
+              onClick={onPortal}
+              loading={busy}
+              leftIcon={<CreditCard className="size-4" />}
+              className="shrink-0 self-end sm:self-auto"
+            >
+              Zaplatiť
+            </Button>
+          </div>
+        ) : hasSub ? (
           <>
             <p className="text-sm text-ink-700">
               Platobnú kartu a zmenu fakturačného obdobia spravuje priamo
@@ -440,7 +504,7 @@ function BillingSection({
                     {(inv.amount_cents / 100).toFixed(2)} {inv.currency}
                   </span>
                   <Badge tone={
-                    inv.status === 'issued' || inv.status === 'paid' ? 'ok'
+                    inv.status === 'issued' || inv.status === 'paid' || inv.status === 'draft' ? 'ok'
                     : inv.status === 'error' ? 'warn'
                     : 'neutral'
                   }>
@@ -512,9 +576,13 @@ function BillingSection({
 function invoiceStatusLabel(status: string): string {
   switch (status) {
     case 'issued': return 'Vystavená';
-    case 'draft':  return 'Koncept';
+    // Rows marked „draft" before 17. 11. 2026 were normal, issued invoices.
+    case 'draft':  return 'Vystavená';
     case 'paid':   return 'Zaplatená';
-    case 'pending': return 'Spracováva sa';
+    case 'pending':
+    case 'sending':
+    case 'needs_review': return 'Spracováva sa';
+    case 'prepared': return 'Pripravená';
     case 'skipped': return 'iDoklad off';
     case 'error':  return 'Chyba';
     default:       return status;

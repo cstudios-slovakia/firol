@@ -19,6 +19,7 @@ import {
 } from '@/api/personList';
 import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { useCertMissingToast } from '@/lib/certMissing';
 import { cn } from '@/lib/cn';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -59,6 +60,7 @@ export function PersonProtocolBlock({
 }) {
   const navigate = useNavigate();
   const toast = useToast();
+  const certMissing = useCertMissingToast();
   const isTest = isTestType(type);
   const isDraft = inspection.status === 'draft';
   const latest = documents[0] ?? null;
@@ -80,7 +82,11 @@ export function PersonProtocolBlock({
       await onChanged();
       window.open(documentDownloadUrl(res.document.id), '_blank', 'noopener');
     } catch (err) {
-      setError(offlineMessage(err, 'PDF sa nepodarilo vygenerovať.'));
+      const kept = certMissing(err, {
+        saved: 'Nič sa nestratilo — úkon je uložený ako koncept. Po doplnení oprávnenia sa k nemu vráť a vygeneruj PDF.',
+        returnLabel: 'Späť na úkon',
+      });
+      if (!kept) setError(offlineMessage(err, 'PDF sa nepodarilo vygenerovať.'));
     } finally {
       setBusy(null);
     }

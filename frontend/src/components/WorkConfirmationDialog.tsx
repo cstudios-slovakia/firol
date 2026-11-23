@@ -3,6 +3,7 @@ import { FileSignature } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { WorkConfirmations, type WorkConfirmation } from '@/api/workConfirmations';
 import { ApiError } from '@/lib/api';
+import { clientNouns, facilityNouns } from '@/lib/clientKind';
 import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
 import { ConfirmationActions } from '@/components/CompanyWorkConfirmations';
@@ -35,6 +36,7 @@ export function WorkConfirmationDialog({
   companyId,
   facilityId,
   companyName,
+  clientType,
   facilityName,
   date,
   actCount,
@@ -48,6 +50,8 @@ export function WorkConfirmationDialog({
   companyId?: number;
   facilityId?: number;
   companyName: string;
+  /** Type of the client — picks firma / bytové družstvo and prevádzka / bytový dom wording. */
+  clientType?: string | null;
   facilityName?: string | null;
   date: string;
   /** How many finished úkony will go on it, so the technician can sanity-check. */
@@ -131,7 +135,7 @@ export function WorkConfirmationDialog({
       title="Potvrdenie o vykonaní práce"
       description={
         created
-          ? 'Potvrdenie je uložené pri firme. Nájdeš ho aj neskôr v záložke Protokoly.'
+          ? `Potvrdenie je uložené pri ${clientNouns(clientType).cases.loc}. Nájdeš ho aj neskôr v záložke Protokoly.`
           : 'Doklad pre tvojho zamestnávateľa — kde si bol a čo si urobil. Neobsahuje žiadne zistenia, len čísla protokolov.'
       }
       dismissible={!saving && !signing}
@@ -200,7 +204,7 @@ export function WorkConfirmationDialog({
 
         <p className="text-xs text-ink-500">
           Ak čas nevyplníš, na potvrdení sa riadok „Čas od – do" ani údaj o čase
-          na prevádzke neuvedie.
+          na {facilityNouns(clientType).cases.loc} neuvedie.
         </p>
 
         {error && (

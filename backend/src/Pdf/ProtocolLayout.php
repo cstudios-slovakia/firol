@@ -103,12 +103,24 @@ final class ProtocolLayout
   .sig-img { max-height: 38pt; max-width: 150pt; }
   .sig-line { border-top: 1pt solid #2a2a32; margin-top: 4pt; padding-top: 3pt; font-size: 8pt; color: #6b6b75; }
   .footer { border-top: 1pt solid #e5e5ea; margin-top: 8pt; padding-top: 4pt; font-size: 8pt; color: #6b6b75; }
+  table.pt { border-collapse: collapse; width: 100%; font-size: 8.8pt; margin-top: 7pt; }
+  table.pt td { padding: 2.5pt 5pt; vertical-align: top; }
+  td.pt-head { font-size: 10pt; padding-top: 4pt; border-bottom: 1pt solid #d6d6dc; }
+  td.pt-meta { color: #4b5563; font-size: 8.3pt; padding-bottom: 3pt; }
+  td.pt-l { width: 22%; color: #6b6b75; font-weight: bold; font-size: 7.3pt; letter-spacing: .3pt; padding-right: 8pt; }
+  td.pt-v { width: 78%; }
+  .pt-tag { color: #c62828; font-weight: bold; font-size: 7.3pt; letter-spacing: .4pt; padding-left: 6pt; }
+  .pt-none { border: 1pt solid #e5e5ea; padding: 5pt 6pt; font-size: 9pt; }
 </style>
 CSS;
     }
 
-    /** Header: client left, odbor tag + title + number + date right. */
-    public function header(string $title): string
+    /**
+     * Header: client left, odbor tag + title (+ optional subtitle) + number + date right.
+     * `$facilityLabel` names the facility line („Prevádzka" unless the template
+     * knows better — a book entry for bytové domy or several prevádzky).
+     */
+    public function header(string $title, ?string $subtitle = null, string $facilityLabel = 'Prevádzka'): string
     {
         $brand = (array) ($this->v['brand'] ?? []);
         $company = (array) ($this->v['company'] ?? []);
@@ -121,17 +133,21 @@ CSS;
             ? '<div class="hdr-sub">' . self::esc((string) $facility['address']) . '</div>'
             : '';
         $titleHtml = implode('<br>', array_map([self::class, 'esc'], explode("\n", $title)));
+        $subHtml = ($subtitle !== null && $subtitle !== '')
+            ? '<div class="hdr-sub" style="font-weight:normal; margin-top:2pt;">' . self::esc($subtitle) . '</div>'
+            : '';
 
         return '<table class="hdr"><tr>'
             . '<td width="48%"><table class="hdr-inner"><tr>'
             . '<td width="50pt" style="padding-right:7pt;">' . $logo . '</td>'
             . '<td><div class="hdr-company">' . self::esc((string) ($company['name'] ?? '')) . '</div>'
-            . '<div class="hdr-sub">Prevádzka: ' . self::esc((string) ($facility['name'] ?? '')) . ' | IČO: '
+            . '<div class="hdr-sub">' . self::esc($facilityLabel) . ': ' . self::esc((string) ($facility['name'] ?? '')) . ' | IČO: '
             . self::esc((string) ($company['ico'] ?? '—')) . '</div>' . $address . '</td>'
             . '</tr></table></td>'
             . '<td width="52%" class="hdr-right">'
             . '<div><span class="tag">' . self::esc($this->tag) . '</span></div>'
             . '<div class="hdr-title">' . $titleHtml . '</div>'
+            . $subHtml
             . '<div class="hdr-meta">Č. dokumentu: ' . self::esc((string) ($this->v['number'] ?? '')) . '</div>'
             . '<div class="hdr-meta">Dátum: ' . self::esc($this->executedOn()) . '</div>'
             . '</td></tr></table>'
@@ -228,18 +244,64 @@ CSS;
             . '<td></td></tr></table>';
     }
 
-    /** Pätička: „Vypracoval: meno | č. oprávnenia: X" plus an optional count. */
+    /**
+     * 2-column signature block (Option A / 2_Vzor_hotoveho_zaznamu_A.pdf):
+     * VYKONAL | S VÝSLEDKOM KONTROLY (PREHLIADKY) OBOZNÁMENÝ.
+     */
+    public function signaturesOptionA(
+        string $documentType,
+        string $performedLabel = 'Vykonal',
+        string $clientLabel = 'S výsledkom prehliadky oboznámený',
+        ?string $clientName = null,
+    ): string {
+        $inspector = (array) ($this->v['inspector'] ?? []);
+        $company = (array) ($this->v['company'] ?? []);
+        $handover = $this->v['handover'] ?? null;
+
+        $sig = !empty($inspector['signature_data_uri'])
+            ? '<img class="sig-img" src="' . self::esc((string) $inspector['signature_data_uri']) . '" alt="">'
+            : '';
+
+        $resolvedClient = $clientName !== null
+            ? self::esc($clientName)
+            : SignatureBlock::nameCell(is_array($handover) ? $handover : null, (string) ($company['approver'] ?? ''));
+
+        $clientSigLine = '';
+        if (is_array($handover) && !empty($handover['signature_data_uri'])) {
+            $clientSigLine = '<img class="sig-img" src="' . self::esc((string) $handover['signature_data_uri']) . '" alt=""><div class="sig-line"></div>';
+        } elseif (is_array($handover) && !empty($handover['signed_on'])) {
+            $clientSigLine = '<i class="muted" style="font-size:8.5pt;">podpísané na displeji</i><div class="sig-line"></div>';
+        } else {
+            $clientSigLine = '<i class="muted" style="font-size:8.5pt;">podpis po vytlačení</i><div class="sig-line"></div>';
+        }
+
+        return '<h2>Podpisy</h2><table class="sig-tbl">'
+            . '<tr><th width="50%">' . self::esc($performedLabel) . '</th>'
+            . '<th width="50%">' . self::esc($clientLabel) . '</th></tr>'
+            . '<tr><td>' . $this->inspectorCell() . '</td>'
+            . '<td>' . $resolvedClient . '</td></tr>'
+            . '<tr class="sig-row"><td>' . $sig . '<div class="sig-line"></div></td>'
+            . '<td>' . $clientSigLine . '</td>'
+            . '</tr></table>';
+    }
+
+    /**
+     * Pätička: „Vypracoval: meno | č. oprávnenia: X" plus an optional count.
+     * The software credit is not repeated here: {@see PdfRenderer::buildPdf()}
+     * prints it at the bottom of every page (fix list of 16. 11. 2026 — it
+     * appeared twice on the last page).
+     */
     public function footer(string $extra = ''): string
     {
         $inspector = (array) ($this->v['inspector'] ?? []);
-        $html = '<div class="footer">Vypracoval: ' . self::esc((string) ($inspector['fullname'] ?? ''));
+        $left = 'Vypracoval: ' . self::esc((string) ($inspector['fullname'] ?? ''));
         if (!empty($inspector['certification_number'])) {
-            $html .= ' | č. oprávnenia: ' . self::esc((string) $inspector['certification_number']);
+            $left .= ' | č. oprávnenia: ' . self::esc((string) $inspector['certification_number']);
         }
         if ($extra !== '') {
-            $html .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' . self::esc($extra);
+            $left .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' . self::esc($extra);
         }
-        return $html . '</div>';
+        return '<div class="footer">' . $left . '</div>';
     }
 
     /** „j. n. Y" for an ISO date, „—" for none. */
@@ -262,13 +324,14 @@ CSS;
         return self::date($this->v['inspection']['executed_on'] ?? null);
     }
 
-    /** Name plus „bezpečnostný technik, č. opr.: …" as the mockup prints it. */
+    /** Name plus role („technik požiarnej ochrany" / „bezpečnostný technik") + č. opr. */
     private function inspectorCell(): string
     {
         $inspector = (array) ($this->v['inspector'] ?? []);
         $html = self::esc((string) ($inspector['fullname'] ?? ''));
         if (!empty($inspector['certification_number'])) {
-            $html .= '<br><span style="font-size:8pt; color:#555;">bezpečnostný technik, č. opr.: '
+            $role = ($this->tag === 'BOZP') ? 'bezpečnostný technik' : 'technik požiarnej ochrany';
+            $html .= '<br><span style="font-size:8pt; color:#555;">' . $role . ', č. opr.: '
                 . self::esc((string) $inspector['certification_number']) . '</span>';
         }
         return $html;

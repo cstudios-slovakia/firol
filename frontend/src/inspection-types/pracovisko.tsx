@@ -62,7 +62,7 @@ function seedAreas(stored: unknown): Area[] {
   return [...predefined, ...own];
 }
 
-function PracoviskoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function PracoviskoStep2Form({ inspectionId, facilityId, clientType, initialItem, csrfToken, onSaved }: Step2FormProps) {
   const editing = initialItem !== null;
   const toast = useToast();
   const defects = useDefects(initialItem);
@@ -141,6 +141,7 @@ function PracoviskoStep2Form({ inspectionId, facilityId, initialItem, csrfToken,
           values={spaces}
           onChange={(v) => { setSpaces(v); setErrors((e) => ({ ...e, spaces: null })); }}
           facilityId={facilityId}
+          clientType={clientType}
           placeholder="Napr. skladové priestory"
           error={errors.spaces ?? null}
         />

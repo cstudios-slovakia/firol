@@ -42,7 +42,7 @@ final class PersonProtocol
      *
      * @param array<string, mixed>       $inspection row incl. `details`
      * @param list<array<string, mixed>> $items
-     * @return array{error: string, status: int}|null
+     * @return array{error: string, status: int, code?: string, cert?: string}|null
      */
     public static function check(int $accountId, array $inspection, array $items, string $variant): ?array
     {
@@ -66,6 +66,8 @@ final class PersonProtocol
             return [
                 'error'  => 'Firma nemá zadané potrebné oprávnenie. Obráťte sa na hlavného používateľa.',
                 'status' => 422,
+                'code'   => 'cert_missing',
+                'cert'   => 'vv',
             ];
         }
         return null;

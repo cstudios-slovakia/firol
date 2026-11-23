@@ -51,6 +51,11 @@ final class HandoverController
         if ($doc['parent_type'] === 'training') {
             Response::error('Školenie sa podpisuje na prezenčnej listine, nie tu.', 422);
         }
+        // POapp 7. 11. 2026, spec 2 rule 7 — no signing in the app for the
+        // požiarna kniha, old entries included: it is signed on paper.
+        if ($doc['type'] === 'poziarna_kniha') {
+            Response::error('Zápis do požiarnej knihy sa podpisuje rukou na vytlačenom dokumente.', 422);
+        }
 
         // A signature re-renders the protocol from the record. While the úkon
         // is open again (a test printed blank whose results are being typed

@@ -10,6 +10,12 @@ use Firol\Auth\Tenant;
 use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
+use Firol\Support\BookEntry;
+use Firol\Support\InspectionCoverage;
+use Firol\Support\InspectionDetails;
+use Firol\Support\PrehliadkaDefects;
+use Firol\Support\PrehliadkaDetails;
+use Firol\Support\PrehliadkaPrevious;
 use PDO;
 
 /**
@@ -58,6 +64,128 @@ final class InspectionItemController
     /** Fire closure kinds (dvere = door, okno = window, klapka = damper). */
     private const PU_KINDS = ['dvere', 'okno', 'klapka'];
 
+    /**
+     * Field keys collected while {@see self::missingFields()} runs; null the rest
+     * of the time, when a problem refuses the request on the spot.
+     *
+     * @var list<string>|null
+     */
+    private static ?array $problems = null;
+
+    /** The item type being validated, so a refusal names a field by its label. */
+    private static ?string $labelType = null;
+
+    /**
+     * Slovak names of the fields of the types a prehliadka can prepare a concept
+     * for — the labels of their Step 2 forms, so the technician finds the field
+     * by the name on screen. A key without a name is shown as its key.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private const FIELD_LABELS = [
+        'php' => [
+            'manufacturer' => 'Výrobca', 'type' => 'Typ', 'serial' => 'Výrobné číslo / séria',
+            'year' => 'Rok výroby', 'location' => 'Umiestnenie', 'status' => 'Stav',
+            'notes' => 'Poznámky / závady',
+        ],
+        'hydranty' => [
+            'type' => 'Typ hydrantu', 'type_other' => 'Označenie typu', 'location' => 'Umiestnenie',
+            'hose_count' => 'Počet hadíc', 'hs' => 'HS', 'hd' => 'HD', 'q' => 'Q', 'result' => 'Výsledok kontroly',
+            'defects' => 'Zistené závady',
+        ],
+        'pu_akcieschopnost' => [
+            'kind' => 'Druh uzáveru', 'identifier' => 'Číslo / označenie', 'manufacturer' => 'Výrobca',
+            'location' => 'Umiestnenie', 'result' => 'Výsledok kontroly', 'notes' => 'Poznámky / závady',
+        ],
+        'pu_udrzba' => [
+            'kind' => 'Druh uzáveru', 'identifier' => 'Číslo / označenie', 'manufacturer' => 'Výrobca',
+            'location' => 'Umiestnenie', 'maintenance_work' => 'Vykonané práce', 'result' => 'Výsledok',
+            'notes' => 'Poznámky / závady',
+        ],
+        'nudzove_osvetlenie' => [
+            'evid_number' => 'Evid. č. svietidla', 'floor' => 'Podlažie', 'luminaire_type' => 'Druh / typ',
+            'manufacturer' => 'Výrobca', 'location' => 'Umiestnenie',
+            'duration_min' => 'Doba svietenia v núdzovom režime', 'result' => 'Výsledok testu',
+            'notes' => 'Poznámky / závady',
+        ],
+        // The follow-ups the checklist after a prehliadka closes (spec 12.2).
+        'oprava_ts_php' => [
+            'manufacturer' => 'Výrobca', 'type' => 'Typ', 'serial' => 'Výrobné číslo / séria',
+            'year' => 'Rok výroby', 'location' => 'Umiestnenie', 'notes' => 'Poznámky',
+        ],
+        'vyradenie' => [
+            'manufacturer' => 'Výrobca', 'type' => 'Typ', 'serial' => 'Č. výr. série / tlak. nádoby',
+            'year' => 'Rok výroby', 'location' => 'Umiestnenie', 'reason' => 'Dôvod vyradenia',
+        ],
+        'ts_hadic' => [
+            'hose_type' => 'Typ / priemer hadice', 'location' => 'Umiestnenie', 'manufacturer' => 'Výrobca',
+            'working_pressure' => 'Pracovný pretlak', 'test_pressure' => 'Skúšobný pretlak', 'length' => 'Dĺžka',
+            'year_of_manufacture' => 'Rok výroby', 'result' => 'Výsledok skúšky',
+            'notes' => 'Poznámky / závady',
+        ],
+    ];
+
+    /**
+     * The fields an existing item lacks to be a COMPLETE item of its type — the
+     * very rules {@see self::store()} and {@see self::update()} enforce, run in
+     * collect mode (no second copy of them). Used to hold back a concept from
+     * a prehliadka until it is complete (spec 7.3).
+     *
+     * @param array<string, mixed> $fields
+     * @return list<string> Slovak names of the missing / invalid fields, [] when complete
+     */
+    public static function missingFields(string $type, array $fields): array
+    {
+        if (\Firol\Support\BozpItems::supports($type)) {
+            return \Firol\Support\BozpItems::missingFields($type, $fields);
+        }
+        if (!isset(self::FIELD_LABELS[$type])) {
+            return []; // no rules to check for this type here
+        }
+        self::$problems = [];
+        try {
+            self::validateFields($type, $fields);
+            $keys = self::collectedProblems();
+        } finally {
+            self::$problems = null;
+        }
+        $names = [];
+        foreach ($keys as $k) {
+            $names[] = array_key_exists($k, self::FIELD_LABELS[$type]) ? self::FIELD_LABELS[$type][$k] : $k;
+        }
+        return array_values(array_unique($names));
+    }
+
+    /**
+     * The Slovak name of a field of the type being validated, the key itself
+     * for a field (or type) without one.
+     */
+    private static function labelOf(string $key): string
+    {
+        return self::FIELD_LABELS[self::$labelType ?? ''][$key]
+            ?? self::REFUSAL_LABELS[self::$labelType ?? ''][$key]
+            ?? $key;
+    }
+
+    /**
+     * Names for refusals only, of a type kept out of {@see self::FIELD_LABELS}
+     * on purpose: a type listed there is checked for completeness before issue.
+     * The old-format požiarna kniha record (its Step 2 form labels).
+     *
+     * @var array<string, array<string, string>>
+     */
+    private const REFUSAL_LABELS = [
+        'poziarna_kniha' => [
+            'workspaces' => 'Prehliadnuté pracoviská', 'notes' => 'Text zápisu',
+        ],
+    ];
+
+    /** @return list<string> */
+    private static function collectedProblems(): array
+    {
+        return self::$problems ?? [];
+    }
+
     public static function store(Request $req, array $params): void
     {
         Csrf::require($req);
@@ -72,7 +200,8 @@ final class InspectionItemController
         // supports many items but the domain doesn't, so block it at the
         // controller. The UI enforces this too — this is the belt-and-braces
         // server-side check.
-        if ($inspection['type'] === 'poziarna_kniha'
+        // A new-format entry's items are its defects, as many as it has.
+        if (($inspection['type'] === 'poziarna_kniha' && !self::isNewBook($inspection))
             || \Firol\Support\BozpRecords::supports((string) $inspection['type'])) {
             $existing = Db::pdo()->prepare(
                 'SELECT COUNT(*) FROM inspection_items WHERE inspection_id = ?'
@@ -86,9 +215,10 @@ final class InspectionItemController
             }
         }
 
-        $fields = self::validateFields($inspection['type'], $req->json());
+        $fields = self::validateFields($inspection['type'], $req->json(), $inspection);
 
         $pdo = Db::pdo();
+        $copiedFiles = [];
         $pdo->beginTransaction();
         try {
             $maxStmt = $pdo->prepare(
@@ -104,10 +234,26 @@ final class InspectionItemController
             )->execute([$inspectionId, $position, json_encode($fields, JSON_UNESCAPED_UNICODE)]);
 
             $itemId = (int) $pdo->lastInsertId();
-            self::syncPreventiveFlag($pdo, $inspection['type'], $inspectionId, $fields);
+            // A new device is typed here — never „prevzaté" (fix list of 16. 11.).
+            \Firol\Support\PrehliadkaChecklist::dropCarriedPosition($pdo, $inspectionId, $position);
+            if (!self::isNewBook($inspection)) {
+                self::syncPreventiveFlag($pdo, $inspection['type'], $inspectionId, $fields);
+            }
+            self::rememberWalkPlaces($inspection, $fields);
+            // A defect taken over from the last prehliadka starts with that
+            // defect's photos (spec 12.1) — copied here, so a create replayed
+            // from the offline outbox brings them as well.
+            if ($inspection['type'] === PrehliadkaDetails::TYPE) {
+                PrehliadkaDefects::copyCarriedPhotos((int) $inspection['account_id'], $fields, $inspectionId, $itemId, $copiedFiles);
+            }
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
+            foreach ($copiedFiles as $abs) {
+                if (is_file($abs)) {
+                    @unlink($abs);
+                }
+            }
             throw $e;
         }
 
@@ -127,9 +273,9 @@ final class InspectionItemController
         $inspection = self::loadInspectionOrFail($isAdmin ? null : $accountId, $inspectionId);
         self::assertEditable($inspection);
 
-        self::loadItemForInspectionOrFail($itemId, $inspectionId);
+        $existingFields = self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
-        $fields = self::validateFields($inspection['type'], $req->json());
+        $fields = self::validateFields($inspection['type'], $req->json(), $inspection, $existingFields, $itemId);
 
         Db::pdo()->prepare(
             'UPDATE inspection_items SET fields = ? WHERE id = ? AND inspection_id = ?'
@@ -139,7 +285,10 @@ final class InspectionItemController
             $inspectionId,
         ]);
 
-        self::syncPreventiveFlag(Db::pdo(), $inspection['type'], $inspectionId, $fields);
+        if (!self::isNewBook($inspection)) {
+            self::syncPreventiveFlag(Db::pdo(), $inspection['type'], $inspectionId, $fields);
+        }
+        self::rememberWalkPlaces($inspection, $fields);
 
         Response::json(['item' => self::loadItem($itemId)]);
     }
@@ -157,9 +306,25 @@ final class InspectionItemController
 
         self::loadItemForInspectionOrFail($itemId, $inspectionId);
 
-        Db::pdo()->prepare(
-            'DELETE FROM inspection_items WHERE id = ? AND inspection_id = ?'
-        )->execute([$itemId, $inspectionId]);
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            $pos = $pdo->prepare('SELECT position FROM inspection_items WHERE id = ? AND inspection_id = ?');
+            $pos->execute([$itemId, $inspectionId]);
+            $position = $pos->fetchColumn();
+            $pdo->prepare(
+                'DELETE FROM inspection_items WHERE id = ? AND inspection_id = ?'
+            )->execute([$itemId, $inspectionId]);
+            // Its position leaves the list of carried items with it, so the next
+            // device added (MAX(position)+1) does not inherit „prevzaté".
+            if ($position !== false) {
+                \Firol\Support\PrehliadkaChecklist::dropCarriedPosition($pdo, $inspectionId, (int) $position);
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
 
         // Positions stay sparse after deletes — that's fine for ordering.
         // PDF generation later will renumber on render rather than rewriting
@@ -188,14 +353,168 @@ final class InspectionItemController
     }
 
     /**
+     * A defect of a preventívna prehliadka teaches its prevádzka the entrance
+     * and the place it was written with, so both come back as tiles next time
+     * (spec 3.2, 6.3.4). Runs in the defect's own transaction on create.
+     *
+     * @param array<string, mixed> $inspection id, type, account_id, facility_id
+     * @param array<string, mixed> $fields validated defect fields
+     */
+    private static function rememberWalkPlaces(array $inspection, array $fields): void
+    {
+        // A book defect teaches the prevádzka it belongs to.
+        if (self::isNewBook($inspection)) {
+            $facilityId = (int) ($fields['facility_id'] ?? 0);
+        } elseif (($inspection['type'] ?? '') === PrehliadkaDetails::TYPE) {
+            $facilityId = (int) $inspection['facility_id'];
+        } else {
+            return;
+        }
+        if ($facilityId <= 0) {
+            return;
+        }
+        $where = (array) ($fields['where'] ?? []);
+        \Firol\Support\FacilityWalkMemory::remember(
+            (int) $inspection['account_id'],
+            $facilityId,
+            isset($where['entrance']) ? (string) $where['entrance'] : null,
+            isset($where['place']) ? (string) $where['place'] : null,
+        );
+    }
+
+    /**
+     * Whether another item of the record already carries the defect `$key`
+     * (round 7). `$itemId` is the item being saved, null for a new one.
+     */
+    private static function originTaken(int $inspectionId, string $key, ?int $itemId): bool
+    {
+        $stmt = Db::pdo()->prepare(
+            "SELECT id FROM inspection_items WHERE inspection_id = ? AND JSON_VALUE(fields, '$.persists_from.key') = ?"
+        );
+        $stmt->execute([$inspectionId, $key]);
+        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $id) {
+            if ((int) $id !== $itemId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether the item stored before carried the same origin (key and source).
+     *
+     * @param array<string, mixed>|null $existingFields
+     * @param array<string, mixed> $origin
+     */
+    private static function sameOrigin(?array $existingFields, array $origin): bool
+    {
+        $stored = $existingFields['persists_from'] ?? null;
+        return is_array($stored)
+            && ($stored['key'] ?? null) === ($origin['key'] ?? null)
+            && (int) ($stored['inspection_id'] ?? 0) === (int) ($origin['inspection_id'] ?? 0);
+    }
+
+    /**
      * Dispatches per inspection type. Adding a new type means registering
      * a validator branch here that returns the canonical fields array.
      *
      * @param array<string, mixed> $body
+     * @param array<string, mixed> $inspection the parent row (type, executed_on), for the
+     *                                         types whose fields depend on it
      * @return array<string, mixed>
      */
-    private static function validateFields(string $type, array $body): array
+    private static function validateFields(string $type, array $body, array $inspection = [], ?array $existingFields = null, ?int $itemId = null): array
     {
+        // A defect stored as „dôvod zanikol" before the customer's answer 6 B
+        // (18. 11. 2026) keeps that state on a later save of the same item.
+        $keepsZanik = ($existingFields['status'] ?? null) === 'zanik';
+        // POapp 26. 10. 2026 — a defect of a preventívna prehliadka.
+        if ($type === PrehliadkaDetails::TYPE) {
+            try {
+                $isBytovyDom = ($inspection['client_type'] ?? '') === 'bytove_druzstvo';
+                $fields = PrehliadkaDefects::validate(
+                    $body,
+                    isset($inspection['executed_on']) ? (string) $inspection['executed_on'] : null,
+                    $isBytovyDom,
+                    ['allow_new_zanik' => $keepsZanik],
+                );
+                if (isset($fields['persists_from']) && is_array($fields['persists_from'])) {
+                    $srcInspId = (int) ($fields['persists_from']['inspection_id'] ?? 0);
+                    // A book entry written for several prevádzky is a source at each.
+                    $check = Db::pdo()->prepare(
+                        'SELECT s.id FROM inspections s WHERE s.id = ? AND s.account_id = ? AND '
+                        . InspectionCoverage::covers('s', '?') . ' AND s.archived_at IS NULL'
+                    );
+                    $check->execute([
+                        $srcInspId,
+                        (int) $inspection['account_id'],
+                        (int) $inspection['facility_id'],
+                        (int) $inspection['facility_id'],
+                    ]);
+                    if (!$check->fetchColumn()) {
+                        // The source is gone (archived, or not this prevádzka's).
+                        // An answer odstránený / dôvod zanikol means nothing
+                        // without it — kept, it would print as a new defect
+                        // removed on the spot. An open one stays a defect found
+                        // today, as a carried-over write always became here.
+                        if (!PrehliadkaDefects::isOpen($fields)) {
+                            throw new \InvalidArgumentException(
+                                'Minulá prehliadka, z ktorej nedostatok pochádza, už nie je k dispozícii. Vráť sa na obchôdzku.'
+                            );
+                        }
+                        $fields['persists_from'] = null;
+                        $fields['status'] = 'zisteny';
+                    } elseif (!PrehliadkaPrevious::namesDefectOf((string) $fields['persists_from']['key'], $srcInspId, (int) $inspection['facility_id'])
+                        && !self::sameOrigin($existingFields, $fields['persists_from'])) {
+                        // The origin must name a defect of that record (round 6) —
+                        // of this prevádzka when the record is a book entry of
+                        // several (round 7): a made-up one would let a new defect be
+                        // „dôvod zanikol". An item saved with this origin before keeps it.
+                        throw new \InvalidArgumentException('Nedostatok z minulej prehliadky má neplatný pôvod.');
+                    } elseif (self::originTaken((int) $inspection['id'], (string) $fields['persists_from']['key'], $itemId)) {
+                        // One item per carried defect (round 7: a second one was accepted).
+                        throw new \InvalidArgumentException('Tento nedostatok z minulej prehliadky už je v zázname zapísaný.');
+                    } elseif ($fields['persists_from']['source_item_id'] !== null) {
+                        // The item whose photos get copied must belong to that record.
+                        $item = Db::pdo()->prepare('SELECT 1 FROM inspection_items WHERE id = ? AND inspection_id = ?');
+                        $item->execute([$fields['persists_from']['source_item_id'], $srcInspId]);
+                        if (!$item->fetchColumn()) {
+                            $fields['persists_from']['source_item_id'] = null;
+                        }
+                    }
+                }
+                return $fields;
+            } catch (\InvalidArgumentException $e) {
+                self::failValidation($e->getMessage());
+            }
+        }
+        // POapp 7. 11. 2026 — a defect of a new-format požiarna kniha entry: the
+        // prehliadka's defect screen (spec 8) with an optional deadline, the
+        // prevádzka chosen among the entry's (stamped when there is one), scope
+        // always po and nothing carried over (plan O3).
+        if ($type === 'poziarna_kniha' && self::isNewBook($inspection)) {
+            $facilityIds = BookEntry::facilityIds((int) $inspection['id']);
+            // Nothing is carried into a book entry: an origin sent anyway is
+            // dropped before validating, so it cannot make a new defect
+            // „dôvod zanikol" (round 6 — answer 6 B held only on screen).
+            unset($body['persists_from']);
+            try {
+                $fields = PrehliadkaDefects::validate(
+                    $body,
+                    isset($inspection['executed_on']) ? (string) $inspection['executed_on'] : null,
+                    ($inspection['client_type'] ?? '') === 'bytove_druzstvo',
+                    ['deadline_optional' => true, 'facility_ids' => $facilityIds, 'allow_new_zanik' => $keepsZanik],
+                );
+            } catch (\InvalidArgumentException $e) {
+                self::failValidation($e->getMessage());
+            }
+            $fields['scope'] = 'po';
+            $fields['persists_from'] = null;
+            if (count($facilityIds) === 1) {
+                $fields['facility_id'] = $facilityIds[0];
+            }
+            return $fields;
+        }
         // Block 2 — single-record BOZP úkony (kniha BOZP, pracovisko,
         // osamelé pracoviská, fajčenie): one record holds the whole úkon.
         if (\Firol\Support\BozpRecords::supports($type)) {
@@ -210,6 +529,9 @@ final class InspectionItemController
         if (\Firol\Support\BozpItems::supports($type)) {
             try {
                 return \Firol\Support\BozpItems::validate($type, $body);
+            } catch (\Firol\Support\FieldRefused $e) {
+                // The field's key, as the fire validators pass it (round 6).
+                self::failValidation($e->getMessage(), $e->field);
             } catch (\InvalidArgumentException $e) {
                 self::failValidation($e->getMessage());
             }
@@ -223,7 +545,8 @@ final class InspectionItemController
                 self::failValidation($e->getMessage());
             }
         }
-        return match ($type) {
+        self::$labelType = $type;
+        $fields = match ($type) {
             'php'                => self::validatePhpFields($body),
             'hydranty'           => self::validateHydrantyFields($body),
             'oprava_ts_php'      => self::validateOpravaTsPhpFields($body),
@@ -235,6 +558,10 @@ final class InspectionItemController
             'vyradenie'          => self::validateVyradenieFields($body),
             default => self::failValidation("Items for type '$type' are not supported yet."),
         };
+        if (isset($body['prehliadka_defects']) && is_array($body['prehliadka_defects'])) {
+            $fields['prehliadka_defects'] = $body['prehliadka_defects'];
+        }
+        return $fields;
     }
 
     /**
@@ -254,12 +581,12 @@ final class InspectionItemController
             $year = (int) $year;
         }
         if (!is_int($year) || $year < 1900 || $year > 2200) {
-            self::failValidation('Field year must be an integer year (1900–2200).');
+            self::failValidation('Pole „' . self::labelOf('year') . '" musí byť rok od 1900 do 2200.', 'year');
         }
 
         $status = $body['status'] ?? null;
         if (!is_string($status) || !in_array($status, self::PHP_STATUSES, true)) {
-            self::failValidation('Field status must be one of: A, TS, O, V.');
+            self::failValidation('Vyber „' . self::labelOf('status') . '".', 'status');
         }
 
         return [
@@ -296,7 +623,7 @@ final class InspectionItemController
             $year = (int) $year;
         }
         if (!is_int($year) || $year < 1900 || $year > 2200) {
-            self::failValidation('Field year must be an integer year (1900–2200).');
+            self::failValidation('Pole „' . self::labelOf('year') . '" musí byť rok od 1900 do 2200.', 'year');
         }
 
         return [
@@ -331,7 +658,7 @@ final class InspectionItemController
             $year = (int) $year;
         }
         if (!is_int($year) || $year < 1900 || $year > 2200) {
-            self::failValidation('Field year must be an integer year (1900–2200).');
+            self::failValidation('Pole „' . self::labelOf('year') . '" musí byť rok od 1900 do 2200.', 'year');
         }
 
         return [
@@ -490,7 +817,7 @@ final class InspectionItemController
     {
         $kind = $body['kind'] ?? null;
         if (!is_string($kind) || !in_array($kind, self::PU_KINDS, true)) {
-            self::failValidation('Field kind must be one of: dvere, okno, klapka.');
+            self::failValidation('Vyber „' . self::labelOf('kind') . '".', 'kind');
         }
         $identifier   = self::stringField($body, 'identifier',   required: true,  max: 80);
         $manufacturer = self::stringField($body, 'manufacturer', required: true,  max: 80);
@@ -499,7 +826,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.');
+            self::failValidation('Vyber „' . self::labelOf('result') . '".', 'result');
         }
 
         return [
@@ -528,7 +855,7 @@ final class InspectionItemController
     {
         $kind = $body['kind'] ?? null;
         if (!is_string($kind) || !in_array($kind, self::PU_KINDS, true)) {
-            self::failValidation('Field kind must be one of: dvere, okno, klapka.');
+            self::failValidation('Vyber „' . self::labelOf('kind') . '".', 'kind');
         }
         $identifier      = self::stringField($body, 'identifier',       required: true,  max: 80);
         $manufacturer    = self::stringField($body, 'manufacturer',     required: false, max: 80);
@@ -538,7 +865,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.');
+            self::failValidation('Vyber „' . self::labelOf('result') . '".', 'result');
         }
 
         return [
@@ -573,7 +900,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.');
+            self::failValidation('Vyber „' . self::labelOf('result') . '".', 'result');
         }
 
         return [
@@ -616,7 +943,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.');
+            self::failValidation('Vyber „' . self::labelOf('result') . '".', 'result');
         }
 
         return [
@@ -645,12 +972,12 @@ final class InspectionItemController
     {
         $type      = $body['type'] ?? null;
         if (!is_string($type) || !in_array($type, self::HYDRANTY_TYPES, true)) {
-            self::failValidation('Field type must be one of: DN25, DN33, DN52, C52, other.');
+            self::failValidation('Vyber „' . self::labelOf('type') . '".', 'type');
         }
 
         $typeOther = self::stringField($body, 'type_other', required: false, max: 60);
         if ($type === 'other' && ($typeOther === null || $typeOther === '')) {
-            self::failValidation('Field type_other is required when type = other.');
+            self::failValidation('Pole „' . self::labelOf('type_other') . '" je povinné.', 'type_other');
         }
         // Drop the free-text label when it's not relevant — keeps payload tidy.
         if ($type !== 'other') {
@@ -667,7 +994,7 @@ final class InspectionItemController
 
         $result = $body['result'] ?? null;
         if (!is_string($result) || !in_array($result, self::RESULT_ENUM, true)) {
-            self::failValidation('Field result must be vyhovuje or nevyhovuje.');
+            self::failValidation('Vyber „' . self::labelOf('result') . '".', 'result');
         }
 
         return [
@@ -691,9 +1018,16 @@ final class InspectionItemController
             $raw = (int) $raw;
         }
         if (!is_int($raw) || $raw < 0 || $raw > $max) {
-            self::failValidation("Field $key must be an integer between 0 and $max.");
+            self::failValidation('Pole „' . self::labelOf($key) . '" musí byť celé číslo od 0 do ' . $max . '.', $key);
+            return 0; // only reached while collecting missing fields
         }
         return $raw;
+    }
+
+    /** A bound of a range as the Slovak UI writes it: „0", „0,5". */
+    private static function number(float $n): string
+    {
+        return str_replace('.', ',', rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.'));
     }
 
     /** @param array<string, mixed> $body */
@@ -707,7 +1041,11 @@ final class InspectionItemController
             $raw = (float) $raw;
         }
         if (!is_float($raw) || $raw < $min || $raw > $max) {
-            self::failValidation("Field $key must be a number between $min and $max.");
+            self::failValidation(
+                'Pole „' . self::labelOf($key) . '" musí byť číslo od ' . self::number($min) . ' do ' . self::number($max) . '.',
+                $key,
+            );
+            return 0.0; // only reached while collecting missing fields
         }
         return $raw;
     }
@@ -724,36 +1062,52 @@ final class InspectionItemController
         $raw = $body[$key] ?? null;
         if (!is_string($raw)) {
             if ($required) {
-                self::failValidation("Field required: $key");
+                self::failValidation('Pole „' . self::labelOf($key) . '" je povinné.', $key);
             }
             return null;
         }
         $value = trim($raw);
         if ($value === '') {
             if ($required) {
-                self::failValidation("Field required: $key");
+                self::failValidation('Pole „' . self::labelOf($key) . '" je povinné.', $key);
             }
             return null;
         }
         if (mb_strlen($value) > $max) {
-            self::failValidation("Field too long: $key (max $max chars)");
+            self::failValidation(
+                'Pole „' . self::labelOf($key) . '" je príliš dlhé — najviac ' . $max . ' znakov.',
+                $key,
+            );
         }
         return $value;
     }
 
-    private static function failValidation(string $message): never
+    /**
+     * Refuses the request with a 422 — or, while {@see self::missingFields()} is
+     * checking an item that already exists, records the field and carries on,
+     * so one pass names every field that is missing, not just the first.
+     */
+    private static function failValidation(string $message, ?string $key = null): void
     {
-        Response::error($message, 422);
+        if (self::$problems !== null) {
+            self::$problems[] = $key ?? $message;
+            return;
+        }
+        // `field` lets „Skontroluj hodnoty" tell an empty field from a wrong value.
+        Response::error($message, 422, $key !== null ? ['field' => $key] : []);
     }
 
     /** @return array<string, mixed> */
     private static function loadInspectionOrFail(?int $accountId, int $inspectionId): array
     {
-        $sql = 'SELECT id, type, status FROM inspections
-                WHERE id = ? AND archived_at IS NULL';
+        $sql = 'SELECT i.id, i.type, i.status, i.account_id, i.facility_id, i.company_id, i.executed_on,
+                       i.details, c.client_type
+                FROM   inspections i
+                JOIN   companies c ON c.id = i.company_id
+                WHERE  i.id = ? AND i.archived_at IS NULL';
         $params = [$inspectionId];
         if ($accountId !== null) {
-            $sql .= ' AND account_id = ?';
+            $sql .= ' AND i.account_id = ?';
             $params[] = $accountId;
         }
         $stmt = Db::pdo()->prepare($sql);
@@ -763,6 +1117,13 @@ final class InspectionItemController
             Response::error('Kontrola sa nenašla.', 404);
         }
         return $row;
+    }
+
+    /** @param array<string, mixed> $inspection */
+    private static function isNewBook(array $inspection): bool
+    {
+        return ($inspection['type'] ?? '') === 'poziarna_kniha'
+            && BookEntry::isNew(InspectionDetails::decode($inspection['details'] ?? null));
     }
 
     /**
@@ -783,15 +1144,19 @@ final class InspectionItemController
         }
     }
 
-    private static function loadItemForInspectionOrFail(int $itemId, int $inspectionId): void
+    /** @return array<string, mixed> the item's stored fields */
+    private static function loadItemForInspectionOrFail(int $itemId, int $inspectionId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT 1 FROM inspection_items WHERE id = ? AND inspection_id = ?'
+            'SELECT fields FROM inspection_items WHERE id = ? AND inspection_id = ?'
         );
         $stmt->execute([$itemId, $inspectionId]);
-        if ($stmt->fetchColumn() === false) {
+        $raw = $stmt->fetchColumn();
+        if ($raw === false) {
             Response::error('Položka sa nenašla.', 404);
         }
+        $fields = json_decode((string) $raw, true);
+        return is_array($fields) ? $fields : [];
     }
 
     /** @return array<string, mixed> */

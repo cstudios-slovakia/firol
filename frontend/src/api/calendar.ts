@@ -2,6 +2,7 @@ import { api } from '@/lib/api';
 import type { InspectionType } from '@/api/inspections';
 import type { TrainingType } from '@/api/trainings';
 import type { Section } from '@/lib/sections';
+import type { ClientType } from '@/lib/clientKind';
 
 /**
  * Calendar API (change request 2.5, BOZP extension chapter 11).
@@ -53,9 +54,11 @@ export type CalendarDeadline = {
   section: Section | null;
   company_id: number;
   company_name: string;
+  /** Type of the client — picks firma / bytové družstvo wording. */
+  company_client_type?: ClientType;
   /** Company contact e-mail — recipient of the client notice (11.3). */
   company_email: string | null;
-  /** Null for a training of the whole firma — shown as „Celá firma". */
+  /** Null for a training of the whole client — shown as „Celá firma" / „Celé bytové družstvo". */
   facility_id: number | null;
   facility_name: string | null;
   /** Obec from the prevádzka's address; null when not filled in. */
@@ -146,15 +149,23 @@ export const ZDROJ_LABELS: Record<TerminZdroj, string> = {
 export const Calendar = {
   get: () => api<CalendarData>('/api/calendar'),
 
-  setPlan: (inspectionId: number, plannedDate: string, csrfToken: string | null) =>
+  /**
+   * `facilityId` — which prevádzka's term of the inspection the plan is for: a
+   * požiarna kniha entry covers several, each with a term of its own. Without
+   * it the server takes the inspection's own prevádzka.
+   */
+  setPlan: (inspectionId: number, plannedDate: string, csrfToken: string | null, facilityId?: number | null) =>
     api<{ ok: true }>(`/api/calendar/plans/${inspectionId}`, {
       method: 'PATCH',
-      body: { planned_date: plannedDate },
+      body: facilityId ? { planned_date: plannedDate, facility_id: facilityId } : { planned_date: plannedDate },
       csrfToken,
     }),
 
-  clearPlan: (inspectionId: number, csrfToken: string | null) =>
-    api<void>(`/api/calendar/plans/${inspectionId}`, { method: 'DELETE', csrfToken }),
+  clearPlan: (inspectionId: number, csrfToken: string | null, facilityId?: number | null) =>
+    api<void>(
+      `/api/calendar/plans/${inspectionId}${facilityId ? `?facility_id=${facilityId}` : ''}`,
+      { method: 'DELETE', csrfToken },
+    ),
 
   /** The same for the term of a training (change request 6). */
   setTrainingPlan: (trainingId: number, plannedDate: string, csrfToken: string | null) =>

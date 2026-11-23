@@ -52,7 +52,7 @@ export function MemberRightsCard({ className }: { className?: string }) {
           <h2 className="text-base font-semibold text-ink-900">Technici môžu mazať</h2>
           <p className="mt-0.5 text-xs text-ink-500">
             Mazanie hotových úkonov a protokolov, ich odomknutie na úpravu, mazanie položiek skladu
-            a archivovanie firiem a prevádzok. Keď je vypnuté, technici tieto tlačidlá nevidia.
+            a archivovanie klientov, prevádzok a bytových domov. Keď je vypnuté, technici tieto tlačidlá nevidia.
             Vlastné rozpracované úkony si technik môže zmazať vždy.
           </p>
           <p className="mt-2 text-xs font-medium text-ink-700">

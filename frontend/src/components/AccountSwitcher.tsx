@@ -57,12 +57,12 @@ export function AccountSwitcher() {
   }
 
   return (
-    <div ref={wrap} className="relative">
+    <div ref={wrap} className="relative min-w-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={busy}
-        className="flex items-center gap-2 rounded-2xl border border-ink-200 bg-white px-3 py-1.5 text-left hover:border-ink-300 disabled:opacity-60"
+        className="flex max-w-full items-center gap-2 rounded-2xl border border-ink-200 bg-white px-3 py-1.5 text-left hover:border-ink-300 disabled:opacity-60"
       >
         <UserAccountInfo name={user?.fullname ?? null} companyName={active.invoice_company_name} />
         <ChevronDown className="size-4 shrink-0 text-ink-400" />
@@ -97,12 +97,12 @@ export function AccountSwitcher() {
 
 function UserAccountInfo({ name, companyName }: { name: string | null; companyName: string | null | undefined }) {
   return (
-    <div className="flex flex-col items-start gap-0.5 max-w-[12rem]">
+    <div className="flex min-w-0 max-w-[12rem] flex-col items-start gap-0.5">
       {name && (
-        <span className="truncate text-sm font-medium text-ink-800 leading-none">{name}</span>
+        <span className="max-w-full truncate text-sm font-medium text-ink-800 leading-none">{name}</span>
       )}
       {companyName && (
-        <span className="truncate rounded-md bg-firol-50 px-1.5 py-px text-[11px] font-medium text-firol-700 leading-none border border-firol-100">
+        <span className="max-w-full truncate rounded-md bg-firol-50 px-1.5 py-px text-[11px] font-medium text-firol-700 leading-none border border-firol-100">
           {companyName}
         </span>
       )}
@@ -112,7 +112,7 @@ function UserAccountInfo({ name, companyName }: { name: string | null; companyNa
 
 function CurrentLabel({ account, user }: { account: Account; user: User | null }) {
   return (
-    <div className="rounded-2xl border border-transparent px-3 py-1.5">
+    <div className="min-w-0 rounded-2xl border border-transparent px-3 py-1.5">
       <UserAccountInfo name={user?.fullname ?? null} companyName={account.invoice_company_name} />
     </div>
   );

@@ -2,10 +2,11 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Mail, Send } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Companies } from '@/api/companies';
+import { Facilities } from '@/api/facilities';
 import { Documents } from '@/api/documents';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { companyRecipientEmail } from '@/lib/companyEmail';
+import { clientRecipientEmail, companyRecipientEmail } from '@/lib/companyEmail';
 import { useToast } from '@/lib/toast';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -19,6 +20,7 @@ export function EmailDocumentForm({
   documentId,
   documentNumber,
   companyId,
+  facilityId,
   heading = 'Odoslať protokol e-mailom',
   sentNoun = 'Protokol',
   sentVerb = 'odoslaný',
@@ -28,6 +30,8 @@ export function EmailDocumentForm({
   documentNumber: string;
   /** When given, the client's recorded e-mail is prefilled (and stays editable). */
   companyId?: number;
+  /** When set, the prevádzka e-mail wins over the firm's (spec 3.2). */
+  facilityId?: number | null;
   /** Line above the address. Defaults to the protocol wording. */
   heading?: string;
   /** Toast subject, e.g. „Potvrdenie". */
@@ -44,11 +48,17 @@ export function EmailDocumentForm({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (companyId === undefined) return;
+    if (companyId === undefined && (facilityId === undefined || facilityId === null)) return;
     let cancelled = false;
-    Companies.show(companyId)
-      .then((res) => {
-        const known = companyRecipientEmail(res.company);
+    const load = facilityId != null
+      ? Facilities.show(facilityId).then((res) => clientRecipientEmail({
+          facility_email: res.facility.email,
+          contact_email: res.facility.company_contact_email ?? null,
+          contact: res.facility.company_contact ?? null,
+        }))
+      : Companies.show(companyId!).then((res) => companyRecipientEmail(res.company));
+    load
+      .then((known) => {
         // Never overwrite something the technician already started typing.
         if (!cancelled && known) setEmail((current) => current || known);
       })
@@ -58,7 +68,7 @@ export function EmailDocumentForm({
     return () => {
       cancelled = true;
     };
-  }, [companyId]);
+  }, [companyId, facilityId]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();

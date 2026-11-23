@@ -19,6 +19,7 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
+import { Textarea } from '@/components/ui/Textarea';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
@@ -30,7 +31,10 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
+import { NextRecordedButton } from './NextRecordedButton';
 
 function isPuKind(s: unknown): s is PuKind {
   return s === 'dvere' || s === 'okno' || s === 'klapka';
@@ -39,10 +43,24 @@ function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
 }
 
+/** What the form opens with for a stored item. */
+function puAkcieschopnostValues(f: Partial<PuAkcieschopnostItemFields>) {
+  return {
+    kind: (isPuKind(f.kind) ? f.kind : 'dvere') as PuKind,
+    identifier: typeof f.identifier === 'string' ? f.identifier : '',
+    manufacturer: typeof f.manufacturer === 'string' ? f.manufacturer : '',
+    location: typeof f.location === 'string' ? f.location : '',
+    // A result the item arrived without (a hose with no match in the last
+    // protocol) stays unpicked: it is the technician's to choose, never presumed.
+    result: (isPassFail(f.result) ? f.result : '') as PassFailResult | '',
+    notes: typeof f.notes === 'string' ? f.notes : '',
+  };
+}
+
 /** Carried into the next uzáver by "Ďalší rovnaký" — never the identifier. */
 type PuAkSeed = { kind: PuKind; manufacturer: string };
 
-function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -50,7 +68,7 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
   const [identifier, setIdentifier] = useState('');
   const [manufacturer, setManufacturer] = useState('');
   const [location, setLocation] = useState('');
-  const [result, setResult] = useState<PassFailResult>('vyhovuje');
+  const [result, setResult] = useState<PassFailResult | ''>('vyhovuje');
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
@@ -61,13 +79,13 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<PuAkcieschopnostItemFields>;
-      setKind(isPuKind(f.kind) ? f.kind : 'dvere');
-      setIdentifier(typeof f.identifier === 'string' ? f.identifier : '');
-      setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
-      setLocation(typeof f.location === 'string' ? f.location : '');
-      setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
-      setNotes(typeof f.notes === 'string' ? f.notes : '');
+      const v = puAkcieschopnostValues(initialItem.fields as Partial<PuAkcieschopnostItemFields>);
+      setKind(v.kind);
+      setIdentifier(v.identifier);
+      setManufacturer(v.manufacturer);
+      setLocation(v.location);
+      setResult(v.result);
+      setNotes(v.notes);
     } else {
       // "Ďalší rovnaký": carry kind + manufacturer; identifier/location fresh.
       const seed = peekDuplicateSeed<PuAkSeed>(inspectionId);
@@ -81,6 +99,13 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
   }, [initialItem, inspectionId]);
 
   function isPristine() {
+    // A staged or removed photo is a change too; only saveItemWithPhotos()
+    // commits it, so the shortcut must not skip the save.
+    if (photos.dirty) return false;
+    // An existing item: nothing to save only while nothing was changed.
+    if (initialItem) {
+      return sameFormValues(puAkcieschopnostValues(initialItem.fields as Partial<PuAkcieschopnostItemFields>), { kind, identifier, manufacturer, location, result, notes });
+    }
     return (
       kind === 'dvere' && !identifier && !manufacturer && !location && !notes &&
       result === 'vyhovuje'
@@ -95,7 +120,7 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
 
   async function handleSubmit(
     e: FormEvent,
-    action: 'save-and-next' | 'save-and-summary',
+    action: SubmitAction,
     duplicate = false,
   ) {
     e.preventDefault();
@@ -103,6 +128,7 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
     if (!identifier.trim()) errs.identifier = 'Doplň číslo / označenie uzáveru.';
     if (!manufacturer.trim()) errs.manufacturer = 'Doplň výrobcu.';
     if (!location.trim()) errs.location = 'Doplň umiestnenie.';
+    if (!result) errs.result = 'Vyber výsledok.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
     setApiError(null);
@@ -113,7 +139,7 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
         identifier: identifier.trim(),
         manufacturer: manufacturer.trim(),
         location: location.trim(),
-        result,
+        result: result as PassFailResult,
         notes: notes.trim() || null,
       };
       const saved = await saveItemWithPhotos({
@@ -176,11 +202,11 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
           )}
         </Field>
 
-        <Field label="Výsledok kontroly" required>
+        <Field label="Výsledok kontroly" required error={fieldErrors.result}>
           {() => (
             <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Výsledok kontroly">
               {(['vyhovuje', 'nevyhovuje'] as const).map((r) => (
-                <ResultButton key={r} value={r} active={result === r} onClick={() => setResult(r)} />
+                <ResultButton key={r} value={r} active={result === r} onClick={() => { setResult(r); setFieldErrors((prev) => { const n = { ...prev }; delete n.result; return n; }); }} />
               ))}
             </div>
           )}
@@ -188,14 +214,10 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
 
         <Field label="Poznámky / závady" hint="Voliteľné — nech zostane prázdne ak je uzáver v poriadku.">
           {(p) => (
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
-                <NotebookPen className="size-4" />
-              </span>
-              <textarea id={p.id} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
-                placeholder="Poškodené tesnenie, vypadáva pružina, chýba samozatvárač."
-                className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
-            </div>
+            <Textarea id={p.id} rows={3} clearable
+              leftIcon={<NotebookPen className="size-4" />}
+              value={notes} onValueChange={setNotes}
+              placeholder="Poškodené tesnenie, vypadáva pružina, chýba samozatvárač." />
           )}
         </Field>
 
@@ -212,17 +234,21 @@ function PuAkStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSav
           </p>
         )}
 
-        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
-            loading={submitting} leftIcon={<ListChecks className="size-4" />}>
+            loading={submitting} disabled={photos.processing} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
           <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
-            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            loading={submitting} disabled={photos.processing} leftIcon={<CopyPlus className="size-4" />}
             title="Uloží a predvyplní ďalší uzáver rovnakého druhu a výrobcu.">
             Ďalší rovnaký
           </Button>
-          <Button type="submit" loading={submitting}
+          {editing && hasNextItem && (
+            <NextRecordedButton loading={submitting} disabled={photos.processing}
+              onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next-recorded')} />
+          )}
+          <Button type="submit" loading={submitting} disabled={photos.processing}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}
           </Button>

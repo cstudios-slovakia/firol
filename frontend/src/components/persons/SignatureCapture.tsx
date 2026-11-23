@@ -3,27 +3,7 @@ import { Check, PenLine, X } from 'lucide-react';
 import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
-
-/** Widest signature kept — enough for the protocol cell, a few kB as PNG. */
-const MAX_WIDTH = 360;
-
-/**
- * Downscale the pad's HiDPI PNG so a row with a signature stays a few
- * kilobytes: the signature lives on the person row itself (offline outbox,
- * backup and restore then carry it with no second upload channel).
- */
-async function toSmallDataUri(blob: Blob): Promise<string> {
-  const bitmap = await createImageBitmap(blob);
-  const scale = Math.min(1, MAX_WIDTH / bitmap.width);
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('canvas');
-  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close?.();
-  return canvas.toDataURL('image/png');
-}
+import { toSmallDataUri } from '@/lib/signatureImage';
 
 /**
  * „Podpis (na displeji alebo prázdny)" — chapters 7 and 8. The signature is

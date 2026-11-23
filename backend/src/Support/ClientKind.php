@@ -1,0 +1,156 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Firol\Support;
+
+/**
+ * Client type lives on the company (owner decision D1). A prevádzka under a
+ * bytové družstvo is a bytový dom; nothing else in the logic differs except
+ * the floor fields on that form. The Slovak nouns live here so a server
+ * message names the same thing the screen does (frontend/src/lib/clientKind.ts).
+ */
+final class ClientKind
+{
+    public const FIRMA = 'firma';
+
+    public const BYTOVE_DRUZSTVO = 'bytove_druzstvo';
+
+    public static function isValid(string $type): bool
+    {
+        return $type === self::FIRMA || $type === self::BYTOVE_DRUZSTVO;
+    }
+
+    public static function isBytovyDom(string $type): bool
+    {
+        return $type === self::BYTOVE_DRUZSTVO;
+    }
+
+    /** What a missing name is called in a 422 — the name of a prevádzka / bytový dom. */
+    public static function nameRequired(string $type): string
+    {
+        return self::isBytovyDom($type)
+            ? 'Zadaj názov bytového domu.'
+            : 'Zadaj názov prevádzky.';
+    }
+
+    /** A missing name of the client itself (firma / bytové družstvo). */
+    public static function companyNameRequired(string $type): string
+    {
+        return self::isBytovyDom($type)
+            ? 'Zadaj názov bytového družstva.'
+            : 'Zadaj názov firmy.';
+    }
+
+    // ── The code of the client's požiarna kniha numbers (PK-<KÓD>-NNN) ───────
+
+    /** A typed code that is not 2–4 letters or digits. */
+    public static function bookCodeShape(string $type): string
+    {
+        return (self::isBytovyDom($type) ? 'Kód bytového družstva' : 'Kód firmy')
+            . ' musí mať 2 až 4 znaky — písmená bez diakritiky alebo číslice.';
+    }
+
+    /** A typed code of digits only. */
+    public static function bookCodeLetter(string $type): string
+    {
+        return (self::isBytovyDom($type) ? 'Kód bytového družstva' : 'Kód firmy')
+            . ' musí obsahovať aspoň jedno písmeno.';
+    }
+
+    /** The code is locked: the client has an issued entry. */
+    public static function bookCodeLocked(string $type): string
+    {
+        return 'Kód sa už nedá zmeniť — '
+            . (self::isBytovyDom($type) ? 'bytové družstvo' : 'firma')
+            . ' má vystavený zápis do požiarnej knihy.';
+    }
+
+    /**
+     * The code is taken. `$holderType` is the kind of the client holding it;
+     * null when only numbers of its series hold it (a merge restore).
+     */
+    public static function bookCodeTaken(string $code, ?string $holderType): string
+    {
+        $holder = match (true) {
+            $holderType === null            => 'už majú čísla zápisov tohto účtu',
+            self::isBytovyDom($holderType) => 'už má iné bytové družstvo tohto účtu',
+            default                         => 'už má iná firma tohto účtu',
+        };
+        return 'Kód „' . $code . '" ' . $holder . '. Zvoľ iný.';
+    }
+
+    /** No code, and the name gives no proposal. */
+    public static function bookCodeMissing(string $type): string
+    {
+        return self::isBytovyDom($type)
+            ? 'Bytové družstvo nemá kód pre čísla zápisov do požiarnej knihy a z názvu sa nedá navrhnúť. Doplň ho na detaile bytového družstva (2 – 4 písmená alebo číslice).'
+            : 'Firma nemá kód pre čísla zápisov do požiarnej knihy a z názvu sa nedá navrhnúť. Doplň ho na detaile firmy (2 – 4 písmená alebo číslice).';
+    }
+
+    public static function companyAlreadyArchived(string $type): string
+    {
+        return self::isBytovyDom($type)
+            ? 'Bytové družstvo je už archivované.'
+            : 'Firma je už archivovaná.';
+    }
+
+    public static function companyNotArchived(string $type): string
+    {
+        return self::isBytovyDom($type)
+            ? 'Bytové družstvo nie je archivované.'
+            : 'Firma nie je archivovaná.';
+    }
+
+    public static function facilityAlreadyArchived(string $type): string
+    {
+        return self::isBytovyDom($type)
+            ? 'Bytový dom je už archivovaný.'
+            : 'Prevádzka je už archivovaná.';
+    }
+
+    public static function facilityNotArchived(string $type): string
+    {
+        return self::isBytovyDom($type)
+            ? 'Bytový dom nie je archivovaný.'
+            : 'Prevádzka nie je archivovaná.';
+    }
+
+    /** The client of a facility is archived, so the facility cannot be archived on its own. */
+    public static function clientOfFacilityArchived(string $type): string
+    {
+        return self::isBytovyDom($type)
+            ? 'Bytové družstvo tohto bytového domu je archivované.'
+            : 'Firma tejto prevádzky je archivovaná.';
+    }
+
+    public static function restoreClientOfFacilityFirst(string $type): string
+    {
+        return self::isBytovyDom($type)
+            ? 'Najprv obnov bytové družstvo tohto bytového domu.'
+            : 'Najprv obnov firmu tejto prevádzky.';
+    }
+
+    /** @param string $tail what stops, e.g. „činnosti sa už nemenia." */
+    public static function clientArchivedReadOnly(string $type, string $tail): string
+    {
+        return (self::isBytovyDom($type) ? 'Bytové družstvo je archivované — ' : 'Firma je archivovaná — ') . $tail;
+    }
+
+    /** The facility noun as a label, by count: Prevádzka / Prevádzky, Bytový dom / Bytové domy. */
+    public static function facilityLabel(string $type, int $count): string
+    {
+        if (self::isBytovyDom($type)) {
+            return $count > 1 ? 'Bytové domy' : 'Bytový dom';
+        }
+        return $count > 1 ? 'Prevádzky' : 'Prevádzka';
+    }
+
+    /** E-mail of a prevádzka / bytový dom that is not valid. */
+    public static function facilityEmailInvalid(string $type): string
+    {
+        return self::isBytovyDom($type)
+            ? 'Zadaj platný e-mail bytového domu.'
+            : 'Zadaj platný e-mail prevádzky.';
+    }
+}

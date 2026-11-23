@@ -41,6 +41,8 @@ final class Periodicity
         'hydranty'           => [12],
         'ts_hadic'           => [12],
         'poziarna_kniha'     => [12, 6, 3],
+        // Continues the poziarna_kniha term chain, so it offers the same period.
+        'preventivna_prehliadka' => [12, 6, 3],
         'pu_akcieschopnost'  => [3, 6, 12],
         'pu_udrzba'          => [12],
         'nudzove_osvetlenie' => [12],
@@ -82,6 +84,17 @@ final class Periodicity
         'hliadka_opah' => [12],
         'pokyn_zatva'  => [12],
     ];
+
+    /**
+     * Key of the term chain an inspection type belongs to. The preventívna
+     * prehliadka continues the chain of the retired požiarna kniha, so a client
+     * whose last term came from an old record has it fulfilled by the first
+     * prehliadka (POapp 26. 10. 2026, phase 8a). Every other type is its own chain.
+     */
+    public static function inspectionChain(string $type): string
+    {
+        return $type === 'poziarna_kniha' ? 'preventivna_prehliadka' : $type;
+    }
 
     /**
      * Key of the term chain a training belongs to. Vstupné and Opakované are

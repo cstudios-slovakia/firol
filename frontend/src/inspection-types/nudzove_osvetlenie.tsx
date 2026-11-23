@@ -16,6 +16,7 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
+import { Textarea } from '@/components/ui/Textarea';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
@@ -27,16 +28,35 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
+import { NextRecordedButton } from './NextRecordedButton';
 
 function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
 }
 
+/** What the form opens with for a stored item. */
+function nudzoveOsvetlenieValues(f: Partial<NudzoveOsvetlenieItemFields>) {
+  return {
+    evidNumber: typeof f.evid_number === 'string' ? f.evid_number : '',
+    floor: typeof f.floor === 'string' ? f.floor : '',
+    luminaireType: typeof f.luminaire_type === 'string' ? f.luminaire_type : '',
+    manufacturer: typeof f.manufacturer === 'string' ? f.manufacturer : '',
+    location: typeof f.location === 'string' ? f.location : '',
+    durationMin: typeof f.duration_min === 'number' ? String(f.duration_min) : '',
+    // A result the item arrived without (a hose with no match in the last
+    // protocol) stays unpicked: it is the technician's to choose, never presumed.
+    result: (isPassFail(f.result) ? f.result : '') as PassFailResult | '',
+    notes: typeof f.notes === 'string' ? f.notes : '',
+  };
+}
+
 /** Carried into the next luminaire by "Ďalší rovnaký" — never evid. number. */
 type NoSeed = { floor: string; luminaire_type: string; manufacturer: string };
 
-function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -46,7 +66,7 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
   const [manufacturer, setManufacturer] = useState('');
   const [location, setLocation] = useState('');
   const [durationMin, setDurationMin] = useState('');
-  const [result, setResult] = useState<PassFailResult>('vyhovuje');
+  const [result, setResult] = useState<PassFailResult | ''>('vyhovuje');
   const [notes, setNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
@@ -57,15 +77,15 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<NudzoveOsvetlenieItemFields>;
-      setEvidNumber(typeof f.evid_number === 'string' ? f.evid_number : '');
-      setFloor(typeof f.floor === 'string' ? f.floor : '');
-      setLuminaireType(typeof f.luminaire_type === 'string' ? f.luminaire_type : '');
-      setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
-      setLocation(typeof f.location === 'string' ? f.location : '');
-      setDurationMin(typeof f.duration_min === 'number' ? String(f.duration_min) : '');
-      setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
-      setNotes(typeof f.notes === 'string' ? f.notes : '');
+      const v = nudzoveOsvetlenieValues(initialItem.fields as Partial<NudzoveOsvetlenieItemFields>);
+      setEvidNumber(v.evidNumber);
+      setFloor(v.floor);
+      setLuminaireType(v.luminaireType);
+      setManufacturer(v.manufacturer);
+      setLocation(v.location);
+      setDurationMin(v.durationMin);
+      setResult(v.result);
+      setNotes(v.notes);
     } else {
       // "Ďalší rovnaký": carry floor + luminaire type + manufacturer; the
       // evidence number, location and measured duration always start fresh.
@@ -82,6 +102,13 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
   }, [initialItem, inspectionId]);
 
   function isPristine() {
+    // A staged or removed photo is a change too; only saveItemWithPhotos()
+    // commits it, so the shortcut must not skip the save.
+    if (photos.dirty) return false;
+    // An existing item: nothing to save only while nothing was changed.
+    if (initialItem) {
+      return sameFormValues(nudzoveOsvetlenieValues(initialItem.fields as Partial<NudzoveOsvetlenieItemFields>), { evidNumber, floor, luminaireType, manufacturer, location, durationMin, result, notes });
+    }
     return (
       !evidNumber && !floor && !luminaireType && !manufacturer && !location &&
       !durationMin && !notes && result === 'vyhovuje'
@@ -96,7 +123,7 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
 
   async function handleSubmit(
     e: FormEvent,
-    action: 'save-and-next' | 'save-and-summary',
+    action: SubmitAction,
     duplicate = false,
   ) {
     e.preventDefault();
@@ -107,6 +134,7 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
     const dur = Number(durationMin);
     if (!durationMin || !Number.isInteger(dur) || dur < 0 || dur > 600)
       errs.durationMin = 'Zadaj dobu svietenia v minútach (0–600).';
+    if (!result) errs.result = 'Vyber výsledok.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
     setApiError(null);
@@ -119,7 +147,7 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
         manufacturer: manufacturer.trim(),
         location: location.trim(),
         duration_min: dur,
-        result,
+        result: result as PassFailResult,
         notes: notes.trim() || null,
       };
       const saved = await saveItemWithPhotos({
@@ -200,11 +228,11 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
           )}
         </Field>
 
-        <Field label="Výsledok testu" required>
+        <Field label="Výsledok testu" required error={fieldErrors.result}>
           {() => (
             <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Výsledok testu">
               {(['vyhovuje', 'nevyhovuje'] as const).map((r) => (
-                <ResultButton key={r} value={r} active={result === r} onClick={() => setResult(r)} />
+                <ResultButton key={r} value={r} active={result === r} onClick={() => { setResult(r); setFieldErrors((prev) => { const n = { ...prev }; delete n.result; return n; }); }} />
               ))}
             </div>
           )}
@@ -212,14 +240,10 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
 
         <Field label="Poznámky / závady" hint="Voliteľné — len ak sa niečo zistí.">
           {(p) => (
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
-                <NotebookPen className="size-4" />
-              </span>
-              <textarea id={p.id} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
-                placeholder="Slabá batéria, výmena LED modulu, prachové znečistenie."
-                className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
-            </div>
+            <Textarea id={p.id} rows={3} clearable
+              leftIcon={<NotebookPen className="size-4" />}
+              value={notes} onValueChange={setNotes}
+              placeholder="Slabá batéria, výmena LED modulu, prachové znečistenie." />
           )}
         </Field>
 
@@ -236,17 +260,21 @@ function NoStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
           </p>
         )}
 
-        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
-            loading={submitting} leftIcon={<ListChecks className="size-4" />}>
+            loading={submitting} disabled={photos.processing} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
           <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
-            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            loading={submitting} disabled={photos.processing} leftIcon={<CopyPlus className="size-4" />}
             title="Uloží a predvyplní ďalšie svietidlo rovnakého typu (evid. číslo a doba svietenia ostanú prázdne).">
             Ďalšie rovnaké
           </Button>
-          <Button type="submit" loading={submitting}
+          {editing && hasNextItem && (
+            <NextRecordedButton loading={submitting} disabled={photos.processing}
+              onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next-recorded')} />
+          )}
+          <Button type="submit" loading={submitting} disabled={photos.processing}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}
           </Button>
@@ -302,7 +330,9 @@ function NoItemRow({
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h3 className="truncate text-sm font-semibold text-ink-900">
               <Lightbulb className="-mt-0.5 mr-1 inline size-3 text-ink-400" />
-              {f.evid_number}{f.floor ? ` / ${f.floor}` : ''} · {f.luminaire_type}
+              {[f.evid_number, f.floor].filter(Boolean).join(' / ') || null}
+              {(f.evid_number || f.floor) && f.luminaire_type ? ' · ' : ''}
+              {f.luminaire_type}
             </h3>
             {result && (
               <Badge tone={result === 'vyhovuje' ? 'ok' : 'bad'}>
@@ -311,8 +341,21 @@ function NoItemRow({
             )}
           </div>
           <p className="mt-0.5 truncate text-xs text-ink-500">
+            {f.manufacturer && (
+              <>
+                <Tag className="-mt-0.5 mr-1 inline size-3" />
+                {f.manufacturer}
+                <span className="mx-1.5 text-ink-300">·</span>
+              </>
+            )}
             <MapPin className="-mt-0.5 mr-1 inline size-3" />
             {f.location}
+          </p>
+          {/* The measured value travels with a carried item, so the summary shows it
+              before anything is issued (fix list of 16. 11. 2026). */}
+          <p className="mt-0.5 font-mono text-xs text-ink-600">
+            <Timer className="-mt-0.5 mr-1 inline size-3 text-ink-400" />
+            {typeof f.duration_min === 'number' ? f.duration_min : '—'} <span className="text-ink-400">min</span>
           </p>
           {f.notes && (
             <p className="mt-1 line-clamp-2 text-xs text-ink-600">

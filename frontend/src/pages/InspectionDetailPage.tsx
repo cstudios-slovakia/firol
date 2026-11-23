@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { PREHLIADKA_TYPE, prehliadkaPath } from '@/lib/prehliadka';
+import { KNIHA_TYPE, isKnihaV2, knihaPath, repeatPath } from '@/lib/kniha';
 import {
-  ArrowLeft, ArrowRight, Building2, CalendarDays, ClipboardList, CopyPlus, Download,
+  ArrowLeft, ArrowRight, Building, CalendarDays, ClipboardList, CopyPlus, Download,
   FileText, GitBranch, History, Images, Link2, Lock, LockOpen, NotebookPen, Pencil,
-  PenLine, Plus, Repeat, Warehouse,
+  PenLine, Plus, Repeat, ShieldCheck, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
   INSPECTION_TYPE_LABELS,
   Inspections,
+  PHP_OPRAVA_FOLLOW_UP_STATUSES,
+  PHP_STATUS_LABELS,
   documentDownloadUrl,
   periodicityOf,
   type InspectionDetail,
@@ -17,8 +21,10 @@ import {
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
 import { handleOfflineSave, offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { useCertMissingToast } from '@/lib/certMissing';
 import { useConfirm } from '@/lib/confirm';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -32,8 +38,12 @@ import { EmailDocumentForm } from '@/components/EmailDocumentForm';
 import { ItemPhotoStrip } from '@/components/ItemPhotos';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { InspectionStatusBadge } from '@/components/InspectionStatusBadge';
+import { InspectionTags } from '@/components/InspectionTags';
 import { HandoverDialog } from '@/components/HandoverDialog';
 import { PreviousStatusBadge, previousStatusOf } from '@/components/PreviousStatusBadge';
+import { carriedOriginOf, carriesValues, originText } from '@/lib/carryOver';
+import { isBozpItemType } from '@/api/bozpItems';
+import { plural } from '@/lib/text';
 import { PeriodicityPicker } from '@/components/PeriodicityPicker';
 import { periodicityLabel, type Periodicity } from '@/lib/periodicity';
 import { sectionPathForType } from '@/lib/sections';
@@ -60,6 +70,7 @@ export function InspectionDetailPage() {
   const { csrfToken } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
+  const certMissing = useCertMissingToast();
   const confirm = useConfirm();
   const isReadOnly = useIsReadOnly();
   // „Upraviť" discards the issued protocol, so it follows the práva členov switch.
@@ -80,6 +91,8 @@ export function InspectionDetailPage() {
   const [unlockPrompt, setUnlockPrompt] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [creatingFollowUp, setCreatingFollowUp] = useState(false);
+  // Spec 7.3 — confirming the results a prehliadka prepared in this concept.
+  const [confirmingConcept, setConfirmingConcept] = useState(false);
   // Chapter 12 — pulling last time's devices into an empty draft.
   const [carryingOver, setCarryingOver] = useState(false);
   // Chapter 13 — the document currently being handed over for signature.
@@ -132,9 +145,12 @@ export function InspectionDetailPage() {
       if (res.disposed_skipped > 0) {
         toast.success(disposedNotice(res.disposed_skipped));
       }
-      navigate(`/inspections/${res.inspection.id}`, { replace: false });
+      // A požiarna kniha entry (old or new) is repeated as a new-format draft on its step 1.
+      navigate(repeatPath(data.inspection.type, res.inspection.id), { replace: false });
     } catch (err) {
-      setError(offlineMessage(err, 'Opakovať sa nepodarilo.'));
+      if (!certMissing(err, { returnLabel: 'Späť na kontrolu' })) {
+        setError(offlineMessage(err, 'Opakovať sa nepodarilo.'));
+      }
     } finally {
       setRepeating(false);
     }
@@ -142,8 +158,9 @@ export function InspectionDetailPage() {
 
   /**
    * Fill an empty draft from the previous inspection at this prevádzka
-   * (chapter 12). The devices come across; their stav does not — the
-   * technician enters this year's results themselves.
+   * (chapter 12). A fire-protection type takes the values and the result of
+   * the last protocol (fix list of 16. 11. 2026); any other type the devices
+   * only, its results entered anew.
    */
   async function handleCarryOver() {
     if (!data) return;
@@ -153,7 +170,13 @@ export function InspectionDetailPage() {
       const res = await Inspections.carryOver(id, csrfToken);
       setData((prev) =>
         prev
-          ? { ...prev, inspection: res.inspection, items: res.items, carry_over: null }
+          ? {
+              ...prev,
+              inspection: res.inspection,
+              items: res.items,
+              carry_over: null,
+              incomplete_items: res.incomplete_items ?? null,
+            }
           : prev,
       );
       // A single-record úkon (požiarna kniha, block 2 BOZP records) carries
@@ -165,7 +188,9 @@ export function InspectionDetailPage() {
           ? 'Záznam z minulej kontroly prevzatý — výsledok zadaj nanovo.'
           : res.disposed_skipped > 0
             ? `Položky prevzaté. ${disposedNotice(res.disposed_skipped)}`
-            : 'Položky z minulej kontroly prevzaté — stav zadaj nanovo.',
+            : carriesValues(res.inspection.type)
+              ? 'Položky prevzaté aj s hodnotami a výsledkom — prepíš len to, čo sa zmenilo.'
+              : 'Položky z minulej kontroly prevzaté — výsledok zadaj nanovo.',
       );
       if (record) navigate(`/inspections/${id}/items/${record.id}`);
     } catch (err) {
@@ -217,9 +242,26 @@ export function InspectionDetailPage() {
       toast.success(res.created ? 'Koncept vytvorený' : 'Koncept už existoval — otváram ho');
       navigate(`/inspections/${res.inspection_id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Koncept sa nepodarilo vytvoriť.');
+      if (!certMissing(err, { returnLabel: 'Späť na kontrolu' })) {
+        setError(err instanceof ApiError ? err.message : 'Koncept sa nepodarilo vytvoriť.');
+      }
     } finally {
       setCreatingFollowUp(false);
+    }
+  }
+
+  /** Confirm (or take back) the results of a concept from a prehliadka — online only. */
+  async function handleConfirmConcept(confirmed: boolean) {
+    setPdfError(null);
+    setConfirmingConcept(true);
+    try {
+      await Inspections.confirmConcept(id, confirmed, csrfToken);
+      setData(await Inspections.show(id));
+      toast.success(confirmed ? 'Výsledky potvrdené — protokol môžeš vygenerovať.' : 'Potvrdenie zrušené.');
+    } catch (err) {
+      setPdfError(offlineMessage(err, 'Koncept sa nepodarilo potvrdiť.'));
+    } finally {
+      setConfirmingConcept(false);
     }
   }
 
@@ -237,7 +279,11 @@ export function InspectionDetailPage() {
       setDocuments(docs.items);
       window.open(documentDownloadUrl(res.document.id), '_blank', 'noopener');
     } catch (err) {
-      setPdfError(offlineMessage(err, 'PDF sa nepodarilo vygenerovať.'));
+      const kept = certMissing(err, {
+        saved: 'Nič sa nestratilo — kontrola je uložená ako koncept. Po doplnení čísla sa k nej vráť a vygeneruj PDF.',
+        returnLabel: 'Späť na kontrolu',
+      });
+      if (!kept) setPdfError(offlineMessage(err, 'PDF sa nepodarilo vygenerovať.'));
     } finally {
       setGenerating(false);
     }
@@ -350,13 +396,39 @@ export function InspectionDetailPage() {
     );
   }
 
+  // A preventívna prehliadka has screens of its own (lists and history still
+  // link here, so the redirect is the one place that knows).
+  if (data.inspection.type === PREHLIADKA_TYPE) {
+    return <Navigate to={prehliadkaPath(id)} replace />;
+  }
+  // So has a požiarna kniha entry of the new format; an old one stays here.
+  if (data.inspection.type === KNIHA_TYPE && isKnihaV2(data.inspection.details)) {
+    return <Navigate to={knihaPath(id)} replace />;
+  }
+
   const { inspection: i, items } = data;
+  const facilityN = facilityNouns(i.company_client_type);
   const isDraft = i.status === 'draft';
   const module = getTypeModule(i.type);
   // Block 2 — a list of people is typed on its own screen and issued with
   // the blank-form choice of chapter 8.1 (PersonProtocolBlock).
   const isPersons = isPersonListType(i.type);
   const photoCount = items.reduce((n, it) => n + (it.photos?.length ?? 0), 0);
+  // A concept from a preventívna prehliadka is not a protocol until confirmed (spec 7.3).
+  const conceptState = i.concept_state ?? null;
+  const conceptPending = isDraft && conceptState === 'pending';
+  // Devices that still lack a required field — marked in the list. A concept
+  // cannot be confirmed, and neither it nor a draft of a fire-protection type
+  // (whose items arrive with last protocol's values) can be issued, until they
+  // are filled (fix list of 16. 11. 2026).
+  const incompleteItems = isDraft
+    ? (data.incomplete_items ?? (conceptState !== null ? data.concept_incomplete : null) ?? [])
+    : [];
+  const incompleteById = new Map(incompleteItems.map((c) => [c.item_id, c]));
+  const conceptIncomplete = incompleteItems.length > 0;
+  // Where the values of a draft came from — „prevzaté z protokolu č. … zo dňa …".
+  const carried = isDraft ? carriedOriginOf(i.details) : null;
+  const allCarried = carried !== null && items.length > 0 && items.every((it) => carried.positions.has(it.position));
 
   return (
     <div className="flex flex-col gap-5">
@@ -390,7 +462,7 @@ export function InspectionDetailPage() {
             {INSPECTION_TYPE_LABELS[i.type]}
           </h1>
           <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
-            <Building2 className="size-3" />
+            <Building className="size-3" />
             <Link to={`/companies/${i.company_id}`} className="hover:text-firol-600">
               {i.company_name}
             </Link>
@@ -405,6 +477,7 @@ export function InspectionDetailPage() {
             ) : (
               <InspectionStatusBadge inspection={i} />
             )}
+            <InspectionTags concept={isDraft ? conceptState : null} />
             {!isDraft && (
               <Badge tone="neutral">
                 <Lock className="size-3" />
@@ -434,13 +507,88 @@ export function InspectionDetailPage() {
               onClick={handleRepeat}
               loading={repeating}
               leftIcon={<Repeat className="size-4" />}
-              title="Vytvorí novú kontrolu s tými istými položkami a prázdnym dátumom"
+              title="Vytvorí novú kontrolu s tými istými položkami a dnešným dátumom (dá sa zmeniť)"
             >
               Opakovať
             </Button>
           </div>
         ) : null}
       </header>
+
+      {isDraft && conceptState !== null && (
+        <Card
+          id="concept-banner"
+          className={cn(
+            'flex flex-col gap-3 px-4 py-3 transition-all duration-300',
+            conceptPending ? 'border-status-warn bg-status-warn-bg' : 'bg-ink-50',
+          )}
+        >
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-white text-firol-600">
+              <ShieldCheck className="size-3.5" />
+            </span>
+            <div className="min-w-0 text-xs text-ink-600">
+              <p className="font-semibold text-ink-800">
+                {conceptPending
+                  ? 'Koncept z preventívnej prehliadky — skontroluj a potvrď'
+                  : 'Výsledky potvrdené'}
+              </p>
+              <p className="mt-0.5">
+                {conceptPending
+                  ? carriesValues(i.type) && carried !== null
+                    ? 'Zariadenia s nedostatkom z prehliadky nevyhovujú (aj s fotkami), ostatné majú hodnoty a výsledok z posledného protokolu. Prejdi si ich a doplň, čo chýba. Kým ich nepotvrdíš, protokol sa nedá vygenerovať.'
+                    : 'Výsledky sú predvyplnené z prehliadky: zariadenia s nedostatkom nevyhovujú (aj s fotkami), ostatné vyhovujú. Prejdi si ich a doplň, čo chýba. Kým ich nepotvrdíš, protokol sa nedá vygenerovať.'
+                  : conceptIncomplete
+                    ? 'Potvrdenie platí, ale niektoré povinné údaje stále chýbajú. Doplň ich, inak sa protokol nedá vygenerovať. Potvrdenie môžeš aj zrušiť.'
+                    : 'Protokol môžeš vygenerovať. Ak ešte niečo meníš, potvrdenie môžeš zrušiť.'}
+                {conceptIncomplete && (
+                  <>
+                    {' '}
+                    <b className="font-semibold text-status-bad">
+                      {incompleteItems.length === 1
+                        ? 'Jedno zariadenie nemá vyplnené povinné údaje'
+                        : incompleteItems.length < 5
+                          ? `${incompleteItems.length} zariadenia nemajú vyplnené povinné údaje`
+                          : `${incompleteItems.length} zariadení nemá vyplnené povinné údaje`}
+                    </b>
+                    {' — označené sú v zozname nižšie.'}
+                  </>
+                )}
+                {i.source_inspection_id !== null && (
+                  <>
+                    {' '}
+                    <Link
+                      to={prehliadkaPath(i.source_inspection_id)}
+                      className="font-medium text-firol-600 hover:underline"
+                    >
+                      Otvoriť prehliadku
+                    </Link>
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+          {!isReadOnly && (
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant={conceptPending ? 'primary' : 'secondary'}
+                loading={confirmingConcept}
+                disabled={conceptPending && (items.length === 0 || conceptIncomplete)}
+                title={
+                  conceptPending && conceptIncomplete
+                    ? 'Najprv doplň povinné údaje označených zariadení'
+                    : undefined
+                }
+                onClick={() => handleConfirmConcept(conceptPending)}
+                leftIcon={<ShieldCheck className="size-4" />}
+              >
+                {conceptPending ? 'Potvrdiť výsledky' : 'Zrušiť potvrdenie'}
+              </Button>
+            </div>
+          )}
+        </Card>
+      )}
 
       {!isDraft && !unlockPrompt && (
         <Card className="flex items-start gap-3 bg-ink-50 px-4 py-3">
@@ -510,7 +658,7 @@ export function InspectionDetailPage() {
         <Card className="flex items-start gap-2.5 bg-ink-50 px-4 py-3 text-xs text-ink-600">
           <History className="mt-0.5 size-4 shrink-0 text-ink-400" />
           <p>
-            Túto kontrolu už nahradila novšia kontrola tej istej prevádzky
+            Túto kontrolu už nahradila novšia kontrola {isBytoveDruzstvo(i.company_client_type) ? 'toho istého' : 'tej istej'} {facilityN.cases.gen}{' '}
             a typu, preto sa neoznačuje ako „po termíne". Stále ju môžeš
             zobraziť aj znova opakovať.
           </p>
@@ -612,7 +760,7 @@ export function InspectionDetailPage() {
           </span>
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">
-              Poznámky k prevádzke
+              Poznámky k {facilityN.cases.dat}
             </p>
             <p className="mt-0.5 whitespace-pre-line text-sm text-ink-700">{i.notes}</p>
           </div>
@@ -629,6 +777,8 @@ export function InspectionDetailPage() {
         <CarryOverOfferCard
           offer={data.carry_over}
           record={module?.singleItem === true}
+          withValues={carriesValues(i.type)}
+          bozpType={isBozpItemType(i.type) ? i.type : null}
           busy={carryingOver}
           onCarryOver={handleCarryOver}
         />
@@ -648,6 +798,15 @@ export function InspectionDetailPage() {
             </span>
             <span className="text-xs text-ink-500">spolu {items.length}</span>
           </div>
+          {carried && (
+            <p className="border-b border-ink-100 bg-firol-50/50 px-4 py-2 text-xs text-ink-600" data-carried-origin>
+              {allCarried ? 'Položky ' : 'Označené položky '}
+              {originText(carried.origin)}
+              {/* Only a fire-protection type carries values and results; a BOZP
+                  concept carries the devices, its results are entered anew. */}
+              {carriesValues(i.type) ? ' — skontroluj ich a prepíš, čo sa zmenilo.' : '.'}
+            </p>
+          )}
           {module ? (
             <ul className="divide-y divide-ink-100">
               {items.map((it, idx) => (
@@ -660,9 +819,17 @@ export function InspectionDetailPage() {
                     deleting={deletingItemId === it.id}
                     onDelete={() => handleDeleteItem(it.id)}
                   />
-                  {/* Chapter 12 — what this device scored last time, so the
-                      technician can see at a glance which one was on tlaková
-                      skúška a year ago. Display only. */}
+                  {carried && !allCarried && carried.positions.has(it.position) && (
+                    <p className="px-4 pb-2 text-xs text-ink-400">{originText(carried.origin)}</p>
+                  )}
+                  {incompleteById.has(it.id) && (
+                    <p className="px-4 pb-2 text-xs font-medium text-status-bad" data-incomplete-item={it.id}>
+                      Chýba: {incompleteById.get(it.id)?.missing.join(', ')}
+                    </p>
+                  )}
+                  {/* Chapter 12 — what this device scored last time (types that
+                      carry identification only), so the technician sees at a
+                      glance which one was on tlaková skúška a year ago. */}
                   {previousStatusOf(it.fields) && (
                     <div className="px-4 pb-2">
                       <PreviousStatusBadge type={i.type} fields={it.fields} />
@@ -735,7 +902,16 @@ export function InspectionDetailPage() {
       {!(isPersons && documents.length === 0) && (
       <DocumentsBlock
         documents={documents}
-        canGenerate={isDraft && items.length > 0 && !!i.executed_on}
+        canGenerate={isDraft && items.length > 0 && !!i.executed_on && !conceptPending && !conceptIncomplete}
+        blockedReason={
+          conceptPending
+            ? 'Najprv potvrď výsledky konceptu z prehliadky — až potom sa dá vygenerovať protokol.'
+            : conceptIncomplete
+              ? conceptState !== null
+                ? 'Koncept nie je úplný — doplň povinné údaje označených zariadení.'
+                : 'Kontrola nie je úplná — doplň povinné údaje označených položiek.'
+              : undefined
+        }
         generating={generating}
         onGenerate={handleGeneratePdf}
         pdfError={pdfError}
@@ -747,6 +923,7 @@ export function InspectionDetailPage() {
         visitId={i.visit_id}
         inspectionId={i.id}
         companyId={i.company_id}
+        facilityId={i.facility_id}
       />
       )}
 
@@ -796,19 +973,30 @@ function disposedNotice(n: number): string {
  * single biggest time saver in the field: a technician standing in a boiler
  * room does not retype forty extinguishers they already typed a year ago.
  *
- * What travels is identification. Stav, poznámky, fotky and nedostatky start
- * empty, because carrying a verdict forward would let a protocol claim
- * something nobody checked this time.
+ * A fire-protection type takes the whole items of the last protocol — values
+ * and result included (fix list of 16. 11. 2026); any other type its
+ * identification, with stav, poznámky and nedostatky entered anew. Photos
+ * never travel.
  */
 function CarryOverOfferCard({
   offer,
   record = false,
+  withValues,
+  bozpType = null,
   busy,
   onCarryOver,
 }: {
   offer: NonNullable<InspectionDetail['carry_over']>;
   /** Single-record úkon — the whole record travels, not a list of devices. */
   record?: boolean;
+  /** The items arrive with their values and result (lib/carryOver). */
+  withValues: boolean;
+  /**
+   * A BOZP item check: its rows carry result and texts, but not their
+   * nedostatky, nor the úkon's opatrenia / záver — the offer must not promise
+   * „všetky údaje" (round 6; whether those carry too is asked of the customer).
+   */
+  bozpType?: string | null;
   busy: boolean;
   onCarryOver: () => void;
 }) {
@@ -838,9 +1026,12 @@ function CarryOverOfferCard({
           </p>
           <p className="mt-1 text-xs text-ink-600">
             Prenesie sa {offer.item_count}{' '}
-            {offer.item_count === 1 ? 'položka' : offer.item_count < 5 ? 'položky' : 'položiek'} aj
-            s označením a umiestnením. Stav, poznámky a fotky zadáš nanovo — pri
-            každej položke uvidíš, aký stav mala minule.
+            {offer.item_count === 1 ? 'položka' : offer.item_count < 5 ? 'položky' : 'položiek'}{' '}
+            {withValues && bozpType
+              ? `s údajmi z posledného protokolu — aj ${bozpType === 'oopp' || bozpType === 'oznacenie' ? 'so stavom a poznámkou' : 's výsledkom a zistenými závadami'}. Prepíšeš len to, čo sa zmenilo; nedostatky položiek, ${bozpType === 'oopp' ? 'záver' : 'opatrenia'} a fotky sa neprenášajú.`
+              : withValues
+              ? 'so všetkými údajmi z posledného protokolu — aj s nameranými hodnotami a výsledkom. Prepíšeš len to, čo sa zmenilo; fotky sa neprenášajú.'
+              : 'aj s označením a umiestnením. Stav, poznámky a fotky zadáš nanovo — pri každej položke uvidíš, aký stav mala minule.'}
             {offer.disposed > 0 && ` ${disposedNotice(offer.disposed)}`}
           </p>
         </div>
@@ -870,7 +1061,7 @@ function deviceCountPhrase(n: number): string {
  * Linked protocols (change request 2.1). Two things live here:
  *  - a "created from" back-link when this inspection is itself a follow-up draft;
  *  - existing follow-up drafts spawned from this inspection, and — when the
- *    items qualify — offers to create them: PHP → Oprava/TS (status TS) and
+ *    items qualify — offers to create them: PHP → Oprava/TS (status TS or O) and
  *    PHP → Vyraďovací protokol (status V), Hydranty → TS hadíc.
  *
  * A PHP inspection can qualify for both of its follow-ups at once, so the
@@ -893,11 +1084,13 @@ function FollowUpBlock({
 }) {
   const candidates: { targetType: InspectionType; qualifying: number; offerText: string }[] = [];
   if (type === 'php') {
-    const forTest = items.filter((it) => it.fields.status === 'TS').length;
+    const forRepair = items.filter((it) =>
+      (PHP_OPRAVA_FOLLOW_UP_STATUSES as readonly unknown[]).includes(it.fields.status),
+    ).length;
     candidates.push({
       targetType: 'oprava_ts_php',
-      qualifying: forTest,
-      offerText: `${deviceCountPhrase(forTest)} stav „Tlaková skúška"`,
+      qualifying: forRepair,
+      offerText: `${deviceCountPhrase(forRepair)} stav ${PHP_OPRAVA_FOLLOW_UP_STATUSES.map((s) => `„${PHP_STATUS_LABELS[s]}"`).join(' alebo ')}`,
     });
     const forDisposal = items.filter((it) => it.fields.status === 'V').length;
     candidates.push({
@@ -909,7 +1102,7 @@ function FollowUpBlock({
     candidates.push({
       targetType: 'ts_hadic',
       qualifying: items.length,
-      offerText: `${items.length} ${items.length === 1 ? 'kontrolovaný hydrant' : 'kontrolovaných hydrantov'}`,
+      offerText: plural(items.length, 'kontrolovaný hydrant', 'kontrolované hydranty', 'kontrolovaných hydrantov'),
     });
   }
 
@@ -986,6 +1179,7 @@ function FollowUpBlock({
 function DocumentsBlock({
   documents,
   canGenerate,
+  blockedReason,
   generating,
   onGenerate,
   pdfError,
@@ -997,6 +1191,7 @@ function DocumentsBlock({
   visitId = null,
   inspectionId,
   companyId,
+  facilityId,
 }: {
   documents: InspectionDocument[];
   /** Set when the úkon belongs to a visit: the protocol may wait for its end. */
@@ -1004,7 +1199,10 @@ function DocumentsBlock({
   inspectionId: number;
   /** The client, whose recorded e-mail prefills the send form. */
   companyId: number;
+  facilityId?: number | null;
   canGenerate: boolean;
+  /** Why the protocol cannot be generated yet, when it is not the missing items or date. */
+  blockedReason?: string;
   generating: boolean;
   onGenerate: () => void;
   pdfError?: string | null;
@@ -1029,7 +1227,7 @@ function DocumentsBlock({
         <p className="max-w-sm text-xs text-ink-500">
           {canGenerate
             ? 'Po vygenerovaní sa kontrola uzamkne a dostane svoje číslo protokolu.'
-            : 'Pre vygenerovanie pridaj aspoň jednu položku a skontroluj dátum kontroly.'}
+            : (blockedReason ?? 'Pre vygenerovanie pridaj aspoň jednu položku a skontroluj dátum kontroly.')}
         </p>
         {photoCount > 0 && (
           <IncludePhotosToggle
@@ -1110,8 +1308,14 @@ function DocumentsBlock({
               </div>
               <Download className="size-4 shrink-0 text-ink-400" />
             </a>
-            <HandoverRow doc={doc} canSign={canSign} onSign={() => onSign(doc)} />
-            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} companyId={companyId} />
+            {/* Nothing is signed in the app for the požiarna kniha (spec 2 rule 7) — an old
+                document shows only a handover it already has. */}
+            {doc.type === 'poziarna_kniha' ? (
+              doc.handover && <HandoverRow doc={doc} canSign={false} onSign={() => undefined} />
+            ) : (
+              <HandoverRow doc={doc} canSign={canSign} onSign={() => onSign(doc)} />
+            )}
+            <EmailDocumentForm documentId={doc.id} documentNumber={doc.number} companyId={companyId} facilityId={facilityId} />
           </li>
         ))}
       </ul>

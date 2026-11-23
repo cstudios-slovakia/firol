@@ -1,6 +1,7 @@
 import { api } from '@/lib/api';
 import type { CalendarDeadline, OwnTerm, TerminTechnician } from '@/api/calendar';
 import type { InspectionType } from '@/api/inspections';
+import type { ClientType } from '@/lib/clientKind';
 
 /**
  * Obrazovka „Dnes" — block 4 / chapter 18.
@@ -27,6 +28,8 @@ export type FieldRow = {
   company_name: string | null;
   facility_name: string | null;
   city: string | null;
+  /** A plan row: the client's type, for the whole-client label of a training without a prevádzka. */
+  company_client_type?: ClientType | null;
   /** Úkony planned on the visit; the deadline's type for a plan; empty for an event. */
   types: (InspectionType | 'skolenie_po')[];
   /** Event title; null otherwise. */

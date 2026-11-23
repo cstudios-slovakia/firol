@@ -13,20 +13,28 @@ import type {
 
 /**
  * The action the user picked on the form CTA. Determines where to
- * navigate after the API call resolves.
+ * navigate after the API call resolves. `save-and-next-recorded` opens the
+ * next item already recorded in the úkon (fix list of 16. 11. 2026).
  */
-export type SubmitAction = 'save-and-next' | 'save-and-summary';
+export type SubmitAction = 'save-and-next' | 'save-and-summary' | 'save-and-next-recorded';
 
 export type Step2FormProps = {
   inspectionId: number;
   /** Facility of the inspection — used to bias location autocomplete (2.4.1). */
   facilityId: number;
+  /** Type of the inspection's client — picks prevádzka / bytový dom wording. */
+  clientType?: string | null;
   /** When set, the form opens in edit mode and prefills from this item. */
   initialItem: InspectionItem | null;
   /** CSRF token from AuthContext, threaded through via the parent. */
   csrfToken: string | null;
   /** Called after a successful save with the action the user picked. */
   onSaved: (action: SubmitAction) => void;
+  /**
+   * Editing an item that has a recorded item after it — the form then offers
+   * „Uložiť a ďalší v poradí" (`save-and-next-recorded`).
+   */
+  hasNextItem?: boolean;
   /**
    * Items already saved in this inspection. Lets a form start a new row from
    * where the list left off (označenie walks its predefined kinds).
@@ -97,3 +105,13 @@ export type InspectionTypeModule = {
    */
   DetailsBlock?: React.ComponentType<DetailsBlockProps>;
 };
+
+/**
+ * Whether a form's values still equal what it opened with — the test of
+ * „na súhrn" without a save for an existing item (round 3 of the fix list of
+ * 16. 11. 2026): an imported item whose only text was cleared with the „X" has
+ * changed although every field now looks like a new item's defaults.
+ */
+export function sameFormValues<T extends Record<string, unknown>>(opened: T, now: T): boolean {
+  return (Object.keys(opened) as (keyof T)[]).every((k) => opened[k] === now[k]);
+}

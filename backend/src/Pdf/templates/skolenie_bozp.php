@@ -55,6 +55,14 @@ if (!empty($facility['address'])) {
 }
 
 $count = count($items);
+// Spec 8.3: the Osobné číslo column is printed only when somebody has one.
+$hasPersonalNumbers = false;
+foreach ($items as $personItem) {
+    if (trim((string) (((array) ($personItem['fields'] ?? []))['personal_number'] ?? '')) !== '') {
+        $hasPersonalNumbers = true;
+        break;
+    }
+}
 $signedHandover = is_array($handover ?? null) ? $handover : null;
 
 echo $doc->styles();
@@ -103,8 +111,11 @@ echo $doc->styles();
   <thead>
     <tr>
       <th style="width:8%">Por. č.</th>
-      <th style="width:28%">Meno, priezvisko, titul</th>
-      <th style="width:26%">Pracovné zaradenie</th>
+      <th style="width:<?= $hasPersonalNumbers ? '24' : '28' ?>%">Meno, priezvisko, titul</th>
+      <?php if ($hasPersonalNumbers): ?>
+        <th style="width:11%">Osobné číslo</th>
+      <?php endif ?>
+      <th style="width:<?= $hasPersonalNumbers ? '21' : '26' ?>%">Pracovné zaradenie</th>
       <th style="width:14%">Dátum</th>
       <th>Podpis</th>
     </tr>
@@ -115,6 +126,9 @@ echo $doc->styles();
       <tr>
         <td style="height:7mm;"><?= $idx + 1 ?></td>
         <td><?= $e($f['name'] ?? '') ?></td>
+        <?php if ($hasPersonalNumbers): ?>
+          <td><?= $e($f['personal_number'] ?? '') ?></td>
+        <?php endif ?>
         <td><?= $e($f['position'] ?? '') ?></td>
         <td><?= $e(!empty($f['date']) ? ProtocolLayout::date((string) $f['date']) : $executed) ?></td>
         <td style="text-align:center;">

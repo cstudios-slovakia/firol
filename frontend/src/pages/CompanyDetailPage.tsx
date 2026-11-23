@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMemberRights } from '@/auth/useMemberRights';
-import { Archive, ArchiveRestore, ArrowLeft, Building2, ChevronRight, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Mail, MapPin, Phone, Plus, Route, Send, UserCheck, Warehouse } from 'lucide-react';
+import { Archive, ArchiveRestore, ArrowLeft, Building2, ChevronRight, ClipboardCheck, ClipboardList, Edit2, FileSignature, FileText, Hash, History, Mail, MapPin, Phone, Plus, Route, Send, UserCheck, Warehouse } from 'lucide-react';
 import { useIsReadOnly } from '@/auth/useIsReadOnly';
 import { Companies, type CompanyDetail } from '@/api/companies';
+import { Kniha } from '@/api/kniha';
 import { ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { ArchiveDialog, ArchivedNotice, formatDay, useRestoreArchived } from '@/components/ClientArchive';
@@ -11,19 +12,27 @@ import { DetailHeaderSkeleton, SkeletonList } from '@/components/ui/Skeleton';
 import { PendingSyncBanner } from '@/components/PendingSyncBanner';
 import { BulkSendDialog } from '@/components/BulkSendDialog';
 import { CompanyPersons } from '@/components/CompanyPersons';
+import { BookCodeRow } from '@/components/BookCodeRow';
+import { NewFacilityDialog } from '@/components/NewFacilityDialog';
 import { WorkConfirmationDialog } from '@/components/WorkConfirmationDialog';
 import { CompanyWorkConfirmations } from '@/components/CompanyWorkConfirmations';
 import { CompanyStockIssues } from '@/components/stock/CompanyStockIssues';
 import { Documents, type DocumentSend, type SendableDocument } from '@/api/documents';
 import { documentDownloadUrl, INSPECTION_TYPE_LABELS } from '@/api/inspections';
 import { cn } from '@/lib/cn';
+import { ClientTypePill } from '@/components/ClientTypePill';
 import { companyRecipientEmail } from '@/lib/companyEmail';
+import { clientNouns, clientTypeIcon, clientTypeStyles, facilityNouns, isBytoveDruzstvo } from '@/lib/clientKind';
+import { InspectionTags } from '@/components/InspectionTags';
+import { startPrehliadkaPath } from '@/lib/prehliadka';
+import { Dialog } from '@/components/ui/Dialog';
+import { Button } from '@/components/ui/Button';
 
 type CompanyTab = 'general' | 'facilities' | 'protocols';
 
 const TABS: { key: CompanyTab; label: string }[] = [
   { key: 'general', label: 'Všeobecné' },
-  { key: 'facilities', label: 'Prevádzky' },
+  { key: 'facilities', label: '' },
   { key: 'protocols', label: 'Protokoly' },
 ];
 
@@ -50,7 +59,11 @@ export function CompanyDetailPage() {
   // Chapter 10 — a potvrdenie can also be built after the fact from whatever
   // was finished at this client on a chosen day, not only from a visit.
   const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [prehliadkaFacilityOpen, setPrehliadkaFacilityOpen] = useState(false);
   const [confirmationsKey, setConfirmationsKey] = useState(0);
+  // "Pridať prevádzku / bytový dom" dialog. A freshly created client lands here
+  // with `?nova_prevadzka=1` so the first facility is asked for straight away.
+  const [facilityOpen, setFacilityOpen] = useState(params.get('nova_prevadzka') === '1');
 
   const loadSends = useCallback(() => {
     Documents.sends(id)
@@ -74,19 +87,36 @@ export function CompanyDetailPage() {
     else reload();
   }
 
-  async function onRestore(kind: 'company' | 'facility', targetId: number, name: string) {
-    if (await restoreArchived(kind, targetId, name)) reload();
+  async function onRestore(
+    kind: 'company' | 'facility',
+    targetId: number,
+    name: string,
+    clientType: string | null | undefined,
+  ) {
+    if (await restoreArchived(kind, targetId, name, clientType)) reload();
   }
+
+  // Drop the one-shot flag from the URL once it has opened the dialog, so a
+  // reload or a tab hop does not reopen it.
+  useEffect(() => {
+    if (params.get('nova_prevadzka') !== '1') return;
+    setFacilityOpen(true);
+    const next = new URLSearchParams(params);
+    next.delete('nova_prevadzka');
+    setParams(next, { replace: true });
+  }, [params, setParams]);
 
   useEffect(() => {
     let cancelled = false;
     Companies.show(id)
       .then((res) => {
         if (!cancelled) setData(res);
+        // Warms what a požiarna kniha entry starts from, so it can be begun offline.
+        void Kniha.context(id).catch(() => undefined);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať firmu.');
+        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať klienta.');
       });
     return () => {
       cancelled = true;
@@ -119,6 +149,9 @@ export function CompanyDetailPage() {
   }
 
   const { company, facilities } = data;
+  const nouns = facilityNouns(company.client_type);
+  const client = clientNouns(company.client_type);
+  const bytove = isBytoveDruzstvo(company.client_type);
   const archivedFacilities = data.archived_facilities ?? [];
   // An archived firm opens read-only: protocols can be opened and sent, but no
   // new úkon, edit or potvrdenie starts here until it is restored.
@@ -143,10 +176,10 @@ export function CompanyDetailPage() {
 
       {company.archived_at && (
         <ArchivedNotice
-          label="Firma je archivovaná od"
+          label={`${client.singular} je ${client.archivedAdj} od`}
           archivedAt={company.archived_at}
           reason={company.archived_reason}
-          onRestore={canDelete && !isReadOnly ? () => onRestore('company', company.id, company.name) : undefined}
+          onRestore={canDelete && !isReadOnly ? () => onRestore('company', company.id, company.name, company.client_type) : undefined}
         />
       )}
 
@@ -155,24 +188,28 @@ export function CompanyDetailPage() {
         <div
           className={cn(
             'bg-gradient-to-br to-transparent px-5 pb-4 pt-5',
-            archived ? 'from-ink-100/70' : 'from-firol-50/60',
+            clientTypeStyles(company.client_type, archived).heroGradient,
           )}
         >
           <div className="flex items-start gap-3">
             <div
               className={cn(
                 'grid size-12 shrink-0 place-items-center rounded-2xl',
-                archived ? 'bg-ink-200 text-ink-500' : 'bg-firol-500 text-white shadow-[var(--shadow-glow)]',
+                archived ? 'bg-ink-200 text-ink-500' : clientTypeStyles(company.client_type, archived).avatarStaticBg,
               )}
             >
-              {archived ? <Archive className="size-5" /> : <Building2 className="size-5" />}
+              {archived ? <Archive className="size-5" /> : (() => {
+                const Icon = clientTypeIcon(company.client_type);
+                return <Icon className="size-5" />;
+              })()}
             </div>
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-lg font-semibold tracking-tight text-ink-900">
                 {company.name}
               </h1>
-              <p className="text-xs text-ink-500">
-                {facilities.length} {plural(facilities.length, 'prevádzka', 'prevádzky', 'prevádzok')}
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-500">
+                <ClientTypePill clientType={company.client_type} />
+                {nouns.count(facilities.length)}
               </p>
             </div>
             {canEdit && (
@@ -198,6 +235,14 @@ export function CompanyDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Every úkon is done on a prevádzka — with none yet, say why the
+              start buttons are missing instead of leaving the card bare. */}
+          {canEdit && facilities.length === 0 && (
+            <p className="mt-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-600">
+              Úkony sa robia na {nouns.cases.loc} — najprv {nouns.addLabel.toLowerCase()}.
+            </p>
+          )}
 
           {canStart && (
             <div className="mt-4 flex flex-wrap gap-2">
@@ -226,13 +271,28 @@ export function CompanyDetailPage() {
                 <FileSignature className="size-4" />
                 Potvrdenie o práci
               </button>
+              <button
+                type="button"
+                id="company-start-prehliadka"
+                onClick={() => {
+                  if (facilities.length === 1) {
+                    navigate(startPrehliadkaPath({ companyId: company.id, facilityId: facilities[0].id }));
+                  } else if (facilities.length > 1) {
+                    setPrehliadkaFacilityOpen(true);
+                  }
+                }}
+                className="inline-flex h-10 items-center gap-1.5 rounded-2xl border border-ink-200 bg-white px-4 text-sm font-medium text-ink-700 transition-colors hover:border-ink-300 hover:bg-ink-50"
+              >
+                <ClipboardCheck className="size-4" />
+                Preventívna prehliadka
+              </button>
             </div>
           )}
         </div>
 
         <div
           role="tablist"
-          aria-label="Sekcie firmy"
+          aria-label={`Sekcie ${client.cases.gen}`}
           className="flex gap-1 overflow-x-auto border-b border-ink-100 px-3"
         >
           {TABS.map((t) => (
@@ -251,7 +311,7 @@ export function CompanyDetailPage() {
                   : 'border-transparent text-ink-500 hover:text-ink-800',
               )}
             >
-              {t.label}
+              {t.key === 'facilities' ? nouns.tabLabel : t.label}
               {t.key === 'facilities' && (
                 <span
                   className={cn(
@@ -286,11 +346,16 @@ export function CompanyDetailPage() {
                   <DetailRow icon={<UserCheck className="size-4" />} label="Schvaľujúca osoba" value={company.approver} />
                 )}
                 {!company.ico && !company.address && !company.contact && !company.contact_email && !company.approver && (
-                  <div className="py-2 text-ink-400">Žiadne ďalšie údaje. Doplň ich úpravou firmy.</div>
+                  <div className="py-2 text-ink-400">Žiadne ďalšie údaje. Doplň ich úpravou {client.cases.gen}.</div>
                 )}
+                <BookCodeRow
+                  company={company}
+                  canEdit={canEdit}
+                  onSaved={(next) => setData((prev) => (prev ? { ...prev, company: { ...prev.company, ...next } } : prev))}
+                />
               </dl>
               {/* The persons are edited only while the firm is active. */}
-              {!archived && <CompanyPersons companyId={company.id} facilities={facilities} />}
+              {!archived && <CompanyPersons companyId={company.id} facilities={facilities} clientType={company.client_type} />}
             </div>
           )}
 
@@ -298,13 +363,14 @@ export function CompanyDetailPage() {
             <div role="tabpanel" id="company-panel-facilities" aria-labelledby="company-tab-facilities" className="animate-fade-up">
               {canEdit && (
                 <div className="mb-3 flex justify-end">
-                  <Link
-                    to={`/companies/${company.id}/facilities/new`}
-                    className="inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
+                  <button
+                    type="button"
+                    onClick={() => setFacilityOpen(true)}
+                    className="inline-flex h-8 items-center gap-1 rounded-2xl bg-firol-500 px-3 text-xs font-medium text-white shadow-[var(--shadow-glow)] transition-all duration-200 hover:bg-firol-600 active:scale-[0.98]"
                   >
                     <Plus className="size-3.5" />
-                    Pridať prevádzku
-                  </Link>
+                    {nouns.addLabel}
+                  </button>
                 </div>
               )}
 
@@ -313,9 +379,13 @@ export function CompanyDetailPage() {
                   <div className="grid size-12 place-items-center rounded-2xl bg-firol-50 text-firol-500">
                     <Warehouse className="size-5" />
                   </div>
-                  <p className="text-sm text-ink-700">Firma zatiaľ nemá prevádzky.</p>
+                  <p className="text-sm text-ink-700">
+                    {client.singular} zatiaľ nemá {nouns.pluralNom}.
+                  </p>
                   <p className="max-w-xs text-xs text-ink-500">
-                    Pridaj prvú prevádzku — napríklad sklad, výrobnú halu alebo pobočku.
+                    {bytove
+                      ? 'Pridaj prvý bytový dom.'
+                      : 'Pridaj prvú prevádzku — napríklad sklad, výrobnú halu alebo pobočku.'}
                   </p>
                 </div>
               ) : (
@@ -326,8 +396,13 @@ export function CompanyDetailPage() {
                         to={`/facilities/${f.id}`}
                         className="group flex min-w-0 flex-1 items-center gap-3"
                       >
-                        <div className="grid size-9 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-600">
-                          <Warehouse className="size-4" />
+                        <div
+                          className={cn(
+                            'grid size-9 shrink-0 place-items-center rounded-2xl',
+                            bytove ? 'bg-blue-600 text-white' : 'bg-firol-50 text-firol-600',
+                          )}
+                        >
+                          {bytove ? <Building2 className="size-4" /> : <Warehouse className="size-4" />}
                         </div>
                         <div className="min-w-0 flex-1">
                           <h3 className="truncate text-sm font-semibold text-ink-900 group-hover:text-firol-700">{f.name}</h3>
@@ -370,7 +445,7 @@ export function CompanyDetailPage() {
               {archivedFacilities.length > 0 && (
                 <section className={cn(facilities.length > 0 && 'mt-5 border-t border-ink-100 pt-4')}>
                   <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-400">
-                    Archivované prevádzky
+                    Archivované {nouns.tabLabel.toLowerCase()}
                   </h3>
                   <ul className="flex flex-col divide-y divide-ink-100">
                     {archivedFacilities.map((f) => (
@@ -382,7 +457,7 @@ export function CompanyDetailPage() {
                           <div className="min-w-0 flex-1">
                             <h4 className="truncate text-sm font-semibold text-ink-500 group-hover:text-firol-700">{f.name}</h4>
                             <p className="truncate text-xs text-ink-400">
-                              archivovaná {formatDay(f.archived_at)}
+                              {nouns.archivedAdj} {formatDay(f.archived_at)}
                               {f.archived_reason && ` · ${f.archived_reason}`}
                             </p>
                           </div>
@@ -392,7 +467,7 @@ export function CompanyDetailPage() {
                             type="button"
                             title="Obnoviť"
                             aria-label="Obnoviť"
-                            onClick={() => onRestore('facility', f.id, f.name)}
+                            onClick={() => onRestore('facility', f.id, f.name, company.client_type)}
                             className="grid size-8 shrink-0 place-items-center rounded-xl text-firol-600 transition-all duration-200 hover:bg-firol-50 active:scale-95"
                           >
                             <ArchiveRestore className="size-4" />
@@ -432,11 +507,39 @@ export function CompanyDetailPage() {
         </div>
       </Card>
 
+      {facilities.length > 1 && (
+        <Dialog
+          open={prehliadkaFacilityOpen}
+          onClose={() => setPrehliadkaFacilityOpen(false)}
+          title="Preventívna prehliadka"
+          description={`Vyber ${nouns.cases.acc}, ${bytove ? 'na ktorom' : 'na ktorej'} sa prehliadka vykonáva.`}
+        >
+          <div className="flex flex-col gap-2">
+            {facilities.map((f) => (
+              <Button
+                key={f.id}
+                type="button"
+                variant="secondary"
+                className="justify-start text-left"
+                onClick={() => {
+                  setPrehliadkaFacilityOpen(false);
+                  navigate(startPrehliadkaPath({ companyId: company.id, facilityId: f.id }));
+                }}
+              >
+                <Warehouse className="mr-2 size-4 shrink-0 text-ink-500" />
+                <span className="truncate">{f.name}</span>
+              </Button>
+            ))}
+          </div>
+        </Dialog>
+      )}
+
       <BulkSendDialog
         open={sendOpen}
         onClose={() => setSendOpen(false)}
         companyId={company.id}
         companyName={company.name}
+        clientType={company.client_type}
         defaultRecipient={companyRecipientEmail(company)}
         onSent={loadSends}
       />
@@ -446,8 +549,19 @@ export function CompanyDetailPage() {
         onClose={() => setConfirmationOpen(false)}
         companyId={company.id}
         companyName={company.name}
+        clientType={company.client_type}
         date={todayIso()}
         onCreated={() => setConfirmationsKey((k) => k + 1)}
+      />
+
+      <NewFacilityDialog
+        open={facilityOpen}
+        onClose={() => setFacilityOpen(false)}
+        companyId={company.id}
+        companyName={company.name}
+        companyAddress={company}
+        clientType={company.client_type}
+        onCreated={(f) => navigate(`/facilities/${f.id}`)}
       />
 
       <ArchiveDialog
@@ -455,6 +569,7 @@ export function CompanyDetailPage() {
         kind={archiving?.kind ?? 'company'}
         id={archiving?.id ?? 0}
         name={archiving?.name ?? ''}
+        clientType={company.client_type}
         onClose={() => setArchiving(null)}
         onArchived={onArchived}
       />
@@ -501,7 +616,10 @@ function IssuedProtocols({ companyId }: { companyId: number }) {
         {items.map((doc) => (
           <li key={doc.id} className="flex items-center gap-3 py-3">
             <div className="min-w-0 flex-1">
-              <p className="font-mono text-sm text-ink-900">{doc.number}</p>
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-sm text-ink-900">
+                {doc.number}
+                <InspectionTags scope={doc.prehliadka_scope} className="font-sans" />
+              </p>
               <p className="truncate text-xs text-ink-500">
                 {protocolKind(doc)}
                 {doc.facility_name && ` · ${doc.facility_name}`}
@@ -634,10 +752,4 @@ function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: strin
 function todayIso(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function plural(n: number, one: string, few: string, many: string): string {
-  if (n === 1) return one;
-  if (n >= 2 && n <= 4) return few;
-  return many;
 }

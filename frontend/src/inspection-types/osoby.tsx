@@ -16,7 +16,7 @@
  */
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Briefcase, Clock, Edit2, ListChecks, PenLine, Save, Trash2, User } from 'lucide-react';
+import { AlertTriangle, Briefcase, Clock, Edit2, Hash, ListChecks, PenLine, Save, Trash2, User } from 'lucide-react';
 import {
   PERSON_RESULT_LABELS,
   PERSON_RESULT_SHORT,
@@ -93,7 +93,7 @@ function makeStep2Form(type: PersonListType) {
                 result: f.result ?? null,
                 ...(type === 'dychova_skuska' ? { value: (f.value ?? '').trim() || null } : {}),
               }
-            : { date: f.date || null }),
+            : { date: f.date || null, personal_number: (f.personal_number ?? '').trim() || null }),
         };
         const itemId = initialItem?.id ?? null;
         const saved = await saveItemWithPhotos({
@@ -171,11 +171,19 @@ function makeStep2Form(type: PersonListType) {
               </div>
             </>
           ) : (
-            <Field label="Dátum" hint="Prázdne = dátum oboznámenia.">
-              {(p) => (
-                <Input {...p} type="date" value={f.date ?? ''} onChange={(e) => setF({ ...f, date: e.target.value })} />
-              )}
-            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Osobné číslo" hint="Voliteľné. Keď ho nemá nikto, stĺpec sa na protokole nevytlačí.">
+                {(p) => (
+                  <Input {...p} leftIcon={<Hash className="size-4" />} maxLength={32} autoComplete="off"
+                    value={f.personal_number ?? ''} onChange={(e) => setF({ ...f, personal_number: e.target.value })} />
+                )}
+              </Field>
+              <Field label="Dátum" hint="Prázdne = dátum oboznámenia.">
+                {(p) => (
+                  <Input {...p} type="date" value={f.date ?? ''} onChange={(e) => setF({ ...f, date: e.target.value })} />
+                )}
+              </Field>
+            </div>
           )}
 
           <div className="flex flex-col gap-1.5">
@@ -214,6 +222,7 @@ function PersonItemRow({ inspectionId, index, item, canEdit, deleting, onDelete 
   const defects = defectCount(item.fields);
   const detail = [
     p.position,
+    p.personal_number ? `os. č. ${p.personal_number}` : '',
     p.time ?? '',
     p.value ? `${p.value} ‰` : '',
     p.date ? skDate(p.date) : '',

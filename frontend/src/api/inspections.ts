@@ -4,6 +4,8 @@ import type { BozpItemFields } from '@/api/bozpItems';
 import type { BozpRecordFields } from '@/api/bozpRecords';
 import type { PersonFields } from '@/api/personList';
 import type { InvoicingFields } from '@/api/invoicing';
+import type { DefectFields } from '@/lib/prehliadka';
+import type { ClientType } from '@/lib/clientKind';
 
 /**
  * Inspection types — locked slugs from docs/Firol base document.
@@ -33,7 +35,9 @@ export type InspectionType =
   // Block 2 — the person-list úkony (api/personList.ts).
   | 'dychova_skuska'
   | 'omamne_latky'
-  | 'skolenie_bozp';
+  | 'skolenie_bozp'
+  // POapp 26. 10. 2026 — a walk-through with several records (lib/prehliadka.ts).
+  | 'preventivna_prehliadka';
 
 export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   php: 'Hasiace prístroje (PHP)',
@@ -46,7 +50,7 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   ts_hadic: 'Tlaková skúška hadíc',
   vyradenie: 'Vyraďovací protokol PHP',
   // Block 2 — typy_ukonov.json `nazov`.
-  kniha_bozp: 'Kniha kontrol BOZP',
+  kniha_bozp: 'Preventívna prehliadka BOZP',
   pracovisko: 'Kontrola pracoviska',
   osamele_pracovisko: 'Kontrola osamelých pracovísk',
   fajcenie: 'Kontrola dodržiavania zákazu fajčenia',
@@ -58,6 +62,8 @@ export const INSPECTION_TYPE_LABELS: Record<InspectionType, string> = {
   dychova_skuska: 'Dychová skúška na alkohol',
   omamne_latky: 'Kontrola omamných a psychotropných látok',
   skolenie_bozp: 'Oboznámenie zamestnancov v oblasti BOZP',
+  // Spelled out, never „PPP" (spec 2).
+  preventivna_prehliadka: 'Preventívna prehliadka',
 };
 
 export type InspectionStatus = 'draft' | 'finalized';
@@ -66,8 +72,18 @@ export type InspectionStatus = 'draft' | 'finalized';
  * Chapter 22 — fakturácia úkonu (`billing_mode`, `invoiced`, `invoiced_at`,
  * `billing_note`) rides along on every row; see api/invoicing.ts.
  */
+export type DiscardMode = 'delete' | 'archive';
+
 export type InspectionListItem = InvoicingFields & {
   id: number;
+  /**
+   * What „zahodiť" / the trash icon does to the úkon (17. 11. 2026): `delete`
+   * — a draft never issued, deleted for good; `archive` — an issued úkon,
+   * hidden from the lists with its protocol kept; null — refused (issued
+   * before, something was made from it), no button. Absent on rows cached
+   * before the field existed and on offline-created drafts.
+   */
+  discard?: DiscardMode | null;
   type: InspectionType;
   /**
    * Periodicity as chosen for THIS úkon (chapter 5) — value plus unit, both
@@ -87,6 +103,8 @@ export type InspectionListItem = InvoicingFields & {
   created_at: string;
   company_id: number;
   company_name: string;
+  /** Type of the client — picks firma / bytové družstvo wording. */
+  company_client_type?: ClientType;
   facility_id: number;
   facility_name: string;
   inspector_user_id: number;
@@ -114,6 +132,46 @@ export type InspectionListItem = InvoicingFields & {
   carried_over_from_id: number | null;
   /** The visit this úkon was recorded under, when it came out of one (chapter 9). */
   visit_id: number | null;
+  /**
+   * A concept the preventívna prehliadka prepared (spec 7.3): `pending` until
+   * the technician confirms the results, `confirmed` after. Null for every
+   * other úkon. Absent on rows cached before it existed.
+   */
+  concept_state?: ConceptState | null;
+  /** PO / BOZP / PO + BOZP — only for a preventívna prehliadka. */
+  prehliadka_scope?: PrehliadkaScopeLabel | null;
+  /**
+   * The prevádzky of a new-format požiarna kniha entry (lib/kniha.ts), one row
+   * each with its own periodicity. Absent on every other úkon and on old entries.
+   */
+  facilities?: InspectionFacility[];
+};
+
+/** One prevádzka of a požiarna kniha entry (GET /api/inspections[/{id}]). */
+export type InspectionFacility = {
+  facility_id: number;
+  name: string;
+  /** The stored choice, also while the entry is spôsob 2 (the screens hide it there). */
+  periodicity_value: number | null;
+  periodicity_unit: PeriodicityUnit | null;
+  /** Null while spôsob 2. */
+  valid_until: string | null;
+  is_superseded: boolean;
+};
+
+/** The prevádzky a požiarna kniha entry is written for (create / PATCH body). */
+export type InspectionFacilityInput = {
+  facility_id: number;
+  periodicity_value: number | null;
+  periodicity_unit: PeriodicityUnit | null;
+};
+
+export type ConceptState = 'pending' | 'confirmed';
+export type PrehliadkaScopeLabel = 'po' | 'bozp' | 'po_bozp';
+export const PREHLIADKA_SCOPE_LABELS: Record<PrehliadkaScopeLabel, string> = {
+  po: 'PO',
+  bozp: 'BOZP',
+  po_bozp: 'PO + BOZP',
 };
 
 export type Inspection = InspectionListItem & {
@@ -125,6 +183,12 @@ export type Inspection = InspectionListItem & {
    * without any. Validated per type on the server (Support\InspectionDetails).
    */
   details?: Record<string, unknown> | null;
+  /**
+   * Present on show() of a preventívna prehliadka only: true once it was ever
+   * closed (also after „Upraviť" made it a draft again). Such a prehliadka
+   * cannot be discarded; the server refuses the archive of a re-opened one.
+   */
+  closed_before?: boolean;
 };
 
 export type PhpStatus = 'A' | 'TS' | 'O' | 'V';
@@ -135,6 +199,13 @@ export const PHP_STATUS_LABELS: Record<PhpStatus, string> = {
   O: 'Vyžaduje opravu',
   V: 'Vyradený',
 };
+
+/**
+ * PHP statuses that offer an Oprava/plnenie/TS PHP follow-up (spec 7.3, D3).
+ * The one place to change if FIROL drops `O` — keep in step with
+ * InspectionController::OPRAVA_FOLLOW_UP_STATUSES on the server.
+ */
+export const PHP_OPRAVA_FOLLOW_UP_STATUSES: readonly PhpStatus[] = ['TS', 'O'];
 
 export const PHP_STATUS_TONES: Record<PhpStatus, 'ok' | 'warn' | 'bad' | 'neutral'> = {
   A: 'ok',
@@ -217,7 +288,7 @@ export const PK_ACTIVITY_LABELS: Record<PkActivity, string> = {
   electrical_equipment_check: 'Kontrola stavu používaných elektrických zariadení',
   technical_equipment_check: 'Kontrola stavu používaných technických zariadení',
   electrical_appliances_check: 'Kontrola stavu používaných elektrických spotrebičov',
-  documentation_check: 'Kontrola aktuálnosti dokumentácie požiarnej ochrany',
+  documentation_check: 'Kontrola aktuálnosti dokumentácie ochrany pred požiarmi',
   employee_list_check: 'Kontrola aktuálneho zoznamu zamestnancov a ich školení',
   fire_drill: 'Vykonaný cvičný požiarny poplach',
 };
@@ -369,9 +440,26 @@ export type CarryOverOffer = {
   disposed: number;
 };
 
+/** A device of a concept from a prehliadka that still lacks required fields (spec 7.3). */
+export type ConceptIncompleteItem = {
+  item_id: number;
+  /** The device as the technician knows it — label / serial / identifier. */
+  name: string;
+  /** Slovak names of the missing fields, as the item form labels them. */
+  missing: string[];
+};
+
 export type InspectionDetail = {
   inspection: Inspection;
   items: InspectionItem[];
+  /** Present on show() of a draft concept from a prehliadka; null for any other úkon. */
+  concept_incomplete?: ConceptIncompleteItem[] | null;
+  /**
+   * Items lacking a required field on a draft concept or a draft of a
+   * fire-protection type — the protocol is not generated until they are filled
+   * (fix list of 16. 11. 2026). Absent on a detail cached before it existed.
+   */
+  incomplete_items?: ConceptIncompleteItem[] | null;
   /** Present on show(); follow-up drafts created from this inspection. */
   follow_ups?: FollowUpRef[];
   /** Present on show() and on create, when carrying over is possible. */
@@ -430,6 +518,10 @@ export type InspectionDraftPayload = {
   notes?: string;
   /** Set when the úkon is being recorded as part of a visit (chapter 9). */
   visit_id?: number;
+  /** Header data — required for a preventívna prehliadka (its setup). */
+  details?: Record<string, unknown>;
+  /** Požiarna kniha (new format) — the selected prevádzky, required there. */
+  facilities?: InspectionFacilityInput[];
 };
 
 export type InspectionUpdatePayload = {
@@ -444,6 +536,11 @@ export type InspectionUpdatePayload = {
   notes?: string;
   /** Replaces the whole header object (see `Inspection.details`). */
   details?: Record<string, unknown>;
+  /**
+   * Požiarna kniha (new format) — the whole set of prevádzky. `name` is not
+   * read by the server; it lets a queued edit show the names offline.
+   */
+  facilities?: (InspectionFacilityInput & { name?: string })[];
 };
 
 export type InspectionListFilters = {
@@ -493,8 +590,21 @@ export const Inspections = {
       body,
       csrfToken,
     }),
-  archive: (id: number, csrfToken: string | null) =>
-    api<void>(`/api/inspections/${id}`, { method: 'DELETE', csrfToken }),
+  /**
+   * „Zahodiť" — deletes a never-issued draft for good, archives an issued úkon
+   * (the server decides, see `discard`). A permanent delete never waits in the
+   * offline queue: pass `requireOnline` for a draft. Answers with the mode
+   * the server applied.
+   */
+  archive: (id: number, csrfToken: string | null, opts: { requireOnline?: boolean; expectDelete?: boolean } = {}) =>
+    // `expect=delete`: the user confirmed a permanent delete; the server
+    // answers 409 instead of archiving an úkon issued in the meantime.
+    api<{ mode: DiscardMode } | undefined>(`/api/inspections/${id}${opts.expectDelete ? '?expect=delete' : ''}`, {
+      method: 'DELETE',
+      csrfToken,
+      label: 'Archivovanie úkonu',
+      requireOnline: opts.requireOnline,
+    }),
 
   /**
    * Create (or return the existing) pre-filled follow-up draft from this
@@ -523,7 +633,8 @@ export const Inspections = {
       | VyradenieItemFields
       | BozpItemFields
       | BozpRecordFields
-      | PersonFields,
+      | PersonFields
+      | DefectFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items`, {
@@ -546,7 +657,8 @@ export const Inspections = {
       | VyradenieItemFields
       | BozpItemFields
       | BozpRecordFields
-      | PersonFields,
+      | PersonFields
+      | DefectFields,
     csrfToken: string | null,
   ) =>
     api<{ item: InspectionItem }>(`/api/inspections/${inspectionId}/items/${itemId}`, {
@@ -623,6 +735,18 @@ export const Inspections = {
    * there is nothing sensible to replay from an outbox once the document is
    * gone.
    */
+  /**
+   * Confirm (or take back the confirmation of) the results a prehliadka
+   * prepared in a concept (spec 7.3) — the protocol cannot be generated
+   * before. Online only, like generating.
+   */
+  confirmConcept: (inspectionId: number, confirmed: boolean, csrfToken: string | null) =>
+    api<{ confirmed: boolean }>(`/api/inspections/${inspectionId}/confirm-concept`, {
+      method: 'POST',
+      body: { confirmed },
+      csrfToken,
+      requireOnline: true,
+    }),
   unlock: (inspectionId: number, csrfToken: string | null) =>
     api<{ inspection: Inspection }>(`/api/inspections/${inspectionId}/unlock`, {
       method: 'POST',
@@ -631,9 +755,12 @@ export const Inspections = {
     }),
   /**
    * Start this year's inspection from last year's (chapter 12). The devices
-   * come across; their stav, poznámky, photos and nedostatky do not, and
-   * anything disposed of last time is left behind — `disposed_skipped` says
-   * how many, so a shorter list reads as a decision rather than a bug.
+   * come across — for a type in `carriesValues()` with its values, stav and
+   * texts too (fix list of 16. 11. 2026; the BOZP item checks since 18. 11.
+   * 2026), for any other type its identification only. Photos and the
+   * structured nedostatky never do, and anything disposed of last time is left
+   * behind — `disposed_skipped` says how many, so a shorter list reads as a
+   * decision rather than a bug.
    */
   repeat: (inspectionId: number, csrfToken: string | null) =>
     api<InspectionDetail & { source_id: number; disposed_skipped: number }>(

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Firol\Support;
 
+use Firol\Db;
+
 /**
  * „Zistené nedostatky" — the generic nedostatok block every úkon can carry
  * (block 2 / chapter 7: „pri každom type sa naviac dá pridať nedostatok
@@ -46,8 +48,10 @@ namespace Firol\Support;
  * „Nedostatok č. 2 — popis" — for any type that has no appendix branch of its
  * own. Nothing to do per type.
  *
- * Carry-over. Nedostatky never carry over (chapter 12). List `defects` with
- * `[]` in the type's CarryOver::BLANK entry and never in KEEP.
+ * Carry-over. Nedostatky never carry over (chapter 12) — also for the BOZP
+ * item checks that carry their result and texts since 18. 11. 2026. List
+ * `defects` with `[]` in the type's CarryOver::BLANK entry and never in KEEP;
+ * CarryOver::mapItem() leaves the key behind for a FULL type.
  *
  * Frontend counterpart: frontend/src/components/DefectsEditor.tsx.
  * ────────────────────────────────────────────────────────────────────────────
@@ -61,6 +65,38 @@ final class Defects
     public const MAX_PER_ITEM = 50;
 
     private const MAX_TEXT = 500;
+
+    /**
+     * The nedostatky whose „Overiť odstránenie" task (chapter 20) is done and no
+     * such task is still open — the technician confirmed the removal. Shared by
+     * Dnes „Otvorené nedostatky" for the generic block and for a prehliadka.
+     *
+     * @param list<int> $inspectionIds
+     * @return array<int, array<string, true>> inspection id → defect key → true
+     */
+    public static function verifiedKeys(int $accountId, array $inspectionIds): array
+    {
+        if ($inspectionIds === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($inspectionIds), '?'));
+        $stmt = Db::pdo()->prepare(
+            "SELECT source_inspection_id, source_defect_key,
+                    SUM(done = 0) AS open_count, SUM(done = 1) AS done_count
+             FROM   tasks
+             WHERE  account_id = ? AND source_defect_key IS NOT NULL
+               AND  source_inspection_id IN ($placeholders)
+             GROUP  BY source_inspection_id, source_defect_key"
+        );
+        $stmt->execute([$accountId, ...$inspectionIds]);
+        $verified = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $t) {
+            if ((int) $t['done_count'] > 0 && (int) $t['open_count'] === 0) {
+                $verified[(int) $t['source_inspection_id']][(string) $t['source_defect_key']] = true;
+            }
+        }
+        return $verified;
+    }
 
     /**
      * Validate and normalise the nedostatky coming off the wire.

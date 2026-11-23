@@ -4,24 +4,40 @@ declare(strict_types=1);
 
 namespace Firol\Support;
 
+use Firol\Db;
+
 /**
  * Carrying items over from the previous inspection — block 1 / chapter 12.
  *
  * The single biggest time saver in the field: a technician standing in a
  * boiler room does not retype forty extinguishers they already typed a year
- * ago. What travels is IDENTIFICATION — make, type, serial, year, inventory
- * number, location. What does NOT travel is the assessment: stav, výsledok,
- * poznámka, photos and nedostatky all start empty, because carrying a result
- * forward would let a protocol claim something nobody checked this time.
+ * ago. What travels depends on the kind of úkon:
  *
- * Two further rules from the spec:
- *   - an item disposed of last time ("vyradený") is not carried over at all;
- *     the technician is told how many were dropped, so a missing device reads
- *     as a decision rather than a bug.
- *   - each carried item keeps `previous_status`, shown next to it while
- *     entering results — the technician sees at a glance which extinguisher
- *     was on tlaková skúška last year. It is display-only and no protocol
- *     template reads it.
+ *   - The device types ({@see self::FULL}: PHP, hydranty, tlaková skúška
+ *     hadíc, both požiarne uzávery, núdzové osvetlenie, and the BOZP item
+ *     checks rebríky, regály, pracovné prostriedky, označenie, OOPP) carry
+ *     EVERY field of the last protocol — identification, measured values, the
+ *     result / stav and the texts (fix list of 16. 11. 2026, spec 12.2:
+ *     „preberú sa tie isté údaje, čo tam boli predtým, vrátane výsledku"; the
+ *     BOZP item checks since the customer's answer of 18. 11. 2026, which
+ *     reverses the BOZP spec rule „žiadna prenesená položka nemá predvyplnený
+ *     stav"). The technician changes only what changed; where the values came
+ *     from is recorded on the draft (`carried_from` / `carried_positions`, see
+ *     {@see PrehliadkaChecklist}) and shown on its summary, and nothing is
+ *     issued with a required value empty
+ *     ({@see \Firol\Controllers\DocumentController::generateForInspectionInternal()}).
+ *     The structured nedostatky of a BOZP row ({@see Defects::FIELD}) still
+ *     start empty: they hang photos, deadlines and „Overiť odstránenie" tasks
+ *     off one protocol, and a copy would list the same defect twice as open.
+ *   - Every other type (the BOZP records, the person lists) carries
+ *     IDENTIFICATION only — the workplaces, activities, names. Its assessment
+ *     starts empty; a carried item may keep `previous_status`, shown next to it
+ *     while entering results; it is display-only and no protocol template
+ *     reads it (BOZP block spec ch. 12).
+ *
+ * Photos never travel, and an item disposed of last time ("vyradený") is not
+ * carried over at all; the technician is told how many were dropped, so a
+ * missing device reads as a decision rather than a bug.
  */
 final class CarryOver
 {
@@ -29,8 +45,19 @@ final class CarryOver
     public const PREVIOUS_STATUS_KEY = 'previous_status';
 
     /**
-     * Identification fields kept per inspection type. Everything not listed
-     * is an assessment and is dropped.
+     * Types whose items travel whole — values and result included (fix list
+     * of 16. 11. 2026, point 1; the BOZP item checks since the customer's
+     * answer of 18. 11. 2026). Their field set is KEEP plus the keys of BLANK,
+     * except the structured nedostatky ({@see Defects::FIELD}).
+     */
+    public const FULL = [
+        'php', 'hydranty', 'ts_hadic', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie',
+        'rebriky', 'regale', 'pracovne_prostriedky', 'oznacenie', 'oopp',
+    ];
+
+    /**
+     * Identification fields kept per inspection type. For a type outside
+     * {@see self::FULL} everything not listed is an assessment and is dropped.
      *
      * @var array<string, list<string>>
      */
@@ -43,10 +70,9 @@ final class CarryOver
         'pu_udrzba'          => ['kind', 'identifier', 'manufacturer', 'location'],
         'nudzove_osvetlenie' => ['evid_number', 'floor', 'luminaire_type', 'manufacturer', 'location'],
         'ts_hadic'           => ['hose_type', 'location', 'manufacturer', 'length', 'year_of_manufacture'],
-        // Checklist type: the list of workspaces walked and the activities
-        // ticked are the "identification" — the result and the nedostatky are
-        // not (chapter 12).
-        'poziarna_kniha'     => ['is_preventive', 'workspaces', 'activities', 'custom_activities'],
+        // The požiarna kniha carries nothing over: its items are defects, and a
+        // repeated entry starts with nothing ticked (POapp 7. 11. 2026, spec 6.4;
+        // BookEntry::repeat).
         // Block 2 — single-record BOZP úkony (BozpRecords). The workplaces
         // walked, the activities ticked and the rows checked travel; every
         // result inside a row is blanked by ROW_KEEP below.
@@ -59,8 +85,8 @@ final class CarryOver
         'dychova_skuska'     => ['name', 'position'],
         'omamne_latky'       => ['name', 'position'],
         'skolenie_bozp'      => ['name', 'position'],
-        // Block 2 (Firol\Support\BozpItems). Whether a regál carries its
-        // nosnosť label is an observation, not identification, so it stays.
+        // Block 2 (Firol\Support\BozpItems). Identification; their values
+        // travel through BLANK since they are FULL types (18. 11. 2026).
         'rebriky'              => ['inventory_number', 'type', 'manufacturer', 'year', 'location'],
         'regale'               => ['label', 'type', 'capacity', 'location'],
         'oopp'                 => ['position', 'equipment'],
@@ -71,7 +97,9 @@ final class CarryOver
     /**
      * Blank values written for the assessment fields, so an item carried over
      * has the same JSON shape the type's form expects rather than a hole the
-     * form has to guess at.
+     * form has to guess at. For a {@see self::FULL} type these are the value
+     * fields that travel too; the blank stands in only where the source item
+     * lacks the key.
      *
      * @var array<string, array<string, mixed>>
      */
@@ -84,7 +112,6 @@ final class CarryOver
         'pu_udrzba'          => ['maintenance_work' => '', 'result' => '', 'notes' => null],
         'nudzove_osvetlenie' => ['duration_min' => null, 'result' => '', 'notes' => null],
         'ts_hadic'           => ['working_pressure' => null, 'test_pressure' => null, 'result' => '', 'notes' => null],
-        'poziarna_kniha'     => ['result' => '', 'no_defects_found' => false, 'defects' => [], 'notes' => null],
         'kniha_bozp'         => ['result' => '', 'defects' => []],
         'pracovisko'         => ['overall' => '', 'defects' => []],
         'osamele_pracovisko' => ['overall' => '', 'defects' => []],
@@ -113,10 +140,115 @@ final class CarryOver
         'fajcenie'           => ['rows' => ['area']],
     ];
 
+    /**
+     * The blank assessment fields of one type — what a device the app has not
+     * seen before starts with (a prehliadka's concept builds those, plan 8b).
+     *
+     * @return array<string, mixed>
+     */
+    public static function blank(string $type): array
+    {
+        return self::BLANK[$type] ?? [];
+    }
+
     /** True when the app can carry items over for this inspection type. */
     public static function supports(string $type): bool
     {
         return isset(self::KEEP[$type]);
+    }
+
+    /** True when this type's items travel whole, result included ({@see self::FULL}). */
+    public static function carriesValues(string $type): bool
+    {
+        return in_array($type, self::FULL, true);
+    }
+
+    /**
+     * Whether a draft's items must be checked for empty required fields before
+     * its protocol is issued (fix list of 16. 11. 2026, rounds 2 and 3).
+     *
+     * The check exists to stop a protocol carrying values nobody typed, so it
+     * runs only on a draft whose items were inserted without the item validator:
+     *
+     *  - a concept of a prehliadka (any type);
+     *  - a draft with a recorded origin (`carried_from` — Opakovať, „Prevziať
+     *    položky", the follow-ups built from another úkon, the checklist),
+     *    whatever its type: an oprava / vyradenie follow-up included;
+     *  - a draft of a FULL type ({@see self::carriesValues()}) made with
+     *    Opakovať before the origin was recorded: it has `carried_over_from_id`
+     *    and was never issued.
+     *
+     * A draft typed through the forms, an Excel import (a draft, `''` for an
+     * empty cell) and an old protocol opened again with „Upraviť" — one with
+     * `carried_over_from_id` but no recorded origin (rounds 2 and 3) — generate
+     * as they always did. A draft with a recorded origin stays checked after it
+     * was issued and opened again: `carried_from` is not removed at issue or by
+     * „Upraviť" (round 7: this docblock said otherwise; the rule is unchanged).
+     *
+     * @param array<string, mixed> $row the úkon: `details` (raw JSON or decoded),
+     *        `carried_over_from_id` and `issued_before` when known
+     */
+    public static function checksCompleteness(array $row): bool
+    {
+        $details = $row['details'] ?? null;
+        if (!is_array($details)) {
+            $details = InspectionDetails::decode($details);
+        }
+        if (PrehliadkaConcepts::isConcept($details)) {
+            return true;
+        }
+        if (is_array($details) && array_key_exists(PrehliadkaChecklist::CARRIED_FROM_KEY, $details)) {
+            return true;
+        }
+        // Only the FULL types carry values over whole (round 2; the BOZP item
+        // checks since 18. 11. 2026); a record or person-list Opakovať draft
+        // carries no assessment and stays unchecked.
+        return !empty($row['carried_over_from_id'])
+            && self::carriesValues((string) ($row['type'] ?? ''))
+            && !self::wasIssued($row, $details);
+    }
+
+    /**
+     * Whether the úkon was ever issued: it is finalized, or a draft that was
+     * issued and opened again („Upraviť", „Doplniť výsledky"). `issued_before`
+     * (migration 078) is set on every issue and reopen; the contractor snapshot
+     * written at issue time backs it up for a row read without the column.
+     *
+     * @param array<string, mixed> $row
+     * @param array<string, mixed>|null $details decoded `details`
+     */
+    public static function wasIssued(array $row, ?array $details): bool
+    {
+        if (($row['status'] ?? null) === 'finalized' || !empty($row['issued_before'])) {
+            return true;
+        }
+        return is_array($details) && array_key_exists(Contractor::SNAPSHOT_KEY, $details);
+    }
+
+    /**
+     * The latest finalized úkon of this type at this prevádzka — the source a
+     * repeat and the device list both draw from. `$exceptId` leaves the draft
+     * being filled out of the search.
+     */
+    public static function latestSourceId(
+        int $accountId,
+        int $facilityId,
+        string $type,
+        ?int $exceptId = null,
+    ): ?int {
+        $sql = 'SELECT id FROM inspections
+                WHERE  account_id = ? AND facility_id = ? AND type = ?
+                  AND  status = "finalized" AND archived_at IS NULL';
+        $params = [$accountId, $facilityId, $type];
+        if ($exceptId !== null) {
+            $sql .= ' AND id <> ?';
+            $params[] = $exceptId;
+        }
+        $sql .= ' ORDER BY COALESCE(executed_on, "1000-01-01") DESC, id DESC LIMIT 1';
+        $stmt = Db::pdo()->prepare($sql);
+        $stmt->execute($params);
+        $id = $stmt->fetchColumn();
+        return $id === false ? null : (int) $id;
     }
 
     /**
@@ -135,8 +267,19 @@ final class CarryOver
             return null;
         }
 
+        // A FULL type takes the value fields as well; meta keys of the source
+        // (its own `previous_status`, the defects of a prehliadka it came from)
+        // are not fields of the protocol and stay behind, and so do the
+        // structured nedostatky of a BOZP row (their photos and tasks belong to
+        // the protocol they were found in — Defects). A hydrant's `defects` is
+        // its závady text and travels.
+        $values = array_keys(self::BLANK[$type] ?? []);
+        if (BozpItems::supports($type)) {
+            $values = array_values(array_diff($values, [Defects::FIELD]));
+        }
+        $keep = self::carriesValues($type) ? array_merge(self::KEEP[$type], $values) : self::KEEP[$type];
         $out = [];
-        foreach (self::KEEP[$type] as $key) {
+        foreach ($keep as $key) {
             if (array_key_exists($key, $fields)) {
                 $out[$key] = $fields[$key];
             }
@@ -155,7 +298,8 @@ final class CarryOver
             }, $rows));
         }
 
-        $previous = self::previousStatus($type, $fields);
+        // The carried value itself is last time's stav; a badge would only repeat it.
+        $previous = self::carriesValues($type) ? null : self::previousStatus($type, $fields);
         if ($previous !== null) {
             $out[self::PREVIOUS_STATUS_KEY] = $previous;
         }

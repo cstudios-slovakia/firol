@@ -34,6 +34,12 @@ export type PhotoStaging = {
     staged: StagedPhoto[];
     /** Photos that will exist after commit — drives the counter and the cap. */
     total: number;
+    /**
+     * True while there is something for `commit` to do: a staged photo, or an
+     * existing photo marked for removal. A form's "nothing changed" shortcut
+     * must not skip the save while this is set, or the photo change is lost.
+     */
+    dirty: boolean;
     processing: boolean;
     error: string | null;
     addFiles: (files: FileList | File[]) => Promise<void>;
@@ -218,6 +224,11 @@ export function usePhotoStaging(
         existing: kept,
         staged,
         total,
+        // A photo still being resized is a change too: it lands in `staged`
+        // only when the resize finishes, about a second after it was taken
+        // (round 5 of the fix list of 16. 11. 2026). The save buttons wait
+        // for it (`processing`).
+        dirty: staged.length > 0 || removedIds.length > 0 || processing,
         processing,
         error,
         addFiles,
@@ -375,7 +386,7 @@ export function ItemPhotoField({
             {photos.error ? (
                 <p className="text-xs text-status-bad">{photos.error}</p>
             ) : (
-                !disabled && <p className="text-xs text-ink-400">{helpText}</p>
+                !disabled && helpText !== '' && <p className="text-xs text-ink-400">{helpText}</p>
             )}
         </div>
     );

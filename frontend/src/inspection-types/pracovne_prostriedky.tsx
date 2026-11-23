@@ -24,7 +24,9 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
 
 /**
  * Kontrola pracovných prostriedkov — block 2 / chapter 7, pattern `tabulka`.
@@ -43,7 +45,7 @@ export function isPassFail(v: unknown): v is PassFail {
   return v === 'vyhovuje' || v === 'nevyhovuje';
 }
 
-function PpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function PpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -74,6 +76,21 @@ function PpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
   }, [initialItem]);
 
   function isPristine() {
+    // A staged, removed or still-resizing photo is a change; only the save commits it.
+    if (photos.dirty) return false;
+    // An existing item: nothing to save only while nothing differs from what it
+    // opened with — also a carried item whose texts were cleared with the „X"
+    // (compare-to-initial, as in the fire forms; round 5 of the fix list).
+    if (initialItem) {
+      const f = initialItem.fields;
+      return sameFormValues(
+        {
+          name: str(f, 'name'), manufacturerType: str(f, 'manufacturer_type'), inventoryNumber: str(f, 'inventory_number'),
+          location: str(f, 'location'), faults: str(f, 'faults'), result: isPassFail(f.result) ? f.result : null,
+        },
+        { name, manufacturerType, inventoryNumber, location, faults, result },
+      ) && !defects.isDirty();
+    }
     return !name && !manufacturerType && !inventoryNumber && !location && !faults
       && result === null && photos.total === 0 && defects.rows.length === 0;
   }
@@ -86,7 +103,7 @@ function PpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
     return errs;
   }
 
-  async function handleSubmit(e: FormEvent | React.SyntheticEvent, action: 'save-and-next' | 'save-and-summary') {
+  async function handleSubmit(e: FormEvent | React.SyntheticEvent, action: SubmitAction) {
     e.preventDefault();
     if (submitting) return;
     const errs = validate();
@@ -159,7 +176,7 @@ function PpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
 
         <Field label="Zistené závady" hint="Nechaj prázdne, ak je prostriedok v poriadku.">
           {(p) => (
-            <TextArea id={p.id} value={faults} onChange={setFaults} rows={2}
+            <TextArea id={p.id} value={faults} onChange={setFaults} rows={2} clearable
               placeholder="chýba ochranný kryt kotúča" />
           )}
         </Field>
@@ -175,6 +192,8 @@ function PpStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved
         <DefectsEditor state={defects} initialPhotos={initialItem?.photos} />
 
         <ItemFormFooter
+          busy={photos.processing || defects.processing}
+          onNextRecorded={hasNextItem ? (e) => handleSubmit(e, 'save-and-next-recorded') : undefined}
           editing={editing}
           submitting={submitting}
           apiError={apiError}

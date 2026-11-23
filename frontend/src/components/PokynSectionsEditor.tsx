@@ -9,6 +9,7 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
+import { clientNouns } from '@/lib/clientKind';
 
 /**
  * Text of the "Pokyn — žatevné práce" (change request 2.3), edited in place on
@@ -24,6 +25,7 @@ export function PokynSectionsEditor({
   trainingId,
   fields,
   companyApprover,
+  clientType,
   csrfToken,
   editable,
   onSaved,
@@ -31,6 +33,8 @@ export function PokynSectionsEditor({
   trainingId: number;
   fields: PokynZatvaFields | null;
   companyApprover: string | null;
+  /** Type of the client — picks firma / bytové družstvo wording. */
+  clientType?: string | null;
   csrfToken: string | null;
   editable: boolean;
   onSaved: () => Promise<void> | void;
@@ -169,8 +173,8 @@ export function PokynSectionsEditor({
             label="Schvaľujúca osoba"
             hint={
               companyApprover
-                ? `Nepovinné — ak je prázdne, použije sa „${companyApprover}“ z evidencie firmy.`
-                : 'Nepovinné — ak je prázdne, použije sa údaj z evidencie firmy.'
+                ? `Nepovinné — ak je prázdne, použije sa „${companyApprover}“ z evidencie ${clientNouns(clientType).cases.gen}.`
+                : `Nepovinné — ak je prázdne, použije sa údaj z evidencie ${clientNouns(clientType).cases.gen}.`
             }
           >
             {(p) => (

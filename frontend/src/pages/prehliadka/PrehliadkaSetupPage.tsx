@@ -1,0 +1,985 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, ArrowRight, Building, CalendarDays, CloudOff, Play, Warehouse } from 'lucide-react';
+import { useAuth } from '@/auth/AuthContext';
+import { Companies, type Company, type CompanyListItem, type FacilityListItem } from '@/api/companies';
+import { Facilities, type Facility, type FacilityDeviceGroup } from '@/api/facilities';
+import { Inspections, type InspectionDetail } from '@/api/inspections';
+import { Prehliadka, type PrehliadkaContext } from '@/api/prehliadka';
+import { Visits, type Visit } from '@/api/visits';
+import { ApiError, OfflineQueuedError } from '@/lib/api';
+import { cn } from '@/lib/cn';
+import { todayIso } from '@/lib/dates';
+import { formatDateSk } from '@/lib/clientNoticeEmail';
+import { inspectionCreateOptimistic } from '@/lib/offlineEntities';
+import { CLIENT_NEUTRAL, facilityNouns, facilityPickerNouns, isBytoveDruzstvo } from '@/lib/clientKind';
+import { visitTrail } from '@/lib/visits';
+import {
+  DEVICE_TYPES,
+  PREHLIADKA_TYPE,
+  ROUTINE_LABELS,
+  detailsPayload,
+  effectivePeriodicityMonths,
+  parseDetails,
+  prehliadkaPath,
+  scopeLabel,
+  type DeviceType,
+  type LehotaZakon,
+  type PrehliadkaDetails,
+  type PrehliadkaScope,
+  routineTermKey,
+} from '@/lib/prehliadka';
+import { useToast } from '@/lib/toast';
+import { cachedCertRefusal, useCertMissingToast, warmCertProfile } from '@/lib/certMissing';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Field } from '@/components/ui/Field';
+import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { CheckRow, Segmented, StepBars } from '@/components/prehliadka/ui';
+import { DiscardPrehliadkaButton, useDiscardPrehliadka } from '@/components/prehliadka/DiscardPrehliadka';
+
+type ScopeChoice = 'po' | 'bozp' | 'both';
+
+const SCOPE_OPTIONS: { value: ScopeChoice; label: string }[] = [
+  { value: 'po', label: 'Protipožiarnu' },
+  { value: 'bozp', label: 'BOZP' },
+  { value: 'both', label: 'Obidve' },
+];
+
+function scopeToChoice(s: PrehliadkaScope): ScopeChoice | null {
+  if (s.po && s.bozp) return 'both';
+  if (s.po) return 'po';
+  if (s.bozp) return 'bozp';
+  return null;
+}
+
+function choiceToScope(c: ScopeChoice): PrehliadkaScope {
+  return { po: c !== 'bozp', bozp: c !== 'po' };
+}
+
+function numericParam(raw: string | null): number | null {
+  return raw !== null && /^\d+$/.test(raw) ? Number(raw) : null;
+}
+
+function devicesLabel(n: number): string {
+  if (n === 1) return '1 zariadenie';
+  if (n >= 2 && n <= 4) return `${n} zariadenia`;
+  return `${n} zariadení`;
+}
+
+type Loaded = {
+  facility: Facility;
+  company: Company | null;
+  groups: FacilityDeviceGroup[] | null;
+  context: PrehliadkaContext | null;
+};
+
+/**
+ * Krok 1 — Nastavenie (spec 6.1): one screen, not a wizard.
+ *
+ * Serves two routes. `/prehliadky/new` starts a prehliadka: it creates the
+ * draft when the technician taps „Začať obchôdzku" (also offline — the draft
+ * is an optimistic create). `/prehliadky/:id/nastavenie` is „Zmeniť nastavenie"
+ * of a draft that exists; it keeps the devices written during the walk.
+ *
+ * On the second and every later prehliadka of a prevádzka the switches arrive
+ * preset from the last one, shown as „Ako naposledy" first. The area is the
+ * exception (spec 14): it follows the entry — the OPP item opens with PO, the
+ * BOZP item (`preset=bozp`) with BOZP — and the other area is one tap away.
+ * A draft keeps its own choice. One area is always chosen.
+ */
+export function PrehliadkaSetupPage() {
+  const { id: idStr } = useParams<{ id?: string }>();
+  const editingId = idStr !== undefined ? Number(idStr) : null;
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const visitId = numericParam(searchParams.get('visit_id'));
+  // Every entry other than the BOZP one is the OPP item (spec 14).
+  const presetBozp = searchParams.get('preset') === 'bozp';
+
+  // The prevádzka comes from the query, from the visit, or — editing — from the draft.
+  const [visit, setVisit] = useState<Visit | null>(null);
+  const [visitError, setVisitError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<InspectionDetail | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (visitId === null || editingId !== null) return;
+    let cancelled = false;
+    Visits.show(visitId)
+      .then((res) => {
+        if (!cancelled) setVisit(res.visit);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setVisitError(err instanceof ApiError ? err.message : 'Návštevu sa nepodarilo načítať.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visitId, editingId]);
+
+  useEffect(() => {
+    if (editingId === null) return;
+    let cancelled = false;
+    Inspections.show(editingId)
+      .then((res) => {
+        if (!cancelled) setDraft(res);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setDraftError(err instanceof ApiError ? err.message : 'Prehliadku sa nepodarilo načítať.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingId]);
+
+  const facilityId =
+    editingId !== null
+      ? (draft?.inspection.facility_id ?? null)
+      : visit
+        ? visit.facility_id
+        : numericParam(searchParams.get('facility_id'));
+
+  if (editingId !== null && draftError) return <ErrorCard message={draftError} to="/" />;
+  if (visitId !== null && visitError && !visit) return <ErrorCard message={visitError} to={`/visits/${visitId}`} />;
+
+  if (editingId !== null ? draft === null : visitId !== null && visit === null) {
+    return <SetupSkeleton />;
+  }
+
+  if (facilityId === null) {
+    return (
+      <FacilityChooser
+        onPick={(companyId, facId) => {
+          const next = new URLSearchParams(searchParams);
+          next.set('company_id', String(companyId));
+          next.set('facility_id', String(facId));
+          setSearchParams(next, { replace: true });
+        }}
+      />
+    );
+  }
+
+  return (
+    <SetupForm
+      key={`${editingId ?? 'new'}-${facilityId}-${presetBozp ? 'bozp' : 'po'}`}
+      facilityId={facilityId}
+      editing={draft}
+      visit={visit}
+      presetBozp={presetBozp}
+      presetDate={searchParams.get('executed_on')}
+    />
+  );
+}
+
+// ─── The form ───────────────────────────────────────────────────────────────
+
+function SetupForm({
+  facilityId,
+  editing,
+  visit,
+  presetBozp,
+  presetDate,
+}: {
+  facilityId: number;
+  editing: InspectionDetail | null;
+  visit: Visit | null;
+  presetBozp: boolean;
+  presetDate: string | null;
+}) {
+  const { user, csrfToken } = useAuth();
+  const toast = useToast();
+  const certMissing = useCertMissingToast();
+  // Fresh `can_create` verdict for an offline start (see cachedCertRefusal).
+  useEffect(() => warmCertProfile(), []);
+  const navigate = useNavigate();
+
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const details = useMemo(() => parseDetails(editing?.inspection.details), [editing]);
+
+  // The area preselected by the entry; a draft keeps what it stored (spec 14).
+  const entryScope: PrehliadkaScope = presetBozp ? { po: false, bozp: true } : { po: true, bozp: false };
+  const [scope, setScope] = useState<PrehliadkaScope>(() =>
+    editing && scopeToChoice(details.scope) !== null ? details.scope : entryScope,
+  );
+  const [routine, setRoutine] = useState<DeviceType[]>([]);
+  const [executedOn, setExecutedOn] = useState(
+    editing?.inspection.executed_on ?? visit?.visit_date ?? presetDate ?? todayIso(),
+  );
+
+  const [lehotaZakon, setLehotaZakon] = useState<LehotaZakon>(() => (details.lehota_zakon as LehotaZakon) || 12);
+  const [lehotaVlastna, setLehotaVlastna] = useState<number | null>(() => details.lehota_vlastna ?? null);
+  const [customLehotaInput, setCustomLehotaInput] = useState<string>(
+    details.lehota_vlastna ? String(details.lehota_vlastna) : '',
+  );
+
+  // „Ako naposledy" first; „Zmeniť nastavenie" opens the form itself.
+  const [changing, setChanging] = useState(false);
+  const [scopeError, setScopeError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // The prevádzka, its device list and what it remembers of the last prehliadka.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { facility } = await Facilities.show(facilityId);
+        const [groups, context, companyDetail] = await Promise.all([
+          Facilities.devices(facilityId).then((r) => r.groups).catch(() => null),
+          Prehliadka.context(facilityId).catch(() => null),
+          Companies.show(facility.company_id).catch(() => null),
+        ]);
+        if (cancelled) return;
+        setLoaded({
+          facility,
+          company: companyDetail?.company ?? null,
+          groups,
+          context,
+        });
+      } catch (err) {
+        if (!cancelled) setLoadError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať údaje.');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [facilityId]);
+
+  const counts = useMemo(() => {
+    const map: Partial<Record<DeviceType, number>> = {};
+    for (const g of loaded?.groups ?? []) map[g.type] = g.items.length;
+    return map;
+  }, [loaded]);
+
+  const memory = editing === null ? (loaded?.context?.last ?? null) : null;
+  const openDrafts = loaded?.context?.open_drafts ?? {};
+
+  /** A type can be ticked when it has devices and no unfinished draft (Q10); a ticked one stays. */
+  const tickable = (type: DeviceType, current: DeviceType[]) =>
+    current.includes(type) || ((counts[type] ?? 0) > 0 && openDrafts[type] === undefined);
+
+  // Preset once, as soon as the context is known: the draft being edited, else
+  // the last prehliadka (spec 6.1 „Pamäť"), else nothing.
+  const [seeded, setSeeded] = useState(false);
+  useEffect(() => {
+    if (!loaded || seeded) return;
+    setSeeded(true);
+    const bd = isBytoveDruzstvo(loaded.facility.company_client_type);
+    if (editing) {
+      if (scopeToChoice(details.scope) !== null) setScope(details.scope);
+      setRoutine(details.routine);
+      setLehotaZakon((details.lehota_zakon as LehotaZakon) || (bd ? 12 : 3));
+      setLehotaVlastna(details.lehota_vlastna ?? null);
+      if (details.lehota_vlastna) setCustomLehotaInput(String(details.lehota_vlastna));
+      return;
+    }
+    // The last prehliadka presets everything but the area, which the entry decides.
+    if (memory) {
+      setRoutine(memory.routine.filter((t) => tickable(t, [])));
+      if (memory.lehota_zakon === 3 || memory.lehota_zakon === 6 || memory.lehota_zakon === 12) {
+        setLehotaZakon(memory.lehota_zakon as LehotaZakon);
+      } else {
+        setLehotaZakon(bd ? 12 : 3);
+      }
+      if (typeof memory.lehota_vlastna === 'number') {
+        setLehotaVlastna(memory.lehota_vlastna);
+        setCustomLehotaInput(String(memory.lehota_vlastna));
+      }
+    } else {
+      setLehotaZakon(bd ? 12 : 3);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
+  const showMemoryCard = editing === null && memory !== null && !changing && !presetBozp;
+
+  // A prehliadka already in progress at this prevádzka (only when starting a new one).
+  const inProgress = editing === null ? (loaded?.context?.draft_id ?? null) : null;
+  const discardInProgress = useDiscardPrehliadka(
+    inProgress,
+    () => setLoaded((cur) => (cur && cur.context ? { ...cur, context: { ...cur.context, draft_id: null } } : cur)),
+    undefined,
+    // Refused because it was issued meanwhile (409): read the context again,
+    // so the card of the draft goes without a reload (round 7).
+    () => {
+      Prehliadka.context(facilityId)
+        .then((context) => setLoaded((cur) => (cur ? { ...cur, context } : cur)))
+        .catch(() => undefined);
+    },
+  );
+
+  const backTo = editing
+    ? prehliadkaPath(editing.inspection.id)
+    : visit
+      ? `/visits/${visit.id}`
+      : `/facilities/${facilityId}`;
+
+  function toggleRoutine(type: DeviceType) {
+    setRoutine((cur) => (cur.includes(type) ? cur.filter((t) => t !== type) : [...cur, type]));
+  }
+
+  const effectivePeriodicity = (lehotaVlastna && lehotaVlastna > 0) ? lehotaVlastna : lehotaZakon;
+
+  async function submit(opts?: { useMemory?: boolean }) {
+    if (!loaded) return;
+    // The rest of `details` (devices, ticked activities, answers about the previous
+    // defects …) belongs to the later steps; a PATCH replaces the object, so it travels along.
+    // One override key per routine type serves both today's term and the term
+    // of the last protocol (step 3) — a type ticked or unticked here changes
+    // which of the two the row means, so a date written for the other is dropped.
+    const termOverrides = { ...details.term_overrides };
+    for (const type of new Set([...details.routine, ...routine])) {
+      if (details.routine.includes(type) !== routine.includes(type)) delete termOverrides[routineTermKey(type)];
+    }
+    const effective: PrehliadkaDetails = {
+      ...details,
+      scope,
+      routine,
+      lehota_zakon: lehotaZakon,
+      lehota_vlastna: lehotaVlastna,
+      term_overrides: termOverrides,
+    };
+    if (!effective.scope.po && !effective.scope.bozp) {
+      setScopeError('Vyber, akú prehliadku robíš.');
+      return;
+    }
+    if (!executedOn) {
+      setError('Zadaj dátum prehliadky.');
+      return;
+    }
+    setError(null);
+    setScopeError(null);
+    setSubmitting(true);
+    try {
+      // Offline the write is only parked; ask the cached profile now so a
+      // missing number is told before the walk-through, not on sync. An edit
+      // asks only about scope it switches on, as the server does.
+      if (!navigator.onLine) {
+        const was = editing ? (editing.inspection.details as PrehliadkaDetails | null)?.scope : undefined;
+        const keys = [
+          ...(effective.scope.po && !was?.po ? [`${PREHLIADKA_TYPE}.po`] : []),
+          ...(effective.scope.bozp && !was?.bozp ? [`${PREHLIADKA_TYPE}.bozp`] : []),
+        ];
+        const refusal = await cachedCertRefusal(keys);
+        if (refusal) throw refusal;
+      }
+      if (editing) {
+        const patch = {
+          // The date of a prehliadka in a visit is the visit's; the server ignores it there.
+          executed_on: executedOn,
+          periodicity_value: effectivePeriodicity,
+          periodicity_unit: 'mesiac' as const,
+          details: detailsPayload(effective),
+        };
+        try {
+          await Inspections.update(editing.inspection.id, patch, csrfToken);
+        } catch (err) {
+          if (!(err instanceof OfflineQueuedError)) throw err;
+          toast.success('Uloží sa, keď budeš online');
+        }
+        navigate(prehliadkaPath(editing.inspection.id), { replace: true });
+        return;
+      }
+
+      const facility = loaded.facility;
+      const payload = {
+        type: PREHLIADKA_TYPE,
+        periodicity_value: effectivePeriodicity,
+        periodicity_unit: 'mesiac' as const,
+        executed_on: executedOn,
+        company_id: facility.company_id,
+        facility_id: facility.id,
+        details: detailsPayload(effective),
+        ...(visit ? { visit_id: visit.id } : {}),
+      };
+      // Offline the draft is created locally and syncs later; ignored when the POST reaches the server.
+      const optimistic = inspectionCreateOptimistic({
+        payload,
+        company: {
+          id: facility.company_id,
+          name: facility.company_name ?? loaded.company?.name ?? '',
+          ico: loaded.company?.ico ?? null,
+          billing_mode: loaded.company?.billing_mode,
+        },
+        facility: { id: facility.id, name: facility.name },
+        inspector: { id: user?.id ?? 0, name: user?.fullname ?? '' },
+      });
+      const res = await Inspections.createDraft(payload, csrfToken, optimistic);
+      toast.success(opts?.useMemory ? 'Prehliadka začatá — nastavenie ako naposledy' : 'Prehliadka začatá');
+      navigate(prehliadkaPath(res.inspection.id), { replace: true });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
+      setError(msg);
+      if (!certMissing(err, { returnLabel: 'Späť na prehliadku' })) toast.error(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (loadError) return <ErrorCard message={loadError} to={backTo} />;
+  if (!loaded) return <SetupSkeleton />;
+
+  const { facility } = loaded;
+  const bd = isBytoveDruzstvo(facility.company_client_type);
+  const nouns = facilityNouns(facility.company_client_type);
+
+  return (
+    <div className="flex flex-col gap-5">
+      {visit ? (
+        <Breadcrumb
+          items={[
+            ...visitTrail({ id: visit.id, companyName: visit.company_name, date: visit.visit_date }),
+            { label: 'Preventívna prehliadka' },
+          ]}
+        />
+      ) : (
+        <Link to={backTo} className="inline-flex items-center gap-1 self-start text-sm text-ink-500 hover:text-ink-700">
+          <ArrowLeft className="size-4" />
+          {editing ? 'Späť na obchôdzku' : 'Zrušiť'}
+        </Link>
+      )}
+
+      <header className="animate-fade-up">
+        <p className="text-xs font-semibold uppercase tracking-wider text-firol-500">Krok 1 z 3 · Nastavenie</p>
+        <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink-900">
+          {showMemoryCard ? 'Ako naposledy?' : 'Preventívna prehliadka'}
+        </h1>
+        <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-500">
+          <Building className="size-3" />
+          {facility.company_name}
+          <span className="text-ink-300">·</span>
+          <Warehouse className="size-3" />
+          {facility.name}
+          <span className="text-ink-300">·</span>
+          {formatDateSk(executedOn)}
+        </p>
+        <StepBars step={1} />
+      </header>
+
+      {inProgress !== null && (
+        <Card className="animate-fade-up flex flex-col gap-3 p-4">
+          <div>
+            <p className="text-sm font-semibold text-ink-900">Prehliadka tu už prebieha</p>
+            <p className="mt-0.5 text-xs text-ink-500">
+              Na {nouns.demo.loc} je rozpracovaná prehliadka.{' '}
+              {discardInProgress.allowed ? 'Pokračuj v nej, alebo ju zahoď.' : 'Dokonči ju.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link to={prehliadkaPath(inProgress)}>
+              <Button type="button" id="pp-continue" rightIcon={<ArrowRight className="size-4" />}>
+                Pokračovať
+              </Button>
+            </Link>
+            <DiscardPrehliadkaButton action={discardInProgress} />
+          </div>
+        </Card>
+      )}
+
+      {inProgress === null && showMemoryCard && memory && (
+        <MemoryCard
+          memory={memory}
+          scope={scope}
+          routine={memory.routine.filter((t) => tickable(t, []))}
+          date={executedOn}
+          submitting={submitting}
+          error={error}
+          onStart={() => void submit({ useMemory: true })}
+          onChange={() => setChanging(true)}
+        />
+      )}
+
+      {inProgress === null && !showMemoryCard && (
+        <form
+          className="flex flex-col gap-4"
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <Card className="animate-fade-up flex flex-col gap-2.5 p-4">
+            <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Akú prehliadku robím</span>
+            <Segmented
+              label="Akú prehliadku robím"
+              value={scopeToChoice(scope)}
+              options={SCOPE_OPTIONS}
+              onChange={(c) => {
+                const next = choiceToScope(c);
+                setScope(next);
+                setScopeError(null);
+              }}
+            />
+            {scopeError ? (
+              <p className="text-xs text-status-bad">{scopeError}</p>
+            ) : (
+              <p className="text-xs text-ink-400">
+                Jedna obchôdzka, viac záznamov. Pri každom nedostatku povieš, do ktorého patrí — predvyplní sa z
+                číselníka.
+              </p>
+            )}
+          </Card>
+
+          <Card className="animate-fade-up flex flex-col gap-2.5 p-4">
+            <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+              Robím pri tom aj riadne kontroly?
+            </span>
+            {loaded.groups === null && (
+              <p className="flex items-start gap-2 rounded-xl bg-[var(--color-status-warn-bg)]/60 px-3 py-2 text-xs text-ink-600">
+                <CloudOff className="mt-0.5 size-3.5 shrink-0 text-status-warn" />
+                Zoznam zariadení sa nepodarilo načítať — bez siete sa riadne kontroly zvoliť nedajú. Nedostatok
+                môžeš napísať aj tak, zariadenie vypíšeš rukou.
+              </p>
+            )}
+            <ul className="flex flex-col gap-2">
+              {DEVICE_TYPES.map((type) => {
+                const count = counts[type] ?? 0;
+                const openDraft = openDrafts[type];
+                const ticked = routine.includes(type);
+                const disabled = !tickable(type, routine);
+                return (
+                  <li key={type} className="flex flex-col">
+                    <CheckRow
+                      id={`pp-routine-${type}`}
+                      checked={ticked}
+                      disabled={disabled}
+                      onToggle={() => toggleRoutine(type)}
+                      title={ROUTINE_LABELS[type]}
+                      sub={
+                        count === 0
+                          ? 'Zatiaľ tu nie je žiadna kontrola tohto typu.'
+                          : `${devicesLabel(count)} · na celý objekt`
+                      }
+                    />
+                    {openDraft !== undefined && !ticked && (
+                      <Link
+                        to={`/inspections/${openDraft}`}
+                        className="mt-1 px-3.5 text-xs font-medium text-firol-700 underline-offset-2 hover:underline"
+                      >
+                        Rozpracovaná kontrola už existuje — dokonči ju
+                      </Link>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="text-xs text-ink-400">
+              Z každej zaškrtnutej vznikne na konci vlastný koncept kontroly — aj s výsledkami, ktoré pri obchôdzke
+              zapíšeš. Typ bez zariadení sa zvoliť nedá; zariadenia pribudnú z kontrol na {nouns.demo.loc}.
+            </p>
+          </Card>
+
+          {/* Lehota prehliadky */}
+          <Card className="animate-fade-up flex flex-col gap-3 p-4">
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Lehota prehliadky</span>
+              <p className="mt-0.5 text-xs text-ink-400">Vyberte zákonnú lehotu, pod ktorú objekt patrí.</p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {([
+                [12, '12 mesiacov'],
+                [6, '6 mesiacov'],
+                [3, '3 mesiace'],
+              ] as const).map(([val, label]) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setLehotaZakon(val)}
+                  className={cn(
+                    'rounded-xl px-3.5 py-1.5 text-sm font-medium transition-colors',
+                    lehotaZakon === val
+                      ? 'bg-firol-500 text-white shadow-sm'
+                      : 'bg-ink-100 text-ink-700 hover:bg-ink-200',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <p className="text-xs text-ink-500">
+              {lehotaZakon === 12 && 'Obytné domy a objekty s občasnými pracovnými miestami.'}
+              {lehotaZakon === 6 && 'Objekty, kde sa vykonáva len administratívna činnosť.'}
+              {lehotaZakon === 3 && 'Ostatné objekty.'}
+            </p>
+
+            <div className="mt-1 border-t border-ink-100 pt-3">
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+                Dohodnutá kratšia lehota
+              </span>
+              <p className="mt-0.5 text-xs text-ink-400">
+                Nepovinné. Len <b>kratšia</b> než zákonná, dlhšia nie.
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLehotaVlastna(null);
+                    setCustomLehotaInput('');
+                  }}
+                  className={cn(
+                    'rounded-xl px-3 py-1.5 text-sm font-medium transition-colors',
+                    lehotaVlastna === null
+                      ? 'bg-firol-500 text-white shadow-sm'
+                      : 'bg-ink-100 text-ink-700 hover:bg-ink-200',
+                  )}
+                >
+                  bez dohody
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (lehotaVlastna === null) {
+                      const fallback = Math.max(1, lehotaZakon - 1);
+                      setLehotaVlastna(fallback);
+                      setCustomLehotaInput(String(fallback));
+                    }
+                  }}
+                  className={cn(
+                    'rounded-xl px-3 py-1.5 text-sm font-medium transition-colors',
+                    lehotaVlastna !== null
+                      ? 'bg-firol-500 text-white shadow-sm'
+                      : 'bg-ink-100 text-ink-700 hover:bg-ink-200',
+                  )}
+                >
+                  {lehotaVlastna !== null ? `vlastná · ${lehotaVlastna} mes.` : 'vlastná'}
+                </button>
+              </div>
+
+              {lehotaVlastna !== null && (
+                <div className="mt-2.5 flex items-center gap-2">
+                  <div className="w-28">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={120}
+                      value={customLehotaInput}
+                      placeholder="napr. 6"
+                      onChange={(e) => {
+                        setCustomLehotaInput(e.target.value);
+                        const parsed = parseInt(e.target.value, 10);
+                        if (!isNaN(parsed) && parsed > 0 && parsed <= 120) {
+                          setLehotaVlastna(parsed);
+                        } else if (e.target.value === '') {
+                          setLehotaVlastna(null);
+                        }
+                      }}
+                    />
+                  </div>
+                  <span className="text-xs text-ink-500">mesiacov</span>
+                </div>
+              )}
+
+              {lehotaVlastna !== null && lehotaVlastna >= lehotaZakon && (
+                <p className="mt-2 rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-xs font-medium text-[var(--color-status-bad)]">
+                  Dohodnutá lehota ({lehotaVlastna} mes.) nie je kratšia než zákonná ({lehotaZakon} mes.). Dlhšiu lehotu než zákonnú nie je možné dohodnúť.
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-600">
+              Ďalšia prehliadka sa počíta z <b>{effectivePeriodicity} {effectivePeriodicity === 1 ? 'mesiaca' : effectivePeriodicity < 5 ? 'mesiacov' : 'mesiacov'}</b>
+              {lehotaVlastna ? ` — dohodnutá kratšia lehota, zákonná je ${lehotaZakon}` : ''}.
+            </div>
+          </Card>
+
+          {/* Výstup z prehliadky */}
+          <Card className="animate-fade-up flex flex-col gap-2.5 p-4">
+            <span className="text-xs font-semibold uppercase tracking-wide text-ink-500">Výstup z prehliadky</span>
+            <ul className="flex flex-col gap-2">
+              {scope.po && (
+                <li className="flex items-center gap-3 rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 opacity-90">
+                  <span className="grid size-5 place-items-center rounded-md bg-firol-50 text-xs font-bold text-firol-600">✓</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-ink-900">
+                      {bd ? 'Záznam o preventívnej protipožiarnej prehliadke bytového domu' : 'Záznam o vykonaní preventívnej protipožiarnej prehliadky'}
+                    </p>
+                    <p className="text-xs text-ink-500">
+                      {bd ? 'Vzniká vždy.' : 'Hlavný výstup prehliadky.'}
+                    </p>
+                  </div>
+                </li>
+              )}
+              {scope.bozp && (
+                <li className="flex items-center gap-3 rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 opacity-90">
+                  <span className="grid size-5 place-items-center rounded-md bg-firol-50 text-xs font-bold text-firol-600">✓</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-ink-900">Preventívna prehliadka BOZP</p>
+                    <p className="text-xs text-ink-500">Nahrádza knihu kontrol BOZP — vzniká vždy.</p>
+                  </div>
+                </li>
+              )}
+            </ul>
+          </Card>
+
+          <Card className="animate-fade-up flex flex-col gap-4 p-4">
+            {visit ? (
+              <Field label="Dátum prehliadky" hint="Dátum prehliadky je dátum návštevy.">
+                {(p) => (
+                  <Input
+                    id={p.id}
+                    type="text"
+                    readOnly
+                    disabled
+                    value={formatDateSk(executedOn)}
+                    leftIcon={<CalendarDays className="size-4" />}
+                  />
+                )}
+              </Field>
+            ) : (
+              <Field
+                label="Dátum prehliadky"
+                required
+                hint="Od tohto dátumu sa počítajú termíny. Predvyplnený je dnešný dátum, môžeš ho zmeniť aj na minulý."
+              >
+                {(p) => (
+                  <Input
+                    {...p}
+                    type="date"
+                    required
+                    leftIcon={<CalendarDays className="size-4" />}
+                    value={executedOn}
+                    onChange={(e) => setExecutedOn(e.target.value)}
+                  />
+                )}
+              </Field>
+            )}
+          </Card>
+
+          {error && (
+            <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
+              {error}
+            </div>
+          )}
+
+          <Button
+            type="submit"
+            id="pp-start"
+            loading={submitting}
+            leftIcon={editing ? undefined : <Play className="size-4" />}
+            rightIcon={<ArrowRight className="size-4" />}
+          >
+            {editing ? 'Uložiť nastavenie' : 'Začať obchôdzku'}
+          </Button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+// ─── „Ako naposledy" ────────────────────────────────────────────────────────
+
+function MemoryCard({
+  memory,
+  scope,
+  routine: routineTypes,
+  date,
+  submitting,
+  error,
+  onStart,
+  onChange,
+}: {
+  memory: NonNullable<PrehliadkaContext['last']>;
+  /** The area this start uses — the entry's, not the last prehliadka's. */
+  scope: PrehliadkaScope;
+  routine: DeviceType[];
+  date: string;
+  submitting: boolean;
+  error: string | null;
+  onStart: () => void;
+  onChange: () => void;
+}) {
+  const routine = routineTypes.map((t) => ROUTINE_LABELS[t]);
+  const months = effectivePeriodicityMonths(memory);
+  return (
+    <div className="animate-fade-up flex flex-col gap-3">
+      <Card className="flex flex-col gap-3 border-firol-200 p-4">
+        <div>
+          <p className="text-sm font-semibold text-ink-900">
+            Prevzaté z prehliadky {memory.executed_on ? formatDateSk(memory.executed_on) : '—'}
+          </p>
+          <p className="mt-0.5 text-xs text-ink-500">Všetko sa dá zmeniť.</p>
+        </div>
+        <ul className="flex flex-col gap-1.5 text-sm text-ink-800">
+          <li>
+            • Zapisujem <b>{scopeLabel(scope)}</b>
+          </li>
+          <li>
+            • Riadne kontroly: <b>{routine.length > 0 ? routine.join(', ') : 'žiadne'}</b>
+          </li>
+          <li>
+            • Dátum: <b>{formatDateSk(date)}</b>
+          </li>
+          <li>
+            • Lehota prehliadky: <b>{months} {months === 1 ? 'mesiac' : months < 5 ? 'mesiace' : 'mesiacov'}</b>
+            {memory.lehota_vlastna ? ' (dohodnutá kratšia)' : ''}
+          </li>
+        </ul>
+      </Card>
+      {error && (
+        <div className="rounded-xl bg-[var(--color-status-bad-bg)] px-3 py-2 text-sm text-[var(--color-status-bad)]">
+          {error}
+        </div>
+      )}
+      <Button type="button" id="pp-start-memory" loading={submitting} onClick={onStart} leftIcon={<Play className="size-4" />}>
+        Začať obchôdzku
+      </Button>
+      <Button type="button" id="pp-change-setup" variant="secondary" onClick={onChange} disabled={submitting}>
+        Zmeniť nastavenie
+      </Button>
+    </div>
+  );
+}
+
+// ─── Without a prevádzka in the link ────────────────────────────────────────
+
+/** Reached from the type picker, where only a company may be known. */
+function FacilityChooser({ onPick }: { onPick: (companyId: number, facilityId: number) => void }) {
+  const [searchParams] = useSearchParams();
+  const [companies, setCompanies] = useState<CompanyListItem[] | null>(null);
+  const [facilities, setFacilities] = useState<FacilityListItem[]>([]);
+  const [companyId, setCompanyId] = useState<number | null>(numericParam(searchParams.get('company_id')));
+  const [facilityId, setFacilityId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingFacilities, setLoadingFacilities] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    Companies.list()
+      .then((res) => {
+        if (!cancelled) {
+          setCompanies(res.items);
+          if (companyId === null && res.items.length === 1) setCompanyId(res.items[0].id);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať klientov.');
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (companyId === null) {
+      setFacilities([]);
+      setFacilityId(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingFacilities(true);
+    Companies.show(companyId)
+      .then((res) => {
+        if (!cancelled) {
+          setFacilities(res.facilities);
+          setFacilityId(res.facilities.length === 1 ? res.facilities[0].id : null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať zoznam.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingFacilities(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
+  if (companies === null && !error) return <SetupSkeleton />;
+
+  // Facility wording follows the chosen client (both nouns before one is chosen).
+  const fNouns = facilityPickerNouns(
+    companyId !== null,
+    (companies ?? []).find((c) => c.id === companyId)?.client_type,
+  );
+
+  return (
+    <div className="flex flex-col gap-5">
+      <Link to="/opp" className="inline-flex items-center gap-1 self-start text-sm text-ink-500 hover:text-ink-700">
+        <ArrowLeft className="size-4" />
+        Späť
+      </Link>
+      <header>
+        <h1 className="text-xl font-semibold tracking-tight text-ink-900">Preventívna prehliadka</h1>
+        <p className="mt-1 text-sm text-ink-500">Najprv vyber, kde sa prehliadka robí.</p>
+      </header>
+      <Card className="flex flex-col gap-4 p-5">
+        <Field label={CLIENT_NEUTRAL.singular} required>
+          {(p) => (
+            <Select
+              id={p.id}
+              value={companyId !== null ? String(companyId) : ''}
+              onChange={(v) => setCompanyId(v ? Number(v) : null)}
+              placeholder={CLIENT_NEUTRAL.pickPlaceholder}
+              leftIcon={<Building className="size-4" />}
+              searchable
+              options={(companies ?? []).map((c) => ({
+                value: String(c.id),
+                label: c.name,
+                description: c.ico ? `IČO ${c.ico}` : undefined,
+              }))}
+            />
+          )}
+        </Field>
+        <Field label={fNouns.singular} required>
+          {(p) => (
+            <Select
+              id={p.id}
+              value={facilityId !== null ? String(facilityId) : ''}
+              onChange={(v) => setFacilityId(v ? Number(v) : null)}
+              disabled={companyId === null || loadingFacilities}
+              placeholder={companyId === null ? CLIENT_NEUTRAL.pickFirstPlaceholder : loadingFacilities ? 'Načítavam…' : `— vyber ${fNouns.cases.acc} —`}
+              leftIcon={<Warehouse className="size-4" />}
+              searchable
+              options={facilities.map((f) => ({ value: String(f.id), label: f.name }))}
+            />
+          )}
+        </Field>
+        {error && <p className="text-sm text-status-bad">{error}</p>}
+        <Button
+          type="button"
+          id="pp-pick-facility"
+          disabled={companyId === null || facilityId === null}
+          rightIcon={<ArrowRight className="size-4" />}
+          onClick={() => companyId !== null && facilityId !== null && onPick(companyId, facilityId)}
+        >
+          Pokračovať
+        </Button>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Chrome ─────────────────────────────────────────────────────────────────
+
+function SetupSkeleton() {
+  return (
+    <div className="flex flex-col gap-4" aria-busy>
+      <Skeleton className="h-4 w-20" />
+      <Skeleton className="h-7 w-56" />
+      <Skeleton className="h-28 w-full rounded-2xl" />
+      <Skeleton className="h-56 w-full rounded-2xl" />
+    </div>
+  );
+}
+
+function ErrorCard({ message, to }: { message: string; to: string }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <Link to={to} className="inline-flex items-center gap-1 self-start text-sm text-ink-500 hover:text-ink-700">
+        <ArrowLeft className="size-4" />
+        Späť
+      </Link>
+      <Card className="px-4 py-3 text-sm text-status-bad">{message}</Card>
+    </div>
+  );
+}

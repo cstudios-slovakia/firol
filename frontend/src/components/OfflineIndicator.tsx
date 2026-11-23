@@ -18,6 +18,9 @@ import { useToast } from '@/lib/toast';
  * event already (see lib/pwa.ts) so the manual retry button is mostly
  * for permanently-failed entries (4xx/5xx).
  */
+/** A queued change of one úkon or of its items (a temp id included). */
+const UKON_PATH = /^\/api\/inspections\/-?\d+(\/|\?|$)/;
+
 export function OfflineIndicator() {
   const online = useOnlineStatus();
   const pending = usePendingMutations();
@@ -30,7 +33,11 @@ export function OfflineIndicator() {
   function reportSync(res: DrainResult) {
     if (res.networkError) {
       toast.error('Údaje sa nepodarilo synchronizovať — skontroluj pripojenie na internet.');
-    } else if (res.synced > 0 && res.failed === 0) {
+    } else if (res.certMissing) {
+      // The guided toast (useCertMissingSyncToast) already says what to do.
+    } else if (res.failed > 0) {
+      toast.error('Niektoré zmeny sa nepodarilo uložiť. Dôvod je pri každej v zozname.');
+    } else if (res.synced > 0) {
       toast.success('Údaje boli uložené.');
     }
   }
@@ -52,12 +59,15 @@ export function OfflineIndicator() {
 
   const tone = online ? 'amber' : 'red';
   return (
-    <div ref={wrapperRef} className="relative">
+    // Not `relative`: the panel anchors to the header row (AppShell), so at
+    // 360 px it opens under the whole header instead of running off the left
+    // edge from the pill.
+    <div ref={wrapperRef} className="shrink-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          'inline-flex items-center gap-1.5 rounded-2xl px-2.5 py-1.5 text-xs font-medium transition-colors',
+          'inline-flex items-center gap-1.5 whitespace-nowrap rounded-2xl px-2.5 py-1.5 text-xs font-medium transition-colors',
           tone === 'red'
             ? 'bg-red-50 text-red-700 hover:bg-red-100'
             : 'bg-amber-50 text-amber-700 hover:bg-amber-100',
@@ -74,7 +84,7 @@ export function OfflineIndicator() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-30 mt-2 w-80 rounded-2xl border border-ink-100 bg-white p-3 shadow-2xl">
+        <div className="absolute right-4 top-full z-30 mt-1 w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-ink-100 bg-white p-3 shadow-2xl">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm font-semibold text-ink-900">
               {online ? 'Čakajúce zmeny' : 'Si offline'}
@@ -93,7 +103,7 @@ export function OfflineIndicator() {
 
           {!hasQueue && (
             <p className="text-xs leading-relaxed text-ink-500">
-              Bez signálu sa zmeny uložia lokálne a odošlú sa keď budeš online. PDF a fakturácia
+              Bez signálu sa zmeny uložia lokálne a odošlú sa, keď budeš online. PDF a fakturácia
               vyžadujú pripojenie.
             </p>
           )}
@@ -131,7 +141,15 @@ export function OfflineIndicator() {
                         {m.attempts > 0 && ` · ${m.attempts} pokus${m.attempts > 1 ? 'y' : ''}`}
                       </div>
                       {m.lastError && (
-                        <div className="mt-1 text-[11px] text-red-700">{m.lastError}</div>
+                        <div className="mt-1 text-[11px] text-red-700">
+                          {m.lastError}
+                          {/* A zmena of an úkon or item that no longer exists — a discarded
+                              draft is deleted for good (17. 11. 2026), an issued one is
+                              archived; retrying cannot help. Only úkon and item paths:
+                              a 404 of a training, firma or task means something else. */}
+                          {m.lastStatus === 404 && UKON_PATH.test(m.path) &&
+                            ' Úkon alebo položku medzitým niekto zmazal alebo archivoval, zmenu už nie je kam uložiť — zahoď ju.'}
+                        </div>
                       )}
                     </div>
                     <div className="flex shrink-0 gap-1">

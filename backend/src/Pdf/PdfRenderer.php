@@ -84,13 +84,17 @@ final class PdfRenderer
      *   signature_data_uri?), items (fields + position), stats, and — when the
      *   protocol carries photo documentation — photos (caption + path).
      */
-    public static function renderForType(string $type, array $payload): string
+    public static function renderHtmlForType(string $type, array $payload): string
     {
         $bodyTemplate = match ($type) {
             'php'                => 'php.php',
             'hydranty'           => 'hydranty.php',
             'oprava_ts_php'      => 'oprava_ts_php.php',
-            'poziarna_kniha'     => 'poziarna_kniha.php',
+            // POapp 7. 11. 2026 — a new-format entry carries `kniha`; old
+            // entries keep their own template.
+            'poziarna_kniha'     => isset($payload['kniha']) ? 'poziarna_kniha_zapis.php' : 'poziarna_kniha.php',
+            // POapp 26. 10. 2026 — the PO record of a preventívna prehliadka.
+            'preventivna_prehliadka' => 'preventivna_prehliadka.php',
             'pu_akcieschopnost'  => 'pu_akcieschopnost.php',
             'pu_udrzba'          => 'pu_udrzba.php',
             'nudzove_osvetlenie' => 'nudzove_osvetlenie.php',
@@ -123,6 +127,12 @@ final class PdfRenderer
             Sections::forInspectionType($type) === Sections::BOZP ? ProtocolLayout::BOZP_COLOR : null,
         );
 
+        return $html;
+    }
+
+    public static function renderForType(string $type, array $payload): string
+    {
+        $html = self::renderHtmlForType($type, $payload);
         return self::buildPdf($html, $payload['number'] ?? 'firol');
     }
 

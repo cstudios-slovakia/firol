@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { cn } from '@/lib/cn';
 import { fold } from '@/lib/text';
+import { facilityNouns } from '@/lib/clientKind';
 
 const TEXTAREA =
   'w-full rounded-xl border border-ink-200 bg-white px-3 py-2.5 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200';
@@ -45,13 +46,14 @@ export function FieldError({ children }: { children: ReactNode }) {
 /**
  * A list of places (prehliadnuté pracoviská, kontrolované priestory): typed
  * one at a time or picked from the places already recorded on this
- * prevádzka — the „výber z prevádzky" of chapter 7.
+ * prevádzka / bytový dom — the „výber z prevádzky" of chapter 7.
  */
 export function PlaceListField({
   label,
   values,
   onChange,
   facilityId,
+  clientType,
   placeholder,
   error,
 }: {
@@ -59,6 +61,8 @@ export function PlaceListField({
   values: string[];
   onChange: (next: string[]) => void;
   facilityId: number;
+  /** Type of the client — picks prevádzka / bytový dom wording. */
+  clientType?: string | null;
   placeholder: string;
   error: string | null;
 }) {
@@ -126,7 +130,7 @@ export function PlaceListField({
       </div>
       {offered.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs text-ink-400">Z tejto prevádzky:</span>
+          <span className="text-xs text-ink-400">Z {facilityNouns(clientType).demo.gen}:</span>
           <div className="flex flex-wrap gap-2">
             {offered.map((k) => (
               <button key={k} type="button" onClick={() => add(k)}

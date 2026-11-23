@@ -52,7 +52,11 @@ export const TRAINING_COLOR = '#7A5AC8';
 /** Inspection types in each section. */
 export const SECTION_INSPECTION_TYPES: Record<Section, InspectionType[]> = {
   revizie: ['php', 'oprava_ts_php', 'vyradenie', 'hydranty', 'ts_hadic'],
-  opp: ['poziarna_kniha', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie'],
+  opp: [
+    'poziarna_kniha', 'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie',
+    // POapp 26. 10. 2026 — one walk-through, several records (lib/prehliadka.ts).
+    'preventivna_prehliadka',
+  ],
   // The BOZP úkony of block 2.
   bozp: [
     // Block 2 — single-record úkony (api/bozpRecords.ts).

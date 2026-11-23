@@ -22,7 +22,8 @@ use PDO;
 final class AccountPurge
 {
     /**
-     * Companies + facilities + everything hanging off them (inspections,
+     * Companies + facilities (client type and the prevádzka objekt columns
+     * go with those rows) + everything hanging off them (inspections,
      * items, photos, trainings, trainees, documents).
      *
      * @return int number of companies removed
@@ -97,6 +98,22 @@ final class AccountPurge
         self::pruneDocumentDirs($accountId);
 
         return $count;
+    }
+
+    /**
+     * The account's own číselník nedostatkov items (Phase 4), archived ones
+     * included. Shipped items (account_id NULL) are never touched. Only for a
+     * replace-mode restore, which writes the own items back from the backup;
+     * deleting the firms or the account's úkony leaves the číselník alone, and
+     * deleting the whole account removes it through the FK cascade.
+     *
+     * @return int number of items removed
+     */
+    public static function defectCatalog(int $accountId): int
+    {
+        $stmt = Db::pdo()->prepare('DELETE FROM defect_catalog WHERE account_id = ?');
+        $stmt->execute([$accountId]);
+        return $stmt->rowCount();
     }
 
     /** Inspections + items + photos + their protocols. Companies survive. */

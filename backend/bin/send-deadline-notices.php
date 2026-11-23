@@ -11,14 +11,16 @@ declare(strict_types=1);
  * e-mails the client about each termín falling within the chosen number of
  * days (7 / 14 / 30):
  *
- *   - only when the company has a contact e-mail (`companies.contact_email`);
+ *   - only when a recipient resolves (spec 3.2): the prevádzka e-mail, else
+ *     the firm's contact e-mail, else an address found in the firm's Kontakt;
  *   - one message per prevádzka and day, listing every control due there —
  *     the same grouping and the same words as the manual button
  *     („Oznámiť klientovi e-mailom", lib/clientNoticeEmail.ts);
  *   - the day announced is the planned visit date when one is set, otherwise
  *     the deadline itself — again as the manual notice does;
  *   - never twice: each deadline is claimed in `deadline_notices` (unique per
- *     defining úkon) BEFORE the mail goes out, so two overlapping runs cannot
+ *     defining úkon and prevádzka — a požiarna kniha entry can define the
+ *     terms of several) BEFORE the mail goes out, so two overlapping runs cannot
  *     both send it. A failed send releases the claim and is retried the next
  *     day; a run killed between claim and send loses that one notice rather
  *     than risking a duplicate.
@@ -55,12 +57,15 @@ $accounts = $pdo->query(
 )->fetchAll(PDO::FETCH_ASSOC);
 
 $claim = $pdo->prepare(
-    'INSERT IGNORE INTO deadline_notices (account_id, inspection_id, training_id, notice_date, recipient)
-     VALUES (?, ?, ?, ?, ?)'
+    'INSERT IGNORE INTO deadline_notices (account_id, inspection_id, facility_id, training_id, notice_date, recipient)
+     VALUES (?, ?, ?, ?, ?, ?)'
 );
 $release = $pdo->prepare(
-    'DELETE FROM deadline_notices WHERE inspection_id <=> ? AND training_id <=> ? AND account_id = ?'
+    'DELETE FROM deadline_notices WHERE inspection_id <=> ? AND facility_id <=> ? AND training_id <=> ? AND account_id = ?'
 );
+// A training's notice is keyed by the training alone; an inspection's by the
+// úkon and the prevádzka whose term it is.
+$noticeFacility = static fn (array $d): ?int => $d['training_id'] === null ? $d['facility_id'] : null;
 // What the e-mail calls a termín: a training by its subtype, an inspection by its type.
 $noticeType = static fn (array $d): string => (string) ($d['training_type'] ?? $d['type']);
 $senderStmt = $pdo->prepare('SELECT fullname, phone FROM users WHERE id = ?');
@@ -116,7 +121,7 @@ foreach ($accounts as $account) {
         // Claim first; send only what this run actually claimed.
         $claimed = [];
         foreach ($group as $d) {
-            $claim->execute([$accountId, $d['inspection_id'], $d['training_id'], $day, $to]);
+            $claim->execute([$accountId, $d['inspection_id'], $noticeFacility($d), $d['training_id'], $day, $to]);
             if ($claim->rowCount() === 1) {
                 $claimed[] = $d;
             }
@@ -154,7 +159,7 @@ foreach ($accounts as $account) {
         } else {
             $failed++;
             foreach ($claimed as $d) {
-                $release->execute([$d['inspection_id'], $d['training_id'], $accountId]);
+                $release->execute([$d['inspection_id'], $noticeFacility($d), $d['training_id'], $accountId]);
             }
             fwrite(STDERR, sprintf(
                 "[deadline-notices] account %d: sending to %s failed, will retry\n",

@@ -1,10 +1,12 @@
 import { INSPECTION_TYPE_LABELS, type InspectionType } from '@/api/inspections';
 import { SKOLENIE_PO, type Visit, type VisitInspection, type VisitTraining, type VisitType } from '@/api/visits';
 import type { Crumb } from '@/components/ui/Breadcrumb';
+import { PREHLIADKA_NEW_PATH, PREHLIADKA_TYPE, prehliadkaPath } from '@/lib/prehliadka';
+import { KNIHA_TYPE, knihaNewPath } from '@/lib/kniha';
 
 /** „1 položka", „2 položky", „5 položiek" — Slovak plural of a count. */
 function plural(n: number, one: string, few: string, many: string): string {
-  return `${n} ${n === 1 ? one : n < 5 ? few : many}`;
+  return `${n} ${n === 1 ? one : n >= 2 && n <= 4 ? few : many}`;
 }
 
 /**
@@ -14,6 +16,8 @@ function plural(n: number, one: string, few: string, many: string): string {
 export function visitUkonTypes(visit: Visit): VisitType[] {
   const types: VisitType[] = [...visit.planned_types];
   for (const ins of visit.inspections) {
+    // A prehliadka begun for a planned „Kniha kontrol BOZP" is that úkon, not a second row.
+    if (ins.type === PREHLIADKA_TYPE && types.includes('kniha_bozp')) continue;
     if (!types.includes(ins.type)) types.push(ins.type);
   }
   // A training recorded under the visit counts as its školenie PO even if it
@@ -79,10 +83,44 @@ export function visitUkonState(
       documentId: issued ? training.document_id : null,
     };
   }
-  const inspection = visitInspectionOfType(visit, type);
+  // „Kniha kontrol BOZP" is carried out as a prehliadka preset to BOZP (D2): a
+  // prehliadka begun under the visit stands for it until its own record exists.
+  const inspection =
+    visitInspectionOfType(visit, type) ??
+    (type === 'kniha_bozp' ? visitInspectionOfType(visit, PREHLIADKA_TYPE) : undefined);
   if (!inspection) return { started: false, done: false, text: 'Zatiaľ nezačaté', documentId: null };
-  const items = plural(inspection.item_count, 'položka', 'položky', 'položiek');
+  if (inspection.type === PREHLIADKA_TYPE) {
+    const defects = plural(inspection.item_count, 'nedostatok', 'nedostatky', 'nedostatkov');
+    // A closed prehliadka is done; its records (and concepts) are listed as úkony of their own.
+    if (inspection.status === 'finalized') {
+      return {
+        started: true,
+        done: true,
+        text: `Uzavretá · ${defects}`,
+        documentId: inspection.document_id,
+      };
+    }
+    return { started: true, done: false, text: `Rozpracované · ${defects}`, documentId: null };
+  }
+  // A požiarna kniha entry's items are its defects (an old entry has its one record).
+  const items =
+    inspection.type === KNIHA_TYPE
+      ? plural(inspection.item_count, 'nedostatok', 'nedostatky', 'nedostatkov')
+      : plural(inspection.item_count, 'položka', 'položky', 'položiek');
   const done = inspection.status === 'finalized';
+  // A concept from a prehliadka is not a protocol: it waits for the technician, and
+  // holding it for the end of the visit would only make „generovať všetky" skip it.
+  if (!done && inspection.concept_state === 'pending') {
+    return { started: true, done: false, text: `Koncept z prehliadky · ${items} · čaká na potvrdenie`, documentId: null };
+  }
+  if (!done && inspection.concept_state === 'confirmed') {
+    return {
+      started: true,
+      done: inspection.deferred,
+      text: inspection.deferred ? HELD_TEXT : `Koncept z prehliadky · ${items} · potvrdený`,
+      documentId: null,
+    };
+  }
   if (!done && inspection.deferred) return { started: true, done: true, text: HELD_TEXT, documentId: null };
   return {
     started: true,
@@ -104,14 +142,29 @@ export function visitUkonPath(visit: Visit, type: VisitType): string {
     if (training) return `/trainings/${training.id}`;
     return `/trainings/new?${new URLSearchParams({ visit_id: String(visit.id) }).toString()}`;
   }
-  const existing = visitInspectionOfType(visit, type);
-  if (existing) return `/inspections/${existing.id}`;
   const params = new URLSearchParams({
     company_id: String(visit.company_id),
     facility_id: String(visit.facility_id),
     visit_id: String(visit.id),
     executed_on: visit.visit_date,
   });
+  // POapp 26. 10. 2026 (D2) — „Kniha kontrol BOZP" starts a preventívna
+  // prehliadka preset to BOZP; its record is the kniha BOZP entry. The OPP item
+  // starts it preset to PO (spec 14). A prehliadka
+  // already begun under the visit is continued, whichever of the two was ticked.
+  if (type === PREHLIADKA_TYPE || type === 'kniha_bozp') {
+    const own = visitInspectionOfType(visit, type);
+    if (own) return type === PREHLIADKA_TYPE ? prehliadkaPath(own.id) : `/inspections/${own.id}`;
+    const begun = visitInspectionOfType(visit, PREHLIADKA_TYPE);
+    if (begun) return prehliadkaPath(begun.id);
+    params.set('preset', type === 'kniha_bozp' ? 'bozp' : 'po');
+    return `${PREHLIADKA_NEW_PATH}?${params.toString()}`;
+  }
+  const existing = visitInspectionOfType(visit, type);
+  // An existing požiarna kniha entry opens through /inspections/{id}, which
+  // sends a new-format entry on to its own screens; a new one starts there.
+  if (existing) return `/inspections/${existing.id}`;
+  if (type === KNIHA_TYPE) return knihaNewPath(params);
   return `/inspections/new/${type}/step-1?${params.toString()}`;
 }
 

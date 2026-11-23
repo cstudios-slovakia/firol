@@ -10,13 +10,18 @@ import { cn } from '@/lib/cn';
 /**
  * What a carried-over item scored last time — block 1 / chapter 12.
  *
- * "Pri každej prenesenej položke sa zobrazí, aký mala minule stav." It is the
- * difference between retyping forty extinguishers and glancing down a list to
- * see which one was on tlaková skúška a year ago. Display only: the value is
- * never a default for this year's stav, and no protocol template prints it.
+ * "Pri každej prenesenej položke sa zobrazí, aký mala minule stav." Display
+ * only, never a default for this year's stav, and no protocol template prints
+ * it. The fire types (fix list of 16. 11. 2026) and the BOZP item checks
+ * (customer's answer of 18. 11. 2026) carry the stav itself, so the server no
+ * longer sets the value for them; it remains on drafts carried before, where
+ * the result was left blank, and the badge is hidden where it would only
+ * repeat the item's current value.
  *
- * The badge disappears as soon as the technician records a result, so a row
- * never shows two verdicts at once.
+ * The badge shows only while the item's current value differs from it: a row
+ * whose result is still blank shows what it scored last time, a row the
+ * technician set to the same value shows nothing, and a changed one shows
+ * both — the new verdict and „minule: …".
  */
 export const PREVIOUS_STATUS_KEY = 'previous_status';
 
@@ -51,10 +56,12 @@ export function PreviousStatusBadge({
 }) {
   const previous = previousStatusOf(fields);
   if (!previous) return null;
+  const current = type === 'php' ? fields.status : type === 'oopp' ? fields.condition : fields.result;
+  if (current === previous) return null;
 
   return (
     <span
-      title="Stav z predchádzajúcej kontroly — tento rok ho zadaj nanovo."
+      title="Stav z predchádzajúcej kontroly."
       className={cn(
         'inline-flex items-center gap-1 rounded-full bg-ink-100 px-2 py-0.5 text-[11px] font-medium text-ink-500',
         className,

@@ -115,7 +115,12 @@ final class CalendarController
         Response::json(['settings' => self::noticeSettings($accountId)]);
     }
 
-    /** Set or update the planned visit date for a deadline's inspection. */
+    /**
+     * Set or update the planned visit date for a deadline's inspection. A
+     * požiarna kniha entry defines a term at each of its prevádzky, so the
+     * plan is per (inspection, prevádzka): optional `facility_id`, by default
+     * the inspection's own prevádzka.
+     */
     public static function setPlan(Request $req, array $params): void
     {
         Csrf::require($req);
@@ -130,18 +135,19 @@ final class CalendarController
             $inspectionId,
             $isAdmin ? null : $accountId,
         );
+        $facilityId = self::planFacility($inspectionId, $req->jsonInt('facility_id'));
 
         $date = $req->jsonString('planned_date');
         if ($date === null || !self::isDate($date)) {
             Response::error('Neplatný plánovaný dátum (očakáva sa formát YYYY-MM-DD).', 422);
         }
 
-        // Upsert: one plan per inspection (unique key).
+        // Upsert: one plan per inspection and prevádzka (unique key).
         Db::pdo()->prepare(
-            'INSERT INTO calendar_plans (account_id, inspection_id, planned_date)
-             VALUES (?, ?, ?)
+            'INSERT INTO calendar_plans (account_id, inspection_id, facility_id, planned_date)
+             VALUES (?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE planned_date = VALUES(planned_date)'
-        )->execute([$scopeAccountId, $inspectionId, $date]);
+        )->execute([$scopeAccountId, $inspectionId, $facilityId, $date]);
 
         Response::json(['ok' => true]);
     }
@@ -154,13 +160,23 @@ final class CalendarController
         $isAdmin = Admin::isAdmin(Tenant::currentUserId());
         $inspectionId = (int) ($params['inspection_id'] ?? 0);
 
-        $sql = 'DELETE FROM calendar_plans WHERE inspection_id = ?';
-        $args = [$inspectionId];
-        if (!$isAdmin) {
-            $sql .= ' AND account_id = ?';
-            $args[] = $accountId;
-        }
-        Db::pdo()->prepare($sql)->execute($args);
+        // As on PATCH: an unknown or foreign inspection, or a prevádzka it does
+        // not cover, is a 404. `?facility_id=` names the prevádzka of a book
+        // entry's term; without it, the inspection's own. A plan that is not
+        // there is already cleared.
+        $scopeAccountId = self::assertInspectionInAccount(
+            $inspectionId,
+            $isAdmin ? null : $accountId,
+        );
+        $rawFacility = $req->query('facility_id');
+        $facilityId = self::planFacility(
+            $inspectionId,
+            $rawFacility !== null && ctype_digit($rawFacility) ? (int) $rawFacility : null,
+        );
+
+        Db::pdo()->prepare(
+            'DELETE FROM calendar_plans WHERE inspection_id = ? AND facility_id = ? AND account_id = ?'
+        )->execute([$inspectionId, $facilityId, $scopeAccountId]);
 
         Response::noContent();
     }
@@ -430,6 +446,24 @@ final class CalendarController
             Response::error('Kontrola sa nenašla.', 404);
         }
         return (int) $owner;
+    }
+
+    /**
+     * The prevádzka a plan is for: the one asked for when the inspection covers
+     * it, the inspection's own when none is asked for.
+     */
+    private static function planFacility(int $inspectionId, ?int $facilityId): int
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT i.facility_id FROM inspections i
+             WHERE  i.id = ? AND (? IS NULL OR ' . \Firol\Support\InspectionCoverage::covers('i', '?') . ')'
+        );
+        $stmt->execute([$inspectionId, $facilityId, $facilityId, $facilityId]);
+        $own = $stmt->fetchColumn();
+        if ($own === false) {
+            Response::error('Kontrola sa nenašla.', 404);
+        }
+        return $facilityId ?? (int) $own;
     }
 
     /**

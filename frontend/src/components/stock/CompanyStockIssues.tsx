@@ -85,7 +85,7 @@ export function CompanyStockIssues({ companyId, readOnly }: { companyId: number;
               </div>
             )}
             {emailFor === issue.id && issue.document_id !== null && issue.document_number && (
-              <EmailDocumentForm documentId={issue.document_id} documentNumber={issue.document_number} companyId={companyId} />
+              <EmailDocumentForm documentId={issue.document_id} documentNumber={issue.document_number} companyId={companyId} facilityId={issue.facility_id} />
             )}
           </li>
         ))}

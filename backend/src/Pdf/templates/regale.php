@@ -20,7 +20,8 @@ use Firol\Support\Defects;
 
 $doc = new ProtocolLayout(get_defined_vars());
 $e = [ProtocolLayout::class, 'esc'];
-$cell = static fn(mixed $v): string => ($v === null || trim((string) $v) === '') ? '—' : nl2br($e((string) $v));
+// Never casts an array (round 7) — DefectsTable::scalarText reads text and numbers only.
+$cell = static fn(mixed $v): string => DefectsTable::scalarText($v) === '' ? '—' : nl2br($e(DefectsTable::scalarText($v)));
 $details = (array) ($inspection['details'] ?? []);
 $measures = trim((string) ($details['measures_text'] ?? ''));
 
@@ -43,9 +44,8 @@ $total = (int) ($stats['total'] ?? count($items));
 $disposed = (int) ($stats['vyradene'] ?? 0);
 ?>
 <?= $doc->styles() ?>
-<?= $doc->header('Záznam o kontrole regálov') ?>
+<?= $doc->header('Protokol o vykonaní kontroly — regále') ?>
 <?= $doc->basicInfo() ?>
-<?= $doc->legalWarn('Kontrola vykonaná v rozsahu podľa STN EN 15635 a § 5 nariadenia vlády SR č. 392/2006 Z. z.') ?>
 
 <?= $doc->band('Zoznam kontrolovaných regálov') ?>
 <table class="grid">
@@ -89,9 +89,23 @@ $disposed = (int) ($stats['vyradene'] ?? 0);
   </tr>
 </table>
 
+<?= DefectsTable::renderRoutineDefects($items, 'regale', [
+  'photo_counts' => $photo_counts ?? [],
+]) ?>
+<?php /* The rows' nedostatky (popis, opatrenie, termín), numbered like the photo
+         appendix, under the same band — captioned „Nedostatky" inside the table
+         (it stays with the table on a new page) and each naming its regál by the
+         „Č." of the list above (round 7). */
+$rowNumbers = [];
+foreach ($items as $i => $item) {
+  $rowNumbers[(int) ($item['id'] ?? 0)] = $i + 1;
+} ?>
 <?= DefectsTable::render(Defects::collect($items), [
-  'labels'     => DefectsTable::SHORT_LABELS,
-  'photo_note' => !empty($photos),
+  'labels'      => DefectsTable::SHORT_LABELS,
+  'photo_note'  => !empty($photos),
+  'band'        => false,
+  'caption'     => 'Nedostatky',
+  'item_column' => ['label' => 'Regál č.', 'numbers' => $rowNumbers],
 ]) ?>
 
 <?php if ($measures !== ''): ?>
@@ -99,5 +113,5 @@ $disposed = (int) ($stats['vyradene'] ?? 0);
   <div class="note-box"><?= nl2br($e($measures)) ?></div>
 <?php endif ?>
 
-<?= $doc->signatures('regale') ?>
+<?= $doc->signaturesOptionA('regale', 'VYKONAL', 'S VÝSLEDKOM KONTROLY OBOZNÁMENÝ') ?>
 <?= $doc->footer('Kontrolovaných regálov: ' . $total) ?>

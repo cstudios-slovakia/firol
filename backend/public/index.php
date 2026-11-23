@@ -117,6 +117,10 @@ $router->delete('/api/admin/feedback/{id}', [FeedbackController::class, 'destroy
 
 $router->get('/api/admin/accounts',         [AdminPanelController::class, 'listAccounts']);
 $router->get('/api/admin/accounts/{id}/invoices', [AdminPanelController::class, 'listInvoices']);
+$router->post('/api/admin/invoices/{id}/reissue', [AdminPanelController::class, 'reissueInvoice']);
+$router->post('/api/admin/invoices/{id}/resend', [AdminPanelController::class, 'resendInvoice']);
+$router->post('/api/admin/billing/events/{id}/dismiss', [AdminPanelController::class, 'dismissEvent']);
+$router->get('/api/admin/system-check',     [AdminController::class, 'systemCheck']);
 $router->patch('/api/admin/accounts/{id}',  [AdminPanelController::class, 'updateAccount']);
 $router->delete('/api/admin/accounts/{id}', [AdminPanelController::class, 'deleteAccount']);
 $router->patch('/api/admin/users/{id}',     [AdminPanelController::class, 'updateUser']);
@@ -135,6 +139,7 @@ $router->get('/api/companies',                      [CompanyController::class, '
 $router->post('/api/companies',                     [CompanyController::class, 'store']);
 $router->get('/api/companies/{id}',                 [CompanyController::class, 'show']);
 $router->patch('/api/companies/{id}',               [CompanyController::class, 'update']);
+$router->post('/api/companies/{id}/book-code',      [CompanyController::class, 'updateBookCode']);
 // Spec 25 — a firma / prevádzka is archived and restored, never deleted.
 $router->post('/api/companies/{id}/archive',        [CompanyController::class, 'archive']);
 $router->post('/api/companies/{id}/restore',        [CompanyController::class, 'restore']);
@@ -146,11 +151,38 @@ $router->post('/api/companies/{id}/persons',                 [CompanyPersonContr
 $router->patch('/api/companies/{id}/persons/{person_id}',    [CompanyPersonController::class, 'update']);
 $router->delete('/api/companies/{id}/persons/{person_id}',   [CompanyPersonController::class, 'destroy']);
 
+// Phase 6 — termíny cudzích revízií (spec 6.6). Writes are online-only.
+$router->get('/api/companies/{id}/external-terms',                 [\Firol\Controllers\ExternalTermController::class, 'index']);
+$router->post('/api/companies/{id}/external-terms',                [\Firol\Controllers\ExternalTermController::class, 'store']);
+$router->patch('/api/companies/{id}/external-terms/{term_id}',     [\Firol\Controllers\ExternalTermController::class, 'update']);
+$router->delete('/api/companies/{id}/external-terms/{term_id}',    [\Firol\Controllers\ExternalTermController::class, 'destroy']);
+
 // Chapter 9.1 — several protocols in one e-mail, from a visit or from history.
 $router->get('/api/companies/{id}/sendable-documents', [DocumentSendController::class, 'available']);
 $router->get('/api/companies/{id}/sends',              [DocumentSendController::class, 'index']);
 $router->post('/api/companies/{id}/sends',             [DocumentSendController::class, 'store']);
+// POapp 7. 11. 2026 — what a požiarna kniha entry offers: prevádzky, last terms, records to attach.
+$router->get('/api/companies/{id}/kniha',              [\Firol\Controllers\KnihaController::class, 'context']);
 
+$router->get('/api/facilities/{id}/devices',        [FacilityController::class, 'devices']);
+// POapp 26. 10. 2026, phase 7a — step 1 of a preventívna prehliadka.
+$router->get('/api/facilities/{id}/prehliadka-context', [FacilityController::class, 'prehliadkaContext']);
+// Phase 7b — previous defects, terms of the visit and the firm's own „vykonané činnosti".
+$router->get('/api/facilities/{id}/prehliadka-previous', [\Firol\Controllers\PrehliadkaController::class, 'previous']);
+$router->get('/api/facilities/{id}/prehliadka-terms',    [\Firol\Controllers\PrehliadkaController::class, 'terms']);
+$router->get('/api/companies/{id}/activities',                  [\Firol\Controllers\PrehliadkaController::class, 'activities']);
+$router->post('/api/companies/{id}/activities',                 [\Firol\Controllers\PrehliadkaController::class, 'addActivity']);
+$router->delete('/api/companies/{id}/activities/{activity_id}', [\Firol\Controllers\PrehliadkaController::class, 'removeActivity']);
+// Phase 8a — closing a prehliadka and what it produced.
+$router->post('/api/inspections/{id}/prehliadka-close',  [\Firol\Controllers\PrehliadkaController::class, 'close']);
+$router->get('/api/inspections/{id}/prehliadka-result',  [\Firol\Controllers\PrehliadkaController::class, 'result']);
+$router->post('/api/inspections/{id}/confirm-concept',   [\Firol\Controllers\PrehliadkaController::class, 'confirmConcept']);
+// Spec 12.2 — the checklist after a closed prehliadka: tick, review, issue.
+$router->get('/api/inspections/{id}/prehliadka-checklist',            [\Firol\Controllers\PrehliadkaChecklistController::class, 'index']);
+$router->post('/api/inspections/{id}/prehliadka-checklist/prepare',   [\Firol\Controllers\PrehliadkaChecklistController::class, 'prepare']);
+$router->post('/api/inspections/{id}/prehliadka-checklist/create',    [\Firol\Controllers\PrehliadkaChecklistController::class, 'createManual']);
+$router->get('/api/inspections/{id}/prehliadka-checklist/review',     [\Firol\Controllers\PrehliadkaChecklistController::class, 'review']);
+$router->post('/api/inspections/{id}/prehliadka-checklist/generate',  [\Firol\Controllers\PrehliadkaChecklistController::class, 'generate']);
 $router->get('/api/facilities/{id}',                [FacilityController::class, 'show']);
 $router->patch('/api/facilities/{id}',              [FacilityController::class, 'update']);
 $router->post('/api/facilities/{id}/archive',       [FacilityController::class, 'archive']);
@@ -171,6 +203,7 @@ $router->post('/api/inspections/{id}/carry-over',  [InspectionController::class,
 // blank to type in the handwritten results.
 $router->get('/api/inspections/{id}/person-sources',     [\Firol\Controllers\PersonListController::class, 'sources']);
 $router->post('/api/inspections/{id}/persons/take-over', [\Firol\Controllers\PersonListController::class, 'takeOver']);
+$router->post('/api/inspections/{id}/persons/bulk',      [\Firol\Controllers\PersonListController::class, 'bulk']);
 $router->post('/api/inspections/{id}/fill-results',      [\Firol\Controllers\PersonListController::class, 'fillResults']);
 // "Upraviť" on a locked inspection — discards the issued protocol and puts
 // the inspection back into draft so it can be corrected.
@@ -244,6 +277,14 @@ $router->patch('/api/tasks/{id}',                   [\Firol\Controllers\TaskCont
 $router->delete('/api/tasks/{id}',                  [\Firol\Controllers\TaskController::class, 'destroy']);
 
 $router->get('/api/me/inspector-profile',            [InspectorProfileController::class, 'show']);
+// Phase 4 — číselník nedostatkov. Shipped items are read-only; the writes touch
+// the account's own items only (DELETE archives). `usage` feeds „Najčastejšie".
+$router->get('/api/defect-catalog',                 [\Firol\Controllers\DefectCatalogController::class, 'index']);
+$router->get('/api/defect-catalog/usage',           [\Firol\Controllers\DefectCatalogController::class, 'usage']);
+$router->post('/api/defect-catalog',                [\Firol\Controllers\DefectCatalogController::class, 'store']);
+$router->patch('/api/defect-catalog/{id}',          [\Firol\Controllers\DefectCatalogController::class, 'update']);
+$router->delete('/api/defect-catalog/{id}',         [\Firol\Controllers\DefectCatalogController::class, 'destroy']);
+
 $router->patch('/api/me/inspector-profile',          [InspectorProfileController::class, 'update']);
 $router->post('/api/me/inspector-profile/signature', [InspectorProfileController::class, 'uploadSignature']);
 $router->get('/api/me/inspector-profile/signature',  [InspectorProfileController::class, 'downloadSignature']);
@@ -255,6 +296,10 @@ $router->patch('/api/trainings/{id}',               [TrainingController::class, 
 $router->post('/api/trainings/{id}/unlock',         [TrainingController::class, 'unlock']);
 $router->delete('/api/trainings/{id}',              [TrainingController::class, 'archive']);
 $router->post('/api/trainings/{id}/trainees',       [TraineeController::class, 'store']);
+$router->post('/api/trainings/{id}/trainees/bulk',  [TraineeController::class, 'bulk']);
+$router->post('/api/trainings/{id}/trainees/take-over', [TraineeController::class, 'takeOver']);
+$router->get('/api/trainings/{id}/trainee-source',  [TraineeController::class, 'source']);
+$router->patch('/api/trainings/{id}/trainees/{trainee_id}', [TraineeController::class, 'update']);
 $router->delete('/api/trainings/{id}/trainees/{trainee_id}', [TraineeController::class, 'destroy']);
 $router->get('/api/trainees/{id}/signature',        [TraineeController::class, 'downloadSignature']);
 $router->post('/api/trainings/{id}/generate-pdf',   [DocumentController::class, 'generateForTraining']);

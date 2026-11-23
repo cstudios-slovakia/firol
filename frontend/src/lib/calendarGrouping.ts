@@ -47,7 +47,7 @@ export function openDeadlines(deadlines: CalendarDeadline[]): CalendarDeadline[]
 export type FacilityDayGroup = {
   /** Stable React key — facility and day together identify the group. */
   key: string;
-  /** Null for the trainings of the whole firma (`facility_name` then reads „Celá firma"). */
+  /** Null for the trainings of the whole client (`facility_name` then reads „Celá firma" / „Celé bytové družstvo"). */
   facility_id: number | null;
   facility_name: string;
   company_id: number;
@@ -70,7 +70,7 @@ export function groupByFacilityDay(deadlines: CalendarDeadline[]): FacilityDayGr
   const map = new Map<string, FacilityDayGroup>();
   for (const d of deadlines) {
     const date = effectiveDate(d);
-    // A training of the whole firma has no prevádzka — the firm itself is the place.
+    // A training of the whole client has no prevádzka — the client itself is the place.
     const key = `${d.facility_id ?? `firma-${d.company_id}`}@${date}`;
     let g = map.get(key);
     if (!g) {
@@ -213,7 +213,7 @@ export function groupTerminy(items: Termin[], by: GroupBy): TerminGroup[] {
         ? t.company_id !== null ? `c${t.company_id}` : 'c-none'
         : t.city ? `m${t.city.toLocaleLowerCase('sk')}` : 'm-none';
     const label =
-      by === 'firma' ? t.company_name ?? 'Bez firmy' : t.city ?? 'Bez obce';
+      by === 'firma' ? t.company_name ?? 'Bez klienta' : t.city ?? 'Bez obce';
     let g = map.get(key);
     if (!g) {
       g = { key, label, sublabel: null, items: [], overdue: 0, sections: [] };

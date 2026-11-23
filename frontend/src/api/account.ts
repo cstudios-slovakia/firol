@@ -1,5 +1,5 @@
 import { api, buildUrl } from '@/lib/api';
-import type { SubscriptionState } from '@/auth/AuthContext';
+import type { PaymentFailed, SubscriptionState } from '@/auth/AuthContext';
 
 export type Account = {
   id: number;
@@ -24,6 +24,22 @@ export type Account = {
   active_technicians: number;
   max_self_service_technicians: number;
   price_per_extra_technician_cents: number;
+  /** What a yearly subscription charges per extra technician (from the backend, not derived here). */
+  price_per_extra_technician_yearly_cents: number;
+  /** What one extra technician costs this account per billing period: the unit amount on its Stripe item when one exists, else today's price. */
+  extra_unit_amount_cents: number;
+  /** True when extra_unit_amount_cents is read from the customer's Stripe item. */
+  extra_unit_from_stripe: boolean;
+  /** Next regular charge (base + extra technicians, without prorations); null without a subscription. */
+  next_charge_cents: number | null;
+  /** A promotion code is on the subscription: next_charge_cents is before the discount. */
+  next_charge_before_discount?: boolean;
+  /** Extra technicians next_charge_cents includes (Stripe's count while nothing is pushed to Stripe). */
+  next_charge_extra_technicians?: number;
+  /** VAT rate in percent (VAT_RATE_PERCENT): every price above is net, the customer pays it plus VAT. */
+  vat_rate_percent: number;
+  /** A failed renewal: amount (with VAT) and the first read-only day; null otherwise. */
+  payment_failed: PaymentFailed | null;
   main_user_id: number | null;
   admin_owned: boolean;
   default_php_user_id: number | null;

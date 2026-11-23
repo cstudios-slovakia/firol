@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
+    AlertTriangle,
     AtSign,
     Bug,
-    Building2,
+    Building,
     CalendarDays,
     ChevronDown,
     ChevronRight,
@@ -18,6 +19,7 @@ import {
     Phone,
     Power,
     PowerOff,
+    RotateCcw,
     Search,
     Settings as SettingsIcon,
     ShieldCheck,
@@ -36,6 +38,7 @@ import {
     type AdminAccountsPage,
     type AdminInvoice,
     type AdminUser,
+    type SystemCheck,
     type SystemSettings,
 } from "@/api/admin";
 import { Feedback, type FeedbackSubmission } from "@/api/feedback";
@@ -65,10 +68,126 @@ export function AdminPage() {
         <div className="flex flex-col gap-5">
             <SectionBack label="Admin" />
 
+            <BillingCheckSection />
             <AccountsSection />
             <FeedbackSection />
             <AdminSettingsSection />
         </div>
+    );
+}
+
+/**
+ * „Kontrola fakturácie": the billing configuration as the server sees it
+ * (Stripe keys, prices, the extra-technician product, iDoklad mode, the daily
+ * run, invoices waiting for a person). Problems first; all-ok collapses to
+ * one line.
+ */
+function BillingCheckSection() {
+    const { csrfToken } = useAuth();
+    const toast = useToast();
+    const [checks, setChecks] = useState<SystemCheck[] | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [reload, setReload] = useState(0);
+    const [dismissing, setDismissing] = useState<string | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        AdminPanel.systemCheck()
+            .then((res) => {
+                if (!cancelled) setChecks(res.checks);
+            })
+            .catch((err: unknown) => {
+                if (!cancelled) {
+                    setError(
+                        err instanceof ApiError
+                            ? err.message
+                            : "Kontrolu sa nepodarilo načítať.",
+                    );
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [reload]);
+
+    async function onDismiss(id: string) {
+        setDismissing(id);
+        try {
+            await AdminPanel.dismissEvent(id, csrfToken);
+            toast.success("Udalosť označená ako vyriešená");
+            setReload((n) => n + 1);
+        } catch (err) {
+            toast.error(err instanceof ApiError ? err.message : "Nepodarilo sa uložiť.");
+        } finally {
+            setDismissing(null);
+        }
+    }
+
+    const problems = (checks ?? []).filter((c) => c.level !== "ok");
+    const hasError = problems.some((c) => c.level === "error");
+
+    return (
+        <Card
+            className={cn(
+                "px-4 py-3 sm:px-5",
+                hasError && "border-status-bad/40",
+            )}
+        >
+            <div className="flex items-center gap-2">
+                {problems.length === 0 ? (
+                    <ShieldCheck className="size-4 shrink-0 text-status-ok" />
+                ) : (
+                    <AlertTriangle
+                        className={cn(
+                            "size-4 shrink-0",
+                            hasError ? "text-status-bad" : "text-amber-600",
+                        )}
+                    />
+                )}
+                <h2 className="text-sm font-semibold text-ink-900">
+                    Kontrola fakturácie
+                </h2>
+                {checks && problems.length === 0 && (
+                    <span className="text-xs text-ink-500">
+                        všetko v poriadku
+                    </span>
+                )}
+            </div>
+            {error && <p className="mt-2 text-xs text-status-bad">{error}</p>}
+            {checks === null && !error && (
+                <p className="mt-2 text-xs text-ink-400">Načítavam…</p>
+            )}
+            {problems.length > 0 && (
+                <ul className="mt-2 flex flex-col gap-1.5">
+                    {problems.map((c) => (
+                        <li key={c.key} className="flex items-start gap-2 text-xs">
+                            <Badge tone={c.level === "error" ? "warn" : "neutral"}>
+                                {c.level === "error" ? "Chyba" : "Pozor"}
+                            </Badge>
+                            <span className="min-w-0 flex-1 text-ink-700">
+                                {c.message}
+                                {c.dismiss && c.dismiss.length > 0 && (
+                                    <span className="mt-1 flex flex-wrap gap-1.5">
+                                        {c.dismiss.map((d) => (
+                                            <button
+                                                key={d.id}
+                                                type="button"
+                                                onClick={() => onDismiss(d.id)}
+                                                disabled={dismissing !== null}
+                                                className="inline-flex items-center gap-1 rounded-lg border border-ink-200 bg-white px-2 py-0.5 text-[11px] font-medium text-ink-700 transition-colors hover:bg-ink-50 disabled:opacity-50"
+                                            >
+                                                {dismissing === d.id && <Loader2 className="size-3 animate-spin" />}
+                                                Vyriešené: {d.label}
+                                            </button>
+                                        ))}
+                                    </span>
+                                )}
+                            </span>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </Card>
     );
 }
 
@@ -424,6 +543,27 @@ function AccountsSection() {
             removeAccount(a.id);
             toast.success("Účet zmazaný");
         } catch (err) {
+            // A live Stripe subscription would keep charging a deleted
+            // account: the server refuses until the admin confirms that it
+            // is cancelled in Stripe right away.
+            if (err instanceof ApiError && err.status === 409 && err.code === "live_subscription") {
+                const cancelOk = await confirm({
+                    title: "Účet má živé predplatné v Stripe",
+                    description: `${err.message} Zrušiť predplatné v Stripe okamžite a potom zmazať účet? Zaplatené obdobie sa nevracia (vrátenie peňazí sa robí ručne v Stripe).`,
+                    confirmLabel: "Zrušiť predplatné a zmazať",
+                });
+                if (!cancelOk) return;
+                try {
+                    await AdminPanel.deleteAccount(a.id, csrfToken, true);
+                    removeAccount(a.id);
+                    toast.success("Predplatné zrušené, účet zmazaný");
+                } catch (err2) {
+                    toast.error(
+                        err2 instanceof ApiError ? err2.message : "Zmazanie zlyhalo.",
+                    );
+                }
+                return;
+            }
             toast.error(
                 err instanceof ApiError ? err.message : "Zmazanie zlyhalo.",
             );
@@ -628,7 +768,7 @@ function AccountRow({
                     )}
                 </button>
                 <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-firol-50 text-firol-600">
-                    <Building2 className="size-4" />
+                    <Building className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
                     <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-ink-900">
@@ -745,6 +885,9 @@ function AccountRow({
  * fallback) for download.
  */
 function AccountInvoices({ accountId }: { accountId: number }) {
+    const { csrfToken } = useAuth();
+    const toast = useToast();
+    const [reissuing, setReissuing] = useState<number | null>(null);
     const [years, setYears] = useState<number[] | null>(null);
     const [year, setYear] = useState<number | null>(null);
     const [items, setItems] = useState<AdminInvoice[]>([]);
@@ -774,6 +917,45 @@ function AccountInvoices({ accountId }: { accountId: number }) {
         load();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [accountId]);
+
+    async function onReissue(inv: AdminInvoice) {
+        setReissuing(inv.id);
+        try {
+            const res = await AdminPanel.reissueInvoice(inv, csrfToken);
+            if (res.ok) {
+                toast.success("Faktúra vystavená");
+            } else {
+                toast.error(
+                    `${adminInvoiceStatusLabel(res.status)}${res.message ? ` — ${res.message}` : ""}`,
+                );
+            }
+            load(year ?? undefined);
+        } catch (err) {
+            toast.error(
+                err instanceof ApiError ? err.message : "Vystavenie zlyhalo.",
+            );
+            load(year ?? undefined);
+        } finally {
+            setReissuing(null);
+        }
+    }
+
+    async function onResend(inv: AdminInvoice) {
+        setReissuing(inv.id);
+        try {
+            const res = await AdminPanel.resendInvoice(inv, csrfToken);
+            if (res.ok) {
+                toast.success("Faktúra odoslaná zákazníkovi");
+            } else {
+                toast.error(res.message ?? "Odoslanie zlyhalo.");
+            }
+        } catch (err) {
+            toast.error(err instanceof ApiError ? err.message : "Odoslanie zlyhalo.");
+        } finally {
+            setReissuing(null);
+            load(year ?? undefined);
+        }
+    }
 
     return (
         <div className="border-t border-ink-100 px-3 py-3">
@@ -837,15 +1019,59 @@ function AccountInvoices({ accountId }: { accountId: number }) {
                             <Badge
                                 tone={
                                     inv.status === "issued" ||
-                                    inv.status === "paid"
+                                    inv.status === "paid" ||
+                                    inv.status === "draft"
                                         ? "ok"
-                                        : inv.status === "error"
+                                        : inv.status === "error" ||
+                                            inv.status === "needs_review" ||
+                                            (inv.status === "prepared" &&
+                                                inv.stripe_livemode === true)
                                           ? "warn"
                                           : "neutral"
                                 }
                             >
-                                {adminInvoiceStatusLabel(inv.status)}
+                                {inv.stripe_livemode === false && "[test] "}
+                                {inv.status === "prepared" &&
+                                inv.stripe_livemode === true
+                                    ? "Ostrá platba bez faktúry"
+                                    : adminInvoiceStatusLabel(inv.status)}
                             </Badge>
+                            {inv.can_reissue && (
+                                <button
+                                    type="button"
+                                    onClick={() => onReissue(inv)}
+                                    disabled={reissuing !== null}
+                                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-firol-700 transition-colors hover:bg-firol-50 disabled:opacity-50"
+                                >
+                                    {reissuing === inv.id ? (
+                                        <Loader2 className="size-3.5 animate-spin" />
+                                    ) : (
+                                        <RotateCcw className="size-3.5" />
+                                    )}
+                                    {inv.status === "prepared" ||
+                                    inv.status === "pending"
+                                        ? "Vystaviť"
+                                        : "Vystaviť znova"}
+                                </button>
+                            )}
+                            {inv.status === "issued" && (
+                                <FollowUpBadges inv={inv} />
+                            )}
+                            {inv.can_resend && (
+                                <button
+                                    type="button"
+                                    onClick={() => onResend(inv)}
+                                    disabled={reissuing !== null}
+                                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-firol-700 transition-colors hover:bg-firol-50 disabled:opacity-50"
+                                >
+                                    {reissuing === inv.id ? (
+                                        <Loader2 className="size-3.5 animate-spin" />
+                                    ) : (
+                                        <RotateCcw className="size-3.5" />
+                                    )}
+                                    Poslať znova
+                                </button>
+                            )}
                             {inv.pdf_url ? (
                                 <a
                                     href={inv.pdf_url}
@@ -862,6 +1088,15 @@ function AccountInvoices({ accountId }: { accountId: number }) {
                                     PDF nie je
                                 </span>
                             )}
+                            {(inv.status === "needs_review" ||
+                                inv.status === "error" ||
+                                inv.status === "prepared" ||
+                                inv.status === "sending" ||
+                                inv.status === "no_document" ||
+                                (inv.status === "issued" &&
+                                    (inv.send_error !== null || inv.paid_mark_error !== null))) && (
+                                <InvoiceReviewDetail inv={inv} />
+                            )}
                         </li>
                     ))}
                 </ul>
@@ -875,18 +1110,130 @@ function adminInvoiceStatusLabel(status: string): string {
         case "issued":
             return "Vystavená";
         case "draft":
-            return "Koncept";
+            // Rows from before 17. 11. 2026: a normal invoice was posted
+            // to iDoklad, only the local label said „draft".
+            return "Vystavená (starý stav „draft“)";
         case "paid":
             return "Zaplatená";
         case "pending":
-            return "Spracováva sa";
+            return "Čaká na vystavenie";
+        case "sending":
+            return "Odosiela sa";
+        case "prepared":
+            return "Pripravená, neodoslaná";
+        case "needs_review":
+            return "Na kontrolu";
         case "skipped":
             return "iDoklad off";
         case "error":
             return "Chyba";
+        case "no_document":
+            return "Bez dokladu (nič sa neplatilo)";
         default:
             return status;
     }
+}
+
+/**
+ * The two steps after issuing: marking paid in iDoklad and iDoklad's e-mail
+ * to the customer.
+ */
+function FollowUpBadges({ inv }: { inv: AdminInvoice }) {
+    const paid: Record<string, [string, "ok" | "warn" | "neutral"]> = {
+        done: ["Uhradená v iDoklade", "ok"],
+        pending: ["Úhrada čaká", "neutral"],
+        marking: ["Úhrada sa označuje", "neutral"],
+        error: ["Úhrada neoznačená", "warn"],
+    };
+    const send: Record<string, [string, "ok" | "warn" | "neutral"]> = {
+        sent: ["Odoslaná zákazníkovi", "ok"],
+        pending: ["Odoslanie čaká", "neutral"],
+        sending: ["Odosiela sa", "neutral"],
+        error: ["Neodoslaná", "warn"],
+        uncertain: ["Odoslanie neisté", "warn"],
+    };
+    const p = inv.paid_mark_state ? paid[inv.paid_mark_state] : undefined;
+    const s = inv.send_state ? send[inv.send_state] : undefined;
+    return (
+        <>
+            {p && <Badge tone={p[1]}>{p[0]}</Badge>}
+            {s && (
+                <Badge tone={s[1]}>
+                    {s[0]}
+                    {inv.send_state === "sent" && inv.sent_to ? ` (${inv.sent_to})` : ""}
+                </Badge>
+            )}
+        </>
+    );
+}
+
+const REVIEW_REASON_LABEL: Record<string, string> = {
+    credit: "Držaná ako dobropis podľa pravidla pred 19. 11. 2026 — denná kontrola ju vystaví so záporným riadkom (alebo „Vystaviť znova“).",
+    discount: "Zľava alebo daň v Stripe — riadky nesedia so sumou. Automaticky sa nevystaví.",
+    mismatch: "Riadky po zľavách alebo zaplatená suma nesedia so sumou faktúry. Automaticky sa nevystaví.",
+    vat_mismatch: "DPH alebo súčet dokladu v iDoklade nesedí so zaplatenou sumou — neodoslalo sa nič. Po oprave „Vystaviť znova“ (iDoklad súčet znova overí).",
+    no_vat: "Stripe účtoval bez DPH (predplatné nemalo daňovú sadzbu). Automaticky sa nevystaví — vyrieš ju ručne.",
+    uncertain_send: "iDoklad neodpovedal jednoznačne — over v iDoklade, či faktúra nevznikla, až potom „Vystaviť znova“.",
+    missing_snapshot: "Chýba uložená faktúra zo Stripe — denná kontrola ju načíta znova. Najprv skontroluj v iDoklade, či faktúra už neexistuje.",
+    snapshot_unreadable: "Faktúru zo Stripe sa nepodarilo načítať ani opakovane — denná kontrola to už neskúša. Vyrieš ju ručne.",
+    zero: "Za faktúru zo Stripe sa nič neplatilo — nič sa nevystavuje.",
+    credit_carried: "Nič sa neplatilo: dobropis bol väčší ako faktúra, zvyšok ostáva ako kredit zákazníka v Stripe a použije sa na ďalšej faktúre. Daňový doklad sa nevystavuje.",
+    credit_covered: "Celá suma bola uhradená z kreditu zákazníka v Stripe — nič sa neplatilo, daňový doklad sa nevystavuje.",
+};
+
+function formatEurCents(cents: number | null | undefined): string {
+    if (cents === null || cents === undefined) return "—";
+    return `${(cents / 100).toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+}
+
+/** Stripe's numbers and the reason for a row that needs a person. */
+function InvoiceReviewDetail({ inv }: { inv: AdminInvoice }) {
+    const b = inv.stripe_balance ?? {};
+    return (
+        <div className="basis-full rounded-lg bg-ink-50/70 px-2.5 py-2 text-[11px] leading-relaxed text-ink-600">
+            <p className="font-mono">
+                Stripe {inv.stripe_invoice_id}
+                {inv.stripe_livemode === false && " · testovací režim"}
+            </p>
+            <p>
+                Spolu {formatEurCents(inv.stripe_total_cents)}
+                {inv.stripe_tax_cents !== null && ` (z toho DPH ${formatEurCents(inv.stripe_tax_cents)})`} · zaplatené kartou{" "}
+                {formatEurCents(inv.stripe_amount_paid_cents)}
+                {b.subtotal !== undefined && ` · medzisúčet ${formatEurCents(b.subtotal)}`}
+                {b.starting_balance !== undefined &&
+                    b.starting_balance !== 0 &&
+                    ` · zostatok zákazníka pred ${formatEurCents(b.starting_balance)}`}
+                {b.ending_balance !== undefined &&
+                    b.ending_balance !== null &&
+                    b.ending_balance !== 0 &&
+                    ` · po ${formatEurCents(b.ending_balance)}`}
+            </p>
+            {inv.review_reason && (
+                <p className="text-ink-700">
+                    {REVIEW_REASON_LABEL[inv.review_reason] ?? inv.review_reason}
+                </p>
+            )}
+            {inv.error_message && (
+                <p className="break-words text-ink-500">{inv.error_message}</p>
+            )}
+            {inv.paid_mark_error && (
+                <p className="break-words text-ink-500">
+                    Úhrada ({inv.paid_mark_attempts}×): {inv.paid_mark_error}
+                </p>
+            )}
+            {inv.send_error && (
+                <p className="break-words text-ink-500">
+                    Odoslanie ({inv.send_attempts}×): {inv.send_error}
+                </p>
+            )}
+            {inv.attempts > 0 && (
+                <p className="text-ink-400">
+                    Pokusov: {inv.attempts}
+                    {inv.last_attempt_at && `, naposledy ${new Date(inv.last_attempt_at.replace(" ", "T")).toLocaleString("sk-SK")}`}
+                </p>
+            )}
+        </div>
+    );
 }
 
 function AccountEditForm({
@@ -956,19 +1303,27 @@ function AccountEditForm({
                     {(p) => (
                         <Input
                             {...p}
-                            leftIcon={<Building2 className="size-4" />}
+                            leftIcon={<Building className="size-4" />}
                             value={name}
                             onChange={(e) => setName(e.target.value)}
                         />
                     )}
                 </Field>
-                <Field label="Predplatné platí do">
+                <Field
+                    label="Predplatné platí do"
+                    hint={
+                        account.has_live_subscription
+                            ? "Určuje Stripe (koniec zaplateného obdobia živého predplatného) — tu sa meniť nedá."
+                            : undefined
+                    }
+                >
                     {(p) => (
                         <Input
                             {...p}
                             type="date"
                             leftIcon={<CalendarDays className="size-4" />}
                             value={end}
+                            disabled={account.has_live_subscription}
                             onChange={(e) => setEnd(e.target.value)}
                         />
                     )}
@@ -1315,7 +1670,6 @@ function AdminSettingsSection() {
                     trial_days: Number(trialDays),
                     price_monthly_eur: parseEurAmount(priceMonthly),
                     price_yearly_eur: parseEurAmount(priceYearly),
-                    vat_rate_percent: parseEurAmount(vatPercent),
                     default_included_technicians: Number(defaultIncluded),
                     price_per_extra_technician_cents: Number.isFinite(
                         extraCents,
@@ -1416,7 +1770,7 @@ function AdminSettingsSection() {
                             />
                         )}
                     </Field>
-                    <Field label="DPH (%)">
+                    <Field label="DPH (%)" hint="VAT_RATE_PERCENT v .env — mení sa len tam.">
                         {(p) => (
                             <Input
                                 {...p}
@@ -1424,7 +1778,8 @@ function AdminSettingsSection() {
                                 inputMode="decimal"
                                 leftIcon={<Percent className="size-4" />}
                                 value={vatPercent}
-                                onChange={(e) => setVatPercent(e.target.value)}
+                                readOnly
+                                disabled
                             />
                         )}
                     </Field>
@@ -1444,9 +1799,10 @@ function AdminSettingsSection() {
                     </strong>
                 </p>
                 <p className="text-xs text-ink-400">
-                    Pozn.: ceny tu sú len informatívne pre UI/copy. Skutočné
-                    sumy účtuje Stripe podľa <code>STRIPE_PRICE_MONTHLY</code> /{" "}
-                    <code>STRIPE_PRICE_YEARLY</code>.
+                    Pozn.: ceny tu sú bez DPH a len informatívne pre UI/copy.
+                    Skutočné sumy účtuje Stripe podľa <code>STRIPE_PRICE_MONTHLY</code> /{" "}
+                    <code>STRIPE_PRICE_YEARLY</code> a k nim pripočíta DPH sadzbou{" "}
+                    <code>STRIPE_TAX_RATE_ID</code>.
                 </p>
 
                 <div className="mt-2 border-t border-ink-100 pt-4">
@@ -1512,9 +1868,12 @@ function AdminSettingsSection() {
                         </Field>
                     </div>
                     <p className="mt-2 text-xs text-ink-400">
+                        {/* "× 10" mirrors SeatSync::EXTRA_YEARLY_MONTHS. */}
                         Cena za extra technika sa účtuje cez Stripe ako druhá
-                        položka v predplatnom (ročne = mesačne × 12), s
-                        proráciou pri každej zmene počtu.
+                        položka v predplatnom (ročne = mesačne × 10, rovnako
+                        ako ročný plán), s proráciou pri každej zmene počtu.
+                        Nová cena platí pre novo vzniknuté položky; existujúce
+                        predplatné si ponechajú cenu, s ktorou položka vznikla.
                     </p>
                 </div>
                 <div className="flex justify-end pt-1">

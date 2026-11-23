@@ -24,7 +24,9 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
 
 /**
  * Kontrola OOPP — block 2 / chapter 7, pattern `tabulka`.
@@ -44,7 +46,7 @@ function isCondition(v: unknown): v is OoppCondition {
   return v === 'vyhovujuci' || v === 'opotrebeny' || v === 'chyba';
 }
 
-function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -75,6 +77,21 @@ function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
   }, [initialItem]);
 
   function isPristine() {
+    // A staged, removed or still-resizing photo is a change; only the save commits it.
+    if (photos.dirty) return false;
+    // An existing item: nothing to save only while nothing differs from what it
+    // opened with — also a carried item whose texts were cleared with the „X"
+    // (compare-to-initial, as in the fire forms; round 5 of the fix list).
+    if (initialItem) {
+      const f = initialItem.fields;
+      return sameFormValues(
+        {
+          position: str(f, 'position'), equipment: str(f, 'equipment'), provided: boolOrNull(f, 'provided'),
+          used: boolOrNull(f, 'used'), condition: isCondition(f.condition) ? f.condition : null, notes: str(f, 'notes'),
+        },
+        { position, equipment, provided, used, condition, notes },
+      ) && !defects.isDirty();
+    }
     return !position && !equipment && provided === null && used === null && condition === null
       && !notes && photos.total === 0 && defects.rows.length === 0;
   }
@@ -87,7 +104,7 @@ function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
     return errs;
   }
 
-  async function handleSubmit(e: FormEvent | React.SyntheticEvent, action: 'save-and-next' | 'save-and-summary') {
+  async function handleSubmit(e: FormEvent | React.SyntheticEvent, action: SubmitAction) {
     e.preventDefault();
     if (submitting) return;
     const errs = validate();
@@ -166,7 +183,7 @@ function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
 
         <Field label="Poznámka">
           {(p) => (
-            <TextArea id={p.id} value={notes} onChange={setNotes} rows={2}
+            <TextArea id={p.id} value={notes} onChange={setNotes} rows={2} clearable
               placeholder="nepoužíva prilbu" />
           )}
         </Field>
@@ -175,6 +192,8 @@ function OoppStep2Form({ inspectionId, initialItem, csrfToken, onSaved }: Step2F
         <DefectsEditor state={defects} initialPhotos={initialItem?.photos} />
 
         <ItemFormFooter
+          busy={photos.processing || defects.processing}
+          onNextRecorded={hasNextItem ? (e) => handleSubmit(e, 'save-and-next-recorded') : undefined}
           editing={editing}
           submitting={submitting}
           apiError={apiError}

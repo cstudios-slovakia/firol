@@ -12,6 +12,8 @@ use Firol\Http\Response;
 use Firol\Import\Schema;
 use Firol\Support\Periodicity;
 use Firol\Support\Address;
+use Firol\Support\BookEntry;
+use Firol\Support\PrehliadkaDefects;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -20,6 +22,7 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PDO;
 use Throwable;
@@ -125,6 +128,14 @@ final class ImportController
                 $ws->getColumnDimensionByColumn($col1)->setWidth(max(26, min(mb_strlen($col['header']) + 2, 50)));
 
                 $range = "{$colLetter}2:{$colLetter}1001";
+
+                if (!empty($col['text'])) {
+                    // Text cells: „1,3,5" must not turn into a Slovak decimal.
+                    $ws->getStyle($range)->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+                } elseif (!empty($col['date_or_text'])) {
+                    // A typed date renders as DD-MM-RRRR; a word stays a word.
+                    $ws->getStyle($range)->getNumberFormat()->setFormatCode('dd-mm-yyyy');
+                }
 
                 if (!empty($col['options'])) {
                     // Single-value enum → real dropdown + click-prompt + hard
@@ -278,6 +289,16 @@ final class ImportController
             $intro[] = 'Toto číslo slúži len na spárovanie v rámci tohto súboru — môžeš si ho zvoliť ľubovoľne a po importe sa nikde neukladá.';
         }
 
+        // The book in its new format has its own three sheets, linked by the
+        // number of the entry the same way.
+        if (isset($sheets['Kniha_zapisy'])) {
+            $intro[] = 'Zápisy do požiarnej knihy sa nezadávajú na hárok „Kontroly", ale na tri vlastné hárky: „Kniha_zapisy" (jeden riadok = jeden zápis), „Kniha_prevadzky" (jeden riadok = jedna prevádzka zápisu) a „Kniha_nedostatky" (jeden riadok = jeden nedostatok). Spájajú sa cez číslo zápisu, rovnako ako kontroly a ich položky.';
+            $intro[] = 'Kniha_zapisy: spôsob 1 = zápis je zároveň preventívkou (posúva termín prevádzok), spôsob 2 = preventívky sú priložené (termín sa nemení). Prázdny spôsob = 1 pri jednej prevádzke, 2 pri viacerých. Ako v aplikácii, úvod, vykonané činnosti, vlastné činnosti a doplňujúci text patria len k spôsobu 1 a text zápisu len k spôsobu 2 — stĺpce druhého spôsobu sa neuložia (pri spôsobe 2 zostane úvod zákonná veta). Na záver a Schválil platia pri oboch. Vykonané činnosti zadaj ako čísla bodov zo zoznamu nižšie — firma a bytové družstvo majú každý svoj zoznam (druh klienta sa nastavuje pri firme; firma vytvorená importom je firma). Prázdny úvod = zákonná veta, prázdne „Schválil" = zodpovedná osoba nastavená pri firme.';
+            $intro[] = 'Kniha_prevadzky: každý zápis potrebuje aspoň jednu prevádzku. Pri spôsobe 1 vyber pri každej prevádzke periodicitu 12, 6 alebo 3 mesiace. Prvá prevádzka zápisu je jeho hlavná prevádzka.';
+            $intro[] = 'Kniha_nedostatky: prevádzka je povinná, keď má zápis viac prevádzok. Lehota je bezodkladne, 30d, 3m, 6m, dátum alebo prázdna (bez lehoty). Stav je predvolene „zistený"; pri „dôvod zanikol" napíš dôvod.';
+            $intro[] = 'Zápisy sa naimportujú ako rozpracované, bez čísla a bez dokumentu. Priložené záznamy, fotky ani väzby na číselník sa z Excelu nedajú preniesť — doplníš ich v aplikácii.';
+        }
+
         // Training templates split the data across the "Školenia" sheet and the
         // "Účastníci" sheet, linked the same way as inspections and their items.
         if (isset($sheets['Skolenia'])) {
@@ -292,6 +313,12 @@ final class ImportController
                 'font'      => ['color' => ['rgb' => '334155']],
                 'alignment' => ['wrapText' => true, 'vertical' => Alignment::VERTICAL_TOP],
             ]);
+            // Excel does not grow a merged row to its wrapped text; the merged
+            // A:D is ~140 characters wide.
+            $wrapped = (int) ceil(mb_strlen($line) / 130);
+            if ($wrapped > 1) {
+                $ws->getRowDimension($r)->setRowHeight(15 * $wrapped);
+            }
             $r++;
         }
         $r++;
@@ -365,6 +392,22 @@ final class ImportController
                     $allowed = !empty($col['hint']) ? 'napr. ' . $col['hint'] : '';
                     $lines   = 1;
                 }
+                // A column whose allowed values the rules above cannot express
+                // (the book's numbered activity lists, a word or a date).
+                if (!empty($col['pokyny_values'])) {
+                    $type    = $col['pokyny_type'] ?? $type;
+                    $allowed = $col['pokyny_values'];
+                }
+                if (!empty($col['pokyny_note'])) {
+                    $allowed = ($allowed !== '' ? $allowed . "\n" : '') . $col['pokyny_note'];
+                }
+                if (!empty($col['pokyny_values']) || !empty($col['pokyny_note'])) {
+                    // Count wrapped lines too: the column is ~70 characters wide.
+                    $lines = 0;
+                    foreach (explode("\n", $allowed) as $line) {
+                        $lines += max(1, (int) ceil(mb_strlen($line) / 70));
+                    }
+                }
 
                 $ws->getCell("A{$r}")->setValue($name);
                 $ws->getCell("B{$r}")->setValue($required);
@@ -409,10 +452,11 @@ final class ImportController
             // the tenant and extended as we insert new ones.
             $companyIdByIco = self::loadCompanyMap($accountId);
             $facilityIdByKey = self::loadFacilityMap($accountId);
+            $clientTypeById = self::loadClientTypeMap($accountId);
 
             $insertCompany = $pdo->prepare(
-                'INSERT INTO companies (account_id, name, ico, street, postal_code, city, contact)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)'
+                'INSERT INTO companies (account_id, name, client_type, ico, street, postal_code, city, contact)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
             );
             foreach ($rowsBySheet['Firmy'] as $idx => $row) {
                 $rowNum = $idx + 2; // header + 0-based offset
@@ -431,17 +475,37 @@ final class ImportController
                     $errors[] = ['sheet' => 'Firmy', 'row' => $rowNum, 'message' => 'Chýba IČO firmy.'];
                     continue;
                 }
+                // Optional last column (added with the book's new format): empty
+                // means a firma, as every sheet without the column meant.
+                $clientTypeCell = self::str($row, 'client_type');
+                $clientType = $clientTypeCell ?? \Firol\Support\ClientKind::FIRMA;
+                if (!in_array($clientType, Schema::CLIENT_TYPES, true)) {
+                    $errors[] = ['sheet' => 'Firmy', 'row' => $rowNum, 'message' => 'Neplatný druh klienta (firma / bytove_druzstvo).'];
+                    continue;
+                }
                 if (isset($companyIdByIco[$ico])) {
+                    // A filled type that differs from the stored one is not
+                    // applied (the import never changes an existing client):
+                    // say so instead of skipping the row silently.
+                    $stored = $clientTypeById[$companyIdByIco[$ico]] ?? \Firol\Support\ClientKind::FIRMA;
+                    if ($clientTypeCell !== null && $clientTypeCell !== $stored) {
+                        $as = \Firol\Support\ClientKind::isBytovyDom($stored) ? 'bytové družstvo' : 'firma';
+                        $errors[] = ['sheet' => 'Firmy', 'row' => $rowNum, 'message' => "Firma s IČO $ico už existuje ako $as — druh klienta zmeň v aplikácii."];
+                        continue;
+                    }
                     // Skip silently — re-uploading a sheet with an existing
                     // IČO should be idempotent on the company itself.
                     continue;
                 }
 
                 $addr = Address::parse($address);
-                $insertCompany->execute([$accountId, $name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact]);
+                $insertCompany->execute([$accountId, $name, $clientType, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact]);
                 $newId = (int) $pdo->lastInsertId();
                 $createdCompanies++;
                 $companyIdByIco[$ico] = $newId;
+                $clientTypeById[$newId] = $clientType;
+                // The code of its požiarna kniha numbers, as for a firma created in the app.
+                \Firol\Documents\BookNumber::assignProposal($accountId, $newId, $name);
             }
 
             $insertFacility = $pdo->prepare(
@@ -565,7 +629,7 @@ final class ImportController
                     $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Neplatný typ školenia.'];
                     continue;
                 }
-                if ($date === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                if (!self::isDate($date)) {
                     $errors[] = ['sheet' => 'Skolenia', 'row' => $rowNum, 'message' => 'Neplatný dátum (formát DD-MM-RRRR).'];
                     continue;
                 }
@@ -629,8 +693,8 @@ final class ImportController
             // errors are surfaced only after the parent sheet is sound.
             if ($errors === []) {
                 $insertTrainee = $pdo->prepare(
-                    'INSERT INTO trainees (training_id, fullname, position)
-                     VALUES (?, ?, ?)'
+                    'INSERT INTO trainees (training_id, fullname, position, personal_number)
+                     VALUES (?, ?, ?, ?)'
                 );
                 foreach ($rowsBySheet['Ucastnici'] as $idx => $row) {
                     $rowNum = $idx + 2;
@@ -645,7 +709,14 @@ final class ImportController
                         $errors[] = ['sheet' => 'Ucastnici', 'row' => $rowNum, 'message' => "Školenie s # $trainingRowNo neexistuje v sheete Školenia."];
                         continue;
                     }
-                    $insertTrainee->execute([$trainingId, $fullname, self::str($row, 'position')]);
+                    $personalNumber = self::str($row, 'personal_number');
+                    if ($personalNumber !== null && mb_strlen($personalNumber) > 32) {
+                        $errors[] = ['sheet' => 'Ucastnici', 'row' => $rowNum, 'message' => 'Osobné číslo môže mať najviac 32 znakov.'];
+                        continue;
+                    }
+                    $insertTrainee->execute([
+                        $trainingId, $fullname, self::str($row, 'position'), $personalNumber,
+                    ]);
                     $createdTrainees++;
                 }
             }
@@ -684,7 +755,9 @@ final class ImportController
         $accountId = Tenant::currentAccountId();
         $currentUserId = Tenant::currentUserId();
 
-        $rowsBySheet = self::readUpload(Schema::inspections());
+        // The upload schema also reads the legacy book sheet, so a file filled
+        // in on an older template keeps importing as it did.
+        $rowsBySheet = self::readUpload(Schema::inspectionsUpload());
 
         $errors = [];
         $createdInspections = 0;
@@ -692,6 +765,8 @@ final class ImportController
         $createdTechnicians = 0;
         $createdCompanies = 0;
         $createdFacilities = 0;
+        $createdBookEntries = 0;
+        $createdBookDefects = 0;
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
@@ -746,7 +821,7 @@ final class ImportController
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => $e->getMessage()];
                     continue;
                 }
-                if ($executedOn === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $executedOn)) {
+                if (!self::isDate($executedOn)) {
                     $errors[] = ['sheet' => 'Kontroly', 'row' => $rowNum, 'message' => 'Neplatný dátum (formát DD-MM-RRRR).'];
                     continue;
                 }
@@ -847,6 +922,22 @@ final class ImportController
                 }
             }
 
+            // The book in its new format: independent of Kontroly, so its
+            // sheets are checked whatever Kontroly holds.
+            [$createdBookEntries, $createdBookDefects] = self::importBook(
+                $pdo,
+                $accountId,
+                $currentUserId,
+                $rowsBySheet,
+                $companyIdByIco,
+                $facilityIdByKey,
+                $userIdByEmail,
+                $createdCompanies,
+                $createdFacilities,
+                $createdTechnicians,
+                $errors,
+            );
+
             if ($errors !== []) {
                 $pdo->rollBack();
                 Response::json(['errors' => $errors, 'created' => null], 422);
@@ -862,14 +953,439 @@ final class ImportController
 
         Response::json([
             'created' => [
-                'inspections' => $createdInspections,
-                'items'       => $createdItems,
-                'technicians' => $createdTechnicians,
-                'companies'   => $createdCompanies,
-                'facilities'  => $createdFacilities,
+                'inspections'  => $createdInspections,
+                'items'        => $createdItems,
+                'book_entries' => $createdBookEntries,
+                'book_defects' => $createdBookDefects,
+                'technicians'  => $createdTechnicians,
+                'companies'    => $createdCompanies,
+                'facilities'   => $createdFacilities,
             ],
             'errors' => [],
         ]);
+    }
+
+    /**
+     * Imports the sheets Kniha_zapisy / Kniha_prevadzky / Kniha_nedostatky as
+     * požiarna kniha entries in the new format ({@see BookEntry}): drafts with
+     * no number and no document, like every imported úkon. Every value passes
+     * the validation of the app's own save — the header through
+     * {@see BookEntry::validateShape()} and {@see BookEntry::applyContext()},
+     * the prevádzky through {@see BookEntry::readFacilities()}, each defect
+     * through {@see PrehliadkaDefects::validate()} with the book's options —
+     * and a failing row is reported with its sheet and row.
+     *
+     * As with Kontroly and their items, a child sheet is checked only once its
+     * parent is clean, so one mistake is not reported twice. Attached records,
+     * photos and catalogue links cannot come from Excel and stay empty.
+     *
+     * @param array<string, list<array<string, string>>> $rowsBySheet
+     * @param array<string,int> $companyIdByIco
+     * @param array<string,int> $facilityIdByKey
+     * @param array<string,int> $userIdByEmail
+     * @param list<array{sheet:string,row:int,message:string}> $errors
+     * @return array{0:int, 1:int} entries and defects created
+     */
+    private static function importBook(
+        PDO $pdo,
+        int $accountId,
+        int $currentUserId,
+        array $rowsBySheet,
+        array &$companyIdByIco,
+        array &$facilityIdByKey,
+        array &$userIdByEmail,
+        int &$createdCompanies,
+        int &$createdFacilities,
+        int &$createdTechnicians,
+        array &$errors,
+    ): array {
+        $entryRows = $rowsBySheet['Kniha_zapisy'] ?? [];
+        $placeRows = $rowsBySheet['Kniha_prevadzky'] ?? [];
+        $defectRows = $rowsBySheet['Kniha_nedostatky'] ?? [];
+        if ($entryRows === [] && $placeRows === [] && $defectRows === []) {
+            return [0, 0];
+        }
+        $errorsBefore = count($errors);
+        $fail = static function (string $sheet, int $row, string $message) use (&$errors): void {
+            $errors[] = ['sheet' => $sheet, 'row' => $row, 'message' => $message];
+        };
+
+        // ── Kniha_zapisy ────────────────────────────────────────────────
+        /** @var array<int, array<string, mixed>> $entries number of the entry → parsed row */
+        $entries = [];
+        /** @var array<int, true> $usedNumbers every number seen so far, valid row or not */
+        $usedNumbers = [];
+        foreach ($entryRows as $idx => $row) {
+            $sheet = 'Kniha_zapisy';
+            $rowNum = $idx + 2;
+            $rowNo = self::intOrNull($row, 'row_no');
+            if ($rowNo === null) {
+                $fail($sheet, $rowNum, 'Chýba číslo zápisu.');
+                continue;
+            }
+            // Recorded before the row's other checks, so a second row with the
+            // number of a row that failed is reported too.
+            if (isset($usedNumbers[$rowNo])) {
+                $fail($sheet, $rowNum, "Číslo zápisu $rowNo je na hárku Kniha_zapisy už použité.");
+                continue;
+            }
+            $usedNumbers[$rowNo] = true;
+            $companyName = self::str($row, 'company_name');
+            $ico = self::ico($row, 'company_ico');
+            if ($ico === null || $companyName === null) {
+                $fail($sheet, $rowNum, 'Chýba názov firmy / IČO firmy.');
+                continue;
+            }
+            $executedOn = self::str($row, 'executed_on');
+            if (!self::isDate($executedOn)) {
+                $fail($sheet, $rowNum, 'Neplatný dátum (formát DD-MM-RRRR).');
+                continue;
+            }
+            $sposobCell = self::str($row, 'sposob');
+            if ($sposobCell !== null && !in_array($sposobCell, ['1', '2'], true)) {
+                $fail($sheet, $rowNum, 'Spôsob zápisu môže byť 1 alebo 2 (alebo prázdny).');
+                continue;
+            }
+            $numbersCell = self::str($row, 'cinnosti') ?? '';
+            $numbers = $numbersCell === '' ? [] : preg_split('/[\s,;]+/u', $numbersCell, -1, PREG_SPLIT_NO_EMPTY);
+            $numbers = is_array($numbers) ? $numbers : [];
+            $badNumber = false;
+            foreach ($numbers as $n) {
+                if (!ctype_digit($n)) {
+                    $badNumber = true;
+                    break;
+                }
+            }
+            if ($badNumber) {
+                $fail($sheet, $rowNum, 'Vykonané činnosti zadaj ako čísla bodov oddelené čiarkou (napr. 1,3,5).');
+                continue;
+            }
+
+            $companyId = self::resolveOrCreateCompany(
+                $pdo, $accountId, $ico, $companyName, $companyIdByIco, $createdCompanies,
+            );
+            $clientType = self::companyClientType($pdo, $accountId, $companyId);
+            // The numbers point into the list of the client type (spec 6.1 /
+            // 6.2); the texts themselves contain commas, so they are not typed.
+            $list = BookEntry::activitiesFor($clientType);
+            $labels = [];
+            foreach ($numbers as $n) {
+                $i = (int) $n;
+                if ($i < 1 || $i > count($list)) {
+                    $who = $clientType === 'bytove_druzstvo' ? 'bytové družstvo' : 'firmu';
+                    $fail($sheet, $rowNum, "Bod č. $i nie je v zozname činností pre $who (1–" . count($list) . ').');
+                    continue 2;
+                }
+                $labels[] = $list[$i - 1];
+            }
+            $ownCell = self::str($row, 'vlastne_cinnosti') ?? '';
+            $own = $ownCell === '' ? [] : array_values(array_filter(array_map('trim', explode('|', $ownCell)), static fn (string $a): bool => $a !== ''));
+
+            $inspectorId = $currentUserId;
+            $inspectorEmail = self::str($row, 'inspector_email');
+            if ($inspectorEmail !== null) {
+                $inspectorId = self::resolveOrCreateMember(
+                    $pdo, $accountId, $inspectorEmail, $userIdByEmail, $createdTechnicians,
+                );
+            }
+
+            $entries[$rowNo] = [
+                'row'         => $rowNum,
+                'company_id'  => $companyId,
+                'client_type' => $clientType,
+                'executed_on' => $executedOn,
+                'sposob'      => $sposobCell !== null ? (int) $sposobCell : null,
+                'inspector'   => $inspectorId,
+                // Empty úvod / schválil stay null: applyContext() fills the
+                // legal sentence and the client's person, as on a new entry.
+                'raw'         => [
+                    'uvod'             => self::str($row, 'uvod'),
+                    'cinnosti'         => $labels,
+                    'vlastne_cinnosti' => $own,
+                    'text_zapisu'      => self::str($row, 'text_zapisu') ?? '',
+                    'doplnujuci_text'  => self::str($row, 'doplnujuci_text') ?? '',
+                    'zaver'            => self::str($row, 'zaver') ?? '',
+                    'schvalil'         => self::str($row, 'schvalil'),
+                ],
+                'places'      => [],
+            ];
+        }
+        if (count($errors) > $errorsBefore) {
+            return [0, 0];
+        }
+
+        // ── Kniha_prevadzky ─────────────────────────────────────────────
+        foreach ($placeRows as $idx => $row) {
+            $sheet = 'Kniha_prevadzky';
+            $rowNum = $idx + 2;
+            $rowNo = self::intOrNull($row, 'row_no');
+            if ($rowNo === null) {
+                $fail($sheet, $rowNum, 'Chýba číslo zápisu.');
+                continue;
+            }
+            if (!isset($entries[$rowNo])) {
+                $fail($sheet, $rowNum, "Zápis č. $rowNo neexistuje na hárku Kniha_zapisy.");
+                continue;
+            }
+            $name = self::str($row, 'facility_name');
+            if ($name === null) {
+                $fail($sheet, $rowNum, 'Chýba názov prevádzky.');
+                continue;
+            }
+            $months = self::str($row, 'periodicity');
+            try {
+                [$value, $unit] = BookEntry::periodicity($months, $months !== null ? 'mesiac' : null);
+            } catch (\InvalidArgumentException $e) {
+                $fail($sheet, $rowNum, $e->getMessage());
+                continue;
+            }
+            $facilityId = self::resolveOrCreateFacility(
+                $pdo, $accountId, (int) $entries[$rowNo]['company_id'], $name, $facilityIdByKey, $createdFacilities,
+            );
+            $entries[$rowNo]['places'][] = [
+                'facility_id'       => $facilityId,
+                'periodicity_value' => $value,
+                'periodicity_unit'  => $unit,
+                'row'               => $rowNum,
+                'name'              => $name,
+            ];
+        }
+        if (count($errors) > $errorsBefore) {
+            return [0, 0];
+        }
+
+        // ── The entries ─────────────────────────────────────────────────
+        $insertEntry = $pdo->prepare(
+            'INSERT INTO inspections
+                (account_id, company_id, facility_id, type,
+                 periodicity_value, periodicity_unit, periodicity_is_custom,
+                 executed_on, inspector_user_id, status, notes,
+                 is_preventive_inspection, details)
+             VALUES (?, ?, ?, ?, NULL, NULL, 0, ?, ?, "draft", NULL, ?, ?)'
+        );
+        $created = 0;
+        foreach ($entries as $rowNo => $entry) {
+            $sheet = 'Kniha_zapisy';
+            if ($entry['places'] === []) {
+                $fail($sheet, $entry['row'], "Zápis č. $rowNo nemá žiadnu prevádzku — doplň ju na hárku Kniha_prevadzky.");
+                continue;
+            }
+            try {
+                // Same rules as the app: deduplicated, the first row wins.
+                $rows = BookEntry::readFacilities(array_map(static fn (array $p): array => [
+                    'facility_id'       => $p['facility_id'],
+                    'periodicity_value' => $p['periodicity_value'],
+                    'periodicity_unit'  => $p['periodicity_unit'],
+                ], $entry['places']));
+            } catch (\InvalidArgumentException $e) {
+                $fail($sheet, $entry['row'], $e->getMessage());
+                continue;
+            }
+            $ids = array_map(static fn (array $r): int => $r['facility_id'], $rows);
+            $sposob = $entry['sposob'] ?? BookEntry::defaultSposob(count($rows));
+            // Spôsob 1 moves the term of every prevádzka, so each needs one —
+            // the app refuses step 1 and the PDF without it.
+            if ($sposob === 1) {
+                $missing = false;
+                // Only the rows readFacilities() keeps (the first per prevádzka):
+                // a repeated prevádzka row is ignored there, so here as well.
+                $kept = [];
+                foreach ($entry['places'] as $p) {
+                    $kept[$p['facility_id']] ??= $p;
+                }
+                foreach ($kept as $p) {
+                    if ($p['periodicity_value'] === null) {
+                        $fail('Kniha_prevadzky', $p['row'], "Zápis č. $rowNo je spôsobom 1 — vyber periodicitu 12, 6 alebo 3 mesiace.");
+                        $missing = true;
+                    }
+                }
+                if ($missing) {
+                    continue;
+                }
+            }
+            if (BookEntry::facilityNames($accountId, (int) $entry['company_id'], $ids) === null) {
+                $fail($sheet, $entry['row'], 'Firma alebo prevádzka sa nenašla.');
+                continue;
+            }
+            // What an entry created in the app holds: step 1 stores the legal
+            // Úvod, no activities and empty texts; step 2 then edits only the
+            // fields of the spôsob in force (spôsob 1: Úvod, činnosti, vlastné
+            // činnosti, doplňujúci text; spôsob 2: text zápisu). The other
+            // spôsob's columns are left out, so nothing hidden is stored.
+            $raw = $entry['raw'];
+            if ($sposob === 1) {
+                $raw['text_zapisu'] = '';
+            } else {
+                $raw['uvod'] = null;
+                $raw['cinnosti'] = [];
+                $raw['vlastne_cinnosti'] = [];
+                $raw['doplnujuci_text'] = '';
+            }
+            try {
+                $details = BookEntry::validateShape([
+                    'format'       => BookEntry::FORMAT,
+                    'sposob'       => $sposob,
+                    // An explicit spôsob in the file is the technician's choice,
+                    // as a tapped card is on step 1.
+                    'sposob_rucne' => $entry['sposob'] !== null,
+                    'zaznamy'      => [],
+                ] + $raw);
+                $details = BookEntry::applyContext($details, [
+                    'account_id'   => $accountId,
+                    'company_id'   => (int) $entry['company_id'],
+                    'client_type'  => $entry['client_type'],
+                    'facility_ids' => $ids,
+                    'stored'       => null,
+                    'creating'     => true,
+                ]);
+            } catch (\InvalidArgumentException $e) {
+                $fail($sheet, $entry['row'], $e->getMessage());
+                continue;
+            }
+
+            // The first prevádzka of the entry is its primary one.
+            $insertEntry->execute([
+                $accountId,
+                (int) $entry['company_id'],
+                $ids[0],
+                BookEntry::TYPE,
+                $entry['executed_on'],
+                (int) $entry['inspector'],
+                $sposob === 1 ? 1 : 0,
+                \Firol\Support\InspectionDetails::encode($details),
+            ]);
+            $inspectionId = (int) $pdo->lastInsertId();
+            BookEntry::writeFacilities($pdo, $accountId, $inspectionId, $rows);
+            BookEntry::syncHeader($pdo, $inspectionId);
+            $entries[$rowNo]['inspection_id'] = $inspectionId;
+            $entries[$rowNo]['facility_ids'] = $ids;
+            $created++;
+        }
+        if (count($errors) > $errorsBefore) {
+            return [0, 0];
+        }
+
+        // ── Kniha_nedostatky ────────────────────────────────────────────
+        $insertDefect = $pdo->prepare(
+            'INSERT INTO inspection_items (inspection_id, position, fields)
+             SELECT ?, COALESCE(MAX(position), 0) + 1, ?
+             FROM   inspection_items WHERE inspection_id = ?'
+        );
+        $defects = 0;
+        foreach ($defectRows as $idx => $row) {
+            $sheet = 'Kniha_nedostatky';
+            $rowNum = $idx + 2;
+            $rowNo = self::intOrNull($row, 'row_no');
+            if ($rowNo === null) {
+                $fail($sheet, $rowNum, 'Chýba číslo zápisu.');
+                continue;
+            }
+            $entry = $entries[$rowNo] ?? null;
+            if ($entry === null) {
+                $fail($sheet, $rowNum, "Zápis č. $rowNo neexistuje na hárku Kniha_zapisy.");
+                continue;
+            }
+            /** @var list<int> $ids */
+            $ids = $entry['facility_ids'];
+
+            // The prevádzka by name among the entry's own.
+            $facilityId = null;
+            $name = self::str($row, 'facility_name');
+            if ($name !== null) {
+                foreach ($entry['places'] as $p) {
+                    if (mb_strtolower($p['name']) === mb_strtolower($name) && in_array($p['facility_id'], $ids, true)) {
+                        $facilityId = $p['facility_id'];
+                        break;
+                    }
+                }
+                if ($facilityId === null) {
+                    $fail($sheet, $rowNum, "Prevádzka „{$name}\" nie je medzi prevádzkami zápisu č. $rowNo.");
+                    continue;
+                }
+            }
+
+            $body = [
+                'title'         => self::str($row, 'title'),
+                'description'   => self::str($row, 'description'),
+                // Free text from Excel is the „vlastný popis" of the place.
+                'where'         => ['detail' => self::str($row, 'place')],
+                'device_manual' => self::str($row, 'device_manual'),
+                'regulation'    => self::str($row, 'regulation'),
+                'justification' => self::str($row, 'justification'),
+                'measure'       => self::str($row, 'measure'),
+                'reason'        => self::str($row, 'reason'),
+            ];
+            if ($facilityId !== null) {
+                $body['facility_id'] = $facilityId;
+            }
+
+            $deadline = self::str($row, 'deadline');
+            if ($deadline !== null) {
+                $choice = mb_strtolower($deadline);
+                if (in_array($choice, Schema::BOOK_DEADLINE_CHOICES, true)) {
+                    $body['deadline_choice'] = $choice;
+                } elseif (self::isDate($deadline)) {
+                    $body['deadline_choice'] = 'custom';
+                    $body['deadline_date'] = $deadline;
+                } elseif (self::looksLikeDate($deadline)) {
+                    $fail($sheet, $rowNum, 'Neplatný dátum (formát DD-MM-RRRR).');
+                    continue;
+                } else {
+                    $fail($sheet, $rowNum, 'Lehota môže byť bezodkladne, 30d, 3m, 6m alebo dátum DD-MM-RRRR (alebo prázdna).');
+                    continue;
+                }
+            }
+
+            $status = self::str($row, 'status');
+            if ($status !== null) {
+                // The code or the screen's label (zistený, odstránený, …).
+                $code = array_search(mb_strtolower($status), Schema::BOOK_DEFECT_STATUS_LABELS, true);
+                $status = is_string($code) ? $code : $status;
+                if (!in_array($status, PrehliadkaDefects::STATUSES, true)) {
+                    $fail($sheet, $rowNum, 'Stav môže byť zisteny, odstraneny, trva alebo zanik (alebo prázdny).');
+                    continue;
+                }
+                $body['status'] = $status;
+            }
+
+            try {
+                $fields = PrehliadkaDefects::validate(
+                    $body,
+                    (string) $entry['executed_on'],
+                    $entry['client_type'] === 'bytove_druzstvo',
+                    // Historical book defects: „zanik" stays accepted — it is
+                    // history, not a new defect entered in the app (answer 6 B).
+                    ['deadline_optional' => true, 'facility_ids' => $ids, 'allow_new_zanik' => true],
+                );
+            } catch (\InvalidArgumentException $e) {
+                $fail($sheet, $rowNum, $e->getMessage());
+                continue;
+            }
+            // As InspectionItemController stores a book defect: scope po,
+            // nothing carried over, the prevádzka stamped when there is one.
+            $fields['scope'] = 'po';
+            $fields['persists_from'] = null;
+            if (count($ids) === 1) {
+                $fields['facility_id'] = $ids[0];
+            }
+            $json = json_encode($fields, JSON_UNESCAPED_UNICODE);
+            if ($json === false) {
+                $fail($sheet, $rowNum, 'Nedostatok sa nepodarilo uložiť.');
+                continue;
+            }
+            $insertDefect->execute([(int) $entry['inspection_id'], $json, (int) $entry['inspection_id']]);
+            $defects++;
+        }
+
+        return [$created, $defects];
+    }
+
+    private static function companyClientType(PDO $pdo, int $accountId, int $companyId): ?string
+    {
+        $stmt = $pdo->prepare('SELECT client_type FROM companies WHERE id = ? AND account_id = ?');
+        $stmt->execute([$companyId, $accountId]);
+        $type = $stmt->fetchColumn();
+        return is_string($type) ? $type : null;
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
@@ -968,6 +1484,7 @@ final class ImportController
             'INSERT INTO companies (account_id, name, ico) VALUES (?, ?, ?)'
         )->execute([$accountId, $name, $ico]);
         $id = (int) $pdo->lastInsertId();
+        \Firol\Documents\BookNumber::assignProposal($accountId, $id, $name);
         $companyIdByIco[$ico] = $id;
         $createdCount++;
         return $id;
@@ -1057,6 +1574,16 @@ final class ImportController
                         // DD-MM-RRRR / DD.MM.RRRR text) to the canonical Y-m-d
                         // the importers and the DB expect.
                         $str = self::normalizeImportDate($value);
+                    } elseif (!empty($col['date_or_text'])) {
+                        // A word (bezodkladne, 30d, …) stays as typed; a date in
+                        // any shape Excel delivers becomes Y-m-d. A small bare
+                        // number („30") is no date: it stays text and fails
+                        // validation instead of landing in January 1900.
+                        $isSerial = (is_int($value) || is_float($value)) && $value >= 1000;
+                        $str = $isSerial || $value instanceof \DateTimeInterface
+                            || (is_string($value) && preg_match('#^\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4}$#', trim($value)))
+                            ? self::normalizeImportDate($value)
+                            : ($value === null ? '' : (string) $value);
                     } elseif ($value instanceof \DateTimeInterface) {
                         $str = $value->format('Y-m-d');
                     } elseif (is_float($value) && !in_array($col['key'], ['q', 'hs', 'hd', 'working_pressure', 'test_pressure', 'length'], true)) {
@@ -1096,8 +1623,23 @@ final class ImportController
         );
         $stmt->execute([$accountId]);
         $out = [];
+        $padded = [];
         foreach ($stmt->fetchAll() as $r) {
-            $out[(string) $r['ico']] = (int) $r['id'];
+            $ico = (string) $r['ico'];
+            $out[$ico] = (int) $r['id'];
+            $padded[self::padIco($ico)] = (int) $r['id'];
+        }
+        return $out + $padded;
+    }
+
+    /** @return array<int,string> company id → client_type, the account's companies */
+    private static function loadClientTypeMap(int $accountId): array
+    {
+        $stmt = Db::pdo()->prepare('SELECT id, client_type FROM companies WHERE account_id = ?');
+        $stmt->execute([$accountId]);
+        $out = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $out[(int) $r['id']] = (string) $r['client_type'];
         }
         return $out;
     }
@@ -1161,7 +1703,32 @@ final class ImportController
         $v = self::str($row, $key);
         if ($v === null) return null;
         $v = preg_replace('/\s+/', '', $v) ?? '';
-        return $v === '' ? null : $v;
+        return $v === '' ? null : self::padIco($v);
+    }
+
+    /**
+     * An IČO has 8 digits. A cell Excel read as a number lost its leading
+     * zeros („00169803" → 169803), so an all-digit value shorter than 8 is
+     * padded back; anything else stays as typed.
+     */
+    private static function padIco(string $ico): string
+    {
+        return ctype_digit($ico) && strlen($ico) < 8 ? str_pad($ico, 8, '0', STR_PAD_LEFT) : $ico;
+    }
+
+    /** A real calendar date in the canonical Y-m-d (2026-02-31 is not). */
+    private static function isDate(?string $value): bool
+    {
+        return $value !== null
+            && preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $m) === 1
+            && checkdate((int) $m[2], (int) $m[3], (int) $m[1]);
+    }
+
+    /** Typed as a date (DD-MM-RRRR or RRRR-MM-DD), whether the day exists or not. */
+    private static function looksLikeDate(string $value): bool
+    {
+        return preg_match('#^\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4}$#', $value) === 1
+            || preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1;
     }
 
     /** @param array<string,string> $row */
@@ -1206,11 +1773,17 @@ final class ImportController
         if ($s === '') {
             return '';
         }
-        // Day-first text (the format the template asks for).
+        // Day-first text (the format the template asks for). An impossible
+        // day („31-02-2026") stays as typed, so the row fails validation with
+        // its sheet and row instead of the INSERT failing in the database.
         if (preg_match('#^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$#', $s, $m)) {
+            if (!checkdate((int) $m[2], (int) $m[1], (int) $m[3])) {
+                return $s;
+            }
             return sprintf('%04d-%02d-%02d', (int) $m[3], (int) $m[2], (int) $m[1]);
         }
-        // Already canonical — pass through untouched.
+        // Already canonical — passed through; the validators' isDate() still
+        // rejects an impossible one (2026-02-31).
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $s)) {
             return $s;
         }
@@ -1322,6 +1895,11 @@ final class ImportController
                 $customRaw = self::str($row, 'custom_activities') ?? '';
                 $custom = $customRaw === '' ? [] : array_values(array_filter(array_map('trim', explode('|', $customRaw)), fn($a) => $a !== ''));
                 $defects = [];
+                $defDeadline = self::str($row, 'defect_deadline');
+                if ($defDeadline !== null && !self::isDate($defDeadline) && self::looksLikeDate($defDeadline)) {
+                    $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => 'Neplatný dátum (formát DD-MM-RRRR).'];
+                    return null;
+                }
                 $defDesc = self::str($row, 'defect_description');
                 if ($defDesc !== null) {
                     $defects[] = [

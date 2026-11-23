@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Spinner } from '@/components/ui/Spinner';
 import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
+import { cropToInk } from '@/lib/signatureImage';
 import { HANDOVER_ACTION_LABELS } from '@/lib/handover';
 
 /**
@@ -119,7 +120,7 @@ export function HandoverDialog({
 
     setSaving(true);
     try {
-      const signature = await blobToDataUri(blob);
+      const signature = await blobToDataUri(await cropToInk(blob));
       const res = await Documents.handover(
         documentId,
         {

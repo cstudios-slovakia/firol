@@ -213,6 +213,9 @@ final class AccountController
                     stripe_status, stripe_subscription_id, billing_period, stripe_customer_id,
                     stripe_cancel_at_period_end,
                     included_technicians, extra_technicians,
+                    stripe_extra_subscription_item_id, stripe_extra_unit_amount_cents,
+                    stripe_extra_interval, stripe_base_unit_amount_cents, stripe_has_discount,
+                    stripe_extra_quantity, seat_sync_state,
                     main_user_id, default_php_user_id, default_oprava_user_id
              FROM   accounts WHERE id = ?'
         );
@@ -225,6 +228,7 @@ final class AccountController
             $status === 'active'     => 'active',
             $status === 'trialing'   => 'trial_paid',
             $status === 'past_due'   => 'past_due',
+            $status === 'unpaid'     => 'unpaid',
             $status === 'canceled'   => 'canceled',
             $status === 'incomplete' || $status === 'incomplete_expired' => 'incomplete',
             $subId !== null && $subId !== ''                              => 'has_subscription',
@@ -262,6 +266,29 @@ final class AccountController
             'active_technicians'             => SeatSync::countActiveTechnicians($accountId),
             'max_self_service_technicians'   => SeatSync::maxSelfServiceTechnicians(),
             'price_per_extra_technician_cents' => SeatSync::pricePerExtraCents(),
+            // What a yearly subscription charges per extra technician —
+            // the screens show this figure and never derive it themselves.
+            'price_per_extra_technician_yearly_cents' => SeatSync::pricePerExtraYearlyCents(),
+            // What one extra technician really costs this account: the unit
+            // amount on its Stripe item when one exists (it keeps the price
+            // it was created with), else today's price for its period.
+            'extra_unit_amount_cents'        => SeatSync::extraUnitCents($row),
+            'extra_unit_from_stripe'         => !empty($row['stripe_extra_subscription_item_id'])
+                                                  && $row['stripe_extra_unit_amount_cents'] !== null,
+            // Base item + extras at their Stripe unit amounts, without
+            // prorations; null until a subscription exists. The extras are
+            // the wanted count, or what Stripe has while nothing is pushed
+            // (reconcile switch off, account left for a person).
+            'next_charge_cents'              => SeatSync::nextChargeCents($row),
+            'next_charge_extra_technicians'  => SeatSync::chargedExtraCount($row),
+            // A promotion code is on the subscription: the figure above is
+            // the price before the discount (the screens say so).
+            'next_charge_before_discount'    => !empty($row['stripe_has_discount']),
+            // Every price above is net; the customer pays it plus VAT
+            // (Billing\Vat). The screens show „+ DPH" and the gross amount.
+            'vat_rate_percent'               => \Firol\Billing\Vat::percent(),
+            // A failed renewal: amount, and the first read-only day.
+            'payment_failed'                 => \Firol\Billing\PaymentGrace::bannerFor($accountId, $row['stripe_status'] ?? null),
         ];
     }
 }

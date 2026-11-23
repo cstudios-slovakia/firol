@@ -9,7 +9,7 @@ export type Invoice = {
   document_number: string | null;
   amount_cents: number;
   currency: string;
-  status: 'paid' | 'pending' | 'issued' | 'draft' | 'skipped' | 'error' | string;
+  status: 'paid' | 'pending' | 'sending' | 'issued' | 'draft' | 'prepared' | 'needs_review' | 'skipped' | 'error' | string;
   issued_at: string;
   /** Direct download link — iDoklad PublicHtmlUrl when available, Stripe invoice_pdf otherwise. */
   pdf_url: string | null;

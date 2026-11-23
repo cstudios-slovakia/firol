@@ -13,9 +13,19 @@ use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Storage\Storage;
+use Firol\Support\BookEntry;
 use Firol\Support\CarryOver;
+use Firol\Support\CertGuard;
+use Firol\Support\ClientKind;
+use Firol\Support\InspectionCoverage;
 use Firol\Support\InspectionDetails;
 use Firol\Support\Periodicity;
+use Firol\Support\PrehliadkaChecklist;
+use Firol\Support\PrehliadkaConcepts;
+use Firol\Support\PrehliadkaDefects;
+use Firol\Support\PrehliadkaDetails;
+use Firol\Support\UkonDiscard;
+use Firol\Support\UkonDiscardRefused;
 
 final class InspectionController
 {
@@ -47,19 +57,29 @@ final class InspectionController
      *
      * `executed_on` is nullable, so both sides are coalesced to a floor date
      * to keep the row comparison from collapsing to NULL.
+     *
+     * `$facilityExpr` is the prevádzka the row is seen from: a newer record
+     * covering it supersedes ({@see InspectionCoverage::covers()} — a požiarna
+     * kniha entry covers every prevádzka it was written for). The facility view
+     * of the list passes the covered prevádzka; everything else the úkon's own.
      */
-    private const SUPERSEDED_EXPR = "EXISTS(
+    private static function supersededExpr(string $facilityExpr = 'i.facility_id'): string
+    {
+        return "EXISTS(
                            SELECT 1 FROM inspections s
                            WHERE  i.status      = 'finalized'
                              AND  s.account_id  = i.account_id
-                             AND  s.facility_id = i.facility_id
-                             AND  s.type        = i.type
+                             AND  " . InspectionCoverage::covers('s', $facilityExpr) . "
+                             AND  (s.type = i.type
+                                   OR (s.type IN ('poziarna_kniha', 'preventivna_prehliadka')
+                                       AND i.type IN ('poziarna_kniha', 'preventivna_prehliadka')))
                              AND  s.archived_at IS NULL
                              AND  s.status      = 'finalized'
                              AND  s.is_preventive_inspection = 1
                              AND  (COALESCE(s.executed_on, '1000-01-01'), s.id)
                                 > (COALESCE(i.executed_on, '1000-01-01'), i.id)
                        ) AS is_superseded";
+    }
 
     /**
      * Every inspection type the app knows. Which periodicity each one
@@ -70,7 +90,7 @@ final class InspectionController
      *
      * @var list<string>
      */
-    private const TYPES = [
+    public const TYPES = [
         'php', 'hydranty', 'oprava_ts_php', 'poziarna_kniha',
         'pu_akcieschopnost', 'pu_udrzba', 'nudzove_osvetlenie', 'ts_hadic',
         // Pokyn — žatevné práce is not here: it is a document issued to the
@@ -87,6 +107,9 @@ final class InspectionController
         // than a training-tree record: it carries a periodicity, joins a visit,
         // is signed „Za organizáciu" and shares its person list with the tests.
         'dychova_skuska', 'omamne_latky', 'skolenie_bozp',
+        // POapp 26. 10. 2026 — the walk-through that yields several records
+        // (Firol\Support\PrehliadkaDetails / PrehliadkaDefects).
+        'preventivna_prehliadka',
     ];
 
     /**
@@ -100,6 +123,15 @@ final class InspectionController
      */
     private const NON_CYCLIC_TYPES = ['vyradenie'];
 
+    /**
+     * PHP statuses that feed an Oprava/plnenie/TS PHP follow-up (spec 7.3, D3).
+     * The one place to change if FIROL drops `O` — keep in step with
+     * PHP_OPRAVA_FOLLOW_UP_STATUSES in frontend/src/api/inspections.ts.
+     *
+     * @var list<string>
+     */
+    private const OPRAVA_FOLLOW_UP_STATUSES = ['TS', 'O'];
+
     public static function index(Request $req): void
     {
         $accountId = Tenant::currentAccountId();
@@ -109,27 +141,40 @@ final class InspectionController
         $facilityId = self::queryInt($req, 'facility_id');
         $type = $req->query('type');
 
+        // The facility view lists what covers that prevádzka — a požiarna kniha
+        // entry written for several prevádzky appears under each of them, with
+        // that prevádzka's periodicity (InspectionCoverage). At most one row of
+        // inspection_facilities joins per entry, so no row is duplicated.
+        $fac = $facilityId !== null;
         $sql = 'SELECT i.id, i.type, i.executed_on,
-                       i.periodicity_value, i.periodicity_unit, i.periodicity_is_custom,
+                       ' . ($fac ? InspectionCoverage::periodicityValue() : 'i.periodicity_value') . ' AS periodicity_value,
+                       ' . ($fac ? InspectionCoverage::periodicityUnit() : 'i.periodicity_unit') . ' AS periodicity_unit,
+                       i.periodicity_is_custom,
                        i.is_preventive_inspection, i.source_inspection_id,
                        i.carried_over_from_id, i.visit_id,
-                       i.status, i.notes, i.created_at,
-                       i.company_id, c.name AS company_name,
-                       i.facility_id, f.name AS facility_name,
+                       i.status, i.issued_before, i.notes, i.created_at, i.account_id,
+                       i.company_id, c.name AS company_name, c.client_type AS company_client_type,
+                       ' . ($fac ? InspectionCoverage::facility() : 'i.facility_id') . ' AS facility_id,
+                       f.name AS facility_name,
                        i.inspector_user_id, u.fullname AS inspector_name,
                        i.created_by_user_id,
                        i.effective_inspector_user_id,
                        eu.fullname AS effective_inspector_name,
                        i.effective_cert_number,
                        i.billing_mode, i.invoiced, i.invoiced_at, i.billing_note,
-                       ' . self::SUPERSEDED_EXPR . '
+                       CASE WHEN JSON_VALUE(i.details, "$.concept_from_prehliadka") IS NULL THEN NULL
+                            WHEN JSON_VALUE(i.details, "$.concept_confirmed_at") IS NULL THEN "pending"
+                            ELSE "confirmed" END AS concept_state,
+                       i.details AS scope_details,
+                       ' . self::supersededExpr($fac ? InspectionCoverage::facility() : 'i.facility_id') . '
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
-                JOIN   facilities  f ON f.id = i.facility_id
+                ' . ($fac ? 'LEFT JOIN inspection_facilities ix ON ix.inspection_id = i.id AND ix.facility_id = :fid_x' : '') . '
+                JOIN   facilities  f ON f.id = ' . ($fac ? InspectionCoverage::facility() : 'i.facility_id') . '
                 JOIN   users       u ON u.id = i.inspector_user_id
                 LEFT JOIN users    eu ON eu.id = i.effective_inspector_user_id
                 WHERE  i.archived_at IS NULL';
-        $params = [];
+        $params = $fac ? ['fid_x' => $facilityId] : [];
         // Chapter 22 — „Nevyfakturované": filtered here rather than on the
         // client, so the 200-row cap below never hides an older úkon that is
         // still waiting to be invoiced.
@@ -146,7 +191,7 @@ final class InspectionController
             $params['company_id'] = $companyId;
         }
         if ($facilityId !== null) {
-            $sql .= ' AND i.facility_id = :facility_id';
+            $sql .= ' AND (ix.id IS NOT NULL OR i.facility_id = :facility_id)';
             $params['facility_id'] = $facilityId;
         }
         if ($type !== null) {
@@ -157,9 +202,76 @@ final class InspectionController
 
         $stmt = Db::pdo()->prepare($sql);
         $stmt->execute($params);
-        $items = array_map([self::class, 'shapeRow'], $stmt->fetchAll());
+        $rows = $stmt->fetchAll();
+
+        // New-format book entries carry their prevádzky. In the facility view the
+        // row already speaks for that prevádzka; elsewhere one representative
+        // prevádzka sets the periodicity and term of the row.
+        $bookIds = [];
+        foreach ($rows as $r) {
+            if ($r['type'] === BookEntry::TYPE && BookEntry::isNew(InspectionDetails::decode($r['scope_details'] ?? null))) {
+                $bookIds[] = (int) $r['id'];
+            }
+        }
+        $coverage = InspectionCoverage::forInspections($isAdmin ? null : $accountId, $bookIds);
+        // What the trash icon does to each row (UkonDiscard): delete / archive / none.
+        $discard = UkonDiscard::decideMany($isAdmin ? null : $accountId, $rows);
+        $items = array_map(
+            static fn (array $r): array => self::withFacilities(self::shapeRow($r), $coverage, !$fac)
+                + ['discard' => $discard[(int) $r['id']]['mode'] ?? null],
+            $rows,
+        );
 
         Response::json(['items' => $items]);
+    }
+
+    /**
+     * Adds `facilities` to a shaped new-format book entry and, unless the row is
+     * already seen from one prevádzka, takes the periodicity, term and
+     * superseded state from the representative prevádzka
+     * ({@see InspectionCoverage::representative()}).
+     *
+     * @param array<string, mixed> $row shaped
+     * @param array<int, list<array<string, mixed>>> $coverage {@see InspectionCoverage::forInspections()}
+     * @return array<string, mixed>
+     */
+    private static function withFacilities(array $row, array $coverage, bool $derive): array
+    {
+        $facilities = $coverage[(int) $row['id']] ?? null;
+        if ($facilities === null) {
+            return $row;
+        }
+        $row['facilities'] = $facilities;
+        if ($derive && count($facilities) > 1) {
+            $rep = InspectionCoverage::representative($facilities, (bool) $row['is_preventive_inspection']);
+            if ($rep !== null) {
+                $row['periodicity_value'] = $rep['periodicity_value'];
+                $row['periodicity_unit'] = $rep['periodicity_unit'];
+                $row['valid_until'] = $rep['valid_until'];
+                $row['is_superseded'] = $rep['is_superseded'];
+            }
+        }
+        return $row;
+    }
+
+    /**
+     * One inspection as the detail endpoints return it, with the prevádzky of a
+     * new-format book entry.
+     *
+     * @param array<string, mixed> $row loadOrFail() row
+     * @return array<string, mixed>
+     */
+    private static function shapeDetail(array $row): array
+    {
+        $isBook = $row['type'] === BookEntry::TYPE && BookEntry::isNew(InspectionDetails::decode($row['details'] ?? null));
+        $shaped = self::shapeRow($row);
+        if (!$isBook) {
+            return $shaped;
+        }
+        $coverage = InspectionCoverage::forInspections((int) $row['account_id'], [(int) $row['id']]);
+        $shaped = self::withFacilities($shaped, $coverage, true);
+        $shaped['facilities'] ??= [];
+        return $shaped;
     }
 
     /**
@@ -292,18 +404,46 @@ final class InspectionController
             )
             : null;
 
+        // A concept from a prehliadka: the items that still lack a required field
+        // (what keeps it from being confirmed), so the list can mark them.
+        $rowDetails = InspectionDetails::decode($row['details'] ?? null);
+        $isConcept = PrehliadkaConcepts::isConcept($rowDetails);
+        $conceptIncomplete = null;
+        if ($row['status'] === 'draft' && $isConcept) {
+            $conceptIncomplete = PrehliadkaConcepts::incompleteItems((string) $row['type'], $items);
+        }
+        // A draft with carried items: the same check holds its protocol back
+        // (CarryOver::checksCompleteness()), so the summary marks the items.
+        // Any other draft gets null — nothing is held back.
+        $incomplete = $conceptIncomplete;
+        if ($row['status'] === 'draft' && !$isConcept && CarryOver::checksCompleteness(['details' => $rowDetails] + $row)) {
+            $incomplete = PrehliadkaConcepts::incompleteItems((string) $row['type'], $items);
+        }
+
+        $shapedDetail = self::shapeDetail($row);
+        // A prehliadka says whether it was ever closed: a re-opened one is not a
+        // draft that may be discarded (see archive()).
+        if ($row['type'] === PrehliadkaDetails::TYPE) {
+            $shapedDetail['closed_before'] = self::prehliadkaClosedBefore($row);
+        }
+        // What „zahodiť" does to it: 'delete' (a never-issued draft, for good),
+        // 'archive' (an issued úkon) or null (refused — the screen offers nothing).
+        $shapedDetail['discard'] = UkonDiscard::decide((int) $row['account_id'], $row)['mode'];
+
         Response::json([
-            'inspection' => self::shapeRow($row),
+            'inspection' => $shapedDetail,
             'items' => $items,
             'follow_ups' => $followUps,
             'carry_over' => $carryOver,
+            'concept_incomplete' => $conceptIncomplete,
+            'incomplete_items' => $incomplete,
         ]);
     }
 
     /**
      * Create a pre-filled DRAFT of a follow-up control off the back of this
      * inspection (change request 2.1):
-     *   php      → oprava_ts_php   (prístroje with status "TS")
+     *   php      → oprava_ts_php   (prístroje with status "TS" or "O")
      *   php      → vyradenie       (prístroje with status "V")
      *   hydranty → ts_hadic        (hoses from the checked hydrants)
      * The draft is never finalized — the technician opens it later, enters the
@@ -345,11 +485,32 @@ final class InspectionController
             $itemsStmt->fetchAll(),
         );
 
-        $mapped = match ($targetType) {
-            'oprava_ts_php' => self::mapPhpToOprava($sourceItems),
-            'vyradenie'     => self::mapPhpToVyradenie($sourceItems),
-            default         => self::mapHydrantyToTsHadic($sourceItems),
-        };
+        // A tlaková skúška hadíc takes each hose's values and result from the last
+        // ts_hadic protocol here — the checklist's own matching, with its origin
+        // recorded the same way (fix list of 16. 11. 2026, decision 4).
+        $carriedDetails = null;
+        if ($targetType === 'ts_hadic') {
+            $build = PrehliadkaChecklist::tsHadicRows($accountId, (int) $source['facility_id'], $sourceItems);
+            $mapped = $build['rows'];
+            $carriedDetails = [
+                PrehliadkaChecklist::CARRIED_FROM_KEY      => $build['origin'],
+                PrehliadkaChecklist::CARRIED_POSITIONS_KEY => array_map(static fn (int $i): int => $i + 1, $build['carried']),
+            ];
+        } else {
+            $mapped = $targetType === 'oprava_ts_php'
+                ? self::mapPhpToOprava($sourceItems)
+                : self::mapPhpToVyradenie($sourceItems);
+            // Oprava and vyradenie take today's devices as they are; the origin is
+            // recorded as the checklist after a prehliadka records it, so the
+            // completeness check holds the protocol back while a value the source
+            // lacked is still empty (round 3 of the fix list of 16. 11. 2026).
+            if ($mapped !== []) {
+                $carriedDetails = [
+                    PrehliadkaChecklist::CARRIED_FROM_KEY      => PrehliadkaChecklist::originOf($accountId, $sourceId),
+                    PrehliadkaChecklist::CARRIED_POSITIONS_KEY => range(1, count($mapped)),
+                ];
+            }
+        }
 
         if ($mapped === []) {
             Response::error('Zdrojová kontrola neobsahuje položky pre nadväzujúci koncept.', 422);
@@ -371,6 +532,10 @@ final class InspectionController
             Response::json(['inspection_id' => (int) $existingId, 'created' => false], 200);
         }
 
+        // The follow-up is a new úkon signed by the same technician — refuse
+        // it now, as on creation, rather than when its protocol is issued.
+        self::assertCanInspect($accountId, (int) $source['inspector_user_id'], $targetType);
+
         // Follow-up drafts start from the target type's recommended period;
         // the technician revisits it in Step 1 like any other úkon.
         $recommended = Periodicity::RECOMMENDED_MONTHS[$targetType] ?? [];
@@ -384,7 +549,7 @@ final class InspectionController
                     (account_id, company_id, facility_id, source_inspection_id, type,
                      periodicity_value, periodicity_unit, executed_on, inspector_user_id,
                      status, notes, is_preventive_inspection, created_by_user_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", NULL, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", NULL, ?, ?)'
             )->execute([
                 $accountId,
                 $source['company_id'],
@@ -393,6 +558,9 @@ final class InspectionController
                 $targetType,
                 $fuValue,
                 $fuUnit,
+                // Prefilled with today and editable, as for Opakovať (project rule;
+                // POapp spec ch. 6) — „Generovať" is not held back by an empty date.
+                date('Y-m-d'),
                 $source['inspector_user_id'],
                 in_array($targetType, self::NON_CYCLIC_TYPES, true) ? 0 : 1,
                 Tenant::currentUserId(),
@@ -403,6 +571,10 @@ final class InspectionController
             // the firm, not from the source úkon.
             $pdo->prepare('UPDATE inspections SET billing_mode = ? WHERE id = ?')
                 ->execute([\Firol\Support\Invoicing::companyMode((int) $source['company_id']), $newId]);
+            if ($carriedDetails !== null) {
+                $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
+                    ->execute([InspectionDetails::encode($carriedDetails), $newId]);
+            }
 
             $ins = $pdo->prepare(
                 'INSERT INTO inspection_items (inspection_id, position, fields) VALUES (?, ?, ?)'
@@ -420,18 +592,18 @@ final class InspectionController
     }
 
     /**
-     * PHP items with status "TS" (na tlakovú skúšku) → Oprava/plnenie/TS PHP
-     * draft items. Carries identification only; the standard scope of work is
+     * PHP items with status "TS" (na tlakovú skúšku) or "O" (vyžaduje opravu,
+     * spec 7.3) → Oprava/plnenie/TS PHP draft items. Carries identification only; the standard scope of work is
      * fixed on that protocol and the note starts blank.
      *
      * @param list<array<string, mixed>> $items
      * @return list<array<string, mixed>>
      */
-    private static function mapPhpToOprava(array $items): array
+    public static function mapPhpToOprava(array $items): array
     {
         $out = [];
         foreach ($items as $f) {
-            if (($f['status'] ?? null) !== 'TS') {
+            if (!in_array($f['status'] ?? null, self::OPRAVA_FOLLOW_UP_STATUSES, true)) {
                 continue;
             }
             $out[] = [
@@ -455,7 +627,7 @@ final class InspectionController
      * @param list<array<string, mixed>> $items
      * @return list<array<string, mixed>>
      */
-    private static function mapPhpToVyradenie(array $items): array
+    public static function mapPhpToVyradenie(array $items): array
     {
         $out = [];
         foreach ($items as $f) {
@@ -478,13 +650,16 @@ final class InspectionController
     /**
      * Hydrant items → Tlaková skúška hadíc draft items. One hose row per hose
      * on the hydrant (hose_count), carrying the hydrant's type/DN as the hose
-     * type and the hydrant location. Measured pressures/length are left blank
-     * for the technician to fill when the test is actually performed.
+     * type and the hydrant location. Everything else — výrobca, pressures,
+     * length, year and the result — is blank here; the values of the last
+     * ts_hadic protocol are laid over it by
+     * {@see PrehliadkaChecklist::tsHadicRows()}, and a hose with no match there
+     * stays blank for manual entry, its result not presumed.
      *
      * @param list<array<string, mixed>> $items
      * @return list<array<string, mixed>>
      */
-    private static function mapHydrantyToTsHadic(array $items): array
+    public static function mapHydrantyToTsHadic(array $items): array
     {
         $out = [];
         foreach ($items as $f) {
@@ -506,7 +681,7 @@ final class InspectionController
                     'test_pressure'       => null,
                     'length'              => null,
                     'year_of_manufacture' => null,
-                    'result'              => 'vyhovuje',
+                    'result'              => '',
                     'notes'               => null,
                 ];
             }
@@ -534,6 +709,11 @@ final class InspectionController
         if ($type === null || !in_array($type, self::TYPES, true)) {
             Response::error('Neplatný typ kontroly.', 422);
         }
+        // A prehliadka is nothing without its setup: which records it yields
+        // decides whose oprávnenie signs it and which defects are offered.
+        if ($type === PrehliadkaDetails::TYPE && $details === null) {
+            Response::error('Chýba nastavenie prehliadky.', 422);
+        }
         // Inside a visit (chapter 9) the company, prevádzka and date were chosen
         // once, when the visit started. They are the visit's, not the request's:
         // overriding them is friendlier offline than rejecting a draft that
@@ -547,10 +727,18 @@ final class InspectionController
             $facilityId = $visit['facility_id'];
             $executedOn = $visit['visit_date'];
         }
+        // A požiarna kniha entry is nothing without its header (spec 3); an
+        // old-format entry can no longer be started.
+        if ($type === BookEntry::TYPE && $details === null) {
+            Response::error('Chýba nastavenie zápisu.', 422);
+        }
         // Any value in days/weeks/months, or none at all. The type only
         // decides what the app SUGGESTS (chapter 5) — it never limits what the
-        // technician may choose.
-        [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
+        // technician may choose. A book entry keeps its periodicity per
+        // prevádzka; the columns are derived from them (BookEntry::syncHeader).
+        [$periodicityValue, $periodicityUnit] = $type === BookEntry::TYPE
+            ? [null, null]
+            : self::readPeriodicity($req);
         if ($companyId === null || $facilityId === null) {
             Response::error('Vyber firmu aj prevádzku.', 422);
         }
@@ -604,9 +792,12 @@ final class InspectionController
         }
 
         // Block creation when the executing technician has no own cert AND
-        // no usable fallback. Admins are exempt (they manage other accounts'
-        // data without their own profile).
-        if (!$isAdmin) {
+        // no usable fallback. Admins included: the check is about who signs
+        // the protocol, not who creates the draft — and the close would refuse
+        // it anyway, only after the whole walk-through.
+        if ($type === PrehliadkaDetails::TYPE) {
+            self::assertCanDoPrehliadka($accountId, $inspectorUserId, (array) $details);
+        } else {
             self::assertCanInspect($accountId, $inspectorUserId, $type);
         }
 
@@ -622,6 +813,11 @@ final class InspectionController
             if ($visitCheck->fetchColumn() === false) {
                 Response::error('Návšteva sa nenašla.', 404);
             }
+        }
+
+        $bookRows = null;
+        if ($type === BookEntry::TYPE) {
+            [$bookRows, $details] = self::bookCreate($req, $accountId, $companyId, $facilityId, $visitId !== null, (array) $details);
         }
 
         $pdo = Db::pdo();
@@ -660,6 +856,12 @@ final class InspectionController
                 $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
                     ->execute([InspectionDetails::encode($details), $id]);
             }
+            // A book entry: one row per selected prevádzka, then the columns the
+            // term chain reads (spôsob, primary periodicity) follow from them.
+            if ($bookRows !== null) {
+                BookEntry::writeFacilities($pdo, $accountId, $id, $bookRows);
+                BookEntry::syncHeader($pdo, $id);
+            }
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
@@ -667,7 +869,7 @@ final class InspectionController
         }
 
         Response::json([
-            'inspection' => self::shapeRow(self::loadOrFail($accountId, $id)),
+            'inspection' => self::shapeDetail(self::loadOrFail($accountId, $id)),
             'items' => [],
             // Chapter 12 — offer to carry the devices over from last time
             // instead of typing them again.
@@ -703,13 +905,29 @@ final class InspectionController
             $executedOn = null;
         }
 
+        $body = $req->json();
+
+        // A new-format požiarna kniha entry: its prevádzky, then its header,
+        // then (below) the date. An old entry has neither.
+        $storedDetails = InspectionDetails::decode($row['details'] ?? null);
+        $isNewBook = $row['type'] === BookEntry::TYPE && BookEntry::isNew($storedDetails);
+        if (array_key_exists('facilities', $body) && !$isNewBook) {
+            Response::error('Tento úkon má jednu prevádzku.', 422);
+        }
+        if ($row['type'] === BookEntry::TYPE && !$isNewBook && ($body['details'] ?? null) !== null) {
+            Response::error('Tento typ úkonu nemá údaje v hlavičke.', 422);
+        }
+        if ($isNewBook) {
+            self::bookUpdate($req, $row, $scopeAccountId, (array) $storedDetails);
+        }
+
         // Periodicity is edited as a whole: "bez opakovania" has to be
         // expressible, and a COALESCE over two columns cannot tell "leave it
         // alone" from "clear it". Sending either key means the technician
-        // touched the field.
-        $body = $req->json();
-        $touchesPeriodicity = array_key_exists('periodicity_value', $body)
-            || array_key_exists('periodicity_unit', $body);
+        // touched the field. A book entry keeps it per prevádzka — the
+        // top-level pair is ignored, so a replayed request does not fail.
+        $touchesPeriodicity = !$isNewBook && (array_key_exists('periodicity_value', $body)
+            || array_key_exists('periodicity_unit', $body));
         if ($touchesPeriodicity) {
             [$periodicityValue, $periodicityUnit] = self::readPeriodicity($req);
             Db::pdo()->prepare(
@@ -735,17 +953,66 @@ final class InspectionController
              WHERE  id = ? AND account_id = ?'
         )->execute([$executedOn, $notes, $id, $scopeAccountId]);
 
-        // Header data replaces the whole object — a cleared field has to be
-        // expressible, so there is no field-by-field COALESCE here.
-        if (array_key_exists('details', $body)) {
+        // A new prehliadka (or book entry) date moves every computed defect
+        // deadline with it.
+        if ($executedOn !== null && ($row['type'] === PrehliadkaDetails::TYPE || $isNewBook)) {
+            PrehliadkaDefects::recomputeDeadlines($id, $executedOn);
+        }
+
+        // Header data replaces every field the client owns — a cleared field has
+        // to be expressible, so there is no field-by-field COALESCE here. The
+        // keys the server wrote (the origin of carried items, the concept marks,
+        // the frozen issue copies) stay: InspectionDetails::mergeOver().
+        if (array_key_exists('details', $body) && !$isNewBook) {
             $details = self::readDetails($req, (string) $row['type']);
-            Db::pdo()->prepare(
-                'UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?'
-            )->execute([InspectionDetails::encode($details), $id, $scopeAccountId]);
+            // Switching on PO or BOZP scope asks for that oprávnenie now, as
+            // on creation — not only when the prehliadka is closed.
+            if ($row['type'] === PrehliadkaDetails::TYPE && is_array($details)) {
+                self::assertCanDoPrehliadka(
+                    $scopeAccountId,
+                    (int) $row['inspector_user_id'],
+                    $details,
+                    InspectionDetails::decode($row['details'] ?? null) ?? [],
+                );
+            }
+            if ($row['type'] === PrehliadkaDetails::TYPE && is_array($details) && !empty($details['previous'])) {
+                // A book entry written for several prevádzky is a valid source
+                // at each of them.
+                $validSourceIds = Db::pdo()->prepare(
+                    'SELECT s.id FROM inspections s WHERE s.account_id = ? AND ' . InspectionCoverage::covers('s', '?') . ' AND s.archived_at IS NULL'
+                );
+                $validSourceIds->execute([$scopeAccountId, (int) $row['facility_id'], (int) $row['facility_id']]);
+                $allowed = array_fill_keys($validSourceIds->fetchAll(\PDO::FETCH_COLUMN), true);
+                $details['previous'] = array_values(array_filter(
+                    $details['previous'],
+                    static fn (array $p): bool => isset($allowed[(int) ($p['source_inspection_id'] ?? 0)]),
+                ));
+            }
+            // The stored header is read again under the row's lock and written in
+            // the same transaction (round 7): a confirm-concept or another
+            // server write that landed since the request read the row is kept,
+            // not overwritten by the copy read at the start.
+            $pdo = Db::pdo();
+            $pdo->beginTransaction();
+            try {
+                $lock = $pdo->prepare('SELECT details FROM inspections WHERE id = ? AND account_id = ? FOR UPDATE');
+                $lock->execute([$id, $scopeAccountId]);
+                $current = InspectionDetails::decode($lock->fetchColumn() ?: null);
+                $details = $details === null
+                    ? InspectionDetails::serverOwned((string) $row['type'], $current)
+                    : InspectionDetails::mergeOver($current, $details);
+                $pdo->prepare(
+                    'UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?'
+                )->execute([InspectionDetails::encode($details), $id, $scopeAccountId]);
+                $pdo->commit();
+            } catch (\Throwable $e) {
+                $pdo->rollBack();
+                throw $e;
+            }
         }
 
         $fresh = self::loadOrFail($scopeAccountId, $id);
-        Response::json(['inspection' => self::shapeRow($fresh)]);
+        Response::json(['inspection' => self::shapeDetail($fresh)]);
     }
 
     public static function archive(Request $req, array $params): void
@@ -759,11 +1026,54 @@ final class InspectionController
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
         MemberRights::requireDeleteUkon($existing, (int) $existing['inspector_user_id']);
 
+        // Owner decision of 17. 11. 2026: an issued úkon is archived (hidden,
+        // nothing removed); a draft that was never issued and that nothing was
+        // made from is deleted for good; any other draft is refused
+        // (UkonDiscard).
+        $decision = UkonDiscard::decide($scopeAccountId, $existing);
+        if ($decision['mode'] === null) {
+            Response::error((string) $decision['reason'], 409);
+        }
+        // The client asked for a permanent delete (`?expect=delete`, round 5):
+        // the screen offered „Natrvalo zmazať" for a draft that someone has
+        // issued since. Archiving it instead would hide a protocol the user
+        // never asked to archive. A client without the parameter keeps the
+        // behaviour it always had.
+        if ($req->query('expect') === UkonDiscard::DELETE && $decision['mode'] !== UkonDiscard::DELETE) {
+            Response::error('Protokol bol medzitým vystavený, zahodiť ho nemožno.', 409);
+        }
+        if ($decision['mode'] === UkonDiscard::DELETE) {
+            try {
+                UkonDiscard::delete($scopeAccountId, $existing);
+            } catch (UkonDiscardRefused $e) {
+                // Issued, reopened, followed up or archived between the check
+                // and the lock: the reason decided under the lock. A database
+                // error is not caught here and answers 500.
+                Response::error($e->reason(), 409);
+            }
+            // The mode actually applied, so the client's toast never trusts a
+            // cached `discard`.
+            Response::json(['mode' => UkonDiscard::DELETE]);
+        }
+
         Db::pdo()->prepare(
             'UPDATE inspections SET archived_at = NOW() WHERE id = ? AND account_id = ?'
         )->execute([$id, $scopeAccountId]);
 
-        Response::noContent();
+        Response::json(['mode' => UkonDiscard::ARCHIVE]);
+    }
+
+    /**
+     * Whether a prehliadka was ever closed. „Upraviť" turns it back into a draft
+     * and deletes its own documents, so the status alone cannot tell; what stays
+     * is the audit trail of its closing and of the unlock, and anything that was
+     * issued from it (the kniha BOZP record, concepts — archived ones included).
+     *
+     * @param array<string, mixed> $row loadOrFail() row of a prehliadka
+     */
+    private static function prehliadkaClosedBefore(array $row): bool
+    {
+        return UkonDiscard::prehliadkaClosedBefore($row);
     }
 
     /**
@@ -779,6 +1089,12 @@ final class InspectionController
      * the next one from the sequence and leaves a gap. That is deliberate: a
      * copy of the old protocol may already sit in the customer's inbox, and two
      * different documents sharing one number is far worse than a gap.
+     *
+     * A požiarna kniha entry is the exception (customer's answer 3 of
+     * 18. 11. 2026, „opravený zápis si ponechá pôvodné číslo"): its number is
+     * kept on the entry (`inspections.book_number`, which this method leaves
+     * alone), and the next issue is the same number as a new version
+     * ({@see \Firol\Documents\BookNumber}).
      *
      * Opakovať stays the right tool for re-issuing the same control on a new
      * date; unlock is for fixing a protocol that was issued wrong.
@@ -803,40 +1119,77 @@ final class InspectionController
         MemberRights::requireDelete($accountId);
 
         $pdo = Db::pdo();
+
+        // The kniha BOZP record of a prehliadka (phase 8a) is issued with it and
+        // opened with it — on its own it would drift from the walk-through.
+        if ($row['type'] === 'kniha_bozp' && $row['source_inspection_id'] !== null) {
+            $srcType = $pdo->prepare('SELECT type FROM inspections WHERE id = ? AND account_id = ?');
+            $srcType->execute([(int) $row['source_inspection_id'], $accountId]);
+            if ($srcType->fetchColumn() === PrehliadkaDetails::TYPE) {
+                Response::error(
+                    'Tento zápis vznikol z preventívnej prehliadky — otvor prehliadku a použi „Upraviť".',
+                    422,
+                );
+            }
+        }
+
+        // Unlocking a prehliadka discards everything it issued: its own PP
+        // record and the BOZP record that grew out of it.
+        $ids = [$id];
+        if ($row['type'] === PrehliadkaDetails::TYPE) {
+            $kids = $pdo->prepare(
+                'SELECT id FROM inspections
+                 WHERE  account_id = ? AND source_inspection_id = ? AND type = "kniha_bozp" AND archived_at IS NULL'
+            );
+            $kids->execute([$accountId, $id]);
+            foreach ($kids->fetchAll(\PDO::FETCH_COLUMN) as $kid) {
+                $ids[] = (int) $kid;
+            }
+        }
+        $in = implode(',', array_fill(0, count($ids), '?'));
+
         $docsStmt = $pdo->prepare(
-            'SELECT number, file_path FROM documents
-             WHERE  account_id = ? AND parent_type = "inspection" AND parent_id = ?'
+            "SELECT number, file_path FROM documents
+             WHERE  account_id = ? AND parent_type = 'inspection' AND parent_id IN ($in)"
         );
-        $docsStmt->execute([$accountId, $id]);
+        $docsStmt->execute([$accountId, ...$ids]);
         $docs = $docsStmt->fetchAll();
 
         // A protocol signed on the screen was re-rendered into further
         // versions (chapter 13); every one of those files has to go too, or
         // the discarded protocol stays readable under its old version path.
         $versionsStmt = $pdo->prepare(
-            'SELECT v.file_path FROM document_versions v
+            "SELECT v.file_path FROM document_versions v
              JOIN   documents d ON d.id = v.document_id
-             WHERE  d.account_id = ? AND d.parent_type = "inspection" AND d.parent_id = ?'
+             WHERE  d.account_id = ? AND d.parent_type = 'inspection' AND d.parent_id IN ($in)"
         );
-        $versionsStmt->execute([$accountId, $id]);
+        $versionsStmt->execute([$accountId, ...$ids]);
         $versionFiles = $versionsStmt->fetchAll(\PDO::FETCH_COLUMN);
 
         $pdo->beginTransaction();
         try {
             $pdo->prepare(
-                'DELETE FROM documents
-                 WHERE  account_id = ? AND parent_type = "inspection" AND parent_id = ?'
-            )->execute([$accountId, $id]);
+                "DELETE FROM documents
+                 WHERE  account_id = ? AND parent_type = 'inspection' AND parent_id IN ($in)"
+            )->execute([$accountId, ...$ids]);
 
             $pdo->prepare(
-                'UPDATE inspections
-                 SET    status = "draft",
+                "UPDATE inspections
+                 SET    status = 'draft',
+                        issued_before               = 1,
                         protocol_deferred_at        = NULL,
                         effective_inspector_user_id = NULL,
                         effective_cert_number       = NULL,
                         effective_cert_valid_from   = NULL,
                         effective_cert_valid_to     = NULL
-                 WHERE  id = ? AND account_id = ?'
+                 WHERE  id IN ($in) AND account_id = ?"
+            )->execute([...$ids, $accountId]);
+
+            // A book entry forgets what it printed; the next issue composes afresh.
+            $pdo->prepare(
+                "UPDATE inspections SET details = JSON_REMOVE(details, '$.issued')
+                 WHERE  id = ? AND account_id = ? AND " . BookEntry::isNewSql('inspections') . "
+                   AND  JSON_EXISTS(details, '$.issued')"
             )->execute([$id, $accountId]);
 
             $pdo->commit();
@@ -867,7 +1220,7 @@ final class InspectionController
             ['status' => 'draft'],
         );
 
-        Response::json(['inspection' => self::shapeRow(self::loadOrFail($accountId, $id))]);
+        Response::json(['inspection' => self::shapeDetail(self::loadOrFail($accountId, $id))]);
     }
 
     /**
@@ -892,12 +1245,12 @@ final class InspectionController
      * "Opakovať" — start this year's inspection from last year's, block 1 /
      * chapter 12.
      *
-     * The devices come across; the verdict on them does not. Stav, výsledok,
-     * poznámka, photos and nedostatky all start empty, and a device disposed
-     * of last time is left behind entirely (the response says how many, so the
-     * technician can see it was a decision). Each carried item remembers what
-     * it scored last time in `previous_status`, shown beside it while entering
-     * results but printed on nothing.
+     * The devices come across as {@see CarryOver} maps them: a FULL type (fire
+     * types, BOZP item checks) with its values and result (the draft records
+     * where they came from, `carried_from` / `carried_positions`, shown on its
+     * summary), any other type with its identification only. Photos never travel, and a device disposed of last
+     * time is left behind entirely (the response says how many, so the
+     * technician can see it was a decision).
      *
      * The source inspection and its protocol are untouched.
      */
@@ -916,17 +1269,37 @@ final class InspectionController
         if ($source['status'] !== 'finalized') {
             Response::error('Opakovať možno len ukončenú kontrolu (s vystaveným PDF).', 422);
         }
+        // A prehliadka is started afresh; its setup is offered as „Ako naposledy".
+        if ($source['type'] === PrehliadkaDetails::TYPE) {
+            Response::error('Preventívnu prehliadku nemožno opakovať — začni novú, nastavenie sa predvyplní.', 422);
+        }
+
+        // A požiarna kniha entry — old or new — repeats as a new-format draft:
+        // the same prevádzky, spôsob back to its default, periodicities from
+        // each prevádzka's last term, nothing ticked (BookEntry::repeat).
+        if ($source['type'] === BookEntry::TYPE) {
+            self::assertCanInspect($accountId, (int) $source['inspector_user_id'], BookEntry::TYPE);
+            try {
+                $newId = BookEntry::repeat($accountId, $source, Tenant::currentUserId());
+            } catch (\InvalidArgumentException $e) {
+                Response::error($e->getMessage(), 422);
+            }
+            Response::json([
+                'inspection'       => self::shapeDetail(self::loadOrFail($accountId, $newId)),
+                'items'            => [],
+                'source_id'        => $sourceId,
+                'disposed_skipped' => 0,
+            ], 201);
+        }
 
         // Same cert guard as fresh creation — if the original inspector
         // lost their cert and no fallback is set, refuse to clone now
-        // rather than at PDF time.
-        if (!$isAdmin) {
-            self::assertCanInspect(
-                $accountId,
-                (int) $source['inspector_user_id'],
-                (string) $source['type'],
-            );
-        }
+        // rather than at PDF time. Admins included, as on creation.
+        self::assertCanInspect(
+            $accountId,
+            (int) $source['inspector_user_id'],
+            (string) $source['type'],
+        );
 
         $type = (string) $source['type'];
         $sourceItems = self::loadItemFields($sourceId);
@@ -935,9 +1308,10 @@ final class InspectionController
         $pdo = Db::pdo();
         $pdo->beginTransaction();
         try {
-            // executed_on is intentionally NULL — Step 3 forces the
-            // technician to enter a fresh date before generating PDF.
-            // The periodicity travels: it was the technician's decision for
+            // The date is prefilled with today and stays editable on the
+            // summary (CLAUDE.md, user decision 23. 9. 2026 — as for a new
+            // úkon and a repeated book entry); the protocol carries whatever
+            // date is saved there. The periodicity travels: it was the technician's decision for
             // this prevádzka and there is no reason to make them repeat it.
             $pdo->prepare(
                 'INSERT INTO inspections
@@ -945,7 +1319,7 @@ final class InspectionController
                      periodicity_value, periodicity_unit, periodicity_is_custom,
                      is_preventive_inspection, executed_on, inspector_user_id,
                      status, notes, carried_over_from_id, created_by_user_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, "draft", ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?)'
             )->execute([
                 $accountId,
                 $source['company_id'],
@@ -955,6 +1329,7 @@ final class InspectionController
                 $source['periodicity_unit'],
                 !empty($source['periodicity_is_custom']) ? 1 : 0,
                 !empty($source['is_preventive_inspection']) ? 1 : 0,
+                date('Y-m-d'),
                 $source['inspector_user_id'],
                 $source['notes'],
                 $sourceId,
@@ -970,7 +1345,8 @@ final class InspectionController
             // The header travels in the same spirit as the items: what
             // identifies (the device, the kind of oboznámenie) comes along,
             // what was observed last time does not.
-            $carriedDetails = InspectionDetails::carry($type, InspectionDetails::decode($source['details'] ?? null));
+            $carriedDetails = InspectionDetails::carry($type, InspectionDetails::decode($source['details'] ?? null))
+                ?? self::carriedOrigin($accountId, $type, $sourceId, count($carried['items']));
             if ($carriedDetails !== null) {
                 $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ?')
                     ->execute([InspectionDetails::encode($carriedDetails), $newId]);
@@ -994,7 +1370,7 @@ final class InspectionController
         }
 
         Response::json([
-            'inspection' => self::shapeRow(self::loadOrFail($accountId, $newId)),
+            'inspection' => self::shapeDetail(self::loadOrFail($accountId, $newId)),
             'items' => self::loadItemsForResponse($newId),
             'source_id' => $sourceId,
             'disposed_skipped' => $carried['disposed'],
@@ -1032,12 +1408,23 @@ final class InspectionController
 
         $sourceId = $req->jsonInt('source_id')
             ?? self::lastFinalizedId($accountId, (int) $row['facility_id'], $type, $id);
+        // A bytové družstvo reads „bytový dom" (round 7).
+        $bdCarry = ClientKind::isBytovyDom((string) ($row['company_client_type'] ?? ''));
         if ($sourceId === null) {
-            Response::error('Pre túto prevádzku a typ kontroly zatiaľ nie je z čoho prevziať položky.', 404);
+            Response::error($bdCarry
+                ? 'Pre tento bytový dom a typ kontroly zatiaľ nie je z čoho prevziať položky.'
+                : 'Pre túto prevádzku a typ kontroly zatiaľ nie je z čoho prevziať položky.', 404);
         }
         $source = self::loadOrFail($accountId, $sourceId);
         if ((string) $source['type'] !== $type || (int) $source['facility_id'] !== (int) $row['facility_id']) {
-            Response::error('Prevziať položky možno len z kontroly rovnakého typu na tej istej prevádzke.', 422);
+            Response::error($bdCarry
+                ? 'Prevziať položky možno len z kontroly rovnakého typu v tom istom bytovom dome.'
+                : 'Prevziať položky možno len z kontroly rovnakého typu na tej istej prevádzke.', 422);
+        }
+        // Values and results travel with the item (CarryOver::FULL): only an
+        // issued protocol is a source, never another draft.
+        if ((string) $source['status'] !== 'finalized') {
+            Response::error('Prevziať položky možno len z ukončenej kontroly (s vystaveným PDF).', 422);
         }
 
         $carried = self::carryItems($type, self::loadItemFields($sourceId));
@@ -1057,18 +1444,53 @@ final class InspectionController
             $pdo->prepare(
                 'UPDATE inspections SET carried_over_from_id = ? WHERE id = ? AND account_id = ?'
             )->execute([$sourceId, $id, $accountId]);
+            $origin = self::carriedOrigin($accountId, $type, $sourceId, count($carried['items']));
+            if ($origin !== null) {
+                $details = array_merge(InspectionDetails::decode($row['details'] ?? null) ?? [], $origin);
+                $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?')
+                    ->execute([InspectionDetails::encode($details), $id, $accountId]);
+            }
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
             throw $e;
         }
 
+        // The summary marks the carried items that lack a required value at once,
+        // with the same rule as show() — not only after a reload.
+        $fresh = self::loadOrFail($accountId, $id);
+        $incomplete = CarryOver::checksCompleteness($fresh)
+            ? PrehliadkaConcepts::incompleteItems($type, DocumentController::loadItems($id))
+            : null;
+
         Response::json([
-            'inspection' => self::shapeRow(self::loadOrFail($accountId, $id)),
+            'inspection' => self::shapeRow($fresh),
             'items' => self::loadItemsForResponse($id),
             'source_id' => $sourceId,
             'disposed_skipped' => $carried['disposed'],
+            'incomplete_items' => $incomplete,
         ]);
+    }
+
+    /**
+     * Where the values of a draft of a FULL type (the fire types and, since
+     * 18. 11. 2026, the BOZP item checks) came from, in the shape the
+     * checklist after a prehliadka records it ({@see PrehliadkaChecklist}), so
+     * the summary says „prevzaté z protokolu č. … zo dňa …" (fix list of
+     * 16. 11. 2026, decision 5). Null for a type that carries identification
+     * only, or when nothing was carried.
+     *
+     * @return array<string, mixed>|null
+     */
+    private static function carriedOrigin(int $accountId, string $type, int $sourceId, int $count): ?array
+    {
+        if (!CarryOver::carriesValues($type) || $count === 0) {
+            return null;
+        }
+        return [
+            PrehliadkaChecklist::CARRIED_FROM_KEY      => PrehliadkaChecklist::originOf($accountId, $sourceId),
+            PrehliadkaChecklist::CARRIED_POSITIONS_KEY => range(1, $count),
+        ];
     }
 
     /**
@@ -1139,16 +1561,7 @@ final class InspectionController
         string $type,
         int $exceptId,
     ): ?int {
-        $stmt = Db::pdo()->prepare(
-            'SELECT id FROM inspections
-             WHERE  account_id = ? AND facility_id = ? AND type = ?
-                AND status = "finalized" AND archived_at IS NULL AND id <> ?
-             ORDER  BY COALESCE(executed_on, "1000-01-01") DESC, id DESC
-             LIMIT  1'
-        );
-        $stmt->execute([$accountId, $facilityId, $type, $exceptId]);
-        $id = $stmt->fetchColumn();
-        return $id === false ? null : (int) $id;
+        return CarryOver::latestSourceId($accountId, $facilityId, $type, $exceptId);
     }
 
     /**
@@ -1217,6 +1630,154 @@ final class InspectionController
     }
 
     /**
+     * The prevádzky and the completed header of a new book entry. Inside a
+     * visit the visit's prevádzka is always one of them (added without a
+     * periodicity when the request left it out); otherwise the request's
+     * `facility_id` — the primary prevádzka — must be among them.
+     *
+     * @param array<string, mixed> $details from BookEntry::validateShape()
+     * @return array{0: list<array{facility_id: int, periodicity_value: ?int, periodicity_unit: ?string}>, 1: array<string, mixed>}
+     */
+    private static function bookCreate(Request $req, int $accountId, int $companyId, int $facilityId, bool $inVisit, array $details): array
+    {
+        $body = $req->json();
+        try {
+            $rows = BookEntry::readFacilities($body['facilities'] ?? null, (string) self::clientType($companyId));
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422);
+        }
+        $ids = array_map(static fn (array $r): int => $r['facility_id'], $rows);
+        // A bytové družstvo reads „bytový dom" (round 7).
+        $bd = ClientKind::isBytovyDom((string) self::clientType($companyId));
+        if (!in_array($facilityId, $ids, true)) {
+            if (!$inVisit) {
+                Response::error($bd ? 'Bytový dom zápisu musí byť medzi vybranými.' : 'Prevádzka zápisu musí byť medzi vybranými.', 422);
+            }
+            $rows[] = ['facility_id' => $facilityId, 'periodicity_value' => null, 'periodicity_unit' => null];
+            $ids[] = $facilityId;
+        }
+        if (BookEntry::facilityNames($accountId, $companyId, $ids) === null) {
+            Response::error($bd ? 'Bytové družstvo alebo bytový dom sa nenašli.' : 'Firma alebo prevádzka sa nenašla.', 404);
+        }
+        try {
+            $details = BookEntry::applyContext($details, [
+                'account_id'   => $accountId,
+                'company_id'   => $companyId,
+                'client_type'  => self::clientType($companyId),
+                'facility_ids' => $ids,
+                'stored'       => null,
+                'creating'     => true,
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422);
+        }
+        return [$rows, $details];
+    }
+
+    /**
+     * PATCH of a new book entry: `facilities` (the whole set) and `details`
+     * (the whole header), both checked before anything is written, then
+     * written together with the derived columns (BookEntry::syncHeader).
+     *
+     * @param array<string, mixed> $row loadOrFail() row
+     * @param array<string, mixed> $stored the stored header
+     */
+    private static function bookUpdate(Request $req, array $row, int $accountId, array $stored): void
+    {
+        $body = $req->json();
+        $id = (int) $row['id'];
+        $companyId = (int) $row['company_id'];
+        $current = BookEntry::facilityRows($id);
+        $currentIds = array_map(static fn (array $r): int => $r['facility_id'], $current);
+
+        $rows = null;
+        $ids = $currentIds;
+        // A bytové družstvo reads „bytový dom" (round 7).
+        $bd = ClientKind::isBytovyDom((string) ($row['company_client_type'] ?? ''));
+        if (array_key_exists('facilities', $body)) {
+            try {
+                $rows = BookEntry::readFacilities($body['facilities'], (string) ($row['company_client_type'] ?? ''));
+            } catch (\InvalidArgumentException $e) {
+                Response::error($e->getMessage(), 422);
+            }
+            $ids = array_map(static fn (array $r): int => $r['facility_id'], $rows);
+            if (BookEntry::facilityNames($accountId, $companyId, $ids) === null) {
+                Response::error($bd ? 'Bytové družstvo alebo bytový dom sa nenašli.' : 'Firma alebo prevádzka sa nenašla.', 404);
+            }
+            if ($row['visit_id'] !== null) {
+                $visit = Db::pdo()->prepare('SELECT facility_id FROM visits WHERE id = ? AND account_id = ?');
+                $visit->execute([(int) $row['visit_id'], $accountId]);
+                $visitFacility = $visit->fetchColumn();
+                if ($visitFacility !== false && !in_array((int) $visitFacility, $ids, true)) {
+                    Response::error($bd ? 'Bytový dom návštevy musí zostať vybraný.' : 'Prevádzka návštevy musí zostať vybraná.', 422);
+                }
+            }
+            // A defect belongs to one prevádzka; that prevádzka cannot leave the
+            // entry while the defect is there.
+            $withDefects = Db::pdo()->prepare(
+                "SELECT 1 FROM inspection_items WHERE inspection_id = ? AND JSON_VALUE(fields, '$.facility_id') = ? LIMIT 1"
+            );
+            foreach ($current as $r) {
+                if (in_array($r['facility_id'], $ids, true)) {
+                    continue;
+                }
+                $withDefects->execute([$id, $r['facility_id']]);
+                if ($withDefects->fetchColumn() !== false) {
+                    Response::error(($bd ? 'Z bytového domu ' : 'Z prevádzky ') . $r['name'] . ' sú zapísané nedostatky — najprv ich zmaž.', 409);
+                }
+            }
+        }
+
+        $details = null;
+        if (($body['details'] ?? null) !== null) {
+            $details = self::readDetails($req, BookEntry::TYPE);
+            try {
+                $details = BookEntry::applyContext((array) $details, [
+                    'account_id'   => $accountId,
+                    'company_id'   => $companyId,
+                    'client_type'  => self::clientType($companyId),
+                    'facility_ids' => $ids,
+                    'stored'       => $stored,
+                    'creating'     => false,
+                ]);
+            } catch (\InvalidArgumentException $e) {
+                Response::error($e->getMessage(), 422);
+            }
+            // The keys the server wrote (issued_contractor, …) stay, as in updateBasic().
+            $details = InspectionDetails::mergeOver($stored, $details);
+        } elseif ($rows !== null) {
+            // Records of a prevádzka that left the entry are no longer attached.
+            $details = $stored;
+            $details['zaznamy'] = BookEntry::filterRecords((array) ($stored['zaznamy'] ?? []), $accountId, $companyId, $ids);
+        }
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            if ($rows !== null) {
+                BookEntry::writeFacilities($pdo, $accountId, $id, $rows);
+            }
+            if ($details !== null) {
+                $pdo->prepare('UPDATE inspections SET details = ? WHERE id = ? AND account_id = ?')
+                    ->execute([InspectionDetails::encode($details), $id, $accountId]);
+            }
+            BookEntry::syncHeader($pdo, $id);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    private static function clientType(int $companyId): ?string
+    {
+        $stmt = Db::pdo()->prepare('SELECT client_type FROM companies WHERE id = ?');
+        $stmt->execute([$companyId]);
+        $type = $stmt->fetchColumn();
+        return is_string($type) ? $type : null;
+    }
+
+    /**
      * Read and validate the periodicity pair off the request body, turning a
      * bad pair into a 422 with a Slovak message.
      *
@@ -1236,84 +1797,42 @@ final class InspectionController
     }
 
     /**
-     * Refuse to create an inspection the executor can't legitimately
-     * sign. Technik PO types (everything except php and oprava_ts_php)
-     * require the executor's own cert_general — no borrowing. For PHP /
-     * Oprava the executor may borrow the account-default technician's
-     * cert; only when neither own nor default cert is available do we
-     * block. Errors carry a `code` so the UI can show a useful hint.
+     * Refuse a prehliadka whose scope the technician cannot sign — the rules
+     * live in CertGuard. `$onlyAdded` limits the check to scope switched on
+     * by this request, so a draft that predates a lost number stays editable
+     * (the close refuses it, as before).
+     *
+     * @param array<string, mixed> $details validated PrehliadkaDetails
+     * @param array<string, mixed>|null $before details as stored, for an edit
+     */
+    private static function assertCanDoPrehliadka(
+        int $accountId,
+        int $inspectorUserId,
+        array $details,
+        ?array $before = null,
+    ): void {
+        $scope = (array) ($details['scope'] ?? []);
+        $was = (array) ($before['scope'] ?? []);
+        $po = ($scope['po'] ?? false) === true && ($was['po'] ?? false) !== true;
+        $bozp = ($scope['bozp'] ?? false) === true && ($was['bozp'] ?? false) !== true;
+        self::refuseMissing(CertGuard::missingForPrehliadka($accountId, $inspectorUserId, $po, $bozp));
+    }
+
+    /**
+     * Refuse to create an inspection the executor can't legitimately sign —
+     * the rules live in CertGuard. The refusal carries `code` / `cert` so the
+     * UI can open the right field.
      */
     private static function assertCanInspect(int $accountId, int $inspectorUserId, string $type): void
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT cert_php, cert_oprava, cert_general, cert_bt
-             FROM   inspector_profiles
-             WHERE  user_id = ? AND account_id = ?'
-        );
-        $stmt->execute([$inspectorUserId, $accountId]);
-        $own = $stmt->fetch()
-            ?: ['cert_php' => null, 'cert_oprava' => null, 'cert_general' => null, 'cert_bt' => null];
+        self::refuseMissing(CertGuard::missingForType($accountId, $inspectorUserId, $type));
+    }
 
-        $has = static fn($v) => is_string($v) && trim($v) !== '';
-
-        // Oboznámenie BOZP is signed under the account's own oprávnenie na
-        // výchovu a vzdelávanie (`vv`, chapter 5.3) — a company certificate,
-        // not a personal one — so nothing on the technician's profile is
-        // required to create it. Its presence is checked when the protocol is
-        // issued (DocumentController).
-        if ($type === 'skolenie_bozp') {
-            return;
-        }
-
-        // Every other BOZP úkon is signed as a bezpečnostný technik, not as a
-        // technik PO — chapter 26, „číslo oprávnenia na protokole MUSÍ
-        // zodpovedať typu úkonu". There is no
-        // borrowing here: the oprávnenie is personal, and the protocol says
-        // who did the work.
-        if (\Firol\Support\Sections::forInspectionType($type) === \Firol\Support\Sections::BOZP) {
-            if (!$has($own['cert_bt'] ?? null)) {
-                Response::error(
-                    'Tento úkon BOZP vyžaduje číslo oprávnenia bezpečnostného technika. Doplň ho v Profile technika.',
-                    422,
-                    ['code' => 'cert_missing', 'cert' => 'cert_bt'],
-                );
-            }
-            return;
-        }
-
-        if ($type === 'php' || $type === 'oprava_ts_php') {
-            $certKey = $type === 'php' ? 'cert_php' : 'cert_oprava';
-            $defaultCol = $type === 'php' ? 'default_php_user_id' : 'default_oprava_user_id';
-            if ($has($own[$certKey] ?? null)) {
-                return;
-            }
-            $defaultStmt = Db::pdo()->prepare(
-                'SELECT ip.' . $certKey . '
-                 FROM   accounts a
-                 LEFT JOIN inspector_profiles ip
-                        ON ip.user_id = a.' . $defaultCol . ' AND ip.account_id = a.id
-                 WHERE  a.id = ?'
-            );
-            $defaultStmt->execute([$accountId]);
-            $defaultCert = $defaultStmt->fetchColumn();
-            if ($has($defaultCert)) {
-                return;
-            }
-            $label = $type === 'php' ? 'Kontrola PHP' : 'Oprava / plnenie / TS PHP';
-            Response::error(
-                'Pre ' . $label . ' potrebuješ vlastné číslo oprávnenia, alebo nech správca účtu nastaví predvoleného technika so zadaným číslom.',
-                422,
-                ['code' => 'cert_missing', 'cert' => $certKey],
-            );
-        }
-
-        // All other types print cert_general (Technik PO). No fallback.
-        if (!$has($own['cert_general'] ?? null)) {
-            Response::error(
-                'Tento typ kontroly vyžaduje platné číslo oprávnenia Technik PO. Doplň ho v Profile revízneho technika.',
-                422,
-                ['code' => 'cert_missing', 'cert' => 'cert_general'],
-            );
+    /** @param array{error: string, cert: string}|null $missing */
+    private static function refuseMissing(?array $missing): void
+    {
+        if ($missing !== null) {
+            Response::error($missing['error'], 422, ['code' => 'cert_missing', 'cert' => $missing['cert']]);
         }
     }
 
@@ -1324,9 +1843,10 @@ final class InspectionController
                        i.periodicity_value, i.periodicity_unit, i.periodicity_is_custom,
                        i.is_preventive_inspection, i.source_inspection_id,
                        i.carried_over_from_id, i.visit_id,
-                       i.executed_on, i.status, i.notes, i.details,
+                       i.executed_on, i.status, i.issued_before, i.notes, i.details,
                        i.created_at, i.updated_at,
                        i.company_id, c.name AS company_name, c.ico AS company_ico,
+                       c.client_type AS company_client_type,
                        i.facility_id, f.name AS facility_name,
                        i.inspector_user_id, u.fullname AS inspector_name,
                        i.created_by_user_id,
@@ -1334,7 +1854,7 @@ final class InspectionController
                        eu.fullname AS effective_inspector_name,
                        i.effective_cert_number,
                        i.billing_mode, i.invoiced, i.invoiced_at, i.billing_note,
-                       ' . self::SUPERSEDED_EXPR . '
+                       ' . self::supersededExpr() . '
                 FROM   inspections i
                 JOIN   companies   c ON c.id = i.company_id
                 JOIN   facilities  f ON f.id = i.facility_id
@@ -1392,6 +1912,20 @@ final class InspectionController
         $row['source_inspection_id'] = isset($row['source_inspection_id'])
             ? (int) $row['source_inspection_id']
             : null;
+        // Plan 8b — the scope chip of a prehliadka and the state of a concept. The
+        // list selects them without the whole header; the detail endpoint derives
+        // them from the header it returns anyway.
+        $rawScope = $row['scope_details'] ?? ($row['details'] ?? null);
+        unset($row['scope_details']);
+        $row['prehliadka_scope'] = ($row['type'] ?? null) === PrehliadkaDetails::TYPE
+            ? PrehliadkaDetails::scopeLabel(InspectionDetails::decode($rawScope))
+            : null;
+        if (!array_key_exists('concept_state', $row)) {
+            $conceptDetails = InspectionDetails::decode($row['details'] ?? null);
+            $row['concept_state'] = !PrehliadkaConcepts::isConcept($conceptDetails)
+                ? null
+                : (PrehliadkaConcepts::isPending($conceptDetails) ? 'pending' : 'confirmed');
+        }
         // Header data (block 2). Only the detail endpoints select it; the list
         // leaves it out, and the key is then absent rather than null.
         if (array_key_exists('details', $row)) {

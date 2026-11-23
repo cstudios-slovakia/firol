@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, ArrowRight, Building2, CalendarDays, NotebookPen,
+  ArrowLeft, ArrowRight, Building, CalendarDays, NotebookPen,
   Plus, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
@@ -25,8 +25,10 @@ import { isPersonListType } from '@/api/personList';
 import { ApiError } from '@/lib/api';
 import { todayIso } from '@/lib/dates';
 import { isSection, newInspectionPath } from '@/lib/sections';
+import { CLIENT_NEUTRAL, facilityNouns, facilityPickerNouns } from '@/lib/clientKind';
 import { inspectionCreateOptimistic } from '@/lib/offlineEntities';
 import { useToast } from '@/lib/toast';
+import { cachedCertRefusal, useCertMissingToast, warmCertProfile } from '@/lib/certMissing';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
@@ -62,6 +64,9 @@ function isInspectionType(s: string | undefined): s is InspectionType {
 export function InspectionStep1Page() {
   const { user, csrfToken } = useAuth();
   const toast = useToast();
+  const certMissing = useCertMissingToast();
+  // Fresh `can_create` verdict for an offline start (see cachedCertRefusal).
+  useEffect(() => warmCertProfile(), []);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { type: typeParam } = useParams<{ type?: string }>();
@@ -144,7 +149,7 @@ export function InspectionStep1Page() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať firmy.');
+        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať klientov.');
       })
       .finally(() => {
         if (!cancelled) setLoadingCompanies(false);
@@ -187,7 +192,7 @@ export function InspectionStep1Page() {
       .catch((err: unknown) => {
         // Best-effort in a visit — the locked rows need nothing from this.
         if (cancelled || visitId !== null) return;
-        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať prevádzky.');
+        setError(err instanceof ApiError ? err.message : 'Nepodarilo sa načítať zoznam.');
       })
       .finally(() => {
         if (!cancelled) setLoadingFacilities(false);
@@ -212,14 +217,21 @@ export function InspectionStep1Page() {
 
   const ctaText = useMemo(() => stepTwoCta(type), [type]);
 
+  // Wording of the facility field follows the chosen client: prevádzka for a
+  // firma, bytový dom for a bytové družstvo, both until one is chosen.
+  const clientType = visit
+    ? visit.company_client_type
+    : (companies ?? []).find((c) => c.id === companyId)?.client_type;
+  const fNouns = facilityPickerNouns(visit !== null || companyId !== null, clientType);
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const errs: typeof fieldErrors = {};
     // Inside a visit the three are the visit's own — nothing to validate, but
     // nothing to submit either until it has loaded.
     if (visitId !== null && !visit) return;
-    if (!companyId) errs.company = 'Vyber firmu.';
-    if (!facilityId) errs.facility = 'Vyber prevádzku.';
+    if (!companyId) errs.company = 'Vyber klienta.';
+    if (!facilityId) errs.facility = `Vyber ${fNouns.cases.acc}.`;
     if (!executedOn) errs.date = 'Zadaj dátum vykonania kontroly.';
     if (Object.keys(errs).length > 0) {
       setFieldErrors(errs);
@@ -257,6 +269,12 @@ export function InspectionStep1Page() {
         facility: { id: facilityId!, name: visit?.facility_name ?? facility?.name ?? '' },
         inspector: { id: user?.id ?? 0, name: user?.fullname ?? '' },
       });
+      // Offline the create is only parked; ask the cached profile now so a
+      // missing number is told before the work, not when the draft syncs.
+      if (!navigator.onLine) {
+        const refusal = await cachedCertRefusal([type]);
+        if (refusal) throw refusal;
+      }
       const res = await Inspections.createDraft(payload, csrfToken, optimistic);
       toast.success('Kontrola vytvorená');
       // Chapter 12 — when last time's items can be carried over, the offer
@@ -275,7 +293,7 @@ export function InspectionStep1Page() {
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Niečo sa pokazilo.';
       setError(msg);
-      toast.error(msg);
+      if (!certMissing(err, { returnLabel: 'Späť na novú kontrolu' })) toast.error(msg);
     } finally {
       setSubmitting(false);
     }
@@ -342,16 +360,16 @@ export function InspectionStep1Page() {
           Späť
         </Link>
         <Card className="flex flex-col items-center gap-3 px-6 py-10 text-center">
-          <h2 className="text-base font-semibold text-ink-900">Najprv pridaj firmu</h2>
+          <h2 className="text-base font-semibold text-ink-900">Najprv pridaj klienta</h2>
           <p className="max-w-xs text-sm text-ink-500">
-            Kontrola sa viaže na konkrétnu firmu a jej prevádzku — nepôjde
-            uložiť bez aspoň jednej z nich.
+            Kontrola sa viaže na konkrétneho klienta a jeho prevádzku alebo bytový dom — nepôjde
+            uložiť bez aspoň jedného z nich.
           </p>
           <Link
             to="/companies/new"
             className="inline-flex h-11 items-center rounded-2xl bg-firol-500 px-4 text-sm font-medium text-white shadow-[var(--shadow-glow)] hover:bg-firol-600"
           >
-            Pridať firmu
+            Pridať klienta
           </Link>
         </Card>
       </div>
@@ -393,20 +411,21 @@ export function InspectionStep1Page() {
             <VisitSharedFields
               companyName={visit.company_name}
               facilityName={visit.facility_name}
+              clientType={visit.company_client_type}
               date={visit.visit_date}
               dateLabel={dateLabel(type)}
             />
           ) : (
             <>
-            <Field label="Spoločnosť" required error={fieldErrors.company}>
+            <Field label={CLIENT_NEUTRAL.singular} required error={fieldErrors.company}>
               {(p) => (
                 <Select
                   id={p.id}
                   aria-invalid={p['aria-invalid']}
                   value={companyId !== null ? String(companyId) : ''}
                   onChange={(v) => { setCompanyId(v ? Number(v) : null); if (fieldErrors.company) setFieldErrors((prev) => ({ ...prev, company: undefined })); }}
-                  placeholder="— vyber firmu —"
-                  leftIcon={<Building2 className="size-4" />}
+                  placeholder={CLIENT_NEUTRAL.pickPlaceholder}
+                  leftIcon={<Building className="size-4" />}
                   searchable
                   options={(companies ?? []).map((c) => ({
                     value: String(c.id),
@@ -425,14 +444,14 @@ export function InspectionStep1Page() {
                       <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
                         <Plus className="size-3.5" />
                       </span>
-                      Pridať novú firmu
+                      Pridať nového klienta
                     </button>
                   )}
                 />
               )}
             </Field>
 
-            <Field label="Prevádzka" required error={fieldErrors.facility}>
+            <Field label={fNouns.singular} required error={fieldErrors.facility}>
               {(p) => (
                 <Select
                   id={p.id}
@@ -442,10 +461,10 @@ export function InspectionStep1Page() {
                   disabled={companyId === null || loadingFacilities}
                   placeholder={
                     companyId === null
-                      ? '— najprv vyber firmu —'
+                      ? CLIENT_NEUTRAL.pickFirstPlaceholder
                       : loadingFacilities
                         ? 'Načítavam…'
-                        : '— vyber prevádzku —'
+                        : `— vyber ${fNouns.cases.acc} —`
                   }
                   leftIcon={<Warehouse className="size-4" />}
                   searchable
@@ -465,7 +484,7 @@ export function InspectionStep1Page() {
                       <span className="grid size-6 place-items-center rounded-lg bg-firol-500 text-white">
                         <Plus className="size-3.5" />
                       </span>
-                      Pridať prevádzku
+                      {facilityNouns(companies?.find((c) => c.id === companyId)?.client_type).addLabel}
                     </button>
                   ) : undefined}
                 />
@@ -509,14 +528,14 @@ export function InspectionStep1Page() {
           <Field label="Kontrolu vykonal">
             {() => (
               <div className="flex h-11 items-center gap-3 rounded-xl border border-ink-200 bg-ink-50 px-3 text-sm text-ink-700">
-                <Building2 className="size-4 text-ink-400" />
+                <Building className="size-4 text-ink-400" />
                 <span className="truncate">{user?.fullname ?? 'Aktuálny používateľ'}</span>
                 <span className="ml-auto text-[11px] text-ink-400">predvolené</span>
               </div>
             )}
           </Field>
 
-          <Field label="Poznámky k prevádzke" hint="Napr. prístup, špeciálne podmienky.">
+          <Field label={`Poznámky k ${fNouns.cases.dat}`} hint="Napr. prístup, špeciálne podmienky.">
             {(p) => (
               <div className="relative">
                 <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
@@ -595,6 +614,8 @@ export function InspectionStep1Page() {
           onClose={() => setNewFacilityOpen(false)}
           companyId={companyId}
           companyName={companies?.find((c) => c.id === companyId)?.name ?? ''}
+          companyAddress={companies?.find((c) => c.id === companyId)}
+          clientType={companies?.find((c) => c.id === companyId)?.client_type}
           onCreated={(f) => {
             // Splice the new row into the list (last_periodicities empty —
             // history kicks in only after the first inspection) and

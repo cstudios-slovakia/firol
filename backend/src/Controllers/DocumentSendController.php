@@ -246,21 +246,27 @@ final class DocumentSendController
         $stmt = Db::pdo()->prepare(
             'SELECT * FROM (
                 SELECT d.id, d.type, d.number, d.generated_at, d.file_path,
-                       i.executed_on, i.facility_id, f.name AS facility_name
+                       i.executed_on, i.facility_id, f.name AS facility_name, f.email AS facility_email,
+                       CASE WHEN i.type = "preventivna_prehliadka" THEN i.details
+                            WHEN i.type = "kniha_bozp" THEN p.details END AS scope_details
                 FROM   documents d
                 JOIN   inspections i ON i.id = d.parent_id AND d.parent_type = "inspection"
                 JOIN   facilities  f ON f.id = i.facility_id
+                LEFT   JOIN inspections p
+                       ON p.id = i.source_inspection_id AND i.type = "kniha_bozp" AND p.type = "preventivna_prehliadka"
                 WHERE  d.account_id = ? AND i.company_id = ? AND i.archived_at IS NULL
                 UNION ALL
                 SELECT d.id, d.type, d.number, d.generated_at, d.file_path,
-                       si.issued_on AS executed_on, si.facility_id, f.name AS facility_name
+                       si.issued_on AS executed_on, si.facility_id, f.name AS facility_name, f.email AS facility_email,
+                       NULL AS scope_details
                 FROM   documents d
                 JOIN   stock_issues si ON si.id = d.parent_id AND d.parent_type = "stock_issue"
                 LEFT   JOIN facilities f ON f.id = si.facility_id
                 WHERE  d.account_id = ? AND si.company_id = ?
                 UNION ALL
                 SELECT d.id, d.type, d.number, d.generated_at, d.file_path,
-                       t.date AS executed_on, t.facility_id, f.name AS facility_name
+                       t.date AS executed_on, t.facility_id, f.name AS facility_name, f.email AS facility_email,
+                       NULL AS scope_details
                 FROM   documents d
                 JOIN   trainings t ON t.id = d.parent_id AND d.parent_type = "training"
                 LEFT   JOIN facilities f ON f.id = t.facility_id
@@ -296,10 +302,17 @@ final class DocumentSendController
                 // Null for a výdajka not tied to one prevádzka.
                 'facility_id'   => $r['facility_id'] !== null ? (int) $r['facility_id'] : null,
                 'facility_name' => $r['facility_name'],
+                'facility_email' => isset($r['facility_email']) && $r['facility_email'] !== ''
+                    ? (string) $r['facility_email']
+                    : null,
                 // Shown next to each row so the technician can see which
                 // protocol is pushing the send over the mailbox limit.
                 'byte_size'     => is_file($abs) ? (int) filesize($abs) : 0,
                 'already_sent'  => isset($sent[(int) $r['id']]),
+                // PO / BOZP / PO + BOZP of the prehliadka this record belongs to (plan 8b).
+                'prehliadka_scope' => \Firol\Support\PrehliadkaDetails::scopeLabel(
+                    \Firol\Support\InspectionDetails::decode($r['scope_details'] ?? null),
+                ),
             ];
         }, $stmt->fetchAll());
 

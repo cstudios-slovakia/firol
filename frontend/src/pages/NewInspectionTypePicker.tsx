@@ -5,7 +5,9 @@ import {
   TestTube, Users, Wind,
 } from 'lucide-react';
 // Block 2 — single-record BOZP úkony.
-import { BookCheck, CigaretteOff, Factory, PhoneCall } from 'lucide-react';
+import { BookCheck, CigaretteOff, ClipboardCheck, Factory, PhoneCall } from 'lucide-react';
+import { PREHLIADKA_NEW_PATH } from '@/lib/prehliadka';
+import { knihaNewPath } from '@/lib/kniha';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import {
@@ -74,9 +76,18 @@ const TYPES: TypeMeta[] = [
   {
     type: 'poziarna_kniha',
     shortLabel: 'Požiarna kniha',
-    description: 'Periodický záznam o stave protipožiarnej ochrany.',
+    description: 'Periodický záznam o stave ochrany pred požiarmi.',
     intervalLabel: '3 / 6 / 12 mes.',
     icon: <BookOpen className="size-5" />,
+    enabled: true,
+  },
+  // POapp 26. 10. 2026 — one walk-through that yields several records.
+  {
+    type: 'preventivna_prehliadka',
+    shortLabel: 'Preventívna prehliadka',
+    description: 'Obchôdzka objektu — zapíšeš nedostatky a z nich vzniknú záznamy.',
+    intervalLabel: '3 / 6 / 12 mes.',
+    icon: <ClipboardCheck className="size-5" />,
     enabled: true,
   },
   {
@@ -122,7 +133,7 @@ const TYPES: TypeMeta[] = [
   // Block 2 — single-record BOZP úkony (kniha, pracovisko, osamelé, fajčenie).
   {
     type: 'kniha_bozp',
-    shortLabel: 'Kniha kontrol BOZP',
+    shortLabel: 'Preventívna prehliadka BOZP',
     description: 'Záznam o kontrole stavu BOZP s prehľadom termínov klienta.',
     intervalLabel: '12 / 6 / 3 mes.',
     icon: <BookCheck className="size-5" />,
@@ -257,8 +268,20 @@ export function NewInspectionTypePicker() {
   if (section) passthrough.set('section', section);
 
   const passthroughQs = passthrough.toString();
-  const stepOnePathFor = (type: InspectionType) =>
-    `/inspections/new/${type}/step-1${passthroughQs ? `?${passthroughQs}` : ''}`;
+  const stepOnePathFor = (type: InspectionType) => {
+    // The prehliadka has screens of its own; „Kniha kontrol BOZP" starts the
+    // same one preset to BOZP (D2) — its record is the kniha BOZP entry — and
+    // the OPP item preset to PO (spec 14).
+    if (type === 'preventivna_prehliadka' || type === 'kniha_bozp') {
+      const qs = new URLSearchParams(passthrough);
+      qs.set('preset', type === 'kniha_bozp' ? 'bozp' : 'po');
+      const q = qs.toString();
+      return `${PREHLIADKA_NEW_PATH}${q ? `?${q}` : ''}`;
+    }
+    // A požiarna kniha entry starts with its prevádzky (POapp 7. 11. 2026, spec 4).
+    if (type === 'poziarna_kniha') return knihaNewPath(passthrough);
+    return `/inspections/new/${type}/step-1${passthroughQs ? `?${passthroughQs}` : ''}`;
+  };
 
   // A training has no section flow of its own: it goes to the training form
   // with the same company / prevádzka / visit context, and the picked type

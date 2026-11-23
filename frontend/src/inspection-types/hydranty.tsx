@@ -13,11 +13,13 @@ import {
 } from '@/api/inspections';
 import { ApiError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
+import { sk3 } from '@/lib/kniha';
 import { ItemPhotoField, usePhotoStaging } from '@/components/ItemPhotos';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
+import { Textarea } from '@/components/ui/Textarea';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
@@ -29,13 +31,35 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
+import { NextRecordedButton } from './NextRecordedButton';
 
 function isHydrantType(s: unknown): s is HydrantTypeKind {
   return (HYDRANT_TYPES as string[]).includes(s as string);
 }
 function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
+}
+
+/** What the form opens with for a stored item. */
+function hydrantyValues(f: Partial<HydrantItemFields>) {
+  return {
+    hydrantType: isHydrantType(f.type) ? f.type : 'DN52',
+    typeOther: typeof f.type_other === 'string' ? f.type_other : '',
+    location: typeof f.location === 'string' ? f.location : '',
+    // An item that arrives without a hose count (a device the walk wrote down,
+    // an import) shows the field empty — „1" is presumed for a new item only.
+    hoseCount: typeof f.hose_count === 'number' ? String(f.hose_count) : '',
+    hs: typeof f.hs === 'number' ? String(f.hs) : '',
+    hd: typeof f.hd === 'number' ? String(f.hd) : '',
+    q: typeof f.q === 'number' ? String(f.q) : '',
+    defects: typeof f.defects === 'string' ? f.defects : '',
+    // A result the item arrived without (a hose with no match in the last
+    // protocol) stays unpicked: it is the technician's to choose, never presumed.
+    result: (isPassFail(f.result) ? f.result : '') as PassFailResult | '',
+  };
 }
 
 /**
@@ -45,7 +69,7 @@ function isPassFail(s: unknown): s is PassFailResult {
  */
 type HydrantSeed = { type: HydrantTypeKind; type_other: string; hose_count: string };
 
-function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -57,7 +81,7 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
   const [hd, setHd] = useState<string>('');
   const [q, setQ] = useState<string>('');
   const [defects, setDefects] = useState('');
-  const [result, setResult] = useState<PassFailResult>('vyhovuje');
+  const [result, setResult] = useState<PassFailResult | ''>('vyhovuje');
 
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -67,16 +91,16 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<HydrantItemFields>;
-      setHydrantType(isHydrantType(f.type) ? f.type : 'DN52');
-      setTypeOther(typeof f.type_other === 'string' ? f.type_other : '');
-      setLocation(typeof f.location === 'string' ? f.location : '');
-      setHoseCount(typeof f.hose_count === 'number' ? String(f.hose_count) : '1');
-      setHs(typeof f.hs === 'number' ? String(f.hs) : '');
-      setHd(typeof f.hd === 'number' ? String(f.hd) : '');
-      setQ(typeof f.q === 'number' ? String(f.q) : '');
-      setDefects(typeof f.defects === 'string' ? f.defects : '');
-      setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
+      const v = hydrantyValues(initialItem.fields as Partial<HydrantItemFields>);
+      setHydrantType(v.hydrantType);
+      setTypeOther(v.typeOther);
+      setLocation(v.location);
+      setHoseCount(v.hoseCount);
+      setHs(v.hs);
+      setHd(v.hd);
+      setQ(v.q);
+      setDefects(v.defects);
+      setResult(v.result);
     } else {
       // "Ďalší rovnaký": carry type + hose count only; measured HS/HD/Q and
       // defects/result always start fresh (2.4.2).
@@ -94,6 +118,13 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
   }, [initialItem, inspectionId]);
 
   function isPristine() {
+    // A staged or removed photo is a change too; only saveItemWithPhotos()
+    // commits it, so the shortcut must not skip the save.
+    if (photos.dirty) return false;
+    // An existing item: nothing to save only while nothing was changed.
+    if (initialItem) {
+      return sameFormValues(hydrantyValues(initialItem.fields as Partial<HydrantItemFields>), { hydrantType, typeOther, location, hoseCount, hs, hd, q, defects, result });
+    }
     return (
       hydrantType === 'DN52' && !typeOther && !location && hoseCount === '1' &&
       !hs && !hd && !q && !defects && result === 'vyhovuje'
@@ -108,21 +139,23 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
 
   async function handleSubmit(
     e: FormEvent,
-    action: 'save-and-next' | 'save-and-summary',
+    action: SubmitAction,
     duplicate = false,
   ) {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (hydrantType === 'other' && !typeOther.trim()) errs.typeOther = 'Doplň označenie typu (alebo vyber štandardný DN).';
     if (!location.trim()) errs.location = 'Doplň umiestnenie.';
+    // Number('') is 0: an empty field is an error of its own, never a measured zero.
     const hc = Number(hoseCount);
-    if (!Number.isInteger(hc) || hc < 0 || hc > 20) errs.hoseCount = 'Počet hadíc musí byť 0–20.';
+    if (!hoseCount.trim() || !Number.isInteger(hc) || hc < 0 || hc > 20) errs.hoseCount = 'Počet hadíc musí byť 0–20.';
     const hsN = Number(hs);
-    if (!Number.isFinite(hsN) || hsN < 0 || hsN > 50) errs.hs = 'Hodnota HS musí byť číslo v rozsahu 0–50.';
+    if (!hs.trim() || !Number.isFinite(hsN) || hsN < 0 || hsN > 50) errs.hs = 'Hodnota HS musí byť číslo v rozsahu 0–50.';
     const hdN = Number(hd);
-    if (!Number.isFinite(hdN) || hdN < 0 || hdN > 50) errs.hd = 'Hodnota HD musí byť číslo v rozsahu 0–50.';
+    if (!hd.trim() || !Number.isFinite(hdN) || hdN < 0 || hdN > 50) errs.hd = 'Hodnota HD musí byť číslo v rozsahu 0–50.';
     const qN = Number(q);
-    if (!Number.isFinite(qN) || qN < 0 || qN > 100) errs.q = 'Hodnota Q musí byť číslo v rozsahu 0–100.';
+    if (!q.trim() || !Number.isFinite(qN) || qN < 0 || qN > 100) errs.q = 'Hodnota Q musí byť číslo v rozsahu 0–100.';
+    if (!result) errs.result = 'Vyber výsledok.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
     setApiError(null);
@@ -132,12 +165,12 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
         type: hydrantType,
         type_other: hydrantType === 'other' ? typeOther.trim() : null,
         location: location.trim(),
-        hose_count: Number(hoseCount),
-        hs: Number(hs),
-        hd: Number(hd),
-        q: Number(q),
+        hose_count: hc,
+        hs: hsN,
+        hd: hdN,
+        q: qN,
         defects: defects.trim() || null,
-        result,
+        result: result as PassFailResult,
       };
       const saved = await saveItemWithPhotos({
         inspectionId,
@@ -229,22 +262,18 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
 
         <Field label="Zistené závady" hint="Voliteľné — nech zostane prázdne ak je hydrant v poriadku.">
           {(p) => (
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
-                <NotebookPen className="size-4" />
-              </span>
-              <textarea id={p.id} rows={3} value={defects} onChange={(e) => setDefects(e.target.value)}
-                placeholder="Korózia spojky, popraskaná hadica, chýbajúca tabuľka."
-                className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
-            </div>
+            <Textarea id={p.id} rows={3} clearable
+              leftIcon={<NotebookPen className="size-4" />}
+              value={defects} onValueChange={setDefects}
+              placeholder="Korózia spojky, popraskaná hadica, chýbajúca tabuľka." />
           )}
         </Field>
 
-        <Field label="Výsledok kontroly" required>
+        <Field label="Výsledok kontroly" required error={fieldErrors.result}>
           {() => (
             <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Výsledok kontroly">
               {(['vyhovuje', 'nevyhovuje'] as const).map((r) => (
-                <ResultButton key={r} value={r} active={result === r} onClick={() => setResult(r)} />
+                <ResultButton key={r} value={r} active={result === r} onClick={() => { setResult(r); setFieldErrors((prev) => { const n = { ...prev }; delete n.result; return n; }); }} />
               ))}
             </div>
           )}
@@ -263,17 +292,21 @@ function HydrantyStep2Form({ inspectionId, facilityId, initialItem, csrfToken, o
           </p>
         )}
 
-        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
-            loading={submitting} leftIcon={<ListChecks className="size-4" />}>
+            loading={submitting} disabled={photos.processing} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
           <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
-            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            loading={submitting} disabled={photos.processing} leftIcon={<CopyPlus className="size-4" />}
             title="Uloží a predvyplní ďalší hydrant rovnakým typom (namerané tlaky a prietok ostanú prázdne).">
             Ďalší rovnaký
           </Button>
-          <Button type="submit" loading={submitting}
+          {editing && hasNextItem && (
+            <NextRecordedButton loading={submitting} disabled={photos.processing}
+              onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next-recorded')} />
+          )}
+          <Button type="submit" loading={submitting} disabled={photos.processing}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalší'}
           </Button>
@@ -370,7 +403,7 @@ function HydrantyItemRow({
             <MapPin className="-mt-0.5 mr-1 inline size-3" />
             {f.location}
             <span className="mx-1.5 text-ink-300">·</span>
-            {f.hose_count ?? 0} {(f.hose_count ?? 0) === 1 ? 'hadica' : 'hadíc'}
+            {f.hose_count ?? 0} {sk3(f.hose_count ?? 0, 'hadica', 'hadice', 'hadíc')}
           </p>
           <p className="mt-0.5 font-mono text-xs text-ink-600">
             HS {fmt(f.hs)} · HD {fmt(f.hd)} <span className="text-ink-400">MPa</span>

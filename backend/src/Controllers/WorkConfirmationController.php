@@ -506,7 +506,10 @@ final class WorkConfirmationController
                    AND archived_at IS NULL AND status = "finalized"';
         $args = [$accountId, $companyId, $date];
         if ($facilityId !== null) {
-            $sql .= ' AND facility_id = ?';
+            // A požiarna kniha entry written for several prevádzky was work
+            // done at each of them.
+            $sql .= ' AND ' . \Firol\Support\InspectionCoverage::covers('inspections', '?');
+            $args[] = $facilityId;
             $args[] = $facilityId;
         }
         $sql .= ' ORDER BY id ASC';

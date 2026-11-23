@@ -20,6 +20,13 @@ namespace Firol\Import;
  *   multi_options — for multi-value fields (comma-separated): generates
  *                   a legend block below the data area; each entry is
  *                   ['value' => slug, 'label' => Slovak description]
+ *   text    — the cells are formatted as text, so Excel keeps „1,3,5" as typed
+ *             instead of reading it as a (Slovak) decimal number
+ *   date_or_text — a fixed word or a date (the book's „Lehota"): a date cell is
+ *                  normalized to Y-m-d like a date column, a word stays as typed
+ *   pokyny_type / pokyny_values — what the Pokyny reference shows for a column
+ *                  whose allowed values the generic rendering cannot express
+ *   pokyny_note — an extra line under the allowed values in the Pokyny reference
  */
 final class Schema
 {
@@ -33,15 +40,29 @@ final class Schema
                 'title' => 'Firmy',
                 'columns' => [
                     ['header' => 'Názov firmy *', 'key' => 'name', 'hint' => 'Acme s.r.o.'],
-                    ['header' => 'IČO *', 'key' => 'ico', 'hint' => '12345678'],
+                    ['header' => 'IČO *', 'key' => 'ico', 'hint' => '12345678', 'text' => true, 'pokyny_note' => self::ICO_NOTE],
                     ['header' => 'Adresa', 'key' => 'address', 'hint' => 'Hlavná 1, 010 01 Žilina'],
                     ['header' => 'Kontakt', 'key' => 'contact', 'hint' => 'Ján Vedúci · +421 900 000 000 · jan@acme.sk'],
+                    // Appended last: the importer reads columns by position, so a
+                    // sheet downloaded before the column existed still lines up
+                    // (and reads as a firma). The client type decides which list
+                    // of activities a požiarna kniha entry offers.
+                    [
+                        'header' => 'Druh klienta',
+                        'key' => 'client_type',
+                        'hint' => 'firma',
+                        'options' => self::CLIENT_TYPES,
+                        'option_labels' => [
+                            'firma' => 'Firma',
+                            'bytove_druzstvo' => 'Bytové družstvo',
+                        ],
+                    ],
                 ],
             ],
             'Prevadzky' => [
                 'title' => 'Prevádzky',
                 'columns' => [
-                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678'],
+                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678', 'text' => true, 'pokyny_note' => self::ICO_NOTE],
                     ['header' => 'Názov prevádzky *', 'key' => 'name', 'hint' => 'Sklad Žilina'],
                     ['header' => 'Adresa prevádzky', 'key' => 'address', 'hint' => 'Priemyselná 5, Žilina'],
                     ['header' => 'Kontaktná osoba', 'key' => 'contact_person', 'hint' => 'Peter Skladník'],
@@ -68,7 +89,7 @@ final class Schema
                         'prompt' => 'Zadaj ľubovoľné číslo (napr. 1, 2, 3…). To isté číslo zopakuj na hárku „Účastníci" v stĺpci „Číslo školenia z hárku Školenia", aby sa účastníci priradili k tomuto školeniu.',
                     ],
                     ['header' => 'Názov firmy *', 'key' => 'company_name', 'hint' => 'Acme s.r.o.'],
-                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678'],
+                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678', 'text' => true, 'pokyny_note' => self::ICO_NOTE],
                     ['header' => 'Prevádzka', 'key' => 'facility_name', 'hint' => 'Sklad Žilina'],
                     [
                         'header' => 'Typ školenia *',
@@ -111,6 +132,9 @@ final class Schema
                     ],
                     ['header' => 'Meno a priezvisko *', 'key' => 'fullname', 'hint' => 'Ján Účastník'],
                     ['header' => 'Pracovné zaradenie', 'key' => 'position', 'hint' => 'Skladník'],
+                    // Appended last: the importer reads columns by position, so a sheet
+                    // downloaded before the osobné číslo existed still lines up.
+                    ['header' => 'Osobné číslo', 'key' => 'personal_number', 'hint' => '1042'],
                 ],
             ],
         ];
@@ -150,7 +174,40 @@ final class Schema
     /** Units a period can be expressed in (chapter 5). */
     public const PERIODICITY_UNITS = ['mesiac', 'tyzden', 'den'];
 
-    /** Predefined activity slugs for Požiarna kniha entries. */
+    /**
+     * Pokyny line of every IČO column. The cells are text, so leading zeros
+     * stay; a number Excel already stripped is padded back to 8 digits.
+     */
+    private const ICO_NOTE = 'Zadaj všetkých 8 číslic vrátane núl na začiatku (napr. 00169803). Kratšie IČO z číslic sa doplní nulami zľava.';
+
+    /** Values of the optional „Druh klienta" column (companies.client_type); empty = firma. */
+    public const CLIENT_TYPES = ['firma', 'bytove_druzstvo'];
+
+    /** Values of the „Stav" column of Kniha_nedostatky (PrehliadkaDefects::STATUSES) with the screen's labels. */
+    public const BOOK_DEFECT_STATUS_LABELS = [
+        'zisteny'    => 'zistený',
+        'odstraneny' => 'odstránený',
+        'trva'       => 'trvá',
+        'zanik'      => 'dôvod zanikol',
+    ];
+
+    /**
+     * Pokyny line of the Kniha_zapisy columns the app shows only in spôsob 1
+     * (step 2 of the entry): an import stores them only for a spôsob-1 entry.
+     */
+    private const SPOSOB_1_ONLY = 'Len pri spôsobe 1 — pri spôsobe 2 sa neuloží.';
+
+    /** Fixed deadline choices of the „Lehota" column; a date is the fifth possibility. */
+    public const BOOK_DEADLINE_CHOICES = ['bezodkladne', '30d', '3m', '6m'];
+
+    /**
+     * Sheets of the inspections workbook that only an upload still reads: a
+     * file filled in before the book's new format keeps importing as it did.
+     * The generated template no longer contains them.
+     */
+    public const LEGACY_INSPECTION_SHEETS = ['Polozky_poziarna_kniha'];
+
+    /** Predefined activity slugs for Požiarna kniha entries (the legacy sheet Polozky_poziarna_kniha). */
     public const PK_ACTIVITIES = [
         ['value' => 'visual_check', 'label' => 'Vizuálna kontrola priestorov spoločnosti'],
         ['value' => 'php_check', 'label' => 'Kontrola stavu, označenia a dostupnosti PHP'],
@@ -162,7 +219,7 @@ final class Schema
         ['value' => 'electrical_equipment_check', 'label' => 'Kontrola stavu používaných elektrických zariadení'],
         ['value' => 'technical_equipment_check', 'label' => 'Kontrola stavu používaných technických zariadení'],
         ['value' => 'electrical_appliances_check', 'label' => 'Kontrola stavu používaných elektrických spotrebičov'],
-        ['value' => 'documentation_check', 'label' => 'Kontrola aktuálnosti dokumentácie požiarnej ochrany'],
+        ['value' => 'documentation_check', 'label' => 'Kontrola aktuálnosti dokumentácie ochrany pred požiarmi'],
         ['value' => 'employee_list_check', 'label' => 'Kontrola aktuálneho zoznamu zamestnancov a ich školení'],
         ['value' => 'fire_drill', 'label' => 'Cvičný požiarny poplach'],
     ];
@@ -172,7 +229,33 @@ final class Schema
      */
     public static function inspections(): array
     {
+        return self::inspectionSheets(false);
+    }
+
+    /**
+     * What an upload of the inspections workbook reads: the template's sheets
+     * plus {@see LEGACY_INSPECTION_SHEETS}, so a file filled in on an older
+     * template imports exactly as it did.
+     *
+     * @return array<string, array{title:string, columns: list<array<string, mixed>>}>
+     */
+    public static function inspectionsUpload(): array
+    {
+        return self::inspectionSheets(true);
+    }
+
+    /**
+     * @return array<string, array{title:string, columns: list<array<string, mixed>>}>
+     */
+    private static function inspectionSheets(bool $withLegacy): array
+    {
         $inspectionTypes = array_keys(self::INSPECTION_RECOMMENDED_MONTHS);
+        // A new book entry has its own sheets (Kniha_*); the template no longer
+        // offers poziarna_kniha on Kontroly. The importer still accepts it, for
+        // the files that pair it with the legacy sheet.
+        if (!$withLegacy) {
+            $inspectionTypes = array_values(array_diff($inspectionTypes, ['poziarna_kniha']));
+        }
 
         $sheets = [
             'Kontroly' => [
@@ -186,7 +269,7 @@ final class Schema
                         'prompt' => 'Zadaj ľubovoľné číslo (napr. 1, 2, 3…). To isté číslo zopakuj na hárkoch s položkami v stĺpci „Číslo kontroly z hárku Kontroly", aby sa položky priradili k tejto kontrole.',
                     ],
                     ['header' => 'Názov firmy *', 'key' => 'company_name', 'hint' => 'Acme s.r.o.'],
-                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678'],
+                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678', 'text' => true, 'pokyny_note' => self::ICO_NOTE],
                     ['header' => 'Prevádzka *', 'key' => 'facility_name', 'hint' => 'Sklad Žilina'],
                     [
                         'header' => 'Typ kontroly *',
@@ -447,6 +530,144 @@ final class Schema
             ],
         ];
 
-        return $sheets;
+        if (!$withLegacy) {
+            foreach (self::LEGACY_INSPECTION_SHEETS as $legacy) {
+                unset($sheets[$legacy]);
+            }
+        }
+
+        return $sheets + self::bookSheets();
+    }
+
+    /**
+     * The požiarna kniha in its new format (`details.format` = pk2, BookEntry):
+     * one row per entry, one per prevádzka of an entry, one per defect. Linked
+     * by the number of the entry, like Kontroly and their items.
+     *
+     * @return array<string, array{title:string, columns: list<array<string, mixed>>}>
+     */
+    private static function bookSheets(): array
+    {
+        $entryLink = [
+            'header' => 'Číslo zápisu z hárku Kniha_zapisy *',
+            'key' => 'row_no',
+            'hint' => '1',
+            'prompt_title' => 'Číslo zápisu',
+            'prompt' => 'Napíš číslo zápisu z hárku „Kniha_zapisy" (stĺpec „Číslo zápisu"). Riadok sa priradí k danému zápisu.',
+        ];
+
+        return [
+            'Kniha_zapisy' => [
+                'title' => 'Požiarna kniha — zápisy',
+                'columns' => [
+                    [
+                        'header' => 'Číslo zápisu (ľubovoľné, na spárovanie) *',
+                        'key' => 'row_no',
+                        'hint' => '1',
+                        'prompt_title' => 'Číslo zápisu',
+                        'prompt' => 'Zadaj ľubovoľné číslo (napr. 1, 2, 3…). To isté číslo zopakuj na hárkoch „Kniha_prevadzky" a „Kniha_nedostatky", aby sa prevádzky a nedostatky priradili k tomuto zápisu.',
+                    ],
+                    ['header' => 'Názov firmy *', 'key' => 'company_name', 'hint' => 'Acme s.r.o.'],
+                    ['header' => 'IČO firmy *', 'key' => 'company_ico', 'hint' => '12345678', 'text' => true, 'pokyny_note' => self::ICO_NOTE],
+                    ['header' => 'Dátum zápisu (DD-MM-RRRR) *', 'key' => 'executed_on', 'hint' => '10-01-2026', 'date' => true],
+                    [
+                        'header' => 'Spôsob zápisu',
+                        'key' => 'sposob',
+                        'hint' => '1',
+                        'options' => ['1', '2'],
+                        'option_labels' => [
+                            '1' => 'Zápis je zároveň preventívkou',
+                            '2' => 'Preventívky sú priložené',
+                        ],
+                        'pokyny_note' => 'Prázdne pole: 1 pri jednej prevádzke, 2 pri viacerých.',
+                    ],
+                    [
+                        'header' => 'Vykonané činnosti — spôsob 1 (čísla bodov, oddeľ čiarkou)',
+                        'key' => 'cinnosti',
+                        'hint' => '1,3,5',
+                        'text' => true,
+                        'prompt_title' => 'Čísla bodov',
+                        'prompt' => 'Čísla bodov zo zoznamu činností oddelené čiarkou (napr. 1,3,5). Firma má zoznam s 9 bodmi, bytové družstvo s 13 bodmi — oba nájdeš na hárku „Pokyny".',
+                        'pokyny_type' => 'Čísla bodov (oddeľ čiarkou)',
+                        'pokyny_values' => self::activityLegend(),
+                        'pokyny_note' => self::SPOSOB_1_ONLY,
+                    ],
+                    ['header' => 'Vlastné činnosti — spôsob 1 (oddeľ |)', 'key' => 'vlastne_cinnosti', 'hint' => 'Kontrola skladu | Kontrola kotolne', 'pokyny_note' => self::SPOSOB_1_ONLY],
+                    ['header' => 'Úvod — spôsob 1 (prázdne = zákonná veta)', 'key' => 'uvod', 'hint' => '', 'pokyny_note' => self::SPOSOB_1_ONLY . ' Pri spôsobe 2 zostane zákonná veta, ako v aplikácii.'],
+                    ['header' => 'Text zápisu — spôsob 2', 'key' => 'text_zapisu', 'hint' => '', 'pokyny_note' => 'Len pri spôsobe 2 — pri spôsobe 1 sa neuloží.'],
+                    ['header' => 'Doplňujúci text — spôsob 1', 'key' => 'doplnujuci_text', 'hint' => '', 'pokyny_note' => self::SPOSOB_1_ONLY],
+                    ['header' => 'Na záver', 'key' => 'zaver', 'hint' => \Firol\Support\BookEntry::NA_ZAVER[0], 'pokyny_note' => 'Pri oboch spôsoboch.'],
+                    ['header' => 'Schválil za klienta', 'key' => 'schvalil', 'hint' => 'Ján Vedúci, konateľ', 'pokyny_note' => 'Pri oboch spôsoboch.'],
+                    ['header' => 'E-mail technika', 'key' => 'inspector_email', 'hint' => 'technik@firma.sk'],
+                ],
+            ],
+            'Kniha_prevadzky' => [
+                'title' => 'Požiarna kniha — prevádzky zápisu',
+                'columns' => [
+                    $entryLink,
+                    ['header' => 'Prevádzka *', 'key' => 'facility_name', 'hint' => 'Sklad Žilina'],
+                    [
+                        'header' => 'Periodicita (mesiace)',
+                        'key' => 'periodicity',
+                        'hint' => '12',
+                        'options' => array_map('strval', \Firol\Support\BookEntry::PERIODICITY_MONTHS),
+                        'pokyny_note' => 'Pri spôsobe 1 povinné pre každú prevádzku; pri spôsobe 2 môže ostať prázdne.',
+                    ],
+                ],
+            ],
+            'Kniha_nedostatky' => [
+                'title' => 'Požiarna kniha — nedostatky',
+                'columns' => [
+                    $entryLink,
+                    [
+                        'header' => 'Prevádzka',
+                        'key' => 'facility_name',
+                        'hint' => 'Sklad Žilina',
+                        'prompt_title' => 'Prevádzka',
+                        'prompt' => 'Povinné, keď má zápis viac prevádzok: napíš jednu z prevádzok zápisu z hárku „Kniha_prevadzky".',
+                    ],
+                    ['header' => 'Názov nedostatku *', 'key' => 'title', 'hint' => 'Zablokovaná úniková cesta'],
+                    ['header' => 'Popis zisteného stavu *', 'key' => 'description', 'hint' => 'Na únikovej ceste sú uložené palety.'],
+                    ['header' => 'Miesto *', 'key' => 'place', 'hint' => 'Chodba pri sklade'],
+                    [
+                        'header' => 'Lehota',
+                        'key' => 'deadline',
+                        'hint' => '30d',
+                        'date_or_text' => true,
+                        'prompt_title' => 'Lehota na odstránenie',
+                        'prompt' => 'bezodkladne, 30d, 3m, 6m alebo dátum vo formáte DD-MM-RRRR. Prázdne pole = bez lehoty.',
+                        'pokyny_type' => 'Výber alebo dátum',
+                        'pokyny_values' => "bezodkladne  —  bezodkladne\n30d  —  do 30 dní od dátumu zápisu\n3m  —  do 3 mesiacov\n6m  —  do 6 mesiacov\nalebo dátum DD-MM-RRRR (napr. 30-06-2026)\nprázdne  —  bez lehoty",
+                    ],
+                    [
+                        'header' => 'Stav',
+                        'key' => 'status',
+                        'hint' => 'zisteny',
+                        'options' => array_keys(self::BOOK_DEFECT_STATUS_LABELS),
+                        'option_labels' => self::BOOK_DEFECT_STATUS_LABELS,
+                        'pokyny_note' => 'Prázdne pole = zistený.',
+                    ],
+                    ['header' => 'Dôvod (pri stave „dôvod zanikol")', 'key' => 'reason', 'hint' => ''],
+                    ['header' => 'Zariadenie', 'key' => 'device_manual', 'hint' => 'PHP P6, v. č. 1234'],
+                    ['header' => 'Predpis', 'key' => 'regulation', 'hint' => ''],
+                    ['header' => 'Odôvodnenie', 'key' => 'justification', 'hint' => ''],
+                    ['header' => 'Opatrenie', 'key' => 'measure', 'hint' => ''],
+                ],
+            ],
+        ];
+    }
+
+    /** Both activity lists of a book entry, numbered, for the Pokyny sheet. */
+    private static function activityLegend(): string
+    {
+        $lines = ['Firma (Obsahom prehliadky bola kontrola):'];
+        foreach (\Firol\Support\BookEntry::FIRMA_ACTIVITIES as $i => $label) {
+            $lines[] = ($i + 1) . '  —  ' . $label;
+        }
+        $lines[] = 'Bytové družstvo:';
+        foreach (\Firol\Support\BookEntry::DOM_ACTIVITIES as $i => $label) {
+            $lines[] = ($i + 1) . '  —  ' . $label;
+        }
+        return implode("\n", $lines);
     }
 }

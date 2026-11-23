@@ -23,6 +23,7 @@ export const INSPECTION_TYPE_ACCUSATIVE: Record<InspectionType, string> = {
   hydranty: 'kontrolu požiarnych hydrantov',
   oprava_ts_php: 'opravu, plnenie a tlakovú skúšku hasiacich prístrojov',
   poziarna_kniha: 'preventívnu protipožiarnu prehliadku',
+  preventivna_prehliadka: 'preventívnu prehliadku',
   pu_akcieschopnost: 'kontrolu akcieschopnosti požiarnych uzáverov',
   pu_udrzba: 'údržbu požiarnych uzáverov',
   nudzove_osvetlenie: 'kontrolu núdzového osvetlenia',

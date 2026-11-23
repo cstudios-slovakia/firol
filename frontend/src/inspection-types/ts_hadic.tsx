@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowRight, Building2, CheckCircle2, CopyPlus, Edit2, Gauge,
+  AlertTriangle, ArrowRight, Building, CheckCircle2, CopyPlus, Edit2, Gauge,
   ListChecks, MapPin, NotebookPen, Ruler, Save, Trash2,
 } from 'lucide-react';
 import {
@@ -15,6 +15,7 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
 import { Field } from '@/components/ui/Field';
+import { Textarea } from '@/components/ui/Textarea';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
@@ -26,7 +27,10 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
+import { NextRecordedButton } from './NextRecordedButton';
 
 const TS_HADIC_RESULT_LABELS: Record<PassFailResult, string> = {
   vyhovuje:    'Funkčná',
@@ -35,6 +39,23 @@ const TS_HADIC_RESULT_LABELS: Record<PassFailResult, string> = {
 
 function isPassFail(s: unknown): s is PassFailResult {
   return s === 'vyhovuje' || s === 'nevyhovuje';
+}
+
+/** What the form opens with for a stored item. */
+function tsHadicValues(f: Partial<TsHadicItemFields>) {
+  return {
+    hoseType: typeof f.hose_type === 'string' ? f.hose_type : '',
+    location: typeof f.location === 'string' ? f.location : '',
+    manufacturer: typeof f.manufacturer === 'string' ? f.manufacturer : '',
+    workingPressure: typeof f.working_pressure === 'number' ? String(f.working_pressure) : '',
+    testPressure: typeof f.test_pressure === 'number' ? String(f.test_pressure) : '',
+    length: typeof f.length === 'number' ? String(f.length) : '',
+    yearOfManufacture: typeof f.year_of_manufacture === 'number' ? String(f.year_of_manufacture) : '',
+    // A result the item arrived without (a hose with no match in the last
+    // protocol) stays unpicked: it is the technician's to choose, never presumed.
+    result: (isPassFail(f.result) ? f.result : '') as PassFailResult | '',
+    notes: typeof f.notes === 'string' ? f.notes : '',
+  };
 }
 
 /**
@@ -49,7 +70,7 @@ type TsHadicSeed = {
   year_of_manufacture: string;
 };
 
-function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -60,7 +81,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
   const [testPressure, setTestPressure]       = useState('');
   const [length, setLength]                   = useState('');
   const [yearOfManufacture, setYearOfManufacture] = useState('');
-  const [result, setResult]                   = useState<PassFailResult>('vyhovuje');
+  const [result, setResult]                   = useState<PassFailResult | ''>('vyhovuje');
   const [notes, setNotes]                     = useState('');
 
   const [submitting, setSubmitting]   = useState(false);
@@ -71,16 +92,16 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
 
   useEffect(() => {
     if (initialItem) {
-      const f = initialItem.fields as Partial<TsHadicItemFields>;
-      setHoseType(typeof f.hose_type === 'string' ? f.hose_type : '');
-      setLocation(typeof f.location === 'string' ? f.location : '');
-      setManufacturer(typeof f.manufacturer === 'string' ? f.manufacturer : '');
-      setWorkingPressure(typeof f.working_pressure === 'number' ? String(f.working_pressure) : '');
-      setTestPressure(typeof f.test_pressure === 'number' ? String(f.test_pressure) : '');
-      setLength(typeof f.length === 'number' ? String(f.length) : '');
-      setYearOfManufacture(typeof f.year_of_manufacture === 'number' ? String(f.year_of_manufacture) : '');
-      setResult(isPassFail(f.result) ? f.result : 'vyhovuje');
-      setNotes(typeof f.notes === 'string' ? f.notes : '');
+      const v = tsHadicValues(initialItem.fields as Partial<TsHadicItemFields>);
+      setHoseType(v.hoseType);
+      setLocation(v.location);
+      setManufacturer(v.manufacturer);
+      setWorkingPressure(v.workingPressure);
+      setTestPressure(v.testPressure);
+      setLength(v.length);
+      setYearOfManufacture(v.yearOfManufacture);
+      setResult(v.result);
+      setNotes(v.notes);
     } else {
       // "Ďalší rovnaký": carry the hose description (type, manufacturer,
       // length, year); the pressures, location and result always start
@@ -98,6 +119,13 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
   }
 
   function isPristine() {
+    // A staged or removed photo is a change too; only saveItemWithPhotos()
+    // commits it, so the shortcut must not skip the save.
+    if (photos.dirty) return false;
+    // An existing item: nothing to save only while nothing was changed.
+    if (initialItem) {
+      return sameFormValues(tsHadicValues(initialItem.fields as Partial<TsHadicItemFields>), { hoseType, location, manufacturer, workingPressure, testPressure, length, yearOfManufacture, result, notes });
+    }
     return !hoseType && !location && !manufacturer && !workingPressure &&
       !testPressure && !length && !yearOfManufacture && !notes &&
       result === 'vyhovuje';
@@ -111,7 +139,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
 
   async function handleSubmit(
     e: FormEvent,
-    action: 'save-and-next' | 'save-and-summary',
+    action: SubmitAction,
     duplicate = false,
   ) {
     e.preventDefault();
@@ -133,6 +161,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
     const year = Number(yearOfManufacture);
     if (yearOfManufacture && (!Number.isInteger(year) || year < 1900 || year > new Date().getFullYear()))
       errs.yearOfManufacture = 'Zadaj platný rok výroby.';
+    if (!result) errs.result = 'Vyber výsledok.';
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
     setFieldErrors({});
     setApiError(null);
@@ -146,7 +175,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
         test_pressure:       tp,
         length:              len,
         year_of_manufacture: yearOfManufacture ? year : null,
-        result,
+        result: result as PassFailResult,
         notes: notes.trim() || null,
       };
       const saved = await saveItemWithPhotos({
@@ -198,7 +227,7 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
 
         <Field label="Výrobca" required error={fieldErrors.manufacturer}>
           {(p) => (
-            <AutocompleteInput {...p} required field="manufacturer" leftIcon={<Building2 className="size-4" />}
+            <AutocompleteInput {...p} required field="manufacturer" leftIcon={<Building className="size-4" />}
               value={manufacturer} onChange={(v) => { setManufacturer(v); clearErr('manufacturer'); }}
               placeholder="PYROSTOP s.r.o." />
           )}
@@ -242,11 +271,11 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
           </Field>
         </div>
 
-        <Field label="Výsledok skúšky" required>
+        <Field label="Výsledok skúšky" required error={fieldErrors.result}>
           {() => (
             <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Výsledok skúšky">
               {(['vyhovuje', 'nevyhovuje'] as const).map((r) => (
-                <ResultButton key={r} value={r} active={result === r} onClick={() => setResult(r)} />
+                <ResultButton key={r} value={r} active={result === r} onClick={() => { setResult(r); setFieldErrors((prev) => { const n = { ...prev }; delete n.result; return n; }); }} />
               ))}
             </div>
           )}
@@ -254,14 +283,10 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
 
         <Field label="Poznámky / závady" hint="Voliteľné — len ak sa niečo zistí.">
           {(p) => (
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-3 text-ink-400">
-                <NotebookPen className="size-4" />
-              </span>
-              <textarea id={p.id} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
-                placeholder="Mikrotrhlinky pri spojke, výmena celej hadice odporúčaná."
-                className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-10 pr-3 text-sm text-ink-800 placeholder:text-ink-400 transition-colors duration-150 hover:border-ink-300 focus:border-firol-400 focus:outline-none focus:ring-2 focus:ring-firol-200" />
-            </div>
+            <Textarea id={p.id} rows={3} clearable
+              leftIcon={<NotebookPen className="size-4" />}
+              value={notes} onValueChange={setNotes}
+              placeholder="Mikrotrhlinky pri spojke, výmena celej hadice odporúčaná." />
           )}
         </Field>
 
@@ -278,17 +303,21 @@ function TsHadicStep2Form({ inspectionId, facilityId, initialItem, csrfToken, on
           </p>
         )}
 
-        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <Button type="button" variant="secondary" onClick={handleGoToSummary}
-            loading={submitting} leftIcon={<ListChecks className="size-4" />}>
+            loading={submitting} disabled={photos.processing} leftIcon={<ListChecks className="size-4" />}>
             Uložiť a prejsť na súhrn
           </Button>
           <Button type="button" variant="secondary" onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next', true)}
-            loading={submitting} leftIcon={<CopyPlus className="size-4" />}
+            loading={submitting} disabled={photos.processing} leftIcon={<CopyPlus className="size-4" />}
             title="Uloží a predvyplní ďalšiu hadicu rovnakým popisom (namerané tlaky a umiestnenie ostanú prázdne).">
             Ďalšia rovnaká
           </Button>
-          <Button type="submit" loading={submitting}
+          {editing && hasNextItem && (
+            <NextRecordedButton loading={submitting} disabled={photos.processing}
+              onClick={(e) => handleSubmit(e as unknown as FormEvent, 'save-and-next-recorded')} />
+          )}
+          <Button type="submit" loading={submitting} disabled={photos.processing}
             rightIcon={editing ? <Save className="size-4" /> : <ArrowRight className="size-4" />}>
             {editing ? 'Uložiť zmeny a ďalší' : 'Uložiť a ďalšia hadica'}
           </Button>

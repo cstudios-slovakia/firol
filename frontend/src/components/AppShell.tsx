@@ -1,7 +1,7 @@
 import { Link, Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
     AlertTriangle,
-    Building2,
+    Building,
     CalendarClock,
     ChartNoAxesGantt,
     CreditCard,
@@ -19,7 +19,8 @@ import { Billing } from "@/api/billing";
 import { ApiError } from "@/lib/api";
 import { offlineMessage } from "@/lib/offline";
 import { useToast } from "@/lib/toast";
-import { periodPriceLabel, usePricing } from "@/lib/pricing";
+import { useCertMissingSyncToast, warmCertProfile } from "@/lib/certMissing";
+import { chargeLabel, formatCents, periodPriceLabel, usePricing } from "@/lib/pricing";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { OfflineIndicator } from "./OfflineIndicator";
 import { AuroraBackground } from "./AuroraBackground";
@@ -94,8 +95,8 @@ const TOP_TABS = [
     },
     {
         to: "/companies",
-        label: "Firmy",
-        icon: Building2,
+        label: "Klienti",
+        icon: Building,
         activeColor: "text-blue-600",
         activeBg: "bg-blue-50 shadow-[inset_0_0_0_1px_theme(colors.blue.100)]",
         iconBg: "bg-blue-100",
@@ -189,10 +190,18 @@ const MOBILE_MORE_TABS: Tab[] = [
 ];
 
 export function AppShell() {
-    const { logout } = useAuth();
+    const { logout, activeAccountId } = useAuth();
     const toast = useToast();
     const location = useLocation();
     const navigate = useNavigate();
+
+    // A sync refused for a missing číslo oprávnenia gets the guided toast,
+    // wherever the technician happens to be when the outbox drains.
+    useCertMissingSyncToast();
+    // Keep the profile's `can_create` verdict cached for offline úkony.
+    useEffect(() => {
+        if (activeAccountId !== null) warmCertProfile();
+    }, [activeAccountId]);
 
     // Logout hits the server (POST /api/auth/logout) and isn't queueable, so
     // offline the request just rejects and nothing visible happens. Guard it
@@ -241,31 +250,37 @@ export function AppShell() {
     }, []);
 
     return (
-        <div className="bg-app relative min-h-screen pb-20 sm:pb-0">
+        // pb-36 on a phone: room for the bottom tab bar (80 px) and the
+        // „Spätná väzba" tab above it (bottom-24, ~40 px tall), so the last
+        // button of a page can be scrolled clear of both.
+        <div className="bg-app relative min-h-screen pb-36 sm:pb-0">
             <AuroraBackground />
             <div ref={topBarRef} className="sticky top-0 z-20">
                 <SubscriptionBanner />
+                <PaymentFailedBanner />
                 <TrialBanner />
                 <header className="border-b border-ink-100/80 bg-white/80 backdrop-blur">
-                    <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
+                    <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
                         <Link
                             to="/"
                             aria-label="Domov"
-                            className="group flex items-center gap-2.5 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
+                            className="group flex shrink-0 items-center gap-2.5 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
                         >
                             <BrandMark className="size-9 text-firol-600 transition-transform group-hover:scale-105" />
                             <span className="font-bold tracking-tight text-ink-900 transition-colors group-hover:text-firol-700">
                                 PO<span className="text-firol-600">app</span>
                             </span>
                         </Link>
-                        <div className="flex items-center gap-2">
+                        {/* min-w-0: at 360 px the account card gives way (truncates) so the
+                            Offline pill and the logout button stay on screen. */}
+                        <div className="flex min-w-0 items-center gap-2">
                             <OfflineIndicator />
                             <AccountSwitcher />
                             <button
                                 type="button"
                                 onClick={handleLogout}
                                 aria-label="Odhlásiť"
-                                className="grid size-9 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700"
+                                className="grid size-9 shrink-0 place-items-center rounded-2xl text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700"
                             >
                                 <LogOut className="size-4" />
                             </button>
@@ -298,7 +313,7 @@ export function AppShell() {
  * until Phase 6b wires up Stripe Checkout.
  */
 function SubscriptionBanner() {
-    const { accounts, activeAccountId, csrfToken, isAdmin } = useAuth();
+    const { accounts, activeAccountId, csrfToken, isAdmin, user } = useAuth();
     const toast = useToast();
     const navigate = useNavigate();
     const [busy, setBusy] = useState(false);
@@ -325,13 +340,23 @@ function SubscriptionBanner() {
         year: "numeric",
     });
 
+    // Only the main user may pay (the billing endpoints answer 403 to
+    // anyone else). A subscription whose renewal failed is paid through the
+    // portal — a new checkout would start a second subscription.
+    const isMainUser = !!user && user.id === account.main_user_id;
+    const unpaid =
+        account.subscription_state === "past_due" ||
+        account.subscription_state === "unpaid";
+
     async function onPay() {
         setBusy(true);
         try {
-            const res = await Billing.checkout(
-                account?.billing_period ?? "monthly",
-                csrfToken,
-            );
+            const res = unpaid
+                ? await Billing.portal(csrfToken)
+                : await Billing.checkout(
+                      account?.billing_period ?? "monthly",
+                      csrfToken,
+                  );
             window.location.assign(res.url);
         } catch (err) {
             if (err instanceof ApiError && err.status === 422) {
@@ -355,22 +380,119 @@ function SubscriptionBanner() {
                     <AlertTriangle className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
-                    <p className="font-semibold">Predplatné vypršalo {human}</p>
+                    {unpaid ? (
+                        <>
+                            <p className="font-semibold">
+                                Platba predplatného nebola uhradená
+                                {account.payment_failed
+                                    ? ` (${formatCents(account.payment_failed.amount_cents)} s DPH)`
+                                    : ""}
+                            </p>
+                            <p className="text-xs opacity-80">
+                                Účet je od {readOnlyHuman(account.payment_failed?.read_only_from) ?? human} len na čítanie —
+                                nové kontroly, školenia ani úpravy nie sú možné. Po zaplatení
+                                sa plný prístup obnoví hneď.
+                                {!isMainUser && " Platbu uhradí hlavný používateľ účtu."}
+                            </p>
+                        </>
+                    ) : (
+                        <>
+                            <p className="font-semibold">Predplatné vypršalo {human}</p>
+                            <p className="text-xs opacity-80">
+                                Účet je v režime len na čítanie — nové kontroly,
+                                školenia ani úpravy nie sú možné, kým si neobnovíš
+                                predplatné.
+                                {!isMainUser && " Predplatné obnoví hlavný používateľ účtu."}
+                            </p>
+                        </>
+                    )}
+                </div>
+                {isMainUser && (
+                    <button
+                        type="button"
+                        onClick={onPay}
+                        disabled={busy}
+                        className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-status-bad)] px-3 py-2 text-xs font-semibold text-white shadow transition-opacity hover:opacity-90 disabled:opacity-60"
+                    >
+                        <CreditCard className="size-4" />
+                        {busy ? "Otváram Stripe…" : "Zaplatiť"}
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+}
+
+/** "3. decembra 2026" from a Y-m-d date, or null. */
+function readOnlyHuman(ymd: string | null | undefined): string | null {
+    if (!ymd) return null;
+    const d = new Date(`${ymd}T00:00:00`);
+    return Number.isNaN(d.getTime())
+        ? null
+        : d.toLocaleDateString("sk-SK", { day: "numeric", month: "long", year: "numeric" });
+}
+
+/**
+ * A renewal whose payment failed, while the account is still fully usable
+ * (the grace period, PAYMENT_GRACE_DAYS on the server): every member sees
+ * it with the day the account becomes read-only; the main user gets
+ * „Zaplatiť" (the Stripe portal — card change and paying the open invoice).
+ * After the grace period SubscriptionBanner takes over (read-only).
+ */
+function PaymentFailedBanner() {
+    const { accounts, activeAccountId, csrfToken, isAdmin, user } = useAuth();
+    const toast = useToast();
+    const [busy, setBusy] = useState(false);
+
+    const account = accounts.find((a) => a.id === activeAccountId);
+    if (!account || isAdmin || account.admin_owned) return null;
+    const failed = account.payment_failed;
+    if (!failed) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const readOnly = new Date(`${failed.read_only_from}T00:00:00`);
+    if (Number.isNaN(readOnly.getTime()) || readOnly <= today) return null; // read-only: SubscriptionBanner
+
+    const isMainUser = !!user && user.id === account.main_user_id;
+
+    async function onPay() {
+        setBusy(true);
+        try {
+            const res = await Billing.portal(csrfToken);
+            window.location.assign(res.url);
+        } catch (err) {
+            toast.error(offlineMessage(err, "Platobný portál sa nepodarilo otvoriť."));
+            setBusy(false);
+        }
+    }
+
+    return (
+        <div className="border-b border-amber-300/60 bg-amber-50">
+            <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:gap-3">
+                <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-white/70">
+                    <AlertTriangle className="size-4 text-amber-600" />
+                </span>
+                <div className="min-w-0 flex-1">
+                    <p className="font-semibold">
+                        Platba predplatného ({formatCents(failed.amount_cents)} s DPH) sa nepodarila
+                    </p>
                     <p className="text-xs opacity-80">
-                        Účet je v režime len na čítanie — nové kontroly,
-                        školenia ani úpravy nie sú možné, kým si neobnovíš
-                        predplatné.
+                        Aplikáciu môžeš plne používať do {readOnlyHuman(failed.read_only_from)}
+                        {" "}— potom bude len na čítanie, kým sa platba neuhradí.
+                        {!isMainUser && " Platbu uhradí hlavný používateľ účtu."}
                     </p>
                 </div>
-                <button
-                    type="button"
-                    onClick={onPay}
-                    disabled={busy}
-                    className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-status-bad)] px-3 py-2 text-xs font-semibold text-white shadow transition-opacity hover:opacity-90 disabled:opacity-60"
-                >
-                    <CreditCard className="size-4" />
-                    {busy ? "Otváram Stripe…" : "Zaplatiť"}
-                </button>
+                {isMainUser && (
+                    <button
+                        type="button"
+                        onClick={onPay}
+                        disabled={busy}
+                        className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white shadow transition-all duration-300 hover:bg-amber-700 active:scale-[0.98] disabled:opacity-60"
+                    >
+                        <CreditCard className="size-4" />
+                        {busy ? "Otváram Stripe…" : "Zaplatiť"}
+                    </button>
+                )}
             </div>
         </div>
     );
@@ -384,7 +506,7 @@ function SubscriptionBanner() {
  *  - anything else → no banner (active sub or expired SubscriptionBanner takes over)
  */
 function TrialBanner() {
-    const { accounts, activeAccountId, csrfToken, isAdmin } = useAuth();
+    const { accounts, activeAccountId, csrfToken, isAdmin, user } = useAuth();
     const toast = useToast();
     const navigate = useNavigate();
     const pricing = usePricing();
@@ -412,10 +534,17 @@ function TrialBanner() {
         month: "long",
     });
 
-    const periodPrice = periodPriceLabel(
-        pricing,
-        account.billing_period === "yearly" ? "yearly" : "monthly",
-    );
+    // The next charge with the extra technicians at their Stripe prices;
+    // the price list only while no subscription exists yet.
+    const periodWord = account.billing_period === "yearly" ? "rok" : "mesiac";
+    const periodPrice =
+        account.next_charge_cents !== null
+            ? `${chargeLabel(account.next_charge_cents, pricing?.vatPercent ?? 23)} / ${periodWord}${account.next_charge_before_discount ? ", pred zľavou" : ""}`
+            : periodPriceLabel(
+                  pricing,
+                  account.billing_period === "yearly" ? "yearly" : "monthly",
+              );
+    const isMainUser = !!user && user.id === account.main_user_id;
 
     const isTrialPaid = state === "trial_paid";
 
@@ -464,7 +593,7 @@ function TrialBanner() {
                     >
                         Spravovať predplatné
                     </button>
-                ) : (
+                ) : isMainUser ? (
                     <button
                         type="button"
                         onClick={onPay}
@@ -472,7 +601,7 @@ function TrialBanner() {
                     >
                         Predplatiť
                     </button>
-                )}
+                ) : null}
             </div>
         </div>
     );

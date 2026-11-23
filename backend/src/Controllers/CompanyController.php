@@ -9,10 +9,13 @@ use Firol\Auth\Csrf;
 use Firol\Auth\MemberRights;
 use Firol\Auth\Tenant;
 use Firol\Db;
+use Firol\Documents\BookNumber;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Support\Address;
 use Firol\Support\ClientArchive;
+use Firol\Support\ClientKind;
+use Firol\Support\InspectionCoverage;
 use Firol\Support\Periodicity;
 use PDO;
 
@@ -32,7 +35,7 @@ final class CompanyController
         // tenant via the account_id condition on the parent query.
         // Admins get all companies across all accounts (no tenant filter).
         if ($isAdmin) {
-            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver, c.billing_mode,
+            $sql = 'SELECT c.id, c.name, c.client_type, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver, c.billing_mode,
                            c.archived_at, c.archived_reason,
                            c.account_id,
                            a.invoice_company_name AS account_name,
@@ -49,7 +52,7 @@ final class CompanyController
                     WHERE  1 = 1';
             $params = [];
         } else {
-            $sql = 'SELECT c.id, c.name, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver, c.billing_mode,
+            $sql = 'SELECT c.id, c.name, c.client_type, c.ico, c.street, c.postal_code, c.city, c.contact, c.contact_email, c.approver, c.billing_mode,
                            c.archived_at, c.archived_reason,
                            (SELECT COUNT(*) FROM facilities f
                              WHERE f.company_id = c.id AND f.archived_at IS NULL) AS facilities_count,
@@ -128,19 +131,27 @@ final class CompanyController
         // too: since block 1 a period can be days or weeks, not only months.
         // The window function picks the most recent inspection per
         // facility+type.
+        // A požiarna kniha entry counts at each prevádzka it covers, with that
+        // prevádzka's periodicity; an entry that moves no term (spôsob 2, or an
+        // old plain entry) is not a prehliadka and does not count.
         $defStmt = Db::pdo()->prepare(
             'SELECT facility_id, type, periodicity_value, periodicity_unit
              FROM (
-                 SELECT i.facility_id, i.type, i.periodicity_value, i.periodicity_unit,
+                 SELECT ' . InspectionCoverage::facility() . ' AS facility_id,
+                        IF(i.type = "poziarna_kniha", "preventivna_prehliadka", i.type) AS type,
+                        ' . InspectionCoverage::periodicityValue() . ' AS periodicity_value,
+                        ' . InspectionCoverage::periodicityUnit() . ' AS periodicity_unit,
                         ROW_NUMBER() OVER (
-                            PARTITION BY i.facility_id, i.type
+                            PARTITION BY ' . InspectionCoverage::facility() . ', IF(i.type = "poziarna_kniha", "preventivna_prehliadka", i.type)
                             ORDER BY i.executed_on DESC, i.id DESC
                         ) AS rn
                  FROM   inspections i
-                 JOIN   facilities  f ON f.id = i.facility_id
+                 ' . InspectionCoverage::join() . '
+                 JOIN   facilities  f ON f.id = ' . InspectionCoverage::facility() . '
                  WHERE  f.company_id = ?
                    AND  i.account_id = ?
                    AND  i.archived_at IS NULL
+                   AND  NOT (i.type = "poziarna_kniha" AND i.is_preventive_inspection = 0)
              ) t
              WHERE t.rn = 1'
         );
@@ -201,12 +212,13 @@ final class CompanyController
         [$name, $ico, $addr, $contact, $contactEmail, $approver] = self::readBody($req);
         // Chapter 22 — validated up front so a bad value never half-saves the firm.
         $billingMode = self::readBillingMode($req);
+        $clientType = self::readClientType($req) ?? ClientKind::FIRMA;
 
         $stmt = Db::pdo()->prepare(
-            'INSERT INTO companies (account_id, name, ico, street, postal_code, city, contact, contact_email, approver)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO companies (account_id, name, client_type, ico, street, postal_code, city, contact, contact_email, approver)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        $stmt->execute([$accountId, $name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $contactEmail, $approver]);
+        $stmt->execute([$accountId, $name, $clientType, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $contactEmail, $approver]);
         $id = (int) Db::pdo()->lastInsertId();
 
         // Chapter 22 — absent means the column default (na faktúru).
@@ -214,6 +226,11 @@ final class CompanyController
             Db::pdo()->prepare('UPDATE companies SET billing_mode = ? WHERE id = ?')
                 ->execute([$billingMode, $id]);
         }
+
+        // The code of its požiarna kniha numbers (PK-<KÓD>-NNN, customer's
+        // answer 3 of 18. 11. 2026) is proposed at once; the user may change it
+        // until the first entry is issued.
+        BookNumber::assignProposal($accountId, $id, $name);
 
         Response::json(['company' => self::shape(self::findOrFail($accountId, $id))], 201);
     }
@@ -228,15 +245,17 @@ final class CompanyController
         $existing = self::findOrFail($isAdmin ? null : $accountId, $id);
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
 
-        [$name, $ico, $addr, $contact, $contactEmail, $approver] = self::readBody($req);
+        [$name, $ico, $addr, $contact, $contactEmail, $approver] = self::readBody($req, $existing['ico']);
         // Chapter 22 — validated up front so a bad value never half-saves the firm.
         $billingMode = self::readBillingMode($req);
+        // Absent keeps the current type (an older offline client replays the edit without it).
+        $clientType = self::readClientType($req) ?? (string) $existing['client_type'];
 
         $stmt = Db::pdo()->prepare(
-            'UPDATE companies SET name = ?, ico = ?, street = ?, postal_code = ?, city = ?, contact = ?, contact_email = ?, approver = ?
+            'UPDATE companies SET name = ?, client_type = ?, ico = ?, street = ?, postal_code = ?, city = ?, contact = ?, contact_email = ?, approver = ?
              WHERE  id = ? AND account_id = ?'
         );
-        $stmt->execute([$name, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $contactEmail, $approver, $id, $scopeAccountId]);
+        $stmt->execute([$name, $clientType, $ico, $addr['street'], $addr['postal_code'], $addr['city'], $contact, $contactEmail, $approver, $id, $scopeAccountId]);
 
         // Chapter 22 — absent keeps the current setting (older offline
         // clients replay the edit without it). Changing it affects only úkony
@@ -267,7 +286,7 @@ final class CompanyController
         // Archiving sits under the members' switch (chapter 1.6, spec 25).
         MemberRights::requireDelete($scopeAccountId, MemberRights::ARCHIVE_DENIED);
         if ($existing['archived_at'] !== null) {
-            Response::error('Firma je už archivovaná.', 409);
+            Response::error(ClientKind::companyAlreadyArchived((string) $existing['client_type']), 409);
         }
 
         ClientArchive::archiveCompany($scopeAccountId, $id, ClientArchive::readReason($req));
@@ -290,7 +309,7 @@ final class CompanyController
         $scopeAccountId = $isAdmin ? (int) $existing['account_id'] : $accountId;
         MemberRights::requireDelete($scopeAccountId, MemberRights::ARCHIVE_DENIED);
         if ($existing['archived_at'] === null) {
-            Response::error('Firma nie je archivovaná.', 409);
+            Response::error(ClientKind::companyNotArchived((string) $existing['client_type']), 409);
         }
 
         ClientArchive::restoreCompany($scopeAccountId, $id);
@@ -299,12 +318,14 @@ final class CompanyController
     }
 
     /**
+     * @param ?string $storedIco the IČO already on the firm (update only), so an
+     *                           untouched legacy value is not rejected
      * @return array{
      *   0:string, 1:?string,
      *   2:array{street:?string,postal_code:?string,city:?string}, 3:?string, 4:?string, 5:?string
      * }
      */
-    private static function readBody(Request $req): array
+    private static function readBody(Request $req, ?string $storedIco = null): array
     {
         $name    = $req->jsonString('name');
         $ico     = $req->jsonString('ico');
@@ -318,14 +339,17 @@ final class CompanyController
         $approver = $req->jsonString('approver');
 
         if ($name === null || $name === '') {
-            Response::error('Zadaj názov firmy.', 422);
+            Response::error(ClientKind::companyNameRequired((string) $req->jsonString('client_type')), 422);
         }
         if ($ico !== null) {
             $ico = preg_replace('/\s+/', '', $ico);
             if ($ico === '') {
                 $ico = null;
-            } elseif (!preg_match('/^\d{1,12}$/', $ico)) {
-                Response::error('IČO môže obsahovať len číslice.', 422);
+            } elseif (!preg_match('/^\d{8}$/', $ico) && $ico !== preg_replace('/\s+/', '', (string) $storedIco)) {
+                // Spec 4 — optional, but exactly 8 digits when filled. A stored
+                // legacy value is only re-checked when the user changed it. The
+                // `field` key lets the form show the message at the IČO field.
+                Response::error('IČO musí mať presne 8 číslic.', 422, ['field' => 'ico']);
             }
         }
 
@@ -353,6 +377,21 @@ final class CompanyController
      * The firm's default režim fakturácie (chapter 22) — paušál or na faktúru;
      * null when the body does not carry it.
      */
+    /**
+     * Spec 3.1 — firma or bytové družstvo. Null when the body does not carry it.
+     */
+    private static function readClientType(Request $req): ?string
+    {
+        $type = $req->jsonString('client_type');
+        if ($type === null || $type === '') {
+            return null;
+        }
+        if (!ClientKind::isValid($type)) {
+            Response::error('Neplatný druh klienta.', 422);
+        }
+        return $type;
+    }
+
     private static function readBillingMode(Request $req): ?string
     {
         $mode = $req->jsonString('billing_mode');
@@ -360,7 +399,7 @@ final class CompanyController
             return null;
         }
         if (!in_array($mode, \Firol\Support\Invoicing::COMPANY_MODES, true)) {
-            Response::error('Neplatný režim fakturácie firmy.', 422);
+            Response::error('Neplatný režim fakturácie klienta.', 422);
         }
         return $mode;
     }
@@ -373,8 +412,8 @@ final class CompanyController
      */
     private static function findOrFail(?int $accountId, int $id, bool $includeArchived = false): array
     {
-        $sql = 'SELECT id, account_id, name, ico, street, postal_code, city, contact, contact_email, approver, billing_mode,
-                       archived_at, archived_reason, created_at
+        $sql = 'SELECT id, account_id, name, client_type, ico, street, postal_code, city, contact, contact_email, approver, billing_mode,
+                       book_code, book_last_seq, archived_at, archived_reason, created_at
                 FROM   companies
                 WHERE  id = ?';
         $params = [$id];
@@ -382,14 +421,16 @@ final class CompanyController
             $sql .= ' AND account_id = ?';
             $params[] = $accountId;
         }
-        if (!$includeArchived) {
-            $sql .= ' AND archived_at IS NULL';
-        }
         $stmt = Db::pdo()->prepare($sql);
         $stmt->execute($params);
         $row = $stmt->fetch();
+        // In the client's words (round 7): an archived one is found and has a
+        // kind; an id that names nothing has none, so it is „klient".
         if (!$row) {
-            Response::error('Firma sa nenašla.', 404);
+            Response::error('Klient sa nenašiel.', 404);
+        }
+        if (!$includeArchived && $row['archived_at'] !== null) {
+            Response::error(ClientKind::isBytovyDom((string) $row['client_type']) ? 'Bytové družstvo sa nenašlo.' : 'Firma sa nenašla.', 404);
         }
         return $row;
     }
@@ -415,6 +456,81 @@ final class CompanyController
             $row['address'] = Address::format($row['street'] ?? null, $row['postal_code'] ?? null, $row['city'] ?? null);
         }
         $row['id'] = (int) $row['id'];
+        // Customer's answer 3 of 18. 11. 2026 — the code of the firma's
+        // požiarna kniha numbers: locked once an entry took a number (also an
+        // entry a merge restore brought back with its number — round 7); a
+        // firma without one shows what the first issue would propose.
+        if (array_key_exists('book_last_seq', $row)) {
+            $row['book_last_seq'] = (int) $row['book_last_seq'];
+            $row['book_code_locked'] = isset($row['account_id'])
+                ? BookNumber::isCodeLocked(Db::pdo(), (int) $row['account_id'], $row['id'], $row['book_last_seq'])
+                : $row['book_last_seq'] > 0;
+            $row['book_code_suggested'] = ($row['book_code'] ?? null) === null && isset($row['account_id'])
+                ? BookNumber::propose((int) $row['account_id'], (string) $row['name'], $row['id'])
+                : null;
+        }
         return $row;
+    }
+
+    /**
+     * POST /api/companies/{id}/book-code  { code: string }
+     *
+     * Sets the code of the firma's požiarna kniha numbers (PK-<KÓD>-NNN):
+     * 2–4 letters or digits with at least one letter, upper case, unique within
+     * the account, and only until the firma's first entry is issued.
+     */
+    public static function updateBookCode(Request $req, array $params): void
+    {
+        Csrf::require($req);
+        $accountId = Tenant::currentAccountId();
+        $isAdmin   = Admin::isAdmin(Tenant::currentUserId());
+        $id        = (int) $params['id'];
+
+        // An archived firma is read-only — 404 here as in update() (round 6).
+        $existing = self::findOrFail($isAdmin ? null : $accountId, $id);
+        $scopeAccountId = (int) $existing['account_id'];
+        $clientType = (string) $existing['client_type'];
+
+        try {
+            $code = BookNumber::normalizeCode($req->json()['code'] ?? null, $clientType);
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422);
+        }
+
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            // Under the firma's row lock: an issue running at the same moment
+            // either sees the new code or has already locked it.
+            $lock = $pdo->prepare('SELECT book_code, book_last_seq FROM companies WHERE id = ? AND account_id = ? FOR UPDATE');
+            $lock->execute([$id, $scopeAccountId]);
+            $row = $lock->fetch(PDO::FETCH_ASSOC);
+            if ($row['book_code'] !== $code && BookNumber::isCodeLocked($pdo, $scopeAccountId, $id, (int) ($row['book_last_seq'] ?? 0))) {
+                $pdo->rollBack();
+                Response::error(ClientKind::bookCodeLocked($clientType), 409);
+            }
+            // Taken by another firma, or by numbers of its series already in the
+            // account (a merge restore — round 6).
+            $holder = $pdo->prepare('SELECT client_type FROM companies WHERE account_id = ? AND book_code = ? AND id <> ?');
+            $holder->execute([$scopeAccountId, $code, $id]);
+            $holderType = $holder->fetchColumn();
+            if ($holderType !== false || BookNumber::isCodeTaken($scopeAccountId, $code, $id)) {
+                $pdo->rollBack();
+                Response::error(ClientKind::bookCodeTaken($code, $holderType !== false ? (string) $holderType : null), 422);
+            }
+            $pdo->prepare('UPDATE companies SET book_code = ? WHERE id = ? AND account_id = ?')
+                ->execute([$code, $id, $scopeAccountId]);
+            $pdo->commit();
+        } catch (\PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if (($e->errorInfo[1] ?? null) === 1062) {
+                Response::error(ClientKind::bookCodeTaken($code, ClientKind::FIRMA), 422);
+            }
+            throw $e;
+        }
+
+        Response::json(['company' => self::shape(self::findOrFail($isAdmin ? null : $accountId, $id))]);
     }
 }

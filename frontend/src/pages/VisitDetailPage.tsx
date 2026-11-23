@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, ArrowRight, Building2, CalendarDays, Check, CheckCircle2, FileSignature,
+  ArrowLeft, ArrowRight, Building, CalendarDays, Check, CheckCircle2, FileSignature,
   FileText, Info, Plus, Route, Send, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { documentDownloadUrl } from '@/api/inspections';
 import { Visits, type Visit, type VisitType } from '@/api/visits';
 import { Companies } from '@/api/companies';
+import { Kniha } from '@/api/kniha';
 import { ApiError } from '@/lib/api';
 import { offlineMessage } from '@/lib/offline';
 import { useToast } from '@/lib/toast';
+import { useRevalidateOnReturn } from '@/lib/useRevalidateOnReturn';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -63,6 +65,8 @@ export function VisitDetailPage() {
     load()
       .then(async (v) => {
         if (cancelled) return;
+        // Warms what a požiarna kniha entry of the visit starts from (offline start).
+        void Kniha.context(v.company_id).catch(() => undefined);
         // The client's recorded address, prefilled as the recipient of the
         // bulk send so the common case needs no typing.
         const company = await Companies.show(v.company_id).catch(() => null);
@@ -77,6 +81,10 @@ export function VisitDetailPage() {
       cancelled = true;
     };
   }, [load]);
+
+  // Another technician may have started or finished an úkon of this visit.
+  // Not while "generovať všetky" runs — its own response sets the visit.
+  useRevalidateOnReturn(() => (generating ? undefined : load()));
 
   /**
    * Open the úkon for a planned type: continue the one already started, or
@@ -172,7 +180,7 @@ export function VisitDetailPage() {
           <div className="min-w-0">
             <h1 className="text-xl font-semibold tracking-tight text-ink-900">Návšteva</h1>
             <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
-              <Building2 className="size-3" />
+              <Building className="size-3" />
               <Link to={`/companies/${visit.company_id}`} className="hover:text-firol-600">
                 {visit.company_name}
               </Link>
@@ -304,6 +312,7 @@ export function VisitDetailPage() {
         onClose={() => setSendOpen(false)}
         companyId={visit.company_id}
         companyName={visit.company_name}
+        clientType={visit.company_client_type}
         defaultRecipient={companyEmail}
         preselectDocumentIds={documentIds}
         visitId={visit.id}
@@ -314,6 +323,7 @@ export function VisitDetailPage() {
         onClose={() => setConfirmationOpen(false)}
         visitId={visit.id}
         companyName={visit.company_name}
+        clientType={visit.company_client_type}
         facilityName={visit.facility_name}
         date={visit.visit_date}
         actCount={

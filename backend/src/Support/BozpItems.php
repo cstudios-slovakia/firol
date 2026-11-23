@@ -61,6 +61,47 @@ final class BozpItems
     }
 
     /**
+     * Names of the fields collected while {@see self::missingFields()} runs; null
+     * the rest of the time, when a problem throws on the spot.
+     *
+     * @var list<string>|null
+     */
+    private static ?array $problems = null;
+
+    /**
+     * The fields an existing row lacks to be complete — the rules of
+     * {@see self::validate()}, run in collect mode so one pass names every
+     * missing field (a concept from a prehliadka is held back until complete).
+     *
+     * @param array<string, mixed> $fields
+     * @return list<string> Slovak field names, [] when complete
+     */
+    public static function missingFields(string $type, array $fields): array
+    {
+        self::$problems = [];
+        $found = [];
+        try {
+            self::validate($type, $fields);
+        } catch (\InvalidArgumentException) {
+            // A malformed nedostatok list is not a missing field.
+        } finally {
+            $found = self::$problems ?? [];
+            self::$problems = null;
+        }
+        return array_values(array_unique($found));
+    }
+
+    private static function refuse(string $label, string $message, ?string $key = null): void
+    {
+        if (self::$problems !== null) {
+            self::$problems[] = $label;
+            return;
+        }
+        // The key travels with the refusal (round 6), as `field` of the 422.
+        throw $key !== null ? new FieldRefused($message, $key) : new \InvalidArgumentException($message);
+    }
+
+    /**
      * Validate one row off the wire and return its canonical fields.
      *
      * @param array<string, mixed> $body
@@ -155,12 +196,16 @@ final class BozpItems
     }
 
     /**
-     * Rows whose required assessment is still blank. Only reachable for rows
-     * carried over from last time (chapter 12 carries identification and
-     * leaves the verdict empty) — a row typed in fresh is refused by
-     * validate() before it is stored. Issuing a protocol that prints an empty
-     * výsledok over the technician's signature would claim a check nobody
-     * recorded, so generation waits for them.
+     * Rows whose required assessment is still blank — a row that never went
+     * through the item form: carried over from a source row without one (an
+     * Excel import, a draft carried before 18. 11. 2026, when chapter 12
+     * carried identification only and left the verdict empty), or a concept
+     * row. A row typed in fresh is refused by validate() before it is stored.
+     * Since the customer's answer of 18. 11. 2026 a carried row brings its
+     * result along, so for a draft with a recorded origin the completeness
+     * rule (CarryOver::checksCompleteness) refuses first. Issuing a protocol
+     * that prints an empty výsledok over the technician's signature would
+     * claim a check nobody recorded, so generation waits for them.
      *
      * @param list<array<string, mixed>> $items each with `fields`
      */
@@ -278,12 +323,12 @@ final class BozpItems
         $value = is_string($raw) ? trim($raw) : (is_int($raw) || is_float($raw) ? (string) $raw : '');
         if ($value === '') {
             if ($required) {
-                throw new \InvalidArgumentException('Vyplň pole „' . $label . '".');
+                self::refuse($label, 'Vyplň pole „' . $label . '".', $key);
             }
             return null;
         }
         if (mb_strlen($value) > $max) {
-            throw new \InvalidArgumentException('Pole „' . $label . '" môže mať najviac ' . $max . ' znakov.');
+            self::refuse($label, 'Pole „' . $label . '" môže mať najviac ' . $max . ' znakov.', $key);
         }
         return $value;
     }
@@ -296,7 +341,8 @@ final class BozpItems
     {
         $raw = $body[$key] ?? null;
         if (!is_string($raw) || !in_array($raw, $allowed, true)) {
-            throw new \InvalidArgumentException('Vyber pole „' . $label . '".');
+            self::refuse($label, 'Vyber pole „' . $label . '".', $key);
+            return '';
         }
         return $raw;
     }
@@ -312,7 +358,8 @@ final class BozpItems
             return null;
         }
         if (!is_string($raw) || !in_array($raw, $allowed, true)) {
-            throw new \InvalidArgumentException('Neplatná hodnota v poli „' . $label . '".');
+            self::refuse($label, 'Neplatná hodnota v poli „' . $label . '".', $key);
+            return null;
         }
         return $raw;
     }
@@ -326,11 +373,12 @@ final class BozpItems
         }
         if ($raw === null || $raw === '') {
             if ($required) {
-                throw new \InvalidArgumentException('Vyber pole „' . $label . '" (áno / nie).');
+                self::refuse($label, 'Vyber pole „' . $label . '" (áno / nie).', $key);
             }
             return null;
         }
-        throw new \InvalidArgumentException('Pole „' . $label . '" má hodnotu áno alebo nie.');
+        self::refuse($label, 'Pole „' . $label . '" má hodnotu áno alebo nie.', $key);
+        return null;
     }
 
     /** Rok výroby — optional; a ladder of unknown age is ordinary. */
@@ -344,7 +392,8 @@ final class BozpItems
             $raw = (int) $raw;
         }
         if (!is_int($raw) || $raw < 1900 || $raw > 2200) {
-            throw new \InvalidArgumentException('Rok výroby musí byť rok (napr. 2019).');
+            self::refuse('Rok výroby', 'Rok výroby musí byť rok (napr. 2019).', 'year');
+            return null;
         }
         return $raw;
     }

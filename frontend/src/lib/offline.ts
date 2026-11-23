@@ -3,7 +3,7 @@
  * keep their existing "ApiError | unknown" branching intact.
  *
  * `handleOfflineSave(err, toast)` returns true if it consumed the error
- * by showing a "uloží sa keď budeš online" toast — the caller should
+ * by showing a "uloží sa, keď budeš online" toast — the caller should
  * then proceed as if the save had succeeded. Returns false otherwise,
  * which means the caller's normal error path should run.
  */
@@ -12,7 +12,7 @@ import { db } from './db';
 
 type ToastLike = { success: (m: string) => void };
 
-const QUEUED_MESSAGE = 'Uloží sa keď budeš online';
+const QUEUED_MESSAGE = 'Uloží sa, keď budeš online';
 const OFFLINE_MESSAGE = 'Táto akcia vyžaduje pripojenie na internet.';
 
 export function handleOfflineSave(err: unknown, toast: ToastLike): boolean {

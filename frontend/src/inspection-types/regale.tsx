@@ -26,7 +26,9 @@ import type {
   ItemRowProps,
   StatsBarProps,
   Step2FormProps,
+  SubmitAction,
 } from './common';
+import { sameFormValues } from './common';
 
 /**
  * Kontrola regálov — block 2 / chapter 7, pattern `polozky`.
@@ -46,7 +48,7 @@ type RegalSeed = {
   capacity_marked: boolean | null; result: DisposalResult | null;
 };
 
-function RegaleStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved }: Step2FormProps) {
+function RegaleStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onSaved, hasNextItem }: Step2FormProps) {
   const editing = initialItem !== null;
   const itemId = initialItem?.id ?? null;
 
@@ -90,6 +92,22 @@ function RegaleStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
   }, [initialItem, inspectionId]);
 
   function isPristine() {
+    // A staged, removed or still-resizing photo is a change; only the save commits it.
+    if (photos.dirty) return false;
+    // An existing item: nothing to save only while nothing differs from what it
+    // opened with — also a carried item whose texts were cleared with the „X"
+    // (compare-to-initial, as in the fire forms; round 5 of the fix list).
+    if (initialItem) {
+      const f = initialItem.fields;
+      return sameFormValues(
+        {
+          label: str(f, 'label'), type: str(f, 'type'), capacity: str(f, 'capacity'), location: str(f, 'location'),
+          capacityMarked: boolOrNull(f, 'capacity_marked'), faults: str(f, 'faults'),
+          result: isDisposalResult(f.result) ? f.result : null,
+        },
+        { label, type, capacity, location, capacityMarked, faults, result },
+      ) && !defects.isDirty();
+    }
     return !label && !type && !capacity && !location && capacityMarked === null && !faults
       && result === null && photos.total === 0 && defects.rows.length === 0;
   }
@@ -105,7 +123,7 @@ function RegaleStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
     return errs;
   }
 
-  async function handleSubmit(e: FormEvent | React.SyntheticEvent, action: 'save-and-next' | 'save-and-summary', duplicate = false) {
+  async function handleSubmit(e: FormEvent | React.SyntheticEvent, action: SubmitAction, duplicate = false) {
     e.preventDefault();
     if (submitting) return;
     const errs = validate();
@@ -195,7 +213,7 @@ function RegaleStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
 
         <Field label="Zistené závady" hint="Nechaj prázdne, ak je regál v poriadku.">
           {(p) => (
-            <TextArea id={p.id} value={faults} onChange={setFaults} rows={2}
+            <TextArea id={p.id} value={faults} onChange={setFaults} rows={2} clearable
               placeholder="ohnutý stĺpik, poškodená pätka" />
           )}
         </Field>
@@ -211,6 +229,8 @@ function RegaleStep2Form({ inspectionId, facilityId, initialItem, csrfToken, onS
         <DefectsEditor state={defects} initialPhotos={initialItem?.photos} />
 
         <ItemFormFooter
+          busy={photos.processing || defects.processing}
+          onNextRecorded={hasNextItem ? (e) => handleSubmit(e, 'save-and-next-recorded') : undefined}
           editing={editing}
           submitting={submitting}
           apiError={apiError}

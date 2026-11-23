@@ -62,6 +62,9 @@ final class PersonList
         'Obsah školenia podľa prílohy — osnova školenia.',
     ];
 
+    /** Spec 8.3 — same limit as trainees.personal_number. */
+    public const MAX_PERSONAL_NUMBER = 32;
+
     /** Largest signature image accepted on one row (a PNG data URI). */
     private const MAX_SIGNATURE_BYTES = 200_000;
 
@@ -101,6 +104,9 @@ final class PersonList
 
         if ($type === self::SKOLENIE_BOZP) {
             $out['date'] = self::optionalDate($body, 'date', 'Dátum účastníka musí byť v tvare RRRR-MM-DD.');
+            // Spec 8.3: osobné číslo is optional; the protocol prints its column
+            // only when somebody on the list has one.
+            $out['personal_number'] = self::optionalString($body, 'personal_number', self::MAX_PERSONAL_NUMBER);
         } else {
             $time = self::optionalString($body, 'time', 5);
             if ($time !== null && !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time)) {
@@ -132,9 +138,10 @@ final class PersonList
 
     /**
      * Carry-over (chapter 12, and the person takeover of chapters 7, 8, 8.1):
-     * names and pracovné zaradenie only. Never a result, a time, a value or a
-     * signature — those are this test's observations, and a signature copied
-     * from last year would be a forgery.
+     * names and pracovné zaradenie only — plus the osobné číslo of an
+     * oboznámenie (spec 8.3: „prenáša sa pri prevzatí zoznamu"). Never a
+     * result, a time, a value or a signature — those are this test's
+     * observations, and a signature copied from last year would be a forgery.
      *
      * @param array<string, mixed> $fields
      * @return array<string, mixed>|null null when the row has no name to carry
@@ -149,6 +156,8 @@ final class PersonList
         $out = ['name' => $name, 'position' => $position];
         if ($type === self::SKOLENIE_BOZP) {
             $out['date'] = null;
+            $number = trim((string) ($fields['personal_number'] ?? ''));
+            $out['personal_number'] = $number !== '' ? mb_substr($number, 0, self::MAX_PERSONAL_NUMBER) : null;
         } else {
             $out['time'] = null;
             if ($type === self::DYCHOVA_SKUSKA) {

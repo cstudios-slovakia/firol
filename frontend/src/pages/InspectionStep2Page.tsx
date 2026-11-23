@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Building2, Lock, Warehouse } from 'lucide-react';
+import { ArrowLeft, Building, Lock, Warehouse } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import {
   INSPECTION_TYPE_LABELS,
@@ -73,10 +73,22 @@ export function InspectionStep2Page() {
     ? Math.max(1, (detail?.items.findIndex((it) => it.id === itemId) ?? -1) + 1)
     : totalItems + 1;
   const totalForHeader = editing ? totalItems : totalItems + 1;
+  // The item recorded after the one being edited (items come in position order),
+  // for „Uložiť a ďalší v poradí". Known before the save, so the step works the
+  // same when the save goes to the offline queue.
+  const nextItemId = useMemo(() => {
+    if (!detail || !editing) return null;
+    const idx = detail.items.findIndex((it) => it.id === itemId);
+    return idx >= 0 && idx + 1 < detail.items.length ? detail.items[idx + 1].id : null;
+  }, [detail, editing, itemId]);
 
   async function handleSaved(action: SubmitAction) {
     if (action === 'save-and-summary') {
       navigate(`/inspections/${inspectionId}`, { replace: true });
+      return;
+    }
+    if (action === 'save-and-next-recorded' && nextItemId !== null) {
+      navigate(`/inspections/${inspectionId}/items/${nextItemId}`, { replace: true });
       return;
     }
     // save-and-next: when editing, point at the create route so a fresh
@@ -170,7 +182,7 @@ export function InspectionStep2Page() {
             {INSPECTION_TYPE_LABELS[i.type]}
           </span>
           <span className="text-ink-300">·</span>
-          <Building2 className="size-3" />
+          <Building className="size-3" />
           {i.company_name}
           <span className="text-ink-300">·</span>
           <Warehouse className="size-3" />
@@ -188,8 +200,8 @@ export function InspectionStep2Page() {
         />
       )}
 
-      {/* Chapter 12 — the stav this device had last time, shown while the
-          technician enters this year's. It is never prefilled as the answer. */}
+      {/* Chapter 12 — the stav this device had last time (types that carry
+          identification only), shown while the technician enters this year's. */}
       {initialItem && previousStatusOf(initialItem.fields) && (
         <PreviousStatusBadge type={i.type} fields={initialItem.fields} className="self-start" />
       )}
@@ -198,10 +210,12 @@ export function InspectionStep2Page() {
         key={editing ? `edit-${itemId}` : `new-${detail.items.length}`}
         inspectionId={inspectionId}
         facilityId={i.facility_id}
+        clientType={i.company_client_type}
         initialItem={initialItem}
         csrfToken={csrfToken}
         onSaved={handleSaved}
         items={detail.items}
+        hasNextItem={nextItemId !== null}
       />
     </div>
   );

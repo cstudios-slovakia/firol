@@ -91,6 +91,16 @@ final class Admin
         return in_array(strtolower(trim($email)), self::adminEmails(), true);
     }
 
+    /**
+     * The ADMIN_EMAIL addresses — also where operator alerts go.
+     *
+     * @return list<string>
+     */
+    public static function envSeedEmails(): array
+    {
+        return self::adminEmails();
+    }
+
     /** @return list<string> */
     private static function adminEmails(): array
     {

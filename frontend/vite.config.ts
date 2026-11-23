@@ -90,6 +90,10 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
+      // Build output is not source. On Windows a watched folder cannot be
+      // renamed, which would break the swap of `npm run build:safe` while a
+      // dev server runs.
+      watch: { ignored: ['**/dist/**', '**/dist-next/**', '**/dist-prev/**'] },
       // Vite dev server proxuje /api požiadavky na PHP backend (nginx v Dockeri).
       proxy: {
         '/api': {
@@ -98,16 +102,24 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    // The dependency scan globs every **/*.html and skips only node_modules
+    // and build.outDir (Vite 6.4), so it crawled dist-next/ and dist-prev/ of
+    // `npm run build:safe` too. The app has one entry.
+    optimizeDeps: {
+      entries: ['index.html'],
+    },
     define: {
       __APP_VERSION__: JSON.stringify(APP_VERSION),
     },
     build: {
       outDir: 'dist',
-      // 'hidden' generates source maps without the //# sourceMappingURL
-      // pointer in the emitted JS, so error trackers (Sentry et al.) can
-      // still upload them but they aren't directly fetchable from the
-      // public bundle.
-      sourcemap: 'hidden',
+      // Source maps are opt-in: writing them is what pushes the build past the
+      // memory a small server allows (the host kills it while the bundle is
+      // written; without maps it fits in ~400 MB). VITE_BUILD_SOURCEMAP=1
+      // turns them on as 'hidden' — generated without the //# sourceMappingURL
+      // pointer, so an error tracker can upload them but the public bundle
+      // does not point at them.
+      sourcemap: env.VITE_BUILD_SOURCEMAP === '1' ? 'hidden' : false,
     },
   };
 });

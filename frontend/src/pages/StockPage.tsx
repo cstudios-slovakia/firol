@@ -50,6 +50,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Field } from '@/components/ui/Field';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { CLIENT_NEUTRAL } from '@/lib/clientKind';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import { StockIssueDialog } from '@/components/stock/StockIssueDialog';
 
@@ -771,16 +772,16 @@ function ItemPanel({
 
           {action === 'pouzite' && (
             <>
-              <Field label="Firma" hint="Voliteľné">
+              <Field label={CLIENT_NEUTRAL.singular} hint="Voliteľné">
                 {(p) => (
                   <Select
                     {...p}
                     value={companyId}
                     onChange={setCompanyId}
-                    placeholder="— bez firmy —"
+                    placeholder="— bez klienta —"
                     searchable
                     options={[
-                      { value: '', label: '— bez firmy —' },
+                      { value: '', label: '— bez klienta —' },
                       ...(companies ?? []).map((c) => ({
                         value: String(c.id),
                         label: c.name,

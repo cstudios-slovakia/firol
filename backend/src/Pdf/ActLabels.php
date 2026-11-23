@@ -19,11 +19,12 @@ final class ActLabels
         'hydranty'           => 'Kontrola požiarnych hydrantov',
         'ts_hadic'           => 'Tlaková skúška hadíc',
         'poziarna_kniha'     => 'Zápis do požiarnej knihy',
+        'preventivna_prehliadka' => 'Preventívna protipožiarna prehliadka',
         'pu_akcieschopnost'  => 'Kontrola akcieschopnosti požiarnych uzáverov',
         'pu_udrzba'          => 'Prevádzková údržba požiarnych uzáverov',
         'nudzove_osvetlenie' => 'Kontrola núdzového osvetlenia',
         // Block 2 — single-record BOZP úkony.
-        'kniha_bozp'         => 'Kontrola stavu BOZP (kniha kontrol BOZP)',
+        'kniha_bozp'         => 'Preventívna prehliadka BOZP',
         'pracovisko'         => 'Kontrola pracoviska a pracovného prostredia',
         'osamele_pracovisko' => 'Kontrola osamelých a odlúčených pracovísk',
         'fajcenie'           => 'Kontrola dodržiavania zákazu fajčenia',
@@ -37,7 +38,7 @@ final class ActLabels
         // Block 2 — BOZP úkony with a list of rows (Záznam o kontrole … titles).
         'oopp'                 => 'Kontrola osobných ochranných pracovných prostriedkov',
         'pracovne_prostriedky' => 'Kontrola pracovných prostriedkov',
-        'rebriky'              => 'Kontrola rebríkov',
+        'rebriky'              => 'Kontrola rebríkov (pracovné)',
         'regale'               => 'Kontrola regálov',
         'oznacenie'            => 'Kontrola bezpečnostného a zdravotného označenia',
     ];

@@ -27,8 +27,23 @@ use PHPMailer\PHPMailer\PHPMailer;
  */
 final class Mailer
 {
+    /**
+     * Test hook: when set (by a billing test script, or in a test child
+     * process through the FIROL_TEST_MAIL_CAPTURE constant that
+     * bin/lib/idoklad-recorder.php defines), every message is appended to
+     * this file as one JSON line and counts as accepted — no SMTP. Only code
+     * can set it; no environment variable reaches it in production.
+     */
+    public static ?string $captureFile = null;
+
     public static function send(Message $msg): bool
     {
+        $capture = self::$captureFile
+            ?? (defined('FIROL_TEST_MAIL_CAPTURE') ? (string) constant('FIROL_TEST_MAIL_CAPTURE') : null);
+        if ($capture !== null && $capture !== '') {
+            return file_put_contents($capture, json_encode(['to' => $msg->to, 'subject' => $msg->subject, 'text' => $msg->text],
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND | LOCK_EX) !== false;
+        }
         $host = trim((string) ($_ENV['SMTP_HOST'] ?? ''));
         $user = (string) ($_ENV['SMTP_USERNAME'] ?? '');
         $pass = (string) ($_ENV['SMTP_PASSWORD'] ?? '');

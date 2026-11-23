@@ -8,6 +8,8 @@ use Firol\Auth\Admin;
 use Firol\Auth\Csrf;
 use Firol\Auth\Tenant;
 use Firol\Db;
+use Firol\Documents\BookNumber;
+use Firol\Documents\BookNumberRefused;
 use Firol\Documents\NumberAllocator;
 use Firol\Documents\PersonProtocol;
 use Firol\Http\Request;
@@ -18,6 +20,7 @@ use Firol\Mail\Templates\DocumentEmail;
 use Firol\Pdf\PdfRenderer;
 use Firol\Storage\Storage;
 use Firol\Support\Address;
+use Firol\Support\BookEntry;
 use Firol\Support\Contractor;
 use Firol\Support\Handover;
 use Firol\Support\Periodicity;
@@ -76,7 +79,7 @@ final class DocumentController
             $formVariant,
         );
         if (isset($result['error'])) {
-            Response::error((string) $result['error'], (int) $result['status']);
+            Response::error((string) $result['error'], (int) $result['status'], Response::errorExtras($result));
         }
 
         Response::json([
@@ -115,12 +118,84 @@ final class DocumentController
             ];
         }
 
+        // A prehliadka yields several records and is closed on its own screen
+        // (POapp 26. 10. 2026, phase 8a) — it has no protocol of its own to
+        // generate here, so a visit's „generovať všetky" reports it as skipped.
+        if ((string) $inspection['type'] === 'preventivna_prehliadka') {
+            return [
+                'error' => 'Preventívna prehliadka sa uzatvára samostatne — otvor ju a použi „Uzavrieť".',
+                'status' => 422,
+            ];
+        }
+
+        // A concept prepared from a prehliadka is not a protocol (spec 7.3): the
+        // technician confirms the results first — the app does not issue for a
+        // control something nobody confirmed. A visit's „generovať všetky"
+        // reports it as skipped with this reason.
+        if (\Firol\Support\PrehliadkaConcepts::isPending(\Firol\Support\InspectionDetails::decode($inspection['details'] ?? null))) {
+            return [
+                'error' => 'Koncept z prehliadky — potvrď výsledky.',
+                'status' => 422,
+            ];
+        }
+
+        // The kniha BOZP record of a prehliadka is issued together with it. While
+        // the prehliadka is open again its BOZP record is a draft too, and issuing
+        // it alone would put a number on content the prehliadka is about to change.
+        if ((string) $inspection['type'] === 'kniha_bozp' && !empty($inspection['source_inspection_id'])) {
+            $src = Db::pdo()->prepare('SELECT type, status FROM inspections WHERE id = ? AND account_id = ?');
+            $src->execute([(int) $inspection['source_inspection_id'], $accountId]);
+            $source = $src->fetch();
+            if ($source && $source['type'] === 'preventivna_prehliadka' && $source['status'] !== 'finalized') {
+                return [
+                    'error' => 'Zápis do knihy BOZP vzniká z preventívnej prehliadky — uzavri prehliadku.',
+                    'status' => 422,
+                ];
+            }
+        }
+
+        // POapp 7. 11. 2026 — a new-format požiarna kniha entry is complete
+        // without any item (its items are defects, spec 8); what it needs is
+        // its date, its prevádzky and, in spôsob 1, their periodicities.
+        $bookDetails = \Firol\Support\InspectionDetails::decode($inspection['details'] ?? null);
+        $isNewBook = (string) $inspection['type'] === BookEntry::TYPE && BookEntry::isNew($bookDetails);
+
         $items = self::loadItems($inspectionId);
-        if (count($items) === 0) {
+        if ($isNewBook) {
+            $bookError = BookEntry::readyError($accountId, $inspection);
+            if ($bookError !== null) {
+                return ['error' => $bookError, 'status' => 422];
+            }
+        } elseif (count($items) === 0) {
             return ['error' => 'Pridaj aspoň jednu položku pred generovaním PDF.', 'status' => 422];
+        }
+        // A concept confirmed before the completeness check existed may still hold
+        // an item with required fields blank — the same check as at confirmation.
+        // A draft whose items were carried from another úkon gets the same check
+        // (fix list of 16. 11. 2026, rounds 2 and 3): one the technician never
+        // opened must not be issued with a required value empty. Items typed
+        // through the forms passed the item validator already; an Excel import and
+        // a protocol opened again with „Upraviť" are drafts too and generate as
+        // before (CarryOver::checksCompleteness()).
+        $genDetails = \Firol\Support\InspectionDetails::decode($inspection['details'] ?? null);
+        $isConcept = \Firol\Support\PrehliadkaConcepts::isConcept($genDetails);
+        if (\Firol\Support\CarryOver::checksCompleteness(['details' => $genDetails] + $inspection)) {
+            $incomplete = \Firol\Support\PrehliadkaConcepts::incompleteItems((string) $inspection['type'], $items);
+            if ($incomplete !== []) {
+                return ['error' => \Firol\Support\PrehliadkaConcepts::incompleteMessage($incomplete, $isConcept), 'status' => 422];
+            }
         }
         if ($inspection['executed_on'] === null) {
             return ['error' => 'Doplň dátum vykonania pred generovaním PDF.', 'status' => 422];
+        }
+        // A book entry's number needs its firma's code (customer's answer 3 of
+        // 18. 11. 2026); a name the app cannot propose one from is refused
+        // here, before anything is rendered.
+        if ((string) $inspection['type'] === BookEntry::TYPE) {
+            $codeError = BookNumber::missingCodeError($accountId, $inspection);
+            if ($codeError !== null) {
+                return ['error' => $codeError, 'status' => 422];
+            }
         }
 
         // Year for the sequence is taken from the inspection's executed_on
@@ -130,9 +205,10 @@ final class DocumentController
 
         $insType = (string) $inspection['type'];
 
-        // Block 2 — a row carried over from last time (chapter 12) arrives
-        // with its výsledok blank on purpose. The protocol must not print a
-        // blank verdict over the technician's signature.
+        // Block 2 — a row without a výsledok (carried over before 18. 11. 2026,
+        // when the BOZP rows carried identification only, or a source row
+        // that had none) must not print a blank verdict over the technician's
+        // signature.
         if (\Firol\Support\BozpItems::supports($insType)) {
             $unassessed = \Firol\Support\BozpItems::unassessedCount($insType, $items);
             if ($unassessed > 0) {
@@ -178,6 +254,9 @@ final class DocumentController
         }
 
         $payload = self::buildPayload($accountId, $userId, $inspection, $items);
+        if ($isNewBook) {
+            self::applyBookPayload($payload, $accountId, $inspection, $items, (array) $bookDetails, false);
+        }
         $stats   = $payload['stats'];
 
         if ($isPersons) {
@@ -201,6 +280,7 @@ final class DocumentController
                 (int) $inspection['facility_id'],
                 (string) $inspection['executed_on'],
                 $insType,
+                \Firol\Support\BookMapping::BOZP,
             );
             $frozen = (array) ($items[0]['fields'] ?? []);
             $frozen[\Firol\Support\ClientTerms::SNAPSHOT_KEY] = $payload['client_terms'];
@@ -211,11 +291,24 @@ final class DocumentController
         // The blank form (chapter 8.1) prints no nedostatky, so it carries no
         // photo appendix of them either.
         $payload['photos'] = $includePhotos && $variantColumn !== PersonList::VARIANT_BLANK
-            ? self::buildPhotoAppendix($inspectionId, $insType, $items)
+            ? ($isNewBook ? BookEntry::photoAppendix($inspectionId, $items) : self::buildPhotoAppendix($inspectionId, $insType, $items))
             : [];
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
+
+        // Two requests for the same úkon (two devices, a double tap, the
+        // concepts batch next to the single button) must not both issue a
+        // protocol: take the row lock and look at the status again.
+        $lock = $pdo->prepare('SELECT status FROM inspections WHERE id = ? AND account_id = ? FOR UPDATE');
+        $lock->execute([$inspectionId, $accountId]);
+        if ($lock->fetchColumn() !== 'draft') {
+            $pdo->rollBack();
+            return [
+                'error' => 'Kontrola už je uzamknutá a má vystavený protokol.',
+                'status' => 409,
+            ];
+        }
 
         try {
             // A test printed blank already holds its number (chapter 8.1): the
@@ -226,6 +319,14 @@ final class DocumentController
                 $version = $reuse['version'] + 1;
                 $numberYear = (int) substr($reuse['number'], -8, 4);
                 $year = $numberYear >= 2000 ? $numberYear : $year;
+            } elseif ($insType === BookEntry::TYPE) {
+                // A book entry: the firma's own series, never reset by year; an
+                // entry issued before keeps its number and takes the next
+                // version (BookNumber). The year folder on disk stays the year
+                // of the entry's date, as for every protocol.
+                $book = BookNumber::forIssue($pdo, $accountId, $inspection);
+                $allocated = ['number' => $book['number']];
+                $version = $book['version'];
             } else {
                 $allocated = NumberAllocator::allocate($accountId, $insType, $year);
                 $version = 1;
@@ -257,15 +358,16 @@ final class DocumentController
             } else {
                 $insert = $pdo->prepare(
                     'INSERT INTO documents
-                        (account_id, parent_type, parent_id, type, number, include_photos,
+                        (account_id, parent_type, parent_id, type, number, version, include_photos,
                          file_path, signed, signed_at)
-                     VALUES (?, "inspection", ?, ?, ?, ?, ?, 1, NOW())'
+                     VALUES (?, "inspection", ?, ?, ?, ?, ?, ?, 1, NOW())'
                 );
                 $insert->execute([
                     $accountId,
                     $inspectionId,
                     $inspection['type'],
                     $allocated['number'],
+                    $version,
                     $includePhotos ? 1 : 0,
                     $relPath,
                 ]);
@@ -273,8 +375,8 @@ final class DocumentController
 
                 $pdo->prepare(
                     'INSERT INTO document_versions (document_id, version, file_path)
-                     VALUES (?, 1, ?)'
-                )->execute([$documentId, $relPath]);
+                     VALUES (?, ?, ?)'
+                )->execute([$documentId, $version, $relPath]);
             }
 
             // Which of the two printouts of a test this version is (8.1).
@@ -290,7 +392,21 @@ final class DocumentController
             // number and validity from issue time, not the profile as it
             // reads by then. The firm in the Zhotoviteľ row is frozen the
             // same way, onto inspections.details.
+            //
+            // A book entry also keeps what it printed (`details.issued`). It goes
+            // into the same write: freezeInspection() rewrites the whole column
+            // from $inspection['details'], so a separate UPDATE would be lost.
+            if ($isNewBook) {
+                $bookDetails = (array) $bookDetails;
+                $bookDetails['issued'] = BookEntry::issuedFrom($payload['kniha']);
+                $inspection['details'] = \Firol\Support\InspectionDetails::encode($bookDetails);
+            }
             Contractor::freezeInspection($inspectionId, $inspection, $payload['contractor']);
+            // The term chain reads the columns: spôsob, primary prevádzka and its
+            // periodicity are derived once more from the header and the rows.
+            if ($isNewBook) {
+                BookEntry::syncHeader($pdo, $inspectionId);
+            }
             $pdo->prepare(
                 'UPDATE inspections
                  SET    status = "finalized",
@@ -309,6 +425,10 @@ final class DocumentController
             ]);
 
             $pdo->commit();
+        } catch (BookNumberRefused $e) {
+            // Every variant of the code was taken between the check and the lock.
+            $pdo->rollBack();
+            return ['error' => $e->getMessage(), 'status' => 422];
         } catch (\Throwable $e) {
             $pdo->rollBack();
             // Best-effort cleanup of an orphaned PDF if the rollback
@@ -445,7 +565,7 @@ final class DocumentController
 
         $result = self::generateForTrainingInternal((int) $training['account_id'], $trainingId);
         if (isset($result['error'])) {
-            Response::error((string) $result['error'], (int) $result['status']);
+            Response::error((string) $result['error'], (int) $result['status'], Response::errorExtras($result));
         }
 
         Response::json(['document' => $result['document']], 201);
@@ -636,20 +756,21 @@ final class DocumentController
     /**
      * @return array<string, mixed>
      */
-    private static function loadInspectionForGenerate(?int $accountId, int $inspectionId): array
+    public static function loadInspectionForGenerate(?int $accountId, int $inspectionId): array
     {
         // `source_number` is the protocol number of the inspection this one grew
         // out of (change request 2.1) — printed as "Nadväzuje na kontrolu" on the
         // vyraďovací protokol. NULL for documents created standalone.
-        $sql = 'SELECT i.id, i.account_id, i.type, i.executed_on, i.status,
+        $sql = 'SELECT i.id, i.account_id, i.type, i.executed_on, i.status, i.issued_before,
+                       i.carried_over_from_id,
                        i.periodicity_value, i.periodicity_unit,
                        i.notes, i.details, i.inspector_user_id, i.source_inspection_id,
                        i.effective_inspector_user_id, i.effective_cert_number,
                        i.effective_cert_valid_from, i.effective_cert_valid_to,
-                       i.company_id, c.name AS company_name, c.ico AS company_ico,
+                       i.company_id, c.name AS company_name, c.ico AS company_ico, c.client_type AS company_client_type,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
                        c.approver AS company_approver,
-                       i.facility_id, f.name AS facility_name,
+                       i.facility_id, f.name AS facility_name, f.description AS facility_description,
                        f.street AS facility_street, f.postal_code AS facility_postal_code, f.city AS facility_city,
                        f.contact_person AS facility_contact_person,
                        (SELECT d.number FROM documents d
@@ -674,7 +795,7 @@ final class DocumentController
     }
 
     /** @return list<array<string, mixed>> */
-    private static function loadItems(int $inspectionId): array
+    public static function loadItems(int $inspectionId): array
     {
         $stmt = Db::pdo()->prepare(
             'SELECT id, position, fields FROM inspection_items
@@ -702,6 +823,26 @@ final class DocumentController
      */
     private static function buildPhotoAppendix(int $inspectionId, string $type, array $items): array
     {
+        // A preventívna prehliadka's defects are items with photos of their own;
+        // both of its records caption them with the number the point has there.
+        if ($type === 'preventivna_prehliadka') {
+            return \Firol\Support\PrehliadkaRecord::photoAppendix(
+                $inspectionId,
+                \Firol\Support\PrehliadkaRecord::PO,
+                $items,
+            );
+        }
+        $fromPrehliadka = $type === 'kniha_bozp' && is_array($items[0]['fields']['prehliadka'] ?? null)
+            ? (int) ($items[0]['fields']['prehliadka']['source_inspection_id'] ?? 0)
+            : 0;
+        if ($fromPrehliadka > 0) {
+            return \Firol\Support\PrehliadkaRecord::photoAppendix(
+                $fromPrehliadka,
+                \Firol\Support\PrehliadkaRecord::BOZP,
+                self::loadItems($fromPrehliadka),
+            );
+        }
+
         $pathsByItem = InspectionPhotoController::fullSizePathsByItem($inspectionId);
         if ($pathsByItem === []) {
             return [];
@@ -796,13 +937,33 @@ final class DocumentController
     }
 
     /**
+     * The new-format book entry's part of the renderer payload: `kniha` for the
+     * template, the selected prevádzky as the object (several: names joined, no
+     * address) and the defect count as the stats.
+     *
+     * @param array<string, mixed> $payload
+     * @param array<string, mixed> $inspection
+     * @param list<array<string, mixed>> $items
+     * @param array<string, mixed> $details
+     */
+    private static function applyBookPayload(array &$payload, int $accountId, array $inspection, array $items, array $details, bool $useIssued): void
+    {
+        $payload['kniha'] = BookEntry::payload($accountId, $inspection, $items, $details, $useIssued);
+        if ($payload['kniha']['multi']) {
+            $payload['facility']['name'] = implode(', ', $payload['kniha']['objects']);
+            $payload['facility']['address'] = '';
+        }
+        $payload['stats'] = ['total' => count($items)];
+    }
+
+    /**
      * Assembles the renderer payload (and side-effect: computes stats).
      *
      * @param array<string, mixed> $inspection
      * @param list<array<string, mixed>> $items
      * @return array<string, mixed>
      */
-    private static function buildPayload(
+    public static function buildPayload(
         int $accountId,
         int $userId,
         array $inspection,
@@ -862,16 +1023,18 @@ final class DocumentController
                 'source_number'      => $inspection['source_number'] ?? null,
             ],
             'company' => [
-                'name'    => $inspection['company_name'],
-                'ico'     => $inspection['company_ico'],
-                'address' => Address::format($inspection['company_street'], $inspection['company_postal_code'], $inspection['company_city']),
-                'city'    => $inspection['company_city'],
+                'name'        => $inspection['company_name'],
+                'ico'         => $inspection['company_ico'],
+                'client_type' => $inspection['company_client_type'] ?? null,
+                'address'     => Address::format($inspection['company_street'], $inspection['company_postal_code'], $inspection['company_city']),
+                'city'        => $inspection['company_city'],
                 // Schvaľujúca osoba — printed on the Pokyn and the vyraďovací
                 // protokol (change request 2.3 / 2.1).
                 'approver' => $inspection['company_approver'] ?? null,
             ],
             'facility' => [
                 'name'           => $inspection['facility_name'],
+                'description'    => $inspection['facility_description'] ?? null,
                 'address'        => Address::format($inspection['facility_street'], $inspection['facility_postal_code'], $inspection['facility_city']),
                 'city'           => $inspection['facility_city'],
                 'contact_person' => $inspection['facility_contact_person'],
@@ -884,6 +1047,7 @@ final class DocumentController
             ],
             'items' => $items,
             'stats' => $stats,
+            'photo_counts' => \Firol\Support\PrehliadkaRecord::photoCounts((int) $inspection['id']),
             // Chapter 13 — filled in by rerenderWithHandover() once the client
             // signs. Null here means the protocol prints an empty signature
             // line for a signature on paper, which is normal practice.
@@ -1221,7 +1385,12 @@ final class DocumentController
         $payload['generated_at'] = date('c');
         $payload['handover'] = $handover;
 
-        $year = (int) substr((string) $number, -8, 4);
+        // The year folder the protocol was filed under (documents/{account}/{year}/…);
+        // a book number (PK-<KÓD>-NNN, 18. 11. 2026) carries no year.
+        $year = preg_match('#^documents/\d+/(\d{4})/#', (string) ($doc['file_path'] ?? ''), $m) === 1 ? (int) $m[1] : 0;
+        if ($year < 2000) {
+            $year = (int) substr((string) $number, -8, 4);
+        }
         if ($year < 2000) {
             // Numbers are PREFIX-YYYY-NNN; fall back to the issue year if the
             // slice ever misses rather than writing outside the year folder.
@@ -1323,6 +1492,12 @@ final class DocumentController
         $payload['photos'] = $includePhotos
             ? self::buildPhotoAppendix($inspectionId, (string) $inspection['type'], $items)
             : [];
+        // A new-format book entry prints what it printed at issue.
+        $bookDetails = \Firol\Support\InspectionDetails::decode($inspection['details'] ?? null);
+        if ((string) $inspection['type'] === BookEntry::TYPE && BookEntry::isNew($bookDetails)) {
+            self::applyBookPayload($payload, $accountId, $inspection, $items, (array) $bookDetails, true);
+            $payload['photos'] = $includePhotos ? BookEntry::photoAppendix($inspectionId, $items) : [];
+        }
         // Block 2 — a test re-rendered for a signature keeps the variant it
         // was issued as (a blank form stays blank, chapter 8.1).
         if (PersonList::isPersonType((string) $inspection['type'])) {
@@ -1334,6 +1509,26 @@ final class DocumentController
                 $payload['photos'] = [];
             }
         }
+        // The PO record of a prehliadka (phase 8a): the same document again, with
+        // the Termíny / previous-defect tables and the facility text as issued.
+        if ((string) $inspection['type'] === 'preventivna_prehliadka') {
+            $rawDetails = \Firol\Support\InspectionDetails::decode($inspection['details'] ?? null) ?? [];
+            try {
+                $details = \Firol\Support\PrehliadkaDetails::validate($rawDetails);
+            } catch (\InvalidArgumentException) {
+                $details = $rawDetails;
+            }
+            $block = \Firol\Support\PrehliadkaRecord::poBlock(
+                $accountId,
+                $inspection,
+                $items,
+                $details,
+                $includePhotos,
+                \Firol\Support\PrehliadkaRecord::frozen($rawDetails),
+            );
+            unset($block['_issued']);
+            $payload['prehliadka'] = $block;
+        }
         if ((string) $inspection['type'] === 'kniha_bozp') {
             $frozen = $items[0]['fields'][\Firol\Support\ClientTerms::SNAPSHOT_KEY] ?? null;
             $payload['client_terms'] = is_array($frozen)
@@ -1344,7 +1539,25 @@ final class DocumentController
                     (int) $inspection['facility_id'],
                     (string) $inspection['executed_on'],
                     'kniha_bozp',
+                    \Firol\Support\BookMapping::BOZP,
                 );
+            if (isset($items[0]['fields']['prehliadka']) && is_array($items[0]['fields']['prehliadka'])) {
+                $payload['prehliadka'] = $items[0]['fields']['prehliadka'];
+                $fb = \Firol\Support\PrehliadkaRecord::facilityBlock($accountId, (int) $inspection['facility_id']);
+                $payload['prehliadka']['switches'] = $fb['switches'];
+                if (empty($payload['prehliadka']['description'])) {
+                    $payload['prehliadka']['description'] = $fb['description'];
+                }
+                if (empty($payload['facility']['description'])) {
+                    $payload['facility']['description'] = $fb['description'];
+                }
+            }
+            // The person who took the prehliadka over for the organisation signs
+            // the BOZP record's client column (its „Za organizáciu" cell).
+            $handed = $items[0]['fields']['prehliadka']['handed_over'] ?? null;
+            if (is_array($handed) && !empty($handed['name'])) {
+                $payload['company']['approver'] = \Firol\Support\PrehliadkaRecord::signerName($handed);
+            }
         }
         return $payload;
     }
@@ -1387,7 +1600,7 @@ final class DocumentController
     }
 
     /** Spec-locked Slovak labels for the 6 training types + the Pokyn. */
-    private const TRAINING_TYPE_LABELS = [
+    public const TRAINING_TYPE_LABELS = [
         'vstupne'      => 'Vstupné školenie vedúcich a ostatných zamestnancov',
         'opakovane'    => 'Opakované školenie vedúcich a ostatných zamestnancov',
         'opp_mimo'     => 'Školenie osôb zabezpečujúcich OPP v mimopracovnom čase',
@@ -1403,6 +1616,7 @@ final class DocumentController
     {
         $sql = 'SELECT t.id, t.account_id, t.type, t.date, t.duration_min, t.topics, t.status,
                        t.periodicity_value, t.periodicity_unit,
+                       t.patrol_scope, t.valid_until_override,
                        t.fields,
                        t.company_id, c.name AS company_name, c.ico AS company_ico,
                        c.street AS company_street, c.postal_code AS company_postal_code, c.city AS company_city,
@@ -1437,7 +1651,7 @@ final class DocumentController
     private static function loadTrainees(int $trainingId): array
     {
         $stmt = Db::pdo()->prepare(
-            'SELECT id, fullname, position, signature_path, signed_at
+            'SELECT id, fullname, position, personal_number, signature_path, signed_at
              FROM   trainees WHERE training_id = ? ORDER BY id ASC'
         );
         $stmt->execute([$trainingId]);
@@ -1447,6 +1661,7 @@ final class DocumentController
                 'id'             => (int) $r['id'],
                 'fullname'       => $r['fullname'],
                 'position'       => $r['position'],
+                'personal_number' => $r['personal_number'],
                 'signature_path' => $r['signature_path'],
                 'signed_at'      => $r['signed_at'],
             ];
@@ -1480,6 +1695,7 @@ final class DocumentController
                 'id'                 => (int) $r['id'],
                 'fullname'           => $r['fullname'],
                 'position'           => $r['position'],
+                'personal_number'    => $r['personal_number'] ?? null,
                 'signature_data_uri' => self::signatureToDataUri($r['signature_path'] ?? null),
                 'signed_at'          => $r['signed_at'],
             ];
@@ -1507,6 +1723,10 @@ final class DocumentController
                         (string) $training['periodicity_unit'],
                     )
                     : null,
+                // Spec 8.2: the workplace / activity of a hliadka; null for the rest.
+                'patrol_scope'        => $training['patrol_scope'] ?? null,
+                // Spec 8.1: set only when the validity was written by hand.
+                'valid_until_override' => $training['valid_until_override'] ?? null,
                 'duration_min'        => $training['duration_min'],
                 'topics'              => $training['topics'],
                 'status'              => $training['status'],

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Pagination } from "@/components/ui/Pagination";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-    Building2,
+    Building,
     CalendarDays,
     Edit2,
     GraduationCap,
@@ -185,7 +185,7 @@ export function TrainingsListPage() {
                         <Search className="size-4 shrink-0 text-ink-400" />
                         <input
                             type="search"
-                            placeholder="Hľadať firmu, prevádzku, trénera…"
+                            placeholder="Hľadať klienta, objekt, trénera…"
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                             className="min-w-0 flex-1 bg-transparent text-sm text-ink-900 placeholder:text-ink-400 outline-none"
@@ -399,7 +399,7 @@ function TrainingRow({
                         </Badge>
                     </div>
                     <p className="mt-0.5 truncate text-xs text-ink-500">
-                        <Building2 className="-mt-0.5 mr-1 inline size-3" />
+                        <Building className="-mt-0.5 mr-1 inline size-3" />
                         {it.company_name}
                         {it.facility_name && (
                             <>

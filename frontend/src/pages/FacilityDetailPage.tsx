@@ -3,12 +3,17 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
     Archive,
     ArrowLeft,
+    Building,
     Building2,
     CalendarDays,
     ChevronRight,
+    ClipboardCheck,
     ClipboardList,
+    DoorOpen,
     Edit2,
     GraduationCap,
+    Layers,
+    Mail,
     MapPin,
     NotebookPen,
     Plus,
@@ -22,7 +27,8 @@ import {
 import { useAuth } from "@/auth/AuthContext";
 import { useIsReadOnly } from "@/auth/useIsReadOnly";
 import { useToast } from "@/lib/toast";
-import { Facilities, type Facility } from "@/api/facilities";
+import { useCertMissingToast } from "@/lib/certMissing";
+import { Facilities, type Facility, type FacilityDeviceGroup } from "@/api/facilities";
 import {
     INSPECTION_TYPE_LABELS,
     Inspections,
@@ -31,6 +37,10 @@ import {
     type InspectionType,
 } from "@/api/inspections";
 import { periodicityShort } from "@/lib/periodicity";
+import { Prehliadka } from "@/api/prehliadka";
+import { Kniha, type KnihaLastTerm } from "@/api/kniha";
+import { repeatPath, sk3 } from "@/lib/kniha";
+import { PREHLIADKA_TYPE, prehliadkaPath } from "@/lib/prehliadka";
 import {
     TRAINING_TYPE_LABELS,
     TRAINING_TYPES,
@@ -48,7 +58,19 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
 import { DetailHeaderSkeleton, SkeletonList } from "@/components/ui/Skeleton";
 import { PendingSyncBanner } from "@/components/PendingSyncBanner";
+import { DiscardPrehliadkaButton, useDiscardPrehliadka } from "@/components/prehliadka/DiscardPrehliadka";
+import { InspectionTags } from "@/components/InspectionTags";
 import { useMemberRights } from "@/auth/useMemberRights";
+import {
+    discardDialog,
+    discardDoneMessage,
+    discardErrorMessage,
+    discardModeOf,
+    discardUkon,
+    discardNeedsRefresh,
+    type DiscardMode,
+} from "@/lib/discard";
+import { clientNouns, clientTypeStyles, facilityNouns, isBytoveDruzstvo } from "@/lib/clientKind";
 
 export function FacilityDetailPage() {
     const { id: idStr } = useParams<{ id: string }>();
@@ -59,19 +81,24 @@ export function FacilityDetailPage() {
     const isReadOnly = useIsReadOnly();
     const { canDelete, canDeleteUkon } = useMemberRights();
     const toast = useToast();
+    const certMissing = useCertMissingToast();
     const restoreArchived = useRestoreArchived();
     const [facility, setFacility] = useState<Facility | null>(null);
     const [inspections, setInspections] = useState<InspectionListItem[] | null>(null);
     const [trainings, setTrainings] = useState<TrainingListItem[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [repeatingId, setRepeatingId] = useState<number | null>(null);
-    const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+    const [pendingDelete, setPendingDelete] = useState<{ id: number; mode: DiscardMode; type: string } | null>(null);
     const [deleting, setDeleting] = useState(false);
     const [pendingDeleteTrainingId, setPendingDeleteTrainingId] = useState<number | null>(null);
     const [deletingTraining, setDeletingTraining] = useState(false);
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState<InspectionType | "">("");
-    const [activeTab, setActiveTab] = useState<"inspections" | "trainings">("inspections");
+    const [activeTab, setActiveTab] = useState<"inspections" | "trainings" | "objekt">("inspections");
+    const [devices, setDevices] = useState<FacilityDeviceGroup[] | null>(null);
+    const [ppContextDraft, setPpContextDraft] = useState<number | null>(null);
+    // The newest prehliadka or spôsob 1 požiarna kniha entry holding the term here.
+    const [lastPrehliadka, setLastPrehliadka] = useState<KnihaLastTerm | null>(null);
     const [trainingQuery, setTrainingQuery] = useState("");
     const [trainingTypeFilter, setTrainingTypeFilter] = useState<TrainingType | "">("");
 
@@ -109,20 +136,28 @@ export function FacilityDetailPage() {
 
     async function onRestore() {
         if (!facility) return;
-        if (!(await restoreArchived("facility", facility.id, facility.name))) return;
+        if (!(await restoreArchived("facility", facility.id, facility.name, facility.company_client_type))) return;
         setFacility({ ...facility, archived_at: null, archived_reason: null });
     }
 
     async function handleDelete() {
-        if (pendingDeleteId === null) return;
+        if (pendingDelete === null) return;
+        const { id, mode } = pendingDelete;
         setDeleting(true);
         try {
-            await Inspections.archive(pendingDeleteId, csrfToken);
-            setInspections((prev) => prev?.filter((i) => i.id !== pendingDeleteId) ?? null);
-            setPendingDeleteId(null);
-            toast.success("Kontrola odstránená");
+            const outcome = await discardUkon(id, mode, csrfToken);
+            setInspections((prev) => prev?.filter((i) => i.id !== id) ?? null);
+            setPendingDelete(null);
+            toast.success(discardDoneMessage(outcome));
         } catch (err) {
-            toast.error(err instanceof ApiError ? err.message : "Nepodarilo sa odstrániť kontrolu.");
+            toast.error(discardErrorMessage(err, mode));
+            if (discardNeedsRefresh(err) && facility) {
+                // The row changed meanwhile (issued, …): show what it is now.
+                setPendingDelete(null);
+                Inspections.list({ facility_id: facility.id })
+                    .then((res) => setInspections(res.items))
+                    .catch(() => undefined);
+            }
         } finally {
             setDeleting(false);
         }
@@ -147,8 +182,9 @@ export function FacilityDetailPage() {
         setRepeatingId(insId);
         try {
             const res = await Inspections.repeat(insId, csrfToken);
-            navigate(`/inspections/${res.inspection.id}`);
+            navigate(repeatPath(res.inspection.type, res.inspection.id));
         } catch (err) {
+            if (certMissing(err, { returnLabel: "Späť na prevádzku" })) return;
             setError(
                 err instanceof ApiError
                     ? err.message
@@ -165,10 +201,39 @@ export function FacilityDetailPage() {
         // inspection/training lists are filtered queries that may not be cached
         // for a facility created offline, so fetch them best-effort — a failure
         // shouldn't blank out the whole page.
+        setDevices(null);
         Facilities.show(id)
             .then(async (f) => {
                 if (cancelled) return;
                 setFacility(f.facility);
+                // Warms the caches step 1 of a prehliadka reads (device list,
+                // context) so it can be started offline from here, and tells
+                // whether one is already in progress.
+                void Facilities.devices(id).catch(() => undefined);
+                // … and the context a požiarna kniha entry starts from.
+                void Kniha.context(f.facility.company_id).catch(() => undefined);
+                Prehliadka.context(id)
+                    .then((c) => {
+                        if (cancelled) return;
+                        setPpContextDraft(c.draft_id);
+                        // A context cached before `last_term` existed still names the prehliadka.
+                        setLastPrehliadka(
+                            c.last_term !== undefined
+                                ? c.last_term
+                                : c.last
+                                  ? {
+                                        kind: "prehliadka",
+                                        inspection_id: c.last.inspection_id,
+                                        executed_on: c.last.executed_on,
+                                        periodicity_value: c.last.periodicity_value,
+                                        periodicity_unit: c.last.periodicity_unit,
+                                        valid_until: null,
+                                        defects: c.last.defects ?? 0,
+                                    }
+                                  : null,
+                        );
+                    })
+                    .catch(() => undefined);
                 const [ins, trs] = await Promise.all([
                     Inspections.list({ facility_id: id }).catch(
                         () => ({ items: [] as InspectionListItem[] }),
@@ -186,13 +251,52 @@ export function FacilityDetailPage() {
                 setError(
                     err instanceof ApiError
                         ? err.message
-                        : "Nepodarilo sa načítať prevádzku.",
+                        : "Nepodarilo sa načítať údaje.",
                 );
             });
         return () => {
             cancelled = true;
         };
     }, [id]);
+
+    useEffect(() => {
+        if (activeTab !== "objekt" || devices !== null) return;
+        let cancelled = false;
+        Facilities.devices(id)
+            .then((res) => {
+                if (!cancelled) setDevices(res.groups);
+            })
+            .catch(() => {
+                if (!cancelled) setDevices([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [activeTab, devices, id]);
+
+    // A prehliadka in progress here: the draft in the list (also one created
+    // offline), else what the server reported.
+    const ppDraftId =
+        (inspections ?? []).find((i) => i.type === PREHLIADKA_TYPE && i.status === "draft")?.id ?? ppContextDraft;
+    // Spec 11.1 — a draft prehliadka that was never closed can be discarded from its banner.
+    const ppDiscard = useDiscardPrehliadka(
+        ppDraftId,
+        () => {
+            setInspections((prev) => prev?.filter((i) => i.id !== ppDraftId) ?? null);
+            setPpContextDraft(null);
+        },
+        undefined,
+        // Refused because it was issued meanwhile (409): read the list and the
+        // context again, so the draft card goes without a reload (round 7).
+        () => {
+            Inspections.list({ facility_id: id })
+                .then((res) => setInspections(res.items))
+                .catch(() => undefined);
+            Prehliadka.context(id)
+                .then((c) => setPpContextDraft(c.draft_id))
+                .catch(() => undefined);
+        },
+    );
 
     if (error) {
         return (
@@ -230,8 +334,10 @@ export function FacilityDetailPage() {
     // Spec 25 — archived on its own or with its firm: the history and the
     // protocols stay reachable, but nothing new starts here.
     const archived = Boolean(facility.archived_at || facility.company_archived_at);
+    const nouns = facilityNouns(facility.company_client_type);
+    const client = clientNouns(facility.company_client_type);
+    const showBuildingColumn = isBytoveDruzstvo(facility.company_client_type) || Boolean(facility.description);
     const canEdit = !isReadOnly && !archived;
-
     return (
         <div className="flex flex-col gap-5">
             <Link
@@ -239,20 +345,20 @@ export function FacilityDetailPage() {
                 className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-700 self-start"
             >
                 <ArrowLeft className="size-4" />
-                Späť na firmu
+                Späť na {client.cases.acc}
             </Link>
 
             <PendingSyncBanner resource="facilities" id={id} />
 
             {facility.company_archived_at ? (
                 <ArchivedNotice
-                    label="Firma tejto prevádzky je archivovaná od"
+                    label={`${client.singular} ${nouns.demo.gen} je ${client.archivedAdj} od`}
                     archivedAt={facility.company_archived_at}
-                    hint="Protokoly a história zostávajú. Prevádzka sa vráti spolu s obnovením firmy."
+                    hint={`Protokoly a história zostávajú. ${nouns.singular} sa vráti spolu s obnovením ${client.cases.gen}.`}
                 />
             ) : facility.archived_at ? (
                 <ArchivedNotice
-                    label="Prevádzka je archivovaná od"
+                    label={`${nouns.singular} je ${nouns.archivedAdj} od`}
                     archivedAt={facility.archived_at}
                     reason={facility.archived_reason}
                     onRestore={canDelete && !isReadOnly ? onRestore : undefined}
@@ -263,7 +369,7 @@ export function FacilityDetailPage() {
                 <div
                     className={cn(
                         "bg-gradient-to-br to-transparent px-5 pt-5",
-                        archived ? "from-ink-100/70" : "from-firol-50/60",
+                        clientTypeStyles(facility.company_client_type, archived).heroGradient,
                     )}
                 >
                     <div className="flex items-start gap-3">
@@ -272,10 +378,10 @@ export function FacilityDetailPage() {
                                 "grid size-12 place-items-center rounded-2xl",
                                 archived
                                     ? "bg-ink-200 text-ink-500"
-                                    : "bg-firol-500 text-white shadow-[var(--shadow-glow)]",
+                                    : clientTypeStyles(facility.company_client_type, archived).avatarStaticBg,
                             )}
                         >
-                            {archived ? <Archive className="size-5" /> : <Warehouse className="size-5" />}
+                            {archived ? <Archive className="size-5" /> : isBytoveDruzstvo(facility.company_client_type) ? <Building2 className="size-5" /> : <Warehouse className="size-5" />}
                         </div>
                         <div className="min-w-0 flex-1">
                             <h1 className="truncate text-lg font-semibold tracking-tight text-ink-900">
@@ -286,7 +392,11 @@ export function FacilityDetailPage() {
                                     to={`/companies/${facility.company_id}`}
                                     className="inline-flex items-center gap-1 text-xs text-ink-500 hover:text-firol-600"
                                 >
-                                    <Building2 className="size-3" />
+                                    {isBytoveDruzstvo(facility.company_client_type) ? (
+                                        <Building2 className="size-3" />
+                                    ) : (
+                                        <Building className="size-3" />
+                                    )}
                                     {facility.company_name}
                                 </Link>
                             )}
@@ -316,7 +426,8 @@ export function FacilityDetailPage() {
                     </div>
                 </div>
 
-                <dl className="flex flex-col divide-y divide-ink-100 px-5 py-3 text-sm">
+                <div className={cn(showBuildingColumn && "md:grid md:grid-cols-2 md:gap-x-8")}>
+                <dl className={cn("flex flex-col divide-y divide-ink-100 px-5 py-3 text-sm", showBuildingColumn && "md:pr-0")}>
                     {facility.address && (
                         <DetailRow
                             icon={<MapPin className="size-4" />}
@@ -324,6 +435,18 @@ export function FacilityDetailPage() {
                             value={facility.address}
                         />
                     )}
+                    <DetailRow
+                        icon={<Mail className="size-4" />}
+                        label={`E-mail ${nouns.cases.gen}`}
+                        value={
+                            facility.email
+                                ? facility.email
+                                : facility.recipient_email
+                                  ? `nevyplnený — použije sa ${facility.recipient_email}`
+                                  : `nevyplnený ani na ${nouns.cases.loc}, ani na ${client.cases.loc} — doplňte ho cez ✎`
+                        }
+                        muted={!facility.email}
+                    />
                     {facility.contact_person && (
                         <DetailRow
                             icon={<User className="size-4" />}
@@ -338,18 +461,68 @@ export function FacilityDetailPage() {
                             value={facility.notes}
                         />
                     )}
-                    {!facility.address &&
-                        !facility.contact_person &&
-                        !facility.notes && (
-                            <div className="py-2 text-ink-400">
-                                Žiadne ďalšie údaje. Doplň ich úpravou
-                                prevádzky.
-                            </div>
-                        )}
+                    {!facility.address && !facility.contact_person && !facility.notes && !facility.email && (
+                        <p className="py-2 text-xs text-ink-400">
+                            Adresu a kontakt doplníš úpravou.
+                        </p>
+                    )}
                 </dl>
+
+                {showBuildingColumn && (
+                    <dl className="flex flex-col divide-y divide-ink-100 border-t border-ink-100 px-5 py-3 text-sm md:border-l md:border-t-0 md:pl-8 md:pr-5">
+                        <DetailRow
+                            icon={<Building2 className="size-4" />}
+                            label="Popis objektu"
+                            value={facility.description || "Zatiaľ nevyplnený — doplníte ho cez ✎"}
+                            muted={!facility.description}
+                        />
+                        {isBytoveDruzstvo(facility.company_client_type) && (
+                            <>
+                                <DetailRow
+                                    icon={<DoorOpen className="size-4" />}
+                                    label="Vchody"
+                                    value={facility.vchody || "nevyplnené"}
+                                    muted={!facility.vchody}
+                                />
+                                <DetailRow
+                                    icon={<Layers className="size-4" />}
+                                    label="Podlažia"
+                                    value={
+                                        facility.floors_above != null
+                                            ? `${facility.floors_above} ${sk3(facility.floors_above, "nadzemné", "nadzemné", "nadzemných")} · ${facility.floors_below ?? 0} ${sk3(facility.floors_below ?? 0, "podzemné", "podzemné", "podzemných")}`
+                                            : "nevyplnené"
+                                    }
+                                    muted={facility.floors_above == null}
+                                />
+                            </>
+                        )}
+                    </dl>
+                )}
+                </div>
             </Card>
 
-            {/* Action card menu */}
+            {/* Action card menu: only show continue banner when a draft is in progress */}
+            {canEdit && ppDraftId !== null && (
+                <>
+                <Link
+                    id="pp-start-link"
+                    to={prehliadkaPath(ppDraftId)}
+                    className="flex items-center gap-3.5 rounded-2xl bg-firol-500 px-4 py-3.5 text-white shadow-[var(--shadow-glow)] transition-[background-color,transform] duration-200 hover:bg-firol-600 active:scale-[0.99]"
+                >
+                    <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white/20">
+                        <ClipboardCheck className="size-5 text-white" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold">Prehliadka prebieha · pokračovať</p>
+                        <p className="mt-0.5 text-xs text-white/80">
+                            Rozpracované nedostatky ostali uložené
+                        </p>
+                    </div>
+                    <ChevronRight className="size-4 shrink-0 text-white/70" />
+                </Link>
+                <DiscardPrehliadkaButton action={ppDiscard} size="sm" className="-mt-3 self-end" />
+                </>
+            )}
             {canEdit && (
                 <Link
                     to={`/inspections/new?company_id=${facility.company_id}&facility_id=${facility.id}`}
@@ -419,6 +592,21 @@ export function FacilityDetailPage() {
                             activeTab === "trainings" ? "opacity-100 scale-x-100" : "opacity-0 scale-x-0",
                         )} />
                     </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab("objekt")}
+                        className={cn(
+                            "relative flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium transition-all duration-150 whitespace-nowrap",
+                            activeTab === "objekt" ? "text-firol-600" : "text-ink-500 hover:text-ink-800",
+                        )}
+                    >
+                        <Building2 className={cn("size-4 transition-transform duration-150", activeTab === "objekt" && "scale-110")} />
+                        Objekt
+                        <span className={cn(
+                            "absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-firol-500 transition-[transform,opacity] duration-200 origin-left",
+                            activeTab === "objekt" ? "opacity-100 scale-x-100" : "opacity-0 scale-x-0",
+                        )} />
+                    </button>
                 </nav>
             </div>
 
@@ -463,7 +651,7 @@ export function FacilityDetailPage() {
                             >
                                 Všetky
                             </button>
-                            {(["php", "hydranty", "oprava_ts_php", "poziarna_kniha", "pu_akcieschopnost", "pu_udrzba", "nudzove_osvetlenie", "ts_hadic", "vyradenie", "kniha_bozp", "pracovisko", "osamele_pracovisko", "fajcenie", "oopp", "pracovne_prostriedky", "rebriky", "regale", "oznacenie", "dychova_skuska", "omamne_latky", "skolenie_bozp"] as InspectionType[])
+                            {(["php", "hydranty", "oprava_ts_php", "preventivna_prehliadka", "poziarna_kniha", "pu_akcieschopnost", "pu_udrzba", "nudzove_osvetlenie", "ts_hadic", "vyradenie", "kniha_bozp", "pracovisko", "osamele_pracovisko", "fajcenie", "oopp", "pracovne_prostriedky", "rebriky", "regale", "oznacenie", "dychova_skuska", "omamne_latky", "skolenie_bozp"] as InspectionType[])
                                 .filter((t) => inspections.some((i) => i.type === t))
                                 .map((t) => (
                                     <button
@@ -528,6 +716,10 @@ export function FacilityDetailPage() {
                                                     <Badge tone={finalized ? "ok" : "warn"}>
                                                         {finalized ? "Hotová" : "Koncept"}
                                                     </Badge>
+                                                    <InspectionTags
+                                                        scope={ins.prehliadka_scope}
+                                                        concept={finalized ? null : ins.concept_state}
+                                                    />
                                                 </div>
                                                 <p className="mt-0.5 text-xs text-ink-500">
                                                     <CalendarDays className="-mt-0.5 mr-1 inline size-3" />
@@ -565,12 +757,12 @@ export function FacilityDetailPage() {
                                                 >
                                                     <Edit2 className="size-4" />
                                                 </Link>
-                                                {canDeleteUkon(ins, ins.inspector_user_id) && (
+                                                {discardModeOf(ins) !== null && canDeleteUkon(ins, ins.inspector_user_id) && (
                                                     <button
                                                         type="button"
-                                                        title="Odstrániť"
-                                                        aria-label="Odstrániť"
-                                                        onClick={() => setPendingDeleteId(ins.id)}
+                                                        title={discardModeOf(ins) === "delete" ? "Natrvalo zmazať" : "Archivovať"}
+                                                        aria-label={discardModeOf(ins) === "delete" ? "Natrvalo zmazať" : "Archivovať"}
+                                                        onClick={() => setPendingDelete({ id: ins.id, mode: discardModeOf(ins) as DiscardMode, type: ins.type })}
                                                         className="grid size-8 place-items-center rounded-xl text-[var(--color-status-bad)] transition-colors hover:bg-[var(--color-status-bad-bg)]"
                                                     >
                                                         <Trash2 className="size-4" />
@@ -736,18 +928,22 @@ export function FacilityDetailPage() {
                 )}
             </section>}
 
+            {activeTab === "objekt" && facility && (
+                <ObjektPanel facility={facility} devices={devices} lastPrehliadka={lastPrehliadka} />
+            )}
+
             <Dialog
-                open={pendingDeleteId !== null}
-                onClose={() => { if (!deleting) setPendingDeleteId(null); }}
-                title="Odstrániť kontrolu?"
-                description="Táto akcia je nevratná. Kontrola bude trvalo odstránená spolu so všetkými položkami."
+                open={pendingDelete !== null}
+                onClose={() => { if (!deleting) setPendingDelete(null); }}
+                title={pendingDelete ? discardDialog(pendingDelete.mode, pendingDelete.type).title : ""}
+                description={pendingDelete ? discardDialog(pendingDelete.mode, pendingDelete.type).description : ""}
                 dismissible={!deleting}
             >
                 <div className="flex justify-end gap-2">
                     <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setPendingDeleteId(null)}
+                        onClick={() => setPendingDelete(null)}
                         disabled={deleting}
                     >
                         Zrušiť
@@ -758,7 +954,7 @@ export function FacilityDetailPage() {
                         loading={deleting}
                         onClick={handleDelete}
                     >
-                        Odstrániť
+                        {pendingDelete ? discardDialog(pendingDelete.mode, pendingDelete.type).confirmLabel : ""}
                     </Button>
                 </div>
             </Dialog>
@@ -795,6 +991,7 @@ export function FacilityDetailPage() {
                 kind="facility"
                 id={facility.id}
                 name={facility.name}
+                clientType={facility.company_client_type}
                 onClose={() => setArchiveOpen(false)}
                 onArchived={() => {
                     setArchiveOpen(false);
@@ -805,14 +1002,107 @@ export function FacilityDetailPage() {
     );
 }
 
+const DEVICE_SHORT: Record<string, string> = {
+    php: "PHP",
+    hydranty: "Hydranty",
+    pu_akcieschopnost: "Uzávery",
+    pu_udrzba: "Údržba uzáverov",
+    nudzove_osvetlenie: "Osvetlenie",
+    rebriky: "Rebríky",
+    regale: "Regále",
+};
+
+function deviceCountLabel(n: number): string {
+    if (n === 1) return "1 zariadenie";
+    if (n >= 2 && n <= 4) return `${n} zariadenia`;
+    return `${n} zariadení`;
+}
+
+function defectCountLabel(n: number): string {
+    if (n === 1) return "1 nedostatok";
+    if (n >= 2 && n <= 4) return `${n} nedostatky`;
+    return `${n} nedostatkov`;
+}
+
+function ObjektPanel({
+    facility,
+    devices,
+    lastPrehliadka,
+}: {
+    facility: Facility;
+    devices: FacilityDeviceGroup[] | null;
+    lastPrehliadka: KnihaLastTerm | null;
+}) {
+    const total = (devices ?? []).reduce((sum, g) => sum + g.items.length, 0);
+    const meta = (devices ?? [])
+        .map((g) => `${DEVICE_SHORT[g.type] ?? g.type} ${g.items.length}`)
+        .join(" · ");
+    const place = facilityNouns(facility.company_client_type).demo.loc;
+
+    return (
+        <section key="objekt" className="flex animate-fade-up flex-col gap-3">
+            <Link
+                to={`/facilities/${facility.id}/devices`}
+                className="flex items-center gap-3 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-all duration-200 hover:bg-ink-50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
+            >
+                <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
+                    <Warehouse className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-ink-900">
+                        {devices === null ? "Zariadenia" : total === 0 ? "Zatiaľ žiadne zariadenia" : deviceCountLabel(total)}
+                    </span>
+                    <span className="mt-0.5 block truncate text-xs text-ink-500">
+                        {meta || "pribudnú, keď tu urobíte prvú kontrolu"}
+                    </span>
+                </span>
+                <ChevronRight className="size-4 shrink-0 text-ink-300" />
+            </Link>
+
+            {lastPrehliadka && (
+                <Link
+                    to={
+                        lastPrehliadka.kind === "prehliadka"
+                            ? prehliadkaPath(lastPrehliadka.inspection_id)
+                            : `/inspections/${lastPrehliadka.inspection_id}`
+                    }
+                    id="objekt-last-prehliadka"
+                    className="flex items-center gap-3 rounded-2xl border border-ink-100 bg-white px-4 py-3.5 transition-all duration-200 hover:bg-ink-50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-firol-300"
+                >
+                    <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-firol-50 text-firol-600">
+                        <ClipboardList className="size-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-ink-900">Posledná preventívna prehliadka</span>
+                        <span className="mt-0.5 block truncate text-xs text-ink-500">
+                            {lastPrehliadka.executed_on
+                                ? new Date(lastPrehliadka.executed_on + "T00:00:00").toLocaleDateString("sk-SK")
+                                : "bez dátumu"}
+                            {typeof lastPrehliadka.defects === "number" &&
+                                ` · ${lastPrehliadka.defects === 0 ? "bez nedostatkov" : defectCountLabel(lastPrehliadka.defects)}`}
+                        </span>
+                    </span>
+                    <ChevronRight className="size-4 shrink-0 text-ink-300" />
+                </Link>
+            )}
+
+            <p className="rounded-2xl bg-ink-50 px-3 py-2.5 text-xs leading-relaxed text-ink-600">
+                Zoznam nie je samostatná evidencia — je to to, čo ste zapísali do posledných kontrol na {place}. Prístroj pribudne tak, že ho zapíšete pri kontrole, alebo ho nahráte importom z Excelu. Pri ďalšej kontrole aj pri preventívnej prehliadke sa potom ponúkne sám.
+            </p>
+        </section>
+    );
+}
+
 function DetailRow({
     icon,
     label,
     value,
+    muted = false,
 }: {
     icon: React.ReactNode;
     label: string;
     value: string;
+    muted?: boolean;
 }) {
     return (
         <div className="flex items-start gap-3 py-2.5">
@@ -823,7 +1113,7 @@ function DetailRow({
                 <dt className="text-[10px] font-semibold uppercase tracking-wider text-ink-400">
                     {label}
                 </dt>
-                <dd className="text-sm text-ink-800 break-words whitespace-pre-wrap">
+                <dd className={cn("text-sm break-words whitespace-pre-wrap", muted ? "text-ink-400" : "text-ink-800")}>
                     {value}
                 </dd>
             </div>

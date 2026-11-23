@@ -9,7 +9,7 @@ import {
 import {
     AlertTriangle,
     AtSign,
-    Building2,
+    Building,
     CalendarDays,
     Check,
     CheckCircle2,
@@ -55,9 +55,16 @@ import {
     LEGAL_VOP_URL,
 } from "@/lib/legal";
 import { AccountApi, type Account } from "@/api/account";
+import { formatCents } from "@/lib/pricing";
 import { DataApi, type RestoreMode, type RestoreResult } from "@/api/data";
 import { ImportApi, type ImportKind, type ImportResult } from "@/api/import";
 import { BackupReminderModal } from "@/components/BackupReminderModal";
+import {
+    CERT_HIGHLIGHT_CLASS,
+    CertFocusBanner,
+    useCertFocus,
+    useCertFocusScroll,
+} from "@/components/CertFocus";
 import { InstallAppCard } from "@/components/InstallAppCard";
 import { ClientNoticeSettingsCard } from "@/components/ClientNoticeSettingsCard";
 import { MemberRightsCard } from "@/components/MemberRightsCard";
@@ -75,6 +82,7 @@ import {
 import { Select, type SelectOption } from "@/components/ui/Select";
 import { ApiError } from "@/lib/api";
 import { offlineMessage } from "@/lib/offline";
+import { drainQueue } from "@/lib/queue";
 import { useToast } from "@/lib/toast";
 import { useConfirm } from "@/lib/confirm";
 import { Card } from "@/components/ui/Card";
@@ -87,6 +95,7 @@ import { Badge } from "@/components/ui/Badge";
 import { SignaturePickerModal } from "@/components/SignaturePickerModal";
 import { FeedbackDialog } from "@/components/FeedbackFloater";
 import { cn } from "@/lib/cn";
+import { plural } from "@/lib/text";
 import { formatDateSk } from "@/lib/clientNoticeEmail";
 
 // ─── Tab definitions ─────────────────────────────────────────────────────────
@@ -405,6 +414,10 @@ export function InspectorProfilePage() {
 function InspectorProfileSection() {
     const { csrfToken } = useAuth();
     const toast = useToast();
+    const navigate = useNavigate();
+    // Sent here from a refused úkon („Doplniť v profile"): which number to
+    // highlight, and the screen to go back to once it is saved.
+    const { focus, back } = useCertFocus();
 
     const [profile, setProfile] = useState<InspectorProfile | null>(null);
     const [loading, setLoading] = useState(true);
@@ -493,7 +506,19 @@ function InspectorProfileSection() {
                 csrfToken,
             );
             applyProfile(res.profile);
-            toast.success("Profil revízneho technika uložený");
+            // Work refused on sync for a missing number goes out right away.
+            drainQueue().catch(() => undefined);
+            toast.success(
+                "Profil revízneho technika uložený",
+                back
+                    ? {
+                          action: {
+                              label: back.returnLabel,
+                              onClick: () => navigate(back.returnTo),
+                          },
+                      }
+                    : undefined,
+            );
         } catch (err) {
             const msg =
                 err instanceof ApiError ? err.message : "Niečo sa pokazilo.";
@@ -593,6 +618,10 @@ function InspectorProfileSection() {
                     className="flex flex-col gap-3"
                     noValidate
                 >
+                    {focus && focus !== "vv" && (
+                        <CertFocusBanner cert={focus} back={back} />
+                    )}
+
                     <p className="rounded-xl border border-ink-100 bg-ink-50/40 px-3 py-2 text-xs text-ink-500">
                         Každý typ kontroly vyžaduje iné oprávnenie. Vypíš čísla,
                         ktoré máš — do každého PDF pôjde to správne.
@@ -601,6 +630,7 @@ function InspectorProfileSection() {
                     <CertCard
                         color="firol"
                         title="Kontrola PHP"
+                        highlighted={focus === "cert_php"}
                         subtitle="Oprávnenie na kontrolu hasiacich prístrojov"
                         certValue={certPhp}
                         certPlaceholder="napr. RT-PHP-2024-0123"
@@ -614,6 +644,7 @@ function InspectorProfileSection() {
                     <CertCard
                         color="violet"
                         title="Oprava / plnenie / TS PHP"
+                        highlighted={focus === "cert_oprava"}
                         subtitle="Oprávnenie na opravu, plnenie a tlakovú skúšku PHP"
                         certValue={certOprava}
                         certPlaceholder="napr. RT-TS-2024-0456"
@@ -627,6 +658,7 @@ function InspectorProfileSection() {
                     <CertCard
                         color="blue"
                         title="Technik PO"
+                        highlighted={focus === "cert_general"}
                         subtitle="Hydranty, požiarna kniha, PU, núdzové osvetlenia, TS hadíc, školenia"
                         certValue={certGeneral}
                         certPlaceholder="napr. TPO-2024-0789"
@@ -640,6 +672,7 @@ function InspectorProfileSection() {
                     <CertCard
                         color="emerald"
                         title="Bezpečnostný technik"
+                        highlighted={focus === "cert_bt"}
                         subtitle="Úkony v oblasti BOZP"
                         certValue={certBt}
                         certPlaceholder="napr. 0123/2019-BT"
@@ -898,7 +931,7 @@ function BrandingSection() {
                         {(p) => (
                             <Input
                                 {...p}
-                                leftIcon={<Building2 className="size-4" />}
+                                leftIcon={<Building className="size-4" />}
                                 value={companyName}
                                 onChange={(e) => setCompanyName(e.target.value)}
                                 placeholder="Vaša firma s.r.o."
@@ -1094,7 +1127,12 @@ function TeamSection() {
         0;
     const extra = Math.max(0, active - included);
     const max = seatInfo?.max_self_service_technicians ?? 20;
-    const perExtra = (seatInfo?.price_per_extra_technician_cents ?? 0) / 100;
+    // The account's own price per period from the backend: the unit amount on
+    // its Stripe item when it has one (an item keeps the price it was created
+    // with), else today's price — yearly for a yearly account (not 12 ×
+    // monthly), monthly for everyone else.
+    const isYearly = seatInfo?.billing_period === "yearly";
+    const perExtraLabel = `${formatCents(seatInfo?.extra_unit_amount_cents ?? 0)} + DPH / ${isYearly ? "rok" : "mes"}`;
     const atCap = active >= max;
 
     async function onInvite(e: FormEvent) {
@@ -1315,15 +1353,18 @@ function TeamSection() {
                                 · extra{" "}
                                 <span className="font-semibold">
                                     {extra}
-                                </span> × {perExtra.toFixed(2)} €/mes
+                                </span> × {perExtraLabel}
                             </>
                         )}
                         .{" "}
                         {isMain && !atCap && (
                             <>
                                 Každý ďalší technik nad zahrnutý počet stojí{" "}
-                                {perExtra.toFixed(2)} € / mes a pripočíta sa
-                                proratovane k najbližšej fakture.
+                                {perExtraLabel} a pripočíta sa proratovane k
+                                najbližšej faktúre
+                                {isYearly
+                                    ? " — pri ročnom predplatnom je to faktúra za jeho obnovu."
+                                    : "."}
                             </>
                         )}
                     </div>
@@ -1730,6 +1771,7 @@ function certDaysLeft(validTo: string): number | null {
 
 function CertCard({
     color,
+    highlighted = false,
     title,
     subtitle,
     certValue,
@@ -1741,6 +1783,8 @@ function CertCard({
     onValidToChange,
 }: {
     color: CertCardColor;
+    /** The number a refused úkon sent the user here to fill in. */
+    highlighted?: boolean;
     title: string;
     subtitle: string;
     certValue: string;
@@ -1755,13 +1799,16 @@ function CertCard({
     const days = certDaysLeft(validTo);
     const isExpired = days !== null && days < 0;
     const isExpiringSoon = days !== null && days >= 0 && days <= 30;
+    const { blockRef, inputRef } = useCertFocusScroll<HTMLDivElement>(highlighted);
 
     return (
         <div
+            ref={blockRef}
             className={cn(
-                "rounded-2xl border p-4 flex flex-col gap-3",
+                "rounded-2xl border p-4 flex flex-col gap-3 transition-all duration-300",
                 s.border,
                 s.bg,
+                highlighted && CERT_HIGHLIGHT_CLASS,
             )}
         >
             <div className="flex items-start gap-2.5">
@@ -1785,6 +1832,7 @@ function CertCard({
                 {(p) => (
                     <Input
                         {...p}
+                        ref={inputRef}
                         leftIcon={<Hash className="size-4" />}
                         value={certValue}
                         onChange={(e) => onCertChange(e.target.value)}
@@ -1970,32 +2018,52 @@ type ImportSectionDef = {
     title: string;
     description: string;
     hint: string;
-    Icon: typeof Building2;
+    Icon: typeof Building;
     color: string;
     bg: string;
-    createdLabels: Record<string, string>;
+    /** Each created count's noun in its three Slovak forms (1 / 2–4 / 5+). */
+    createdLabels: Record<string, [string, string, string]>;
 };
+
+/** „1 prevádzka", „2 prevádzky", „5 prevádzok" — one count of an import result. */
+function createdCount(section: ImportSectionDef, key: string, n: number): string {
+    const forms = section.createdLabels[key];
+    return forms ? plural(n, ...forms) : `${n} ${key}`;
+}
+
+/** „1 chyba", „2 chyby", „5 chýb" in the accusative („obsahuje 1 chybu"). */
+function errorCount(n: number): string {
+    return plural(n, "chybu", "chyby", "chýb");
+}
 
 const IMPORT_DEFS: ImportSectionDef[] = [
     {
         kind: "companies",
         title: "Firmy a prevádzky",
         description: "Importuj firmy aj ich prevádzky naraz. Prevádzky sa naviažu na firmu cez IČO.",
-        hint: 'Sheet „Firmy" — Názov je povinný. Sheet „Prevadzky" — IČO firmy musí existovať (buď v sheete vyššie, alebo už v aplikácii).',
-        Icon: Building2,
+        hint: 'Sheet „Firmy" — Názov je povinný. Posledný stĺpec „Druh klienta" (firma / bytove_druzstvo) je nepovinný, prázdny znamená firmu; podľa neho zápis do požiarnej knihy ponúkne zoznam činností. Firme, ktorá už existuje, import druh klienta nezmení — iný druh ako v aplikácii nahlási ako chybu. Sheet „Prevadzky" — IČO firmy musí existovať (buď v sheete vyššie, alebo už v aplikácii).',
+        Icon: Building,
         color: "text-blue-600",
         bg: "bg-blue-50",
-        createdLabels: { companies: "firiem", facilities: "prevádzok" },
+        createdLabels: { companies: ["firma", "firmy", "firiem"], facilities: ["prevádzka", "prevádzky", "prevádzok"] },
     },
     {
         kind: "inspections",
         title: "Kontroly",
-        description: "Hlavičky kontrol aj ich položky. Každý typ má vlastný sheet s položkami (Polozky_php, Polozky_hydranty, …).",
-        hint: 'Sheet „Kontroly" — # riadok je tvoje vlastné poradie (1, 2, 3…). Polozky_* odkazujú na toto # cez stĺpec „# kontrola". Firma sa hľadá podľa IČO — ak ešte neexistuje, vytvorí sa automaticky pod zadaným názvom (IČO má prednosť pred názvom). Prevádzka sa rovnako vytvorí, ak chýba. E-mail technika, ktorý ešte nemá konto, sa predvytvorí a pridá do tvojho tímu; kontroly sa mu priradia, keď sa zaregistruje.',
+        description: "Hlavičky kontrol aj ich položky. Každý typ má vlastný sheet s položkami (Polozky_php, Polozky_hydranty, …). Zápisy do požiarnej knihy majú vlastné tri sheety (Kniha_zapisy, Kniha_prevadzky, Kniha_nedostatky).",
+        hint: 'Sheet „Kontroly" — # riadok je tvoje vlastné poradie (1, 2, 3…). Polozky_* odkazujú na toto # cez stĺpec „# kontrola". Požiarna kniha: jeden riadok v „Kniha_zapisy" je jeden zápis, „Kniha_prevadzky" a „Kniha_nedostatky" naň odkazujú cez číslo zápisu; vykonané činnosti sa zadávajú číslami bodov zo zoznamu na hárku „Pokyny"; úvod, činnosti, vlastné činnosti a doplňujúci text platia len pri spôsobe 1, text zápisu len pri spôsobe 2. Súbor zo staršej šablóny so sheetom „Polozky_poziarna_kniha" sa naimportuje ako doteraz. Firma sa hľadá podľa IČO — ak ešte neexistuje, vytvorí sa automaticky pod zadaným názvom (IČO má prednosť pred názvom). Prevádzka sa rovnako vytvorí, ak chýba. E-mail technika, ktorý ešte nemá konto, sa predvytvorí a pridá do tvojho tímu; kontroly sa mu priradia, keď sa zaregistruje. Všetko sa naimportuje ako rozpracované, bez čísla a dokumentu.',
         Icon: ClipboardList,
         color: "text-firol-600",
         bg: "bg-firol-50",
-        createdLabels: { inspections: "kontrol", items: "položiek", technicians: "nových technikov", companies: "nových firiem", facilities: "nových prevádzok" },
+        createdLabels: {
+            inspections: ["kontrola", "kontroly", "kontrol"],
+            items: ["položka", "položky", "položiek"],
+            book_entries: ["zápis do požiarnej knihy", "zápisy do požiarnej knihy", "zápisov do požiarnej knihy"],
+            book_defects: ["nedostatok v zápisoch", "nedostatky v zápisoch", "nedostatkov v zápisoch"],
+            technicians: ["nový technik", "noví technici", "nových technikov"],
+            companies: ["nová firma", "nové firmy", "nových firiem"],
+            facilities: ["nová prevádzka", "nové prevádzky", "nových prevádzok"],
+        },
     },
     {
         kind: "trainings",
@@ -2005,7 +2073,13 @@ const IMPORT_DEFS: ImportSectionDef[] = [
         Icon: GraduationCap,
         color: "text-violet-600",
         bg: "bg-violet-50",
-        createdLabels: { trainings: "školení", trainees: "účastníkov", trainers: "nových lektorov", companies: "nových firiem", facilities: "nových prevádzok" },
+        createdLabels: {
+            trainings: ["školenie", "školenia", "školení"],
+            trainees: ["účastník", "účastníci", "účastníkov"],
+            trainers: ["nový lektor", "noví lektori", "nových lektorov"],
+            companies: ["nová firma", "nové firmy", "nových firiem"],
+            facilities: ["nová prevádzka", "nové prevádzky", "nových prevádzok"],
+        },
     },
 ];
 
@@ -2042,10 +2116,10 @@ function ImportSubSection({ section }: { section: ImportSectionDef }) {
             const res = await ImportApi.upload(section.kind, file, csrfToken);
             setResult(res);
             if (res.errors.length > 0) {
-                toast.error(`Import zlyhal — ${res.errors.length} chýb v súbore.`);
+                toast.error(`Import zlyhal — ${plural(res.errors.length, "chyba", "chyby", "chýb")} v súbore.`);
             } else if (res.created) {
                 const summary = Object.entries(res.created)
-                    .map(([k, v]) => `${v} ${section.createdLabels[k] ?? k}`)
+                    .map(([k, v]) => createdCount(section, k, Number(v)))
                     .join(", ");
                 toast.success(`Naimportované: ${summary}`);
             }
@@ -2132,7 +2206,7 @@ function ImportSubSection({ section }: { section: ImportSectionDef }) {
                                 {Object.entries(result.created).map(([k, v]) => (
                                     <li key={k}>
                                         <Badge tone="ok">
-                                            {v} {section.createdLabels[k] ?? k}
+                                            {createdCount(section, k, Number(v))}
                                         </Badge>
                                     </li>
                                 ))}
@@ -2144,8 +2218,7 @@ function ImportSubSection({ section }: { section: ImportSectionDef }) {
                         <div className="rounded-xl border border-rose-200 bg-rose-50/40 px-3 py-2.5 text-sm">
                             <p className="flex items-center gap-2 font-semibold text-rose-800">
                                 <AlertTriangle className="size-4" />
-                                Súbor obsahuje {result.errors.length}{" "}
-                                {result.errors.length === 1 ? "chybu" : "chýb"} — neuložilo sa nič.
+                                Súbor obsahuje {errorCount(result.errors.length)} — neuložilo sa nič.
                             </p>
                             <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto pr-1">
                                 {result.errors.map((e, i) => (
@@ -2380,7 +2453,7 @@ function DataSection() {
                         <p>
                             Archív obsahuje{" "}
                             <strong className="text-ink-800">
-                                firmy, prevádzky, kontroly, školenia
+                                klientov, prevádzky, bytové domy, kontroly, školenia
                             </strong>{" "}
                             vrátane všetkých položiek a účastníkov, a k tomu
                             skutočné súbory —{" "}
@@ -2461,7 +2534,7 @@ function DataSection() {
                             Import z Excelu
                         </h2>
                         <p className="text-xs text-ink-500">
-                            Hromadný import firiem, kontrol a školení zo vzorovej Excel šablóny.
+                            Hromadný import firiem, kontrol, zápisov do požiarnej knihy a školení zo vzorovej Excel šablóny.
                         </p>
                     </div>
                 </div>
@@ -2499,21 +2572,21 @@ function DataSection() {
                 </div>
                 <div className="flex flex-col gap-3 px-5 py-5">
                     <PurgeCard
-                        title="Vymazať všetky firmy"
-                        description="Vymaže všetky firmy a prevádzky vrátane všetkých kontrol, školení a dokumentov."
-                        detail="Toto je totálny reset — zmažú sa aj všetky kontroly a školenia, pretože sú naviazané na firmy."
+                        title="Vymazať všetkých klientov"
+                        description="Vymaže všetkých klientov (firmy aj bytové družstvá) a ich prevádzky či bytové domy vrátane všetkých kontrol, školení a dokumentov."
+                        detail="Toto je totálny reset — zmažú sa aj všetky kontroly a školenia, pretože sú naviazané na klientov."
                         busy={busyCompanies}
                         onConfirm={() =>
                             purge(
                                 () => DataApi.purgeCompanies(csrfToken),
                                 setBusyCompanies,
-                                "Firmy",
+                                "Klienti",
                             )
                         }
                     />
                     <PurgeCard
                         title="Vymazať všetky kontroly"
-                        description="Vymaže všetky záznamy o kontrolách a ich položky. Firmy a školenia zostanú."
+                        description="Vymaže všetky záznamy o kontrolách a ich položky. Klienti a školenia zostanú."
                         detail="Zmažú sa všetky kontroly bez ohľadu na stav (draft aj finalizované)."
                         busy={busyInspections}
                         onConfirm={() =>
@@ -2526,7 +2599,7 @@ function DataSection() {
                     />
                     <PurgeCard
                         title="Vymazať všetky školenia"
-                        description="Vymaže všetky školenia a zoznamy účastníkov. Firmy a kontroly zostanú."
+                        description="Vymaže všetky školenia a zoznamy účastníkov. Klienti a kontroly zostanú."
                         detail="Zmažú sa všetky školenia bez ohľadu na stav."
                         busy={busyTrainings}
                         onConfirm={() =>
@@ -2579,8 +2652,8 @@ function ExportToggle({
 // ─── Obnova zo zálohy ─────────────────────────────────────────────────────────
 
 const RESTORE_LABELS: Record<string, string> = {
-    companies: "firiem",
-    facilities: "prevádzok",
+    companies: "klientov",
+    facilities: "prevádzok a bytových domov",
     inspections: "kontrol",
     items: "položiek",
     photos: "fotiek",
@@ -2590,6 +2663,7 @@ const RESTORE_LABELS: Record<string, string> = {
     stock_items: "skladových položiek",
     stock_movements: "pohybov v sklade",
     tasks: "úloh",
+    defect_catalog: "vlastných nedostatkov v číselníku",
 };
 
 const RESTORE_MODES: {
@@ -2607,7 +2681,7 @@ const RESTORE_MODES: {
         value: "replace",
         title: "Nahradiť všetko",
         description:
-            "Najprv zmaže všetky firmy, kontroly, školenia, fotky a protokoly v účte a potom nahrá zálohu. Presná kópia zálohy — pre prípad, že je databáza poškodená.",
+            "Najprv zmaže všetkých klientov, kontroly, školenia, fotky a protokoly v účte a potom nahrá zálohu. Presná kópia zálohy — pre prípad, že je databáza poškodená.",
     },
 ];
 
@@ -2629,7 +2703,7 @@ function RestoreCard() {
             const ok = await confirm({
                 title: "Nahradiť všetky dáta v účte?",
                 description:
-                    "Všetky firmy, prevádzky, kontroly, školenia, fotky aj PDF protokoly sa nenávratne zmažú a nahradia obsahom zálohy. Táto operácia sa nedá vrátiť späť.",
+                    "Všetci klienti, prevádzky, bytové domy, kontroly, školenia, fotky aj PDF protokoly sa nenávratne zmažú a nahradia obsahom zálohy. Táto operácia sa nedá vrátiť späť.",
                 confirmLabel: "Zmazať a obnoviť",
             });
             if (!ok) {

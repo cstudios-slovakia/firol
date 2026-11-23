@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  Building2,
+  Building,
   Calendar,
   Check,
   ClipboardCheck,
@@ -28,6 +28,7 @@ import { Companies, type CompanyListItem, type FacilityListItem } from '@/api/co
 import { INSPECTION_TYPE_LABELS } from '@/api/inspections';
 import { ApiError, OfflineQueuedError } from '@/lib/api';
 import { useToast } from '@/lib/toast';
+import { CLIENT_NEUTRAL, clientPickerNouns, facilityPickerNouns } from '@/lib/clientKind';
 import { useConfirm } from '@/lib/confirm';
 import { todayIso } from '@/lib/dates';
 import { cn } from '@/lib/cn';
@@ -48,8 +49,8 @@ const T = {
   zNedostatku: (cislo: string) => `vzniklo z kontroly ${cislo}`,
   // Spec 25 — closed by archiving, not ticked.
   zrusena: {
-    company_archived: 'zrušená — firma archivovaná',
-    facility_archived: 'zrušená — prevádzka archivovaná',
+    company_archived: 'zrušená — klient archivovaný',
+    facility_archived: 'zrušená — objekt archivovaný',
   },
 };
 
@@ -151,7 +152,7 @@ export function TasksPage() {
       toast.success(done ? 'Úloha splnená' : 'Úloha je znova otvorená');
     } catch (err) {
       if (err instanceof OfflineQueuedError) {
-        toast.success('Uloží sa keď budeš online');
+        toast.success('Uloží sa, keď budeš online');
         return;
       }
       setItems((prev) => [...prev, task]);
@@ -358,7 +359,7 @@ function TaskRow({
           </p>
           <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-500">
             <span className="inline-flex min-w-0 items-center gap-1">
-              <Building2 className="size-3.5 shrink-0 text-ink-400" />
+              <Building className="size-3.5 shrink-0 text-ink-400" />
               {place ?? <span className="text-ink-400">{T.vseobecna}</span>}
             </span>
             {showAssignee && task.assignee_name && (
@@ -434,6 +435,10 @@ function TaskForm({
   const [loadingFacilities, setLoadingFacilities] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Client / facility wording follows the chosen client (neutral before one is).
+  const chosenType = companies.find((c) => c.id === companyId)?.client_type;
+  const fNouns = facilityPickerNouns(companyId !== null, chosenType);
+  const wholeClient = clientPickerNouns(companyId !== null, chosenType).whole.nom;
 
   const isTeam = members.length > 1;
 
@@ -524,7 +529,7 @@ function TaskForm({
       onSaved();
     } catch (err) {
       if (err instanceof OfflineQueuedError) {
-        toast.success('Uloží sa keď budeš online');
+        toast.success('Uloží sa, keď budeš online');
         onSaved();
         return;
       }
@@ -544,7 +549,7 @@ function TaskForm({
       onSaved();
     } catch (err) {
       if (err instanceof OfflineQueuedError) {
-        toast.success('Uloží sa keď budeš online');
+        toast.success('Uloží sa, keď budeš online');
         onSaved();
         return;
       }
@@ -574,14 +579,14 @@ function TaskForm({
             />
           )}
         </Field>
-        <Field label="Firma" hint="Voliteľné">
+        <Field label={CLIENT_NEUTRAL.singular} hint="Voliteľné">
           {(p) => (
             <Select
               id={p.id}
               value={companyId !== null ? String(companyId) : ''}
               onChange={(v) => setCompanyId(v ? Number(v) : null)}
               placeholder={T.vseobecna}
-              leftIcon={<Building2 className="size-4" />}
+              leftIcon={<Building className="size-4" />}
               searchable
               options={[
                 { value: '', label: T.vseobecna },
@@ -591,7 +596,7 @@ function TaskForm({
             />
           )}
         </Field>
-        <Field label="Prevádzka" hint="Voliteľné">
+        <Field label={fNouns.singular} hint="Voliteľné">
           {(p) => (
             <Select
               id={p.id}
@@ -599,12 +604,12 @@ function TaskForm({
               onChange={(v) => setFacilityId(v ? Number(v) : null)}
               disabled={companyId === null || loadingFacilities}
               placeholder={
-                companyId === null ? '— najprv vyber firmu —' : loadingFacilities ? 'Načítavam…' : '— celá firma —'
+                companyId === null ? CLIENT_NEUTRAL.pickFirstPlaceholder : loadingFacilities ? 'Načítavam…' : `— ${wholeClient} —`
               }
               leftIcon={<Warehouse className="size-4" />}
               searchable
               options={[
-                { value: '', label: '— celá firma —' },
+                { value: '', label: `— ${wholeClient} —` },
                 ...facilities.map((f) => ({ value: String(f.id), label: f.name })),
               ]}
               emptyLabel={initial?.facility_name ?? undefined}

@@ -169,10 +169,14 @@ final class ClientArchive
     private static function dropPlans(int $accountId, string $column, int $id): int
     {
         $pdo = Db::pdo();
+        // A plan is per (inspection, prevádzka) since a požiarna kniha entry can
+        // cover several: for a prevádzka, its own plans go, whichever úkon.
         $inspections = $pdo->prepare(
-            "DELETE p FROM calendar_plans p
-             JOIN   inspections i ON i.id = p.inspection_id
-             WHERE  p.account_id = ? AND i.{$column} = ?"
+            $column === 'facility_id'
+                ? 'DELETE p FROM calendar_plans p WHERE p.account_id = ? AND p.facility_id = ?'
+                : "DELETE p FROM calendar_plans p
+                   JOIN   inspections i ON i.id = p.inspection_id
+                   WHERE  p.account_id = ? AND i.{$column} = ?"
         );
         $inspections->execute([$accountId, $id]);
 

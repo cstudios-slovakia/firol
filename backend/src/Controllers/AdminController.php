@@ -29,15 +29,14 @@ final class AdminController
         'trial_days'                       => ['type' => 'int', 'min' => 0, 'max' => 365, 'forbid_range' => [1, 2]],
         'price_monthly_eur'                => ['type' => 'float', 'min' => 0, 'max' => 9999],
         'price_yearly_eur'                 => ['type' => 'float', 'min' => 0, 'max' => 99999],
-        // VAT rate applied on top of the informative UI prices above — has no
-        // effect on Stripe billing (see STRIPE_PRICE_MONTHLY / _YEARLY), it only
-        // drives the "price incl. VAT" hint shown to the admin.
-        'vat_rate_percent'                 => ['type' => 'float', 'min' => 0, 'max' => 100],
+        // The VAT rate is not set here any more: it is VAT_RATE_PERCENT in
+        // .env (Billing\Vat), the one setting the screens, the iDoklad payload
+        // and the Stripe tax-rate check share. settings() returns it read-only.
         // Default number of technician seats (incl. the account admin) included
         // in the base plan for fresh accounts. Existing accounts keep their
         // per-account value; admins override individually if needed.
         'default_included_technicians'     => ['type' => 'int', 'min' => 1, 'max' => 100],
-        // Per-extra-technician monthly price in cents. Yearly = ×12.
+        // Per-extra-technician monthly price in cents. Yearly = ×SeatSync::EXTRA_YEARLY_MONTHS (10).
         'price_per_extra_technician_cents' => ['type' => 'int', 'min' => 0, 'max' => 100000],
         // Above this total technician count the account is steered toward a
         // custom quote — UI hides self-service and shows a contact-us hint.
@@ -48,6 +47,13 @@ final class AdminController
     {
         Admin::require();
         Response::json(['settings' => self::loadAll()]);
+    }
+
+    /** GET /api/admin/system-check — billing configuration check. */
+    public static function systemCheck(Request $req): void
+    {
+        Admin::require();
+        Response::json(['checks' => \Firol\Billing\ConfigCheck::run()]);
     }
 
     public static function updateSettings(Request $req): void
@@ -106,6 +112,8 @@ final class AdminController
         foreach ($stmt->fetchAll() as $row) {
             $result[(string) $row['setting_key']] = (string) $row['setting_value'];
         }
+        // Read-only: VAT_RATE_PERCENT from .env (sent value is ignored).
+        $result['vat_rate_percent'] = (string) \Firol\Billing\Vat::percent();
         return $result;
     }
 }

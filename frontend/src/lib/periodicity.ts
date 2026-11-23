@@ -45,6 +45,8 @@ export const RECOMMENDED_MONTHS: Record<string, number[]> = {
   hydranty: [12],
   ts_hadic: [12],
   poziarna_kniha: [12, 6, 3],
+  // Continues the poziarna_kniha term chain, so it offers the same period.
+  preventivna_prehliadka: [12, 6, 3],
   pu_akcieschopnost: [3, 6, 12],
   pu_udrzba: [12],
   nudzove_osvetlenie: [12],
@@ -91,6 +93,16 @@ export const TRAINING_RECOMMENDED_MONTHS: Record<string, number[]> = {
  */
 export function trainingChain(type: string): string {
   return type === 'vstupne' || type === 'opakovane' ? 'zamestnanci' : type;
+}
+
+/**
+ * Key of the term chain an inspection type belongs to. The preventívna
+ * prehliadka continues the chain of the retired požiarna kniha, so the first
+ * prehliadka fulfils a term an old record left open. Mirrors
+ * `Periodicity::inspectionChain`.
+ */
+export function inspectionChain(type: string): string {
+  return type === 'poziarna_kniha' ? 'preventivna_prehliadka' : type;
 }
 
 /** The period the app offers first for a type, before any history is known. */

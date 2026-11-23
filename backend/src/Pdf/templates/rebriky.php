@@ -19,7 +19,8 @@ use Firol\Support\Defects;
 
 $doc = new ProtocolLayout(get_defined_vars());
 $e = [ProtocolLayout::class, 'esc'];
-$cell = static fn(mixed $v): string => ($v === null || trim((string) $v) === '') ? '—' : nl2br($e((string) $v));
+// Never casts an array (round 7) — DefectsTable::scalarText reads text and numbers only.
+$cell = static fn(mixed $v): string => DefectsTable::scalarText($v) === '' ? '—' : nl2br($e(DefectsTable::scalarText($v)));
 $details = (array) ($inspection['details'] ?? []);
 $measures = trim((string) ($details['measures_text'] ?? ''));
 
@@ -35,9 +36,8 @@ $resultCell = static function (?string $r) use ($e): string {
 $total = (int) ($stats['total'] ?? count($items));
 ?>
 <?= $doc->styles() ?>
-<?= $doc->header('Záznam o kontrole rebríkov') ?>
+<?= $doc->header('Protokol o vykonaní kontroly — rebríky (pracovné)') ?>
 <?= $doc->basicInfo() ?>
-<?= $doc->legalWarn('Kontrola vykonaná v rozsahu podľa STN EN 131-3 a § 5 nariadenia vlády SR č. 392/2006 Z. z. o minimálnych bezpečnostných a zdravotných požiadavkách pri používaní pracovných prostriedkov.') ?>
 
 <?= $doc->band('Zoznam kontrolovaných rebríkov') ?>
 <table class="grid">
@@ -79,9 +79,23 @@ $total = (int) ($stats['total'] ?? count($items));
   </tr>
 </table>
 
+<?= DefectsTable::renderRoutineDefects($items, 'rebriky', [
+  'photo_counts' => $photo_counts ?? [],
+]) ?>
+<?php /* The rows' nedostatky (popis, opatrenie, termín), numbered like the photo
+         appendix, under the same band — captioned „Nedostatky" inside the table
+         (it stays with the table on a new page) and each naming its rebrík by the
+         „Č." of the list above (round 7). */
+$rowNumbers = [];
+foreach ($items as $i => $item) {
+  $rowNumbers[(int) ($item['id'] ?? 0)] = $i + 1;
+} ?>
 <?= DefectsTable::render(Defects::collect($items), [
-  'labels'     => DefectsTable::SHORT_LABELS,
-  'photo_note' => !empty($photos),
+  'labels'      => DefectsTable::SHORT_LABELS,
+  'photo_note'  => !empty($photos),
+  'band'        => false,
+  'caption'     => 'Nedostatky',
+  'item_column' => ['label' => 'Rebrík č.', 'numbers' => $rowNumbers],
 ]) ?>
 
 <?php if ($measures !== ''): ?>
@@ -89,5 +103,5 @@ $total = (int) ($stats['total'] ?? count($items));
   <div class="note-box"><?= nl2br($e($measures)) ?></div>
 <?php endif ?>
 
-<?= $doc->signatures('rebriky') ?>
+<?= $doc->signaturesOptionA('rebriky', 'VYKONAL', 'S VÝSLEDKOM KONTROLY OBOZNÁMENÝ') ?>
 <?= $doc->footer('Kontrolovaných rebríkov: ' . $total) ?>

@@ -74,7 +74,28 @@ export type DefectsState = {
   collect: (opts?: { requireOne?: boolean }) => DefectsCollected | null;
   /** Internal — lets each row's photo field register its staging. */
   registerPhotos: (key: string, staging: PhotoStaging) => void;
+  /**
+   * A photo of a nedostatok is still being resized — the form's save buttons
+   * wait for it, as for the item's own photos (round 6; collect() refused the
+   * save, so nothing was lost, but the buttons looked ready).
+   */
+  processing: boolean;
+  /**
+   * Whether anything differs from what the item opened with — a nedostatok
+   * added, removed or edited, or a photo of one added or removed. „Na súhrn"
+   * skips the save only while this is false.
+   */
+  isDirty: () => boolean;
 };
+
+/** The comparable content of the rows: the ones with something typed in them. */
+function rowsSignature(rows: DefectRow[]): string {
+  return JSON.stringify(
+    rows
+      .filter((r) => r.description.trim() || r.measure.trim() || r.deadline)
+      .map((r) => [r.key, r.description.trim(), r.measure.trim(), r.deadline]),
+  );
+}
 
 /** Stable id a nedostatok's photos attach to. */
 export function newDefectKey(): string {
@@ -104,9 +125,13 @@ export function useDefects(initialItem: InspectionItem | null): DefectsState {
   const [rows, setRows] = useState<DefectRow[]>(() => rowsFrom(initialItem));
   const [error, setError] = useState<string | null>(null);
   const stagings = useRef<Map<string, PhotoStaging>>(new Map());
+  // Rows whose photo field is resizing a photo; state, so the form re-renders.
+  const [processingKeys, setProcessingKeys] = useState<ReadonlySet<string>>(() => new Set());
   // Keys of the nedostatky that belong to the item being edited (loaded or
   // added since) — only their photos may be discarded as „removed".
   const ownKeys = useRef<Set<string>>(new Set(rows.map((r) => r.key)));
+  // What the item opened with, for isDirty().
+  const seeded = useRef<string>(rowsSignature(rows));
 
   // Step 2 reuses one mounted form across items — re-seed on a different item.
   // Only on a real change of item — on mount the rows are already seeded.
@@ -120,6 +145,7 @@ export function useDefects(initialItem: InspectionItem | null): DefectsState {
     seededFor.current = seedKey;
     const next = rowsFrom(initialItem);
     ownKeys.current = new Set(next.map((r) => r.key));
+    seeded.current = rowsSignature(next);
     setRows(next);
     setError(null);
   }, [seedKey, initialItem]);
@@ -143,9 +169,25 @@ export function useDefects(initialItem: InspectionItem | null): DefectsState {
   }, []);
   const registerPhotos = useCallback((key: string, staging: PhotoStaging) => {
     stagings.current.set(key, staging);
+    setProcessingKeys((prev) => {
+      if (prev.has(key) === staging.processing) return prev;
+      const next = new Set(prev);
+      if (staging.processing) next.add(key);
+      else next.delete(key);
+      return next;
+    });
   }, []);
+  const processing = rows.some((r) => processingKeys.has(r.key));
 
   const collect = useCallback((opts?: { requireOne?: boolean }): DefectsCollected | null => {
+    // A photo of a nedostatok still being resized is not staged yet; saving now
+    // would lose it (round 5 of the fix list of 16. 11. 2026).
+    for (const r of rows) {
+      if (stagings.current.get(r.key)?.processing) {
+        setError('Fotka nedostatku sa ešte spracúva — počkaj chvíľu a ulož znova.');
+        return null;
+      }
+    }
     // A row with nothing typed in it is the empty row „Pridať nedostatok"
     // added — not a nedostatok. One with an opatrenie, a termín or a photo but
     // no popis is a mistake the technician has to fix: popis is required.
@@ -188,7 +230,12 @@ export function useDefects(initialItem: InspectionItem | null): DefectsState {
     };
   }, [rows]);
 
-  return { rows, error, add, remove, update, clear, collect, registerPhotos };
+  const isDirty = useCallback((): boolean => {
+    if (rowsSignature(rows) !== seeded.current) return true;
+    return rows.some((r) => stagings.current.get(r.key)?.dirty === true);
+  }, [rows]);
+
+  return { rows, error, add, remove, update, clear, collect, registerPhotos, isDirty, processing };
 }
 
 export function DefectsEditor({
