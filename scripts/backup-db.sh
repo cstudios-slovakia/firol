@@ -15,6 +15,10 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
+# Never stop silently: under `set -e` a failing step used to end the script
+# with no output at all, so the cron log stayed empty while no dump was made.
+trap 'rc=$?; echo "[$(date -Iseconds)] [ERROR] backup failed (line $LINENO, exit $rc) — no dump written" >&2; rm -f "${FILE:-}"' ERR
+
 # ── Config ──────────────────────────────────────────────────────────────────
 
 # Where dumps land. Must be OUTSIDE the webroot so they are never publicly
@@ -37,15 +41,28 @@ fi
 
 # ── Parse credentials from .env ──────────────────────────────────────────────
 
-# Strips surrounding quotes and inline comments. Works for both
-#   KEY=value
-#   KEY="value"
-#   KEY='value'
+# Reads a key the way phpdotenv (the app) does, closely enough for these
+# values. Works for
+#   KEY=value          KEY=value # comment   (comment needs a space before #)
+#   KEY="value"        KEY='value'
+#     KEY=value        (indented — the production .env had this, and the old
+#                       `^KEY=` match found nothing, so no backup was ever made)
+#   export KEY=value
+# A missing key prints nothing and is not an error (DB_HOST / DB_PORT have
+# defaults below; DB_NAME / DB_USER are checked).
 env_val() {
-    local key="$1"
-    grep -E "^${key}=" "$ENV_FILE" \
-        | head -1 \
-        | sed -E "s/^${key}=['\"]?//; s/['\"]?\s*(#.*)?$//"
+    local key="$1" line
+    line=$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$ENV_FILE" | head -1 || true)
+    [[ -n "$line" ]] || return 0
+    line="${line%$'\r'}"
+    line="${line#*=}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    case "$line" in
+        \"*) line="${line#\"}"; line="${line%%\"*}" ;;
+        \'*) line="${line#\'}"; line="${line%%\'*}" ;;
+        *)   line=$(printf '%s' "$line" | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//') ;;
+    esac
+    printf '%s' "$line"
 }
 
 DB_HOST="${DB_HOST:-$(env_val DB_HOST)}"
