@@ -120,16 +120,16 @@ final class CertGuard
         return $out;
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * The technician's own numbers for an úkon in this account. For a
+     * platform admin in a client account they are completed from the admin's
+     * home profile (see InspectorProfiles), exactly as the protocol prints them.
+     *
+     * @return array<string, mixed>
+     */
     private static function ownCerts(int $accountId, int $userId): array
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT cert_php, cert_oprava, cert_general, cert_bt
-             FROM   inspector_profiles
-             WHERE  user_id = ? AND account_id = ?'
-        );
-        $stmt->execute([$userId, $accountId]);
-        return $stmt->fetch() ?: [];
+        return InspectorProfiles::forAccount($userId, $accountId);
     }
 
     private static function defaultHas(int $accountId, string $certKey): bool

@@ -1549,8 +1549,14 @@ that opens the field, highlighted (`lib/certMissing.ts`, `components/CertFocus.t
 - **One source of the rules:** `Support/CertGuard.php` (`missingForType`, `missingForPrehliadka`, `verdicts`),
   used by create, repeat, follow-up, the prehliadka scope edit (PATCH) and `PrehliadkaCloser`.
 - **Decided 10. 11. 2026 (owner):** the check applies to **everyone**, sys-admins included. It is about the
-  signing technician (`inspector_user_id`) in the úkon's account. Consequence: an admin acting in a foreign
-  account needs a profile with the number in that account.
+  signing technician (`inspector_user_id`) in the úkon's account.
+- **Changed 25. 11. 2026 (owner):** a sys-admin acting in an account they are not a member of signs with
+  their **home profile** wherever that account's profile is blank: each number with its own validity, and the
+  signature separately. Anything they did fill in there still wins. Home = the profile in an account they are the
+  main user of, else the one updated last. One helper, `Support/InspectorProfiles::forAccount`, serves both the
+  check (`CertGuard`) and the protocol (`DocumentController`), so they cannot disagree. Trainings (trainer's
+  `cert_general`) still read the training's account only. (Replaces the 10. 11. rule that an admin needed a
+  profile in every foreign account.)
 - **Early:** follow-up drafts (`oprava_ts_php`, `vyradenie`, `ts_hadic`) are checked on creation. A prehliadka
   edit is checked when it switches PO / BOZP scope **on** (scope already on is left alone).
 - **Offline (approved 10. 11. 2026):** `/api/me/inspector-profile` returns `can_create` (the server verdict per
