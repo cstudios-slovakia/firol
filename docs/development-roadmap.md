@@ -2746,6 +2746,39 @@ never called)
 
 ---
 
+## Excel import: bytové domy and preventívne prehliadky (26. 11. 2026) ✅ built
+
+The customer found on 25. 11. 2026 that the import had not followed the new
+modules and sent drafts of the templates (`upravene-importy/`). Built from
+them, with the owner's decision of 26. 11. 2026: **where the drafts and the app
+disagree, the app wins**; the open points go back to the customer later.
+
+- ✅ Firmy template: new sheet **Bytove_domy** (podlažia, vchody, popis objektu,
+  hlavné uzávery, e-mail správcu, kontakt, poznámky) → `facilities`, only under
+  a bytové družstvo. A new house needs both floor counts (the form's rule); an
+  existing house gets only its empty fields filled, nothing stored is
+  overwritten.
+- ✅ Kontroly template: new sheets **Prehliadky** and **Prehliadky_nedostatky**
+  → `preventivna_prehliadka` drafts through `PrehliadkaDetails::validate` and
+  `PrehliadkaDefects::validate`. Columns in the customer's order (the importer
+  reads by position, so their own files import too), plus a last column for
+  the BOZP vlastné činnosti of a po_bozp prehliadka.
+- ✅ Pokyny lines for both, the „Prevádzka = bytový dom" line on the Kontroly
+  and Školenia templates, the Settings hints and result counts.
+
+App rules kept over the drafts (to raise with the customer):
+- ⏸ PO activities of a bytové družstvo: the app's 11 points
+  (`PrehliadkaActivities::PO_DEFAULTS`), not the kniha's 13 the draft listed.
+- ⏸ A defect needs a lehota (the draft allowed none); a new defect cannot be
+  „dôvod zanikol" (the column stays, unused, to keep the positions).
+- ⏸ Vlastné činnosti are per set (PO / BOZP); the draft had one column.
+- ⏸ An empty zákonná lehota is step 1's preset: the last prehliadka of the
+  prevádzka with its dohodnutá lehota, else 12 (dom) / 3 (firma).
+- ⏸ One draft prehliadka per prevádzka; a defect may only go to a record of the
+  prehliadka's scope.
+
+---
+
 ## Open questions (must be answered before the relevant phase starts)
 - **Company entity:** base doc says only "name, IČO, address, contact".
   Proposed full set (need confirmation):
