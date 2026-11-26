@@ -13,7 +13,10 @@ use Firol\Import\Schema;
 use Firol\Support\Periodicity;
 use Firol\Support\Address;
 use Firol\Support\BookEntry;
+use Firol\Support\PrehliadkaActivities;
+use Firol\Support\PrehliadkaContext;
 use Firol\Support\PrehliadkaDefects;
+use Firol\Support\PrehliadkaDetails;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -299,6 +302,33 @@ final class ImportController
             $intro[] = 'Zápisy sa naimportujú ako rozpracované, bez čísla a bez dokumentu. Priložené záznamy, fotky ani väzby na číselník sa z Excelu nedajú preniesť — doplníš ich v aplikácii.';
         }
 
+        // Preventívne prehliadky: two sheets of their own, the app's rules.
+        if (isset($sheets['Prehliadky'])) {
+            $intro[] = 'Preventívne prehliadky sa nezadávajú na hárok „Kontroly", ale na dva vlastné hárky: „Prehliadky" (jeden riadok = jedna prehliadka) a „Prehliadky_nedostatky" (jeden riadok = jeden nedostatok). Spájajú sa cez číslo prehliadky, rovnako ako kontroly a ich položky.';
+            $intro[] = 'Rozsah určuje, ktoré záznamy z prehliadky vzniknú: po = záznam z preventívnej protipožiarnej prehliadky, bozp = preventívna prehliadka BOZP, po_bozp = oba naraz. Pri rozsahu po sa činnosti BOZP neuložia a naopak. Vykonané činnosti zadaj ako čísla bodov zo zoznamov nižšie — sú to tie isté zoznamy, ktoré ponúka aplikácia (firma a bytové družstvo majú každý svoj zoznam PO).';
+            $intro[] = 'Platia pravidlá aplikácie: na jednej prevádzke môže byť len jedna rozpracovaná prehliadka, dohodnutá lehota musí byť kratšia než zákonná a každý nedostatok potrebuje lehotu. Prehliadky sa naimportujú ako rozpracované, bez čísla a bez dokumentu; riadne kontroly popri prehliadke, prevzaté nedostatky, fotky ani väzby na číselník sa z Excelu preniesť nedajú — doplníš ich v aplikácii.';
+        }
+
+        // A bytový dom is a prevádzka of a bytové družstvo on every sheet.
+        $hasFacilityRef = false;
+        foreach ($sheets as $sheet) {
+            foreach ($sheet['columns'] as $col) {
+                if ($col['key'] === 'facility_name') {
+                    $hasFacilityRef = true;
+                    break 2;
+                }
+            }
+        }
+        if ($hasFacilityRef) {
+            $intro[] = isset($sheets['Kontroly'])
+                ? 'Stĺpec „Prevádzka" znamená prevádzku aj bytový dom — pri klientovi s druhom klienta bytove_druzstvo doň zadaj názov bytového domu (napr. Jilemnického 5 – 7). Platí to na hárku „Kontroly", na všetkých hárkoch s položkami, v požiarnej knihe aj pri prehliadkach. Ak dom ešte neexistuje, vytvorí sa — podlažia, vchody a hlavné uzávery mu doplníš na hárku „Bytove_domy" v šablóne firiem alebo priamo v aplikácii.'
+                : 'Stĺpec „Prevádzka" znamená prevádzku aj bytový dom — pri klientovi s druhom klienta bytove_druzstvo doň zadaj názov bytového domu (napr. Jilemnického 5 – 7).';
+        }
+
+        if (isset($sheets['Bytove_domy'])) {
+            $intro[] = 'Bytové domy sa zadávajú na vlastný hárok „Bytove_domy" a patria len klientovi, ktorý má druh klienta bytove_druzstvo. Pri takom klientovi sa popis objektu a hlavné vypínače a uzávery tlačia do záznamu z preventívnej prehliadky bytového domu podľa § 14 ods. 3 vyhlášky MV SR č. 121/2002 Z. z. Dom sa hľadá podľa názvu v rámci družstva; ak ešte neexistuje, vytvorí sa. Domu, ktorý už v aplikácii je, sa doplnia len prázdne údaje — nič vyplnené sa neprepíše.';
+        }
+
         // Training templates split the data across the "Školenia" sheet and the
         // "Účastníci" sheet, linked the same way as inspections and their items.
         if (isset($sheets['Skolenia'])) {
@@ -550,6 +580,10 @@ final class ImportController
                 $createdFacilities++;
             }
 
+            [$createdHouses, $filledHouses] = self::importHouses(
+                $pdo, $accountId, $rowsBySheet['Bytove_domy'], $companyIdByIco, $clientTypeById, $facilityIdByKey, $errors,
+            );
+
             if ($errors !== []) {
                 $pdo->rollBack();
                 Response::json(['errors' => $errors, 'created' => null], 422);
@@ -565,11 +599,175 @@ final class ImportController
 
         Response::json([
             'created' => [
-                'companies'  => $createdCompanies,
-                'facilities' => $createdFacilities,
+                'companies'     => $createdCompanies,
+                'facilities'    => $createdFacilities,
+                'houses'        => $createdHouses,
+                'houses_filled' => $filledHouses,
             ],
             'errors' => [],
         ]);
+    }
+
+    /** Columns of Bytove_domy stored as plain text, with their length limits (facilities). */
+    private const HOUSE_TEXT_COLUMNS = [
+        'contact_person'      => ['Kontaktná osoba', 191],
+        'notes'               => ['Poznámky', 4000],
+        'email'               => ['E-mail správcu domu', 255],
+        'main_power_location' => ['Hlavný vypínač elektriny', 255],
+        'main_gas_location'   => ['Hlavný uzáver plynu', 255],
+        'main_water_location' => ['Hlavný uzáver vody', 255],
+        'description'         => ['Popis objektu', 4000],
+        'vchody'              => ['Vchody', 255],
+    ];
+
+    /**
+     * The sheet Bytove_domy: the houses of a bytové družstvo with what the
+     * bytový dom form holds. The rules are the form's (FacilityController):
+     * only a bytové družstvo has houses, a new house needs both floor counts,
+     * a správca e-mail must be valid.
+     *
+     * What the app already holds wins: a house that exists (by name within the
+     * družstvo, e.g. created by an earlier import of Kontroly) gets only its
+     * empty fields filled; nothing stored is overwritten.
+     *
+     * @param list<array<string, string>> $rows
+     * @param array<string,int> $companyIdByIco
+     * @param array<int,string> $clientTypeById
+     * @param array<string,int> $facilityIdByKey
+     * @param list<array{sheet:string,row:int,message:string}> $errors
+     * @return array{0:int, 1:int} houses created and existing houses filled in
+     */
+    private static function importHouses(
+        PDO $pdo,
+        int $accountId,
+        array $rows,
+        array $companyIdByIco,
+        array $clientTypeById,
+        array &$facilityIdByKey,
+        array &$errors,
+    ): array {
+        $sheet = 'Bytove_domy';
+        $created = 0;
+        $filled = 0;
+        $insert = $pdo->prepare(
+            'INSERT INTO facilities
+                (account_id, company_id, name, street, postal_code, city, email, contact_person, notes,
+                 main_power_location, main_gas_location, main_water_location, description,
+                 floors_above, floors_below, entrances, places, vchody)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "[]", "[]", ?)'
+        );
+        $load = $pdo->prepare(
+            'SELECT street, postal_code, city, email, contact_person, notes,
+                    main_power_location, main_gas_location, main_water_location, description,
+                    floors_above, floors_below, vchody
+             FROM   facilities WHERE id = ? AND account_id = ?'
+        );
+
+        foreach ($rows as $idx => $row) {
+            $rowNum = $idx + 2;
+            $fail = static function (string $message) use (&$errors, $sheet, $rowNum): void {
+                $errors[] = ['sheet' => $sheet, 'row' => $rowNum, 'message' => $message];
+            };
+            $ico = self::ico($row, 'company_ico');
+            $name = self::str($row, 'name');
+            if ($ico === null) {
+                $fail('Chýba IČO bytového družstva.');
+                continue;
+            }
+            if ($name === null) {
+                $fail('Chýba názov bytového domu.');
+                continue;
+            }
+            if (mb_strlen($name) > 191) {
+                $fail('Názov bytového domu je príliš dlhý (najviac 191 znakov).');
+                continue;
+            }
+            $companyId = $companyIdByIco[$ico] ?? null;
+            if ($companyId === null) {
+                $fail("Bytové družstvo s IČO $ico neexistuje — zadaj ho na hárku Firmy s druhom klienta bytove_druzstvo.");
+                continue;
+            }
+            if (!\Firol\Support\ClientKind::isBytovyDom($clientTypeById[$companyId] ?? \Firol\Support\ClientKind::FIRMA)) {
+                $fail("Klient s IČO $ico je firma — bytové domy má len bytové družstvo. Druh klienta zmeň v aplikácii.");
+                continue;
+            }
+
+            // Floors: a number in the form's range, or empty.
+            $floors = [];
+            foreach (['floors_above' => [1, 40, 'nadzemných'], 'floors_below' => [0, 5, 'podzemných']] as $key => [$min, $max, $what]) {
+                $raw = self::str($row, $key);
+                $n = self::intOrNull($row, $key);
+                if ($raw !== null && ($n === null || $n < $min || $n > $max)) {
+                    $fail("Počet $what podlaží musí byť číslo od $min do $max.");
+                    continue 2;
+                }
+                $floors[$key] = $n;
+            }
+            $text = [];
+            foreach (self::HOUSE_TEXT_COLUMNS as $key => [$label, $max]) {
+                $value = self::str($row, $key);
+                if ($value !== null && mb_strlen($value) > $max) {
+                    $fail("$label: text je príliš dlhý (najviac $max znakov).");
+                    continue 2;
+                }
+                $text[$key] = $value;
+            }
+            if ($text['email'] !== null && !filter_var($text['email'], FILTER_VALIDATE_EMAIL)) {
+                $fail('Neplatný e-mail správcu domu.');
+                continue;
+            }
+            $addr = Address::parse(self::str($row, 'address'));
+
+            $key = $companyId . '|' . mb_strtolower($name);
+            $existingId = $facilityIdByKey[$key] ?? null;
+            if ($existingId === null) {
+                if ($floors['floors_above'] === null || $floors['floors_below'] === null) {
+                    $fail('Pri novom bytovom dome zadaj počet nadzemných (1–40) a podzemných (0–5) podlaží.');
+                    continue;
+                }
+                $insert->execute([
+                    $accountId, $companyId, $name,
+                    $addr['street'], $addr['postal_code'], $addr['city'],
+                    $text['email'], $text['contact_person'], $text['notes'],
+                    $text['main_power_location'], $text['main_gas_location'], $text['main_water_location'],
+                    $text['description'], $floors['floors_above'], $floors['floors_below'], $text['vchody'],
+                ]);
+                $facilityIdByKey[$key] = (int) $pdo->lastInsertId();
+                $created++;
+                continue;
+            }
+
+            // An existing house: fill what is empty, keep what is stored.
+            $load->execute([$existingId, $accountId]);
+            $stored = $load->fetch();
+            if ($stored === false) {
+                continue;
+            }
+            $isEmpty = static fn (mixed $v): bool => $v === null || $v === '';
+            $set = [];
+            foreach ($text + $floors as $col => $value) {
+                if ($value !== null && $isEmpty($stored[$col])) {
+                    $set[$col] = $value;
+                }
+            }
+            // The address is one value in the sheet: only into a house with none.
+            if ($isEmpty($stored['street']) && $isEmpty($stored['postal_code']) && $isEmpty($stored['city'])) {
+                foreach (['street', 'postal_code', 'city'] as $col) {
+                    if ($addr[$col] !== null) {
+                        $set[$col] = $addr[$col];
+                    }
+                }
+            }
+            if ($set === []) {
+                continue;
+            }
+            $assign = implode(', ', array_map(static fn (string $c): string => "$c = ?", array_keys($set)));
+            $pdo->prepare("UPDATE facilities SET $assign WHERE id = ? AND account_id = ?")
+                ->execute([...array_values($set), $existingId, $accountId]);
+            $filled++;
+        }
+
+        return [$created, $filled];
     }
 
     public static function importTrainings(Request $req): void
@@ -938,6 +1136,21 @@ final class ImportController
                 $errors,
             );
 
+            // Preventívne prehliadky: their own two sheets, independent of the rest.
+            [$createdPrehliadky, $createdPrehliadkaDefects] = self::importPrehliadky(
+                $pdo,
+                $accountId,
+                $currentUserId,
+                $rowsBySheet,
+                $companyIdByIco,
+                $facilityIdByKey,
+                $userIdByEmail,
+                $createdCompanies,
+                $createdFacilities,
+                $createdTechnicians,
+                $errors,
+            );
+
             if ($errors !== []) {
                 $pdo->rollBack();
                 Response::json(['errors' => $errors, 'created' => null], 422);
@@ -955,6 +1168,8 @@ final class ImportController
             'created' => [
                 'inspections'  => $createdInspections,
                 'items'        => $createdItems,
+                'prehliadky'   => $createdPrehliadky,
+                'prehliadka_defects' => $createdPrehliadkaDefects,
                 'book_entries' => $createdBookEntries,
                 'book_defects' => $createdBookDefects,
                 'technicians'  => $createdTechnicians,
@@ -1378,6 +1593,398 @@ final class ImportController
         }
 
         return [$created, $defects];
+    }
+
+    /**
+     * Imports the sheets Prehliadky / Prehliadky_nedostatky as preventívne
+     * prehliadky: drafts with no number and no document, like every imported
+     * úkon. Wherever the app has a rule, the app's rule applies:
+     *
+     *  - the header passes {@see PrehliadkaDetails::validate()}; the activities
+     *    are the numbers of the screen's own lists
+     *    ({@see PrehliadkaActivities::defaults()}), vlastné činnosti join the
+     *    firm's list as on the screen;
+     *  - an empty zákonná lehota is what step 1 presets: the last prehliadka of
+     *    the prevádzka (with its dohodnutá lehota), else 12 for a bytový dom and
+     *    3 for a firma; a dohodnutá lehota must be shorter than the zákonná;
+     *  - one draft prehliadka per prevádzka — step 1 offers only to continue
+     *    a draft that exists;
+     *  - each defect passes {@see PrehliadkaDefects::validate()} with the
+     *    prehliadka's options: the lehota is required, a new defect cannot be
+     *    „dôvod zanikol", and only the records of the prehliadka's scope are
+     *    offered.
+     *
+     * A child sheet is checked only once its parent is clean, so one mistake
+     * is not reported twice. Riadne kontroly, carried-over defects, photos and
+     * catalogue links cannot come from Excel and stay empty.
+     *
+     * @param array<string, list<array<string, string>>> $rowsBySheet
+     * @param array<string,int> $companyIdByIco
+     * @param array<string,int> $facilityIdByKey
+     * @param array<string,int> $userIdByEmail
+     * @param list<array{sheet:string,row:int,message:string}> $errors
+     * @return array{0:int, 1:int} prehliadky and defects created
+     */
+    private static function importPrehliadky(
+        PDO $pdo,
+        int $accountId,
+        int $currentUserId,
+        array $rowsBySheet,
+        array &$companyIdByIco,
+        array &$facilityIdByKey,
+        array &$userIdByEmail,
+        int &$createdCompanies,
+        int &$createdFacilities,
+        int &$createdTechnicians,
+        array &$errors,
+    ): array {
+        $headRows = $rowsBySheet['Prehliadky'] ?? [];
+        $defectRows = $rowsBySheet['Prehliadky_nedostatky'] ?? [];
+        if ($headRows === [] && $defectRows === []) {
+            return [0, 0];
+        }
+        $errorsBefore = count($errors);
+        $fail = static function (string $sheet, int $row, string $message) use (&$errors): void {
+            $errors[] = ['sheet' => $sheet, 'row' => $row, 'message' => $message];
+        };
+
+        // ── Prehliadky ──────────────────────────────────────────────────
+        $insert = $pdo->prepare(
+            'INSERT INTO inspections
+                (account_id, company_id, facility_id, type,
+                 periodicity_value, periodicity_unit, periodicity_is_custom,
+                 executed_on, inspector_user_id, status, notes,
+                 is_preventive_inspection, details, billing_mode, created_by_user_id)
+             VALUES (?, ?, ?, ?, ?, "mesiac", ?, ?, ?, "draft", NULL, 1, ?, ?, ?)'
+        );
+        $draftAt = $pdo->prepare(
+            'SELECT 1 FROM inspections
+             WHERE  account_id = ? AND facility_id = ? AND type = ?
+               AND  status = "draft" AND archived_at IS NULL
+             LIMIT  1'
+        );
+        /** @var array<int, array<string, mixed>> $prehliadky number of the prehliadka → what its defects need */
+        $prehliadky = [];
+        /** @var array<int, true> $usedNumbers */
+        $usedNumbers = [];
+        /** @var array<int, true> $facilitiesInFile prevádzky that got a prehliadka from this file */
+        $facilitiesInFile = [];
+        $created = 0;
+        foreach ($headRows as $idx => $row) {
+            $sheet = 'Prehliadky';
+            $rowNum = $idx + 2;
+            $rowNo = self::intOrNull($row, 'row_no');
+            if ($rowNo === null) {
+                $fail($sheet, $rowNum, 'Chýba číslo prehliadky.');
+                continue;
+            }
+            if (isset($usedNumbers[$rowNo])) {
+                $fail($sheet, $rowNum, "Číslo prehliadky $rowNo je na hárku Prehliadky už použité.");
+                continue;
+            }
+            $usedNumbers[$rowNo] = true;
+
+            $companyName = self::str($row, 'company_name');
+            $ico = self::ico($row, 'company_ico');
+            $facilityName = self::str($row, 'facility_name');
+            if ($ico === null || $companyName === null || $facilityName === null) {
+                $fail($sheet, $rowNum, 'Chýba názov firmy / IČO firmy / prevádzka.');
+                continue;
+            }
+            $executedOn = self::str($row, 'executed_on');
+            if (!self::isDate($executedOn)) {
+                $fail($sheet, $rowNum, 'Neplatný dátum (formát DD-MM-RRRR).');
+                continue;
+            }
+            $scopeCell = self::str($row, 'scope') ?? 'po';
+            if (!isset(Schema::PREHLIADKA_SCOPE_LABELS[$scopeCell])) {
+                $fail($sheet, $rowNum, 'Rozsah prehliadky môže byť po, bozp alebo po_bozp (alebo prázdny).');
+                continue;
+            }
+            $scope = ['po' => $scopeCell !== 'bozp', 'bozp' => $scopeCell !== 'po'];
+
+            $zakonCell = self::str($row, 'lehota_zakon');
+            if ($zakonCell !== null && !in_array($zakonCell, ['12', '6', '3'], true)) {
+                $fail($sheet, $rowNum, 'Zákonná lehota môže byť 12, 6 alebo 3 mesiace (alebo prázdna).');
+                continue;
+            }
+            $vlastnaCell = self::str($row, 'lehota_vlastna');
+            $vlastna = self::intOrNull($row, 'lehota_vlastna');
+            if ($vlastnaCell !== null && ($vlastna === null || $vlastna < 1)) {
+                $fail($sheet, $rowNum, 'Dohodnutá kratšia lehota je počet mesiacov (napr. 2).');
+                continue;
+            }
+            $numbersPo = self::pointNumbers(self::str($row, 'activities_po'));
+            $numbersBozp = self::pointNumbers(self::str($row, 'activities_bozp'));
+            if ($numbersPo === null || $numbersBozp === null) {
+                $fail($sheet, $rowNum, 'Vykonané činnosti zadaj ako čísla bodov oddelené čiarkou (napr. 1,3,5).');
+                continue;
+            }
+
+            $companyId = self::resolveOrCreateCompany(
+                $pdo, $accountId, $ico, $companyName, $companyIdByIco, $createdCompanies,
+            );
+            $clientType = self::companyClientType($pdo, $accountId, $companyId) ?? \Firol\Support\ClientKind::FIRMA;
+            $isDom = \Firol\Support\ClientKind::isBytovyDom($clientType);
+            $facilityId = self::resolveOrCreateFacility(
+                $pdo, $accountId, $companyId, $facilityName, $facilityIdByKey, $createdFacilities,
+            );
+
+            // One draft per prevádzka, as step 1 allows. The file's own repeat
+            // first: its earlier row already stored a draft here.
+            if (isset($facilitiesInFile[$facilityId])) {
+                $fail($sheet, $rowNum, "Prevádzka „{$facilityName}\" má na hárku Prehliadky viac prehliadok — rozpracovaná môže byť len jedna, ako v aplikácii.");
+                continue;
+            }
+            $draftAt->execute([$accountId, $facilityId, PrehliadkaDetails::TYPE]);
+            if ($draftAt->fetchColumn() !== false) {
+                $where = $isDom ? "V bytovom dome „{$facilityName}\"" : "Na prevádzke „{$facilityName}\"";
+                $fail($sheet, $rowNum, "$where už je rozpracovaná preventívna prehliadka — dokonči ju alebo zahoď v aplikácii.");
+                continue;
+            }
+            $facilitiesInFile[$facilityId] = true;
+
+            // Lehoty: an empty zákonná is step 1's preset.
+            if ($zakonCell !== null) {
+                $zakon = (int) $zakonCell;
+            } else {
+                $last = PrehliadkaContext::forFacility($accountId, $facilityId)['last'];
+                $lastZakon = $last['lehota_zakon'] ?? null;
+                $zakon = in_array($lastZakon, [3, 6, 12], true) ? (int) $lastZakon : ($isDom ? 12 : 3);
+                if ($vlastnaCell === null && is_int($last['lehota_vlastna'] ?? null)) {
+                    $vlastna = (int) $last['lehota_vlastna'];
+                }
+            }
+            if ($vlastna !== null && $vlastna >= $zakon) {
+                $fail($sheet, $rowNum, "Dohodnutá lehota ($vlastna mes.) nie je kratšia než zákonná ($zakon mes.). Dlhšiu lehotu než zákonnú nie je možné dohodnúť.");
+                continue;
+            }
+
+            // Activities: the numbers of the screen's lists, then the own ones.
+            $activities = [];
+            foreach ([PrehliadkaActivities::PO => $numbersPo, PrehliadkaActivities::BOZP => $numbersBozp] as $kind => $numbers) {
+                $activities[$kind] = [];
+                if (!$scope[$kind === PrehliadkaActivities::PO ? 'po' : 'bozp']) {
+                    // Not part of this prehliadka: ignored, as the setup drops them.
+                    continue;
+                }
+                $list = PrehliadkaActivities::defaults($kind, $clientType);
+                foreach ($numbers as $i) {
+                    if ($i < 1 || $i > count($list)) {
+                        $set = $kind === PrehliadkaActivities::PO ? 'PO' : 'BOZP';
+                        $who = $kind === PrehliadkaActivities::PO ? ($isDom ? ' pre bytové družstvo' : ' pre firmu') : '';
+                        $fail($sheet, $rowNum, "Bod č. $i nie je v zozname činností $set$who (1–" . count($list) . ').');
+                        continue 3;
+                    }
+                    $activities[$kind][] = $list[$i - 1];
+                }
+                // „Vlastné činnosti" belong to the PO set when PO is done, else
+                // to BOZP; the BOZP ones of a po_bozp prehliadka have the last column.
+                $ownKey = $kind === PrehliadkaActivities::PO || !$scope['po'] ? 'vlastne' : 'vlastne_bozp';
+                $ownCell = self::str($row, $ownKey) ?? '';
+                foreach (explode('|', $ownCell) as $label) {
+                    $label = trim($label);
+                    if ($label === '') {
+                        continue;
+                    }
+                    // A text of the default list is that point, not an addition.
+                    $default = null;
+                    foreach ($list as $d) {
+                        if (mb_strtolower($d) === mb_strtolower($label)) {
+                            $default = $d;
+                            break;
+                        }
+                    }
+                    if ($default !== null) {
+                        $activities[$kind][] = $default;
+                        continue;
+                    }
+                    try {
+                        $added = PrehliadkaActivities::add($accountId, $companyId, $kind, $label, $currentUserId);
+                    } catch (\InvalidArgumentException $e) {
+                        $fail($sheet, $rowNum, $e->getMessage());
+                        continue 3;
+                    }
+                    $activities[$kind][] = $added['label'];
+                }
+            }
+
+            try {
+                $details = PrehliadkaDetails::validate([
+                    'scope'              => $scope,
+                    'routine'            => [],
+                    'lehota_zakon'       => $zakon,
+                    'lehota_vlastna'     => $vlastna,
+                    'poznamka'           => self::str($row, 'poznamka'),
+                    'oboznameny_meno'    => self::str($row, 'oboznameny_meno'),
+                    'oboznameny_funkcia' => self::str($row, 'oboznameny_funkcia'),
+                    'activities_po'      => $activities[PrehliadkaActivities::PO],
+                    'activities_bozp'    => $activities[PrehliadkaActivities::BOZP],
+                ]);
+            } catch (\InvalidArgumentException $e) {
+                $fail($sheet, $rowNum, $e->getMessage());
+                continue;
+            }
+
+            $inspectorId = $currentUserId;
+            $inspectorEmail = self::str($row, 'inspector_email');
+            if ($inspectorEmail !== null) {
+                $inspectorId = self::resolveOrCreateMember(
+                    $pdo, $accountId, $inspectorEmail, $userIdByEmail, $createdTechnicians,
+                );
+            }
+
+            // As step 1 creates it: the periodicity is the dohodnutá lehota,
+            // else the zákonná, in months; the režim is the firm's.
+            $months = $vlastna ?? $zakon;
+            $insert->execute([
+                $accountId,
+                $companyId,
+                $facilityId,
+                PrehliadkaDetails::TYPE,
+                $months,
+                Periodicity::isCustom(PrehliadkaDetails::TYPE, $months, 'mesiac') ? 1 : 0,
+                $executedOn,
+                $inspectorId,
+                \Firol\Support\InspectionDetails::encode($details),
+                \Firol\Support\Invoicing::companyMode($companyId),
+                $currentUserId,
+            ]);
+            $prehliadky[$rowNo] = [
+                'inspection_id' => (int) $pdo->lastInsertId(),
+                'executed_on'   => $executedOn,
+                'is_dom'        => $isDom,
+                'scope'         => $scope,
+                'scope_cell'    => $scopeCell,
+            ];
+            $created++;
+        }
+        if (count($errors) > $errorsBefore) {
+            return [0, 0];
+        }
+
+        // ── Prehliadky_nedostatky ───────────────────────────────────────
+        $insertDefect = $pdo->prepare(
+            'INSERT INTO inspection_items (inspection_id, position, fields)
+             SELECT ?, COALESCE(MAX(position), 0) + 1, ?
+             FROM   inspection_items WHERE inspection_id = ?'
+        );
+        $statusLabels = ['zisteny' => 'zistený', 'odstraneny' => 'odstránený', 'trva' => 'trvá', 'zanik' => 'dôvod zanikol'];
+        $defects = 0;
+        foreach ($defectRows as $idx => $row) {
+            $sheet = 'Prehliadky_nedostatky';
+            $rowNum = $idx + 2;
+            $rowNo = self::intOrNull($row, 'row_no');
+            if ($rowNo === null) {
+                $fail($sheet, $rowNum, 'Chýba číslo prehliadky.');
+                continue;
+            }
+            $parent = $prehliadky[$rowNo] ?? null;
+            if ($parent === null) {
+                $fail($sheet, $rowNum, "Prehliadka č. $rowNo neexistuje na hárku Prehliadky.");
+                continue;
+            }
+
+            // The record: only those of the prehliadka's scope, as the screen offers.
+            $scopeCell = self::str($row, 'scope');
+            if ($scopeCell === null) {
+                $defectScope = $parent['scope']['po'] ? 'po' : 'bo';
+            } else {
+                $defectScope = Schema::PREHLIADKA_DEFECT_SCOPES[mb_strtolower($scopeCell)] ?? null;
+                if ($defectScope === null) {
+                    $fail($sheet, $rowNum, 'Do ktorého záznamu patrí: po, bozp alebo oboje (alebo prázdne).');
+                    continue;
+                }
+                $offered = match ($defectScope) {
+                    'po'    => $parent['scope']['po'],
+                    'bo'    => $parent['scope']['bozp'],
+                    default => $parent['scope']['po'] && $parent['scope']['bozp'],
+                };
+                if (!$offered) {
+                    $fail($sheet, $rowNum, "Prehliadka č. $rowNo má rozsah {$parent['scope_cell']} — nedostatok nemôže patriť do záznamu „$scopeCell\".");
+                    continue;
+                }
+            }
+
+            $body = [
+                'title'         => self::str($row, 'title'),
+                'description'   => self::str($row, 'description'),
+                'scope'         => $defectScope,
+                // Free text from Excel is the „vlastný popis" of the place.
+                'where'         => ['detail' => self::str($row, 'place')],
+                'device_manual' => self::str($row, 'device_manual'),
+                'responsible'   => self::str($row, 'responsible'),
+                'regulation'    => self::str($row, 'regulation'),
+                'justification' => self::str($row, 'justification'),
+                'measure'       => self::str($row, 'measure'),
+                'reason'        => self::str($row, 'reason'),
+            ];
+
+            $deadline = self::str($row, 'deadline');
+            if ($deadline === null) {
+                $fail($sheet, $rowNum, 'Chýba lehota — bezodkladne, 30d, 3m, 6m alebo dátum DD-MM-RRRR.');
+                continue;
+            }
+            $choice = mb_strtolower($deadline);
+            if (in_array($choice, Schema::BOOK_DEADLINE_CHOICES, true)) {
+                $body['deadline_choice'] = $choice;
+            } elseif (self::isDate($deadline)) {
+                $body['deadline_choice'] = 'custom';
+                $body['deadline_date'] = $deadline;
+            } elseif (self::looksLikeDate($deadline)) {
+                $fail($sheet, $rowNum, 'Neplatný dátum (formát DD-MM-RRRR).');
+                continue;
+            } else {
+                $fail($sheet, $rowNum, 'Lehota môže byť bezodkladne, 30d, 3m, 6m alebo dátum DD-MM-RRRR.');
+                continue;
+            }
+
+            $status = self::str($row, 'status');
+            if ($status !== null) {
+                // The code or the screen's label (zistený, odstránený, …).
+                $code = array_search(mb_strtolower($status), $statusLabels, true);
+                $body['status'] = is_string($code) ? $code : $status;
+            }
+
+            try {
+                // The prehliadka's own rules: no options, as the defect screen saves it.
+                $fields = PrehliadkaDefects::validate($body, (string) $parent['executed_on'], (bool) $parent['is_dom']);
+            } catch (\InvalidArgumentException $e) {
+                $fail($sheet, $rowNum, $e->getMessage());
+                continue;
+            }
+            $json = json_encode($fields, JSON_UNESCAPED_UNICODE);
+            if ($json === false) {
+                $fail($sheet, $rowNum, 'Nedostatok sa nepodarilo uložiť.');
+                continue;
+            }
+            $insertDefect->execute([(int) $parent['inspection_id'], $json, (int) $parent['inspection_id']]);
+            $defects++;
+        }
+
+        return [$created, $defects];
+    }
+
+    /**
+     * „1,3,5" → [1, 3, 5]; an empty cell → []; anything that is not a list of
+     * numbers → null.
+     *
+     * @return list<int>|null
+     */
+    private static function pointNumbers(?string $cell): ?array
+    {
+        if ($cell === null) {
+            return [];
+        }
+        $parts = preg_split('/[\s,;]+/u', $cell, -1, PREG_SPLIT_NO_EMPTY);
+        $out = [];
+        foreach (is_array($parts) ? $parts : [] as $n) {
+            if (!ctype_digit($n)) {
+                return null;
+            }
+            $out[] = (int) $n;
+        }
+        return $out;
     }
 
     private static function companyClientType(PDO $pdo, int $accountId, int $companyId): ?string

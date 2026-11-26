@@ -28,7 +28,7 @@ final class PrehliadkaContext
     /**
      * @return array{
      *   draft_id: ?int,
-     *   last: ?array{inspection_id: int, executed_on: ?string, defects: int, periodicity_value: ?int, periodicity_unit: ?string, scope: array{po: bool, bozp: bool}, routine: list<string>},
+     *   last: ?array{inspection_id: int, executed_on: ?string, defects: int, periodicity_value: ?int, periodicity_unit: ?string, scope: array{po: bool, bozp: bool}, routine: list<string>, lehota_zakon: ?int, lehota_vlastna: ?int},
      *   open_drafts: array<string, int>|stdClass
      * }
      */

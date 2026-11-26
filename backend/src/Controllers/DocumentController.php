@@ -23,6 +23,7 @@ use Firol\Support\Address;
 use Firol\Support\BookEntry;
 use Firol\Support\Contractor;
 use Firol\Support\Handover;
+use Firol\Support\InspectorProfiles;
 use Firol\Support\Periodicity;
 use Firol\Support\PhotoCaption;
 use Firol\Support\PersonList;
@@ -1081,21 +1082,9 @@ final class DocumentController
         int $executorUserId,
         string $insType,
     ): array {
-        $loadProfile = static function (int $uid) use ($accountId): array {
-            $stmt = Db::pdo()->prepare(
-                'SELECT signature_path, cert_php, cert_oprava, cert_general, cert_bt,
-                        certification_number,
-                        valid_from_php, valid_to_php,
-                        valid_from_oprava, valid_to_oprava,
-                        valid_from_general, valid_to_general,
-                        valid_from_bt, valid_to_bt,
-                        valid_from, valid_to
-                 FROM   inspector_profiles
-                 WHERE  user_id = ? AND account_id = ?'
-            );
-            $stmt->execute([$uid, $accountId]);
-            return $stmt->fetch() ?: [];
-        };
+        // A platform admin working in a client account signs with their home
+        // profile wherever the client account's one is blank (InspectorProfiles).
+        $loadProfile = static fn (int $uid): array => InspectorProfiles::forAccount($uid, $accountId);
 
         $executorProfile = $loadProfile($executorUserId);
 
@@ -1438,20 +1427,16 @@ final class DocumentController
         }
 
         if ($userId > 0) {
-            $stmt = Db::pdo()->prepare(
-                'SELECT u.fullname, ip.signature_path
-                 FROM   users u
-                 LEFT   JOIN inspector_profiles ip
-                        ON ip.user_id = u.id AND ip.account_id = ?
-                 WHERE  u.id = ?'
-            );
-            $stmt->execute([$accountId, $userId]);
-            $row = $stmt->fetch() ?: [];
-            if (!empty($row['fullname'])) {
-                $payload['inspector']['fullname'] = (string) $row['fullname'];
+            $stmt = Db::pdo()->prepare('SELECT fullname FROM users WHERE id = ?');
+            $stmt->execute([$userId]);
+            $fullname = $stmt->fetchColumn();
+            if (is_string($fullname) && $fullname !== '') {
+                $payload['inspector']['fullname'] = $fullname;
             }
+            // The same profile the protocol was issued with (InspectorProfiles).
+            $signature = InspectorProfiles::forAccount($userId, $accountId)['signature_path'] ?? null;
             $payload['inspector']['signature_data_uri'] = self::signatureToDataUri(
-                isset($row['signature_path']) && is_string($row['signature_path']) ? $row['signature_path'] : null,
+                is_string($signature) ? $signature : null,
             );
         }
 
@@ -1623,15 +1608,11 @@ final class DocumentController
                        c.approver AS company_approver,
                        t.facility_id, f.name AS facility_name,
                        f.street AS facility_street, f.postal_code AS facility_postal_code, f.city AS facility_city,
-                       t.trainer_id, tr.fullname AS trainer_name,
-                       ip.cert_general   AS trainer_certification_number,
-                       ip.signature_path AS trainer_signature_path
+                       t.trainer_id, tr.fullname AS trainer_name
                 FROM   trainings t
                 JOIN   companies  c  ON c.id = t.company_id
                 LEFT JOIN facilities f  ON f.id = t.facility_id
                 LEFT JOIN users      tr ON tr.id = t.trainer_id
-                LEFT JOIN inspector_profiles ip
-                       ON ip.user_id = t.trainer_id AND ip.account_id = t.account_id
                 WHERE  t.id = ? AND t.archived_at IS NULL';
         $params = [$trainingId];
         if ($accountId !== null) {
@@ -1644,6 +1625,14 @@ final class DocumentController
         if (!$row) {
             Response::error('Školenie sa nenašlo.', 404);
         }
+        // The trainer signs under their Technik PO number. A platform admin
+        // training in a client account signs with their home profile wherever
+        // that account's one is blank (InspectorProfiles), as on úkony.
+        $trainer = $row['trainer_id'] !== null
+            ? InspectorProfiles::forAccount((int) $row['trainer_id'], (int) $row['account_id'])
+            : [];
+        $row['trainer_certification_number'] = $trainer['cert_general'] ?? null;
+        $row['trainer_signature_path'] = $trainer['signature_path'] ?? null;
         return $row;
     }
 

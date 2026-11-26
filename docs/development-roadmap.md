@@ -1549,8 +1549,17 @@ that opens the field, highlighted (`lib/certMissing.ts`, `components/CertFocus.t
 - **One source of the rules:** `Support/CertGuard.php` (`missingForType`, `missingForPrehliadka`, `verdicts`),
   used by create, repeat, follow-up, the prehliadka scope edit (PATCH) and `PrehliadkaCloser`.
 - **Decided 10. 11. 2026 (owner):** the check applies to **everyone**, sys-admins included. It is about the
-  signing technician (`inspector_user_id`) in the úkon's account. Consequence: an admin acting in a foreign
-  account needs a profile with the number in that account.
+  signing technician (`inspector_user_id`) in the úkon's account.
+- **Changed 25. 11. 2026 (owner):** a sys-admin acting in an account they are not a member of signs with
+  their **home profile** wherever that account's profile is blank: each number with its own validity, and the
+  signature separately. Anything they did fill in there still wins. Home = the profile in an account they are the
+  main user of, else the one updated last. One helper, `Support/InspectorProfiles::forAccount`, serves both the
+  check (`CertGuard`) and the protocol (`DocumentController`), so they cannot disagree. Trainings follow the
+  same rule (26. 11. 2026): the trainer's `cert_general` and signature on the training detail and its PDF.
+  So do work confirmations (technician's number and signature) and stock issues (the issuer's number frozen
+  at issue, the signature on the PDF), 26. 11. 2026. No reader of `inspector_profiles` for a signing identity
+  is left outside the helper. (Replaces the 10. 11. rule that an admin needed a profile in every foreign
+  account.)
 - **Early:** follow-up drafts (`oprava_ts_php`, `vyradenie`, `ts_hadic`) are checked on creation. A prehliadka
   edit is checked when it switches PO / BOZP scope **on** (scope already on is left alone).
 - **Offline (approved 10. 11. 2026):** `/api/me/inspector-profile` returns `can_create` (the server verdict per
@@ -2736,6 +2745,39 @@ never called)
   of an imported technician (round 2) — unchanged.
 - ⏸ Charging an added technician at once; the monthly ↔ yearly switch — not
   decided.
+
+---
+
+## Excel import: bytové domy and preventívne prehliadky (26. 11. 2026) ✅ built
+
+The customer found on 25. 11. 2026 that the import had not followed the new
+modules and sent drafts of the templates (`upravene-importy/`). Built from
+them, with the owner's decision of 26. 11. 2026: **where the drafts and the app
+disagree, the app wins**; the open points go back to the customer later.
+
+- ✅ Firmy template: new sheet **Bytove_domy** (podlažia, vchody, popis objektu,
+  hlavné uzávery, e-mail správcu, kontakt, poznámky) → `facilities`, only under
+  a bytové družstvo. A new house needs both floor counts (the form's rule); an
+  existing house gets only its empty fields filled, nothing stored is
+  overwritten.
+- ✅ Kontroly template: new sheets **Prehliadky** and **Prehliadky_nedostatky**
+  → `preventivna_prehliadka` drafts through `PrehliadkaDetails::validate` and
+  `PrehliadkaDefects::validate`. Columns in the customer's order (the importer
+  reads by position, so their own files import too), plus a last column for
+  the BOZP vlastné činnosti of a po_bozp prehliadka.
+- ✅ Pokyny lines for both, the „Prevádzka = bytový dom" line on the Kontroly
+  and Školenia templates, the Settings hints and result counts.
+
+App rules kept over the drafts (to raise with the customer):
+- ⏸ PO activities of a bytové družstvo: the app's 11 points
+  (`PrehliadkaActivities::PO_DEFAULTS`), not the kniha's 13 the draft listed.
+- ⏸ A defect needs a lehota (the draft allowed none); a new defect cannot be
+  „dôvod zanikol" (the column stays, unused, to keep the positions).
+- ⏸ Vlastné činnosti are per set (PO / BOZP); the draft had one column.
+- ⏸ An empty zákonná lehota is step 1's preset: the last prehliadka of the
+  prevádzka with its dohodnutá lehota, else 12 (dom) / 3 (firma).
+- ⏸ One draft prehliadka per prevádzka; a defect may only go to a record of the
+  prehliadka's scope.
 
 ---
 

@@ -14,6 +14,7 @@ use Firol\Http\Response;
 use Firol\Pdf\PdfRenderer;
 use Firol\Storage\Storage;
 use Firol\Support\Address;
+use Firol\Support\InspectorProfiles;
 
 /**
  * Potvrdenie o vykonaní práce — block 1 / chapter 10.
@@ -257,14 +258,11 @@ final class WorkConfirmationController
                     w.facility_id, f.name AS facility_name,
                     f.street AS facility_street, f.postal_code AS facility_postal_code,
                     f.city AS facility_city,
-                    w.technician_user_id, u.fullname AS technician_name,
-                    ip.cert_general, ip.cert_php, ip.signature_path
+                    w.technician_user_id, u.fullname AS technician_name
              FROM   work_confirmations w
              JOIN   companies  c ON c.id = w.company_id
              LEFT   JOIN facilities f ON f.id = w.facility_id
              JOIN   users      u ON u.id = w.technician_user_id
-             LEFT   JOIN inspector_profiles ip
-                    ON ip.user_id = w.technician_user_id AND ip.account_id = w.account_id
              WHERE  w.id = ? AND w.account_id = ?'
         );
         $stmt->execute([$id, $accountId]);
@@ -272,6 +270,13 @@ final class WorkConfirmationController
         if (!$row) {
             Response::error('Potvrdenie sa nenašlo.', 404);
         }
+        // The technician's number and signature. A platform admin in a client
+        // account signs with their home profile wherever that account's one is
+        // blank (InspectorProfiles), as on úkony and trainings.
+        $profile = InspectorProfiles::forAccount((int) $row['technician_user_id'], $accountId);
+        $row['cert_general'] = $profile['cert_general'] ?? null;
+        $row['cert_php'] = $profile['cert_php'] ?? null;
+        $row['signature_path'] = $profile['signature_path'] ?? null;
 
         $ids = self::readIds(json_decode((string) $row['inspection_ids'], true));
         $inspections = self::loadInspections($accountId, (int) $row['company_id'], $ids);

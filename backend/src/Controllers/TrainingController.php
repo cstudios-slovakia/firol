@@ -13,6 +13,7 @@ use Firol\Db;
 use Firol\Http\Request;
 use Firol\Http\Response;
 use Firol\Storage\Storage;
+use Firol\Support\InspectorProfiles;
 use Firol\Support\Periodicity;
 use Firol\Support\PokynZatva;
 
@@ -513,15 +514,12 @@ final class TrainingController
                        t.facility_id, f.name AS facility_name, t.visit_id,
                        t.trainer_id, tr.fullname AS trainer_name,
                        t.created_by_user_id,
-                       ip.cert_general AS trainer_certification_number,
                        t.billing_mode, t.invoiced, t.invoiced_at, t.billing_note,
                        (SELECT COUNT(*) FROM trainees WHERE training_id = t.id) AS trainees_count
                 FROM   trainings t
                 JOIN   companies   c  ON c.id = t.company_id
                 LEFT JOIN facilities f  ON f.id = t.facility_id
                 LEFT JOIN users      tr ON tr.id = t.trainer_id
-                LEFT JOIN inspector_profiles ip
-                       ON ip.user_id = t.trainer_id AND ip.account_id = t.account_id
                 WHERE  t.id = ? AND t.archived_at IS NULL';
         $params = [$id];
         if ($accountId !== null) {
@@ -534,6 +532,12 @@ final class TrainingController
         if (!$row) {
             Response::error('Školenie sa nenašlo.', 404);
         }
+        // The trainer's Technik PO number, read as the PDF prints it: a
+        // platform admin training in a client account signs with their home
+        // profile wherever that account's one is blank (InspectorProfiles).
+        $row['trainer_certification_number'] = $row['trainer_id'] !== null
+            ? (InspectorProfiles::forAccount((int) $row['trainer_id'], (int) $row['account_id'])['cert_general'] ?? null)
+            : null;
         return $row;
     }
 
