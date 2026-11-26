@@ -16,6 +16,7 @@ use Firol\Pdf\PdfRenderer;
 use Firol\Storage\Storage;
 use Firol\Support\Address;
 use Firol\Support\Contractor;
+use Firol\Support\InspectorProfiles;
 use Firol\Support\Stock;
 use Firol\Support\StockException;
 use PDO;
@@ -545,13 +546,10 @@ final class StockController
             'SELECT si.*, c.name AS company_name, c.ico AS company_ico, c.street AS company_street,
                     c.postal_code AS company_postal_code, c.city AS company_city,
                     f.name AS facility_name, f.street AS facility_street,
-                    f.postal_code AS facility_postal_code, f.city AS facility_city,
-                    ip.signature_path
+                    f.postal_code AS facility_postal_code, f.city AS facility_city
              FROM   stock_issues si
              JOIN   companies c ON c.id = si.company_id
              LEFT   JOIN facilities f ON f.id = si.facility_id
-             LEFT   JOIN inspector_profiles ip
-                    ON ip.user_id = si.issuer_user_id AND ip.account_id = si.account_id
              WHERE  si.id = ? AND si.account_id = ?'
         );
         $stmt->execute([$issueId, $accountId]);
@@ -559,6 +557,11 @@ final class StockController
         if (!$row) {
             throw new \RuntimeException('Výdajka sa nenašla.');
         }
+        // The issuer's signature, from the same profile their number was
+        // frozen from (see issuer()).
+        $row['signature_path'] = $row['issuer_user_id'] !== null
+            ? (InspectorProfiles::forAccount((int) $row['issuer_user_id'], $accountId)['signature_path'] ?? null)
+            : null;
 
         $lineStmt = $pdo->prepare(
             'SELECT item_name, qty, unit, note, inspection_id
@@ -772,28 +775,26 @@ final class StockController
      * professional document tied to one úkon type, so it prints the
      * technician's general number (technik PO), falling back to the PHP one
      * and then the BT one — the same order the potvrdenie o práci uses.
+     * A platform admin in a client account signs with their home profile
+     * wherever that account's one is blank (InspectorProfiles).
      *
      * @return array{0: string, 1: ?string}
      */
     private static function issuer(int $accountId, int $userId): array
     {
-        $stmt = Db::pdo()->prepare(
-            'SELECT u.fullname, ip.cert_general, ip.cert_php, ip.cert_bt
-             FROM   users u
-             LEFT   JOIN inspector_profiles ip ON ip.user_id = u.id AND ip.account_id = ?
-             WHERE  u.id = ?'
-        );
-        $stmt->execute([$accountId, $userId]);
-        $r = $stmt->fetch() ?: [];
+        $stmt = Db::pdo()->prepare('SELECT fullname FROM users WHERE id = ?');
+        $stmt->execute([$userId]);
+        $fullname = $stmt->fetchColumn();
+        $profile = InspectorProfiles::forAccount($userId, $accountId);
         $cert = null;
         foreach (['cert_general', 'cert_php', 'cert_bt'] as $col) {
-            $v = trim((string) ($r[$col] ?? ''));
+            $v = trim((string) ($profile[$col] ?? ''));
             if ($v !== '') {
                 $cert = $v;
                 break;
             }
         }
-        return [(string) ($r['fullname'] ?? ''), $cert];
+        return [is_string($fullname) ? $fullname : '', $cert];
     }
 
     private static function imageDataUri(?string $relativePath): ?string
