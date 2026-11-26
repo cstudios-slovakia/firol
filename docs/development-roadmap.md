@@ -1554,9 +1554,10 @@ that opens the field, highlighted (`lib/certMissing.ts`, `components/CertFocus.t
   their **home profile** wherever that account's profile is blank: each number with its own validity, and the
   signature separately. Anything they did fill in there still wins. Home = the profile in an account they are the
   main user of, else the one updated last. One helper, `Support/InspectorProfiles::forAccount`, serves both the
-  check (`CertGuard`) and the protocol (`DocumentController`), so they cannot disagree. Trainings (trainer's
-  `cert_general`) still read the training's account only. (Replaces the 10. 11. rule that an admin needed a
-  profile in every foreign account.)
+  check (`CertGuard`) and the protocol (`DocumentController`), so they cannot disagree. Trainings follow the
+  same rule (26. 11. 2026): the trainer's `cert_general` and signature on the training detail and its PDF.
+  Work confirmations and stock issues still read the record's account only. (Replaces the 10. 11. rule that an
+  admin needed a profile in every foreign account.)
 - **Early:** follow-up drafts (`oprava_ts_php`, `vyradenie`, `ts_hadic`) are checked on creation. A prehliadka
   edit is checked when it switches PO / BOZP scope **on** (scope already on is left alone).
 - **Offline (approved 10. 11. 2026):** `/api/me/inspector-profile` returns `can_create` (the server verdict per

@@ -1608,15 +1608,11 @@ final class DocumentController
                        c.approver AS company_approver,
                        t.facility_id, f.name AS facility_name,
                        f.street AS facility_street, f.postal_code AS facility_postal_code, f.city AS facility_city,
-                       t.trainer_id, tr.fullname AS trainer_name,
-                       ip.cert_general   AS trainer_certification_number,
-                       ip.signature_path AS trainer_signature_path
+                       t.trainer_id, tr.fullname AS trainer_name
                 FROM   trainings t
                 JOIN   companies  c  ON c.id = t.company_id
                 LEFT JOIN facilities f  ON f.id = t.facility_id
                 LEFT JOIN users      tr ON tr.id = t.trainer_id
-                LEFT JOIN inspector_profiles ip
-                       ON ip.user_id = t.trainer_id AND ip.account_id = t.account_id
                 WHERE  t.id = ? AND t.archived_at IS NULL';
         $params = [$trainingId];
         if ($accountId !== null) {
@@ -1629,6 +1625,14 @@ final class DocumentController
         if (!$row) {
             Response::error('Školenie sa nenašlo.', 404);
         }
+        // The trainer signs under their Technik PO number. A platform admin
+        // training in a client account signs with their home profile wherever
+        // that account's one is blank (InspectorProfiles), as on úkony.
+        $trainer = $row['trainer_id'] !== null
+            ? InspectorProfiles::forAccount((int) $row['trainer_id'], (int) $row['account_id'])
+            : [];
+        $row['trainer_certification_number'] = $trainer['cert_general'] ?? null;
+        $row['trainer_signature_path'] = $trainer['signature_path'] ?? null;
         return $row;
     }
 
